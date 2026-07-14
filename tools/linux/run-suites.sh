@@ -69,6 +69,14 @@ cp crates/kaya/examples/milestone0.ml crates/kaya/examples/milestone0_ml_stubs.c
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
     milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml) || status=1
 
+# The Haskell guest (direct ring: inline peeks + the same cursor stubs).
+mkdir -p /tmp/haskell
+cp crates/kaya/examples/milestone0.hs crates/kaya/examples/milestone0_hs_stubs.c /tmp/haskell/
+(cd /tmp/haskell && ghc -threaded -O -o milestone0-hs \
+    milestone0_hs_stubs.c milestone0.hs \
+    -L"$CARGO_TARGET_DIR/debug" -lkaya \
+    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug") || status=1
+
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone0"
     run "$proto" c /tmp/milestone0-c
@@ -76,6 +84,7 @@ for proto in x11 wayland; do
     run "$proto" go go run crates/kaya/examples/milestone0.go
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone0.csproj
     run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone0-ocaml
+    run "$proto" haskell /tmp/haskell/milestone0-hs
 done
 
 kill "$WESTON_PID" 2>/dev/null

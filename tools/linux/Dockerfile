@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates git \
     python3 golang \
     ocaml-nox opam libffi-dev \
+    ghc \
     xvfb xauth imagemagick x11-utils \
     weston \
     && rm -rf /var/lib/apt/lists/*

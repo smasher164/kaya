@@ -31,7 +31,17 @@ cp crates/kaya/examples/milestone0.ml crates/kaya/examples/milestone0_ml_stubs.c
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
     milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml) >/dev/null
 
-# All five guests against the AppKit backend.
+# The Haskell guest, likewise compiled once (ghc also writes its
+# intermediates beside the source).
+mkdir -p target/haskell
+cp crates/kaya/examples/milestone0.hs crates/kaya/examples/milestone0_hs_stubs.c \
+    target/haskell/
+(cd target/haskell && ghc -threaded -O -o milestone0-hs \
+    milestone0_hs_stubs.c milestone0.hs \
+    -L"$ROOT/target/debug" -lkaya \
+    -optl-Wl,-rpath,"$ROOT/target/debug") >/dev/null
+
+# All six guests against the AppKit backend.
 run rust cargo run --quiet --example milestone0
 run python python3 crates/kaya/examples/milestone0.py
 run go go run crates/kaya/examples/milestone0.go
@@ -39,8 +49,9 @@ run csharp env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet run --project crates/kaya/examples/milestone0.csproj
 run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/milestone0-ocaml
+run haskell target/haskell/milestone0-hs
 
-# The same five guests against the SwiftUI backend, selected at runtime:
+# The same six guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.
 tools/swiftui/build-dylib.sh >/dev/null
 export KAYA_BACKEND=swiftui
@@ -52,6 +63,7 @@ run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet run --project crates/kaya/examples/milestone0.csproj
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/milestone0-ocaml
+run haskell-swiftui target/haskell/milestone0-hs
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
 exit "$status"

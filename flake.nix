@@ -62,12 +62,14 @@
             python3
             go
             dotnet-sdk_10
-            # OCaml guest (function floor via ocaml-ctypes); findlib's setup
-            # hook wires OCAMLPATH for the shell.
+            # OCaml guest (direct ring over ocaml-ctypes + cursor stubs);
+            # findlib's setup hook wires OCAMLPATH for the shell.
             ocaml
             ocamlPackages.findlib
             ocamlPackages.ctypes
             ocamlPackages.ctypes-foreign
+            # Haskell guest (direct ring; base-only, so bare ghc suffices).
+            ghc
             # Android: SDK/emulator/NDK from androidenv; Gradle builds the
             # app shells (fetches AGP/Compose from Google Maven at build time).
             androidSdk
