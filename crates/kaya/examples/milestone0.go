@@ -12,6 +12,7 @@ package main
 #cgo CFLAGS: -I${SRCDIR} -I${SRCDIR}/../include
 #cgo darwin LDFLAGS: -L${SRCDIR}/../../../target/debug -lkaya -Wl,-rpath,${SRCDIR}/../../../target/debug
 #cgo windows LDFLAGS: -L${SRCDIR} -L${SRCDIR}/../../../target/aarch64-pc-windows-msvc/release -lkaya
+#cgo linux LDFLAGS: -L${SRCDIR}/../../../target-linux/debug -lkaya -Wl,-rpath,${SRCDIR}/../../../target-linux/debug
 #include <kaya.h>
 */
 import "C"

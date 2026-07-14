@@ -5,3 +5,4 @@ result
 tools/winui-bindgen/target
 /crates/kaya/examples/obj/
 /crates/kaya/examples/bin/
+/target-linux/

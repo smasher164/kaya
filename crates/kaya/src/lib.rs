@@ -13,7 +13,10 @@ mod appkit;
 #[cfg(target_os = "windows")]
 mod winui;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod gtk;
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod capi;
 
 pub use app::AppCtx;
@@ -23,10 +26,12 @@ pub use protocol::{Command, Occurrence, WidgetId, skeleton};
 pub(crate) use appkit as backend;
 #[cfg(target_os = "windows")]
 pub(crate) use winui as backend;
+#[cfg(target_os = "linux")]
+pub(crate) use gtk as backend;
 
 /// Start the core on the current thread (which must be the process main
 /// thread) and run `app_main` on the app thread. Does not return.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     use std::sync::mpsc;
     let (occ_tx, occ_rx) = mpsc::channel();

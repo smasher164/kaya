@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Runs inside the container (see tools/validate-linux.sh): builds kaya
+# against the container's GTK and runs the milestone-0 validations under
+# both display protocols — X11 (Xvfb) and Wayland (headless Weston). The
+# repo is mounted at /work; Linux build artifacts go to target-linux so
+# they never collide with the host's target directory.
+set -uo pipefail
+
+cd /work
+export CARGO_TARGET_DIR=/work/target-linux
+
+# --lib builds the cdylib (libkaya.so) that the foreign suites load;
+# --example alone would build only the rlib it depends on.
+cargo build --lib --example milestone0 || exit 1
+
+LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
+status=0
+
+# dotnet writes obj/bin next to the csproj; build in a scratch copy so the
+# host's in-tree dotnet artifacts (different RID) are untouched.
+mkdir -p /tmp/cs
+cp crates/kaya/examples/milestone0.cs crates/kaya/examples/milestone0.csproj /tmp/cs/
+
+# Headless Weston for the Wayland leg.
+export XDG_RUNTIME_DIR=/tmp/xdg
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+weston --backend=headless --socket=kaya-wayland &>/tmp/weston.log &
+WESTON_PID=$!
+sleep 2
+
+run() {
+    local proto="$1" name="$2"
+    shift 2
+    echo "== $name ($proto) =="
+    local ok=1
+    case "$proto" in
+        x11)
+            KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 xvfb-run -a "$@" || ok=0
+            ;;
+        wayland)
+            KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY=kaya-wayland \
+                timeout 180 "$@" || ok=0
+            ;;
+    esac
+    if [ "$ok" = 1 ]; then
+        echo "$name ($proto): PASS"
+    else
+        echo "$name ($proto): FAIL"
+        status=1
+    fi
+}
+
+for proto in x11 wayland; do
+    run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone0"
+    run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone0.py
+    run "$proto" go go run crates/kaya/examples/milestone0.go
+    run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone0.csproj
+done
+
+kill "$WESTON_PID" 2>/dev/null
+
+# Best-effort screenshot of the running scene (X11 leg) for visual
+# validation.
+xvfb-run -a bash -c "
+    \"$CARGO_TARGET_DIR/debug/examples/milestone0\" &
+    sleep 3
+    import -window root /work/target-linux/shot-linux.png
+    kill %1
+" 2>/dev/null || true
+
+exit "$status"
