@@ -158,6 +158,24 @@ that key; the demand slot determines which rows are materialized. Platform
 cell recycling maps to rebinding an existing template instance to a
 different row's signals, an identity switch with no re-instantiation.
 
+**Windows are a scene layer, not a widget kind.** A window has no parent
+layout (the OS and the user position it), its lifecycle differs in kind
+(close is a request — an occurrence with a fail-safe default, per the
+decision vocabulary), and three of the five backends refuse the
+identification at the type level (NSWindow is not an NSView, WinUI's
+Window is not a UIElement, and on mobile the surface is the OS's to give,
+as the Android attach shape demonstrates). GTK and Qt unified window and
+widget and it fits only them; Flutter assumed one implicit surface and
+spent years retrofitting desktop multi-window; SwiftUI's scene layer
+(WindowGroup above View) is the modern answer and the one kaya adopts:
+windows get their own id space and their own small vocabulary —
+create_window, mount targets, SetTitle/Present/Close commands,
+CloseRequested/Resized occurrences — designed in full when multi-window
+arrives (it also carries dialogs and modality). Until then the core
+provides one implicit window, reachable as mount target 0: a default,
+never an assumption. Window-scoped properties (title, size) never become
+widget properties in the interim.
+
 `When` is implemented as the degenerate `For` over a collection of zero or
 one items. The operator set is a complete basis: a conditional and a map
 over structure. Additions expected later under the escalation policy:
@@ -799,6 +817,55 @@ feature rather than reconstructed per backend afterward.
   header generated with cbindgen), and occurrences already travel the
   real byte-record ring; the full record vocabulary replaces the ad-hoc
   records when the reactive surface lands.
+- Milestone 1 is the reactive substrate: signals, scene-as-data, and one
+  live binding, proven by re-expressing the milestone-0 scene through the
+  new surface — the same window, button, and label, but the scene arrives
+  as records and the label's text is a signal binding written from the
+  app thread. Structural operators (`When`, `For`) wait for milestone 2;
+  the substrate earns them. The wire decisions, settled in design:
+  creation is a record, not a function — the guest writes
+  create_signal/create_widget records with guest-allocated ids (per-type
+  id spaces, a monotonic counter in each binding; unique by construction,
+  the core fails loud on collisions as a broken-binding tripwire), so
+  creating N things costs zero boundary crossings and composes into one
+  atomic mount. The transaction is a buffer and one call commits it: the
+  guest builds a byte blob of records (the same framing as the occurrence
+  ring — one vocabulary document, two transports) and submits it with a
+  single call; no second shared ring, so the write path demands no
+  atomics from any language — the weakest FFI story gets the full
+  surface, and bindings reduce to serializers plus counters (mechanical
+  enough to generate from the vocabulary later). A transaction applies
+  atomically on the UI thread, last-write-wins per signal within a batch,
+  batches in submission order. The milestone-1 vocabulary: create_signal,
+  write_signal, create_widget (kinds Column, Button, Label), set_property
+  (value is a constant or a signal reference, nothing else — the binding
+  rule made wire-concrete; text only for now), add_child (append-only;
+  keyed insertion arrives with For), and mount, whose window target is
+  reserved now with 0 as the implicit default window (see "Windows are a
+  scene layer"). There are no signal reads: the flow is unidirectional —
+  occurrences up as a lossless log, state down as keep-latest writes, the
+  app a fold over the first producing the second. The app's own variables
+  are the source of truth; a signal only holds what the app wrote, so
+  read-modify-write has nothing to read, UI-originated state arrives as
+  occurrences, and signals are a render pipe, not a state bus. This is
+  where framework history points: the systems that shipped architectural
+  two-way binding (WPF, Cocoa bindings, AngularJS) retreated from it one
+  by one, and the survivors' "two-way" syntax (v-model, SwiftUI Binding,
+  Svelte bind:) is compile-time sugar over property-down/event-up with a
+  single owner — sugar kaya bindings can offer identically, with the core
+  never knowing. The no-callback protocol had already foreclosed true
+  two-way (the core cannot write guest memory); no-reads makes the
+  surface match. Backends stay dumb appliers: the command enum grows
+  Create/SetProp/AddChild/Mount variants, the same doorbell drains them,
+  and signal writes resolve core-side through the signal-to-binding index
+  into targeted SetProp ops — no backend grows a diff, a reconciler, or a
+  subscription system, and the presentation-side pump (SwiftUI, Compose)
+  receives the already-resolved op stream as records. Occurrence
+  subscription/filtering is deferred: every click emits at milestone 1;
+  the log is cheap. The milestone-0 examples migrate rather than fork —
+  kaya_set_text and the fixed widget-id constants leave the C surface,
+  replaced by kaya_submit plus the vocabulary — and the definition of
+  done is the same validation matrix, green, with the scene as data.
 - The conformance gallery is the definition of done. A widget is admitted
   when its scene passes on every platform, and the scene list grows one
   widget at a time, seeded by the layout-normalization worklist scenes.
@@ -822,6 +889,13 @@ remains is implementation-scale:
    payloads.
 3. The Vello scene-encoding subset for v2 display lists (arrives with
    Canvas, after v1).
+4. The window vocabulary, in full: create_window and per-window mount
+   targets, lifecycle (CloseRequested and the veto default, Present,
+   Close), sizing and titles, dialogs and modality, and the per-platform
+   capability story for mobile (where the primary surface is OS-given
+   and extra windows range from real to unsupported). Milestone 1
+   reserves the mount target with 0 as the implicit default window so
+   none of this breaks the wire when it lands.
 
 The v1 widget set and the gallery scene list are covered in "v1 scope and
 delivery process"; the scene list grows per widget admission.
