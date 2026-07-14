@@ -8,11 +8,19 @@ FROM debian:trixie
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential clang pkg-config libgtk-4-dev \
-    curl ca-certificates \
+    curl ca-certificates git \
     python3 golang \
+    ocaml-nox opam libffi-dev \
     xvfb xauth imagemagick x11-utils \
     weston \
     && rm -rf /var/lib/apt/lists/*
+
+# ctypes-foreign via opam on the system compiler: Debian's ctypes deb
+# omits the foreign (libffi) half entirely — its META even dangles.
+RUN opam init -a --bare --disable-sandboxing \
+    && opam switch create default ocaml-system \
+    && opam install -y ocamlfind ctypes ctypes-foreign
+ENV PATH=/root/.opam/default/bin:$PATH
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \

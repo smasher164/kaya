@@ -23,14 +23,24 @@ run() {
     fi
 }
 
-# All four guests against the AppKit backend.
+# The OCaml guest compiles once and runs in both backend passes.
+# (ocamlopt writes its intermediates beside the source, hence the copy.)
+mkdir -p target/ocaml
+cp crates/kaya/examples/milestone0.ml crates/kaya/examples/milestone0_ml_stubs.c target/ocaml/
+(cd target/ocaml && ocamlfind ocamlopt \
+    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
+    milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml) >/dev/null
+
+# All five guests against the AppKit backend.
 run rust cargo run --quiet --example milestone0
 run python python3 crates/kaya/examples/milestone0.py
 run go go run crates/kaya/examples/milestone0.go
 run csharp env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet run --project crates/kaya/examples/milestone0.csproj
+run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/milestone0-ocaml
 
-# The same four guests against the SwiftUI backend, selected at runtime:
+# The same five guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.
 tools/swiftui/build-dylib.sh >/dev/null
 export KAYA_BACKEND=swiftui
@@ -40,6 +50,8 @@ run python-swiftui python3 crates/kaya/examples/milestone0.py
 run go-swiftui go run crates/kaya/examples/milestone0.go
 run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet run --project crates/kaya/examples/milestone0.csproj
+run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/milestone0-ocaml
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
 exit "$status"

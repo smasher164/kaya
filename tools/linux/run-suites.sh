@@ -57,12 +57,25 @@ clang crates/kaya/examples/milestone0.c \
     -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
     || status=1
 
+# The OCaml guest (direct ring: Bigarray data path + noalloc cursor
+# stubs). ocamlopt writes its intermediates beside the source, hence the
+# copy. The foreign half's findlib name differs across ctypes
+# packagings; take whichever exists.
+FOREIGN=ctypes-foreign
+ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
+mkdir -p /tmp/ocaml
+cp crates/kaya/examples/milestone0.ml crates/kaya/examples/milestone0_ml_stubs.c /tmp/ocaml/
+(cd /tmp/ocaml && ocamlfind ocamlopt \
+    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
+    milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml) || status=1
+
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone0"
     run "$proto" c /tmp/milestone0-c
     run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone0.py
     run "$proto" go go run crates/kaya/examples/milestone0.go
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone0.csproj
+    run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone0-ocaml
 done
 
 kill "$WESTON_PID" 2>/dev/null
