@@ -24,7 +24,8 @@ impl AppCtx {
                 target_os = "macos",
                 target_os = "windows",
                 target_os = "linux",
-                target_os = "ios"
+                target_os = "ios",
+                target_os = "android"
             ))]
             crate::backend::ring_doorbell();
         }

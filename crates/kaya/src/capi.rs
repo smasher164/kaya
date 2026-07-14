@@ -88,13 +88,22 @@ pub extern "C" fn kaya_run() -> i32 {
         return crate::swiftui_host::run();
     }
 
-    let (occ_sink, cmd_rx) = state()
-        .core_ends
-        .lock()
-        .unwrap()
-        .take()
-        .expect("kaya_run may only be called once");
+    let (occ_sink, cmd_rx) = take_core_ends().expect("kaya_run may only be called once");
     crate::backend::run_core(occ_sink, cmd_rx)
+}
+
+/// The core's ends of the transport: the ring-backed occurrence sink and
+/// the command receiver. Taken once, by whichever entry starts the core
+/// (kaya_run here; Kaya.nativeRun on Android, where the OS owns main).
+pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Command>)> {
+    state().core_ends.lock().unwrap().take()
+}
+
+/// The occurrence ring's raw layout, for the Android backend to wrap in
+/// direct ByteBuffers (the JVM's window onto foreign memory).
+#[cfg(target_os = "android")]
+pub(crate) fn ring_raw() -> (*mut u8, u32, *mut u32, *mut u32) {
+    state().ring.raw()
 }
 
 /// Function-floor consumption: block until the next occurrence and write

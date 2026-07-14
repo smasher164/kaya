@@ -1,0 +1,31 @@
+package dev.kaya.milestone0
+
+import android.os.Bundle
+import android.system.Os
+import androidx.activity.ComponentActivity
+import dev.kaya.Kaya
+import dev.kaya.KayaCompose
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Map KAYA_* intent extras to environment variables, so the
+        // library's env-based switches keep one spelling everywhere:
+        //   am start ... --ez KAYA_SELFTEST true --es KAYA_BACKEND compose
+        // is this platform's KAYA_SELFTEST=1 KAYA_BACKEND=compose ./app.
+        intent.extras?.let { extras ->
+            for (key in extras.keySet()) {
+                if (key.startsWith("KAYA_")) {
+                    @Suppress("DEPRECATION")
+                    Os.setenv(key, extras.get(key).toString(), true)
+                }
+            }
+        }
+
+        System.loadLibrary("milestone0_android")
+        if (Kaya.nativeStart(this) == Kaya.PRESENT_GUEST) {
+            KayaCompose.mount(this)
+        }
+    }
+}

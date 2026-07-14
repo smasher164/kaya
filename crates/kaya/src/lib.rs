@@ -19,6 +19,11 @@ mod gtk;
 #[cfg(target_os = "ios")]
 mod uikit;
 
+// Public because kaya::android_main! expands to a JNI entry in the app's
+// own crate, which needs the module's types and start function.
+#[cfg(target_os = "android")]
+pub mod android;
+
 #[cfg(target_os = "macos")]
 mod swiftui_host;
 
@@ -26,7 +31,8 @@ mod swiftui_host;
     target_os = "macos",
     target_os = "windows",
     target_os = "linux",
-    target_os = "ios"
+    target_os = "ios",
+    target_os = "android"
 ))]
 pub mod capi;
 
@@ -41,14 +47,21 @@ pub(crate) use winui as backend;
 pub(crate) use gtk as backend;
 #[cfg(target_os = "ios")]
 pub(crate) use uikit as backend;
+#[cfg(target_os = "android")]
+pub(crate) use android as backend;
 
 /// Start the core on the current thread (which must be the process main
 /// thread) and run `app_main` on the app thread. Does not return.
+///
+/// Not the entry point on Android, where the OS owns the process main
+/// (Zygote forks it and an Activity is the way in): use
+/// [`android_main!`](crate::android_main) and start from the Activity.
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
     target_os = "linux",
-    target_os = "ios"
+    target_os = "ios",
+    target_os = "android"
 ))]
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     use std::sync::mpsc;

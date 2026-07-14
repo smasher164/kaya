@@ -6,3 +6,7 @@ tools/winui-bindgen/target
 /crates/kaya/examples/obj/
 /crates/kaya/examples/bin/
 /target-linux/
+/android/.gradle/
+/android/**/build/
+/android/*/src/main/jniLibs/
+/android/.kotlin/
