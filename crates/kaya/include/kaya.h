@@ -23,6 +23,8 @@
 
 #define KAYA_WIDGET_LABEL 2
 
+#define KAYA_COMMAND_SET_TEXT 1
+
 typedef struct KayaOccurrence {
   uint16_t kind;
   uint64_t widget_id;
@@ -37,6 +39,13 @@ typedef struct KayaRingInfo {
   uint32_t *head;
   uint32_t *tail;
 } KayaRingInfo;
+
+typedef struct KayaCommand {
+  uint16_t kind;
+  uint64_t widget_id;
+  uint32_t text_len;
+  uint8_t text[256];
+} KayaCommand;
 
 /**
  * Wire framing of every record, exported through the C header so direct
@@ -59,9 +68,21 @@ typedef struct KayaRecordButtonClicked {
   uint64_t widget_id;
 } KayaRecordButtonClicked;
 
+/**
+ * The presentation-side functions handed to a guest-language backend.
+ */
+typedef struct KayaHostApi {
+  void (*emit_button_clicked)(uint64_t);
+  bool (*next_command)(struct KayaCommand*);
+} KayaHostApi;
 
 
 
+
+
+extern void *dlopen(const char *path, int flag);
+
+extern void *dlsym(void *handle, const char *symbol);
 
 /**
  * Take over the calling thread, which must be the process main thread,
@@ -88,6 +109,20 @@ void kaya_occurrence_ring(struct KayaRingInfo *out);
  * false when the core has shut down and the ring is drained.
  */
 bool kaya_wait_occurrences(void);
+
+/**
+ * Presentation side: emit a button-clicked occurrence, exactly as a
+ * backend's action handler would. Do not combine with kaya_run.
+ */
+void kaya_emit_button_clicked(uint64_t widget_id);
+
+/**
+ * Presentation side: block until the next command and write it to `out`.
+ * Returns false if command consumption could not be acquired (kaya_run
+ * owns it). Call from a single presentation pump thread; process exit is
+ * the shutdown path for a presentation leg at milestone-0 grade.
+ */
+bool kaya_next_command(struct KayaCommand *out);
 
 /**
  * Set a widget's text. `text` points to `len` bytes of UTF-8; invalid

@@ -31,8 +31,8 @@ explains what it was tested against.
 
 | Platform | Backend | Notes |
 |----------|---------|-------|
-| macOS    | AppKit  | First backend, since it has the fastest iteration loop for development. |
-| iOS      | UIKit for v1; SwiftUI planned as a second-generation Apple backend. | SwiftUI exposes no object model — views are compile-time generic value types — so unlike Android's JNI route a SwiftUI backend is an interpreter written in Swift mapping kaya's scene onto SwiftUI declarations. The alignment is unusually good: kaya signal maps to an @Observable property, `When` to `if`, `For` to `ForEach`, templates to view builders, and SwiftUI's source-of-truth model is exactly kaya's core-owned signals, so the shim is closer to transliteration than translation (SwiftUI's own diff is what native apps pay anyway). The payoff is the SwiftUI-only surface: WidgetKit, the current design language, each year's newest controls. The friction is at the imperative edges — `focus()` via @FocusState, `scrollTo()` via ScrollViewReader, ref handles in a value-typed world, UIViewRepresentable escapes for the IME contract — each mappable, each bespoke. Plan: a post-milestone-0 spike reimplements the milestone-0 scene as a small Swift interpreter package to measure those edges empirically; additive, behind a feature flag. A backend written in Swift is fine — the Android backend will carry Kotlin/Java shim components regardless; backends may be thick, bindings must stay thin. The general pattern stands: every platform has a language-locked declarative layer (SwiftUI, Compose) over an object-model layer (UIKit, Android Views); kaya's v1 targets the object-model layer everywhere. The milestone-0 skeleton passes in the simulator, validated from Rust and from Swift over the C ABI (swiftc imports kaya.h directly via -import-objc-header — zero re-declarations; Swift's C interop is free, so the function floor is already optimal and the direct-ring tier buys nothing there). iOS specifics: UIApplicationMain never returns, the delegate reaches its channel ends through a slot, the self-test exits the process (legitimate: on iOS kaya is the process), sendActionsForControlEvents drives the real action path, and simulator builds are unsigned — tools/ios/run-sim.sh boots, installs, launches with SIMCTL_CHILD_ env, and screenshots via simctl. It shares most of the AppKit bridge layer and has the same protocols where it matters: `UITextInput` for IME, UIKit accessibility, Core Animation compositing, and pull-based `UITableView` virtualization. The platform-specific wrinkle is the suspension lifecycle ("save state now"), which falls into the occurrence-plus-deadline class. Building and deploying to a device from a Linux host is feasible with xtool-style SwiftPM cross-compilation; the Simulator still requires macOS. |
+| macOS    | AppKit; plus the SwiftUI backend (shared with iOS, see the iOS row) as a first-class leg. | First backend, since it has the fastest iteration loop for development. |
+| iOS      | UIKit and SwiftUI, both first-class backends validated from milestone 0 onward. | SwiftUI exposes no object model — views are compile-time generic value types — so unlike Android's JNI route a SwiftUI backend is an interpreter written in Swift mapping kaya's scene onto SwiftUI declarations. The alignment is unusually good: kaya signal maps to an @Observable property, `When` to `if`, `For` to `ForEach`, templates to view builders, and SwiftUI's source-of-truth model is exactly kaya's core-owned signals, so the shim is closer to transliteration than translation (SwiftUI's own diff is what native apps pay anyway). The payoff is the SwiftUI-only surface: WidgetKit, the current design language, each year's newest controls. The friction is at the imperative edges — `focus()` via @FocusState, `scrollTo()` via ScrollViewReader, ref handles in a value-typed world, UIViewRepresentable escapes for the IME contract — each mappable, each bespoke. The SwiftUI backend (tools/swiftui) is a milestone-0 leg validated alongside everything else: the scene as SwiftUI speaking the protocol over the presentation-side C API — kaya_emit_* for occurrences out of action closures, and a blocking kaya_next_command pump (the mirror of kaya_next_occurrence; no polling, no callbacks) hopping to the main actor to write @Observable state, with SwiftUI's invalidation as the render path. It passes the self-test in the iOS Simulator and natively on macOS from the same Swift file — one presentation layer serves both Apple platforms. Critically, the validated composition is the product scenario: the unchanged milestone-0 examples drive it via runtime backend selection — all four guest languages on macOS, and on iOS the Rust example's own main is the bundle executable with the SwiftUI dylib loaded from inside the bundle (the rust-swiftui leg). No app logic is written in Swift anywhere; app developers shipping on Apple platforms do not write Swift. This also establishes the guest-language-backend contract in miniature: the presentation-side C API is the same protocol with the roles swapped, exclusive with kaya_run per process. The imperative edges (focus, scrollTo, ref handles) get measured as real widgets arrive, per feature, breadth-first like every other backend. A backend written in Swift is fine — the Android backend will carry Kotlin/Java shim components regardless; backends may be thick, bindings must stay thin. The general pattern stands: every platform has a language-locked declarative layer (SwiftUI, Compose) over an object-model layer (UIKit, Android Views); kaya v1 validates both layers on Apple platforms (UIKit/AppKit and SwiftUI), and the object-model layer elsewhere. The milestone-0 skeleton passes in the simulator, validated from Rust and from Swift over the C ABI (swiftc imports kaya.h directly via -import-objc-header — zero re-declarations; Swift's C interop is free, so the function floor is already optimal and the direct-ring tier buys nothing there). iOS specifics: UIApplicationMain never returns, the delegate reaches its channel ends through a slot, the self-test exits the process (legitimate: on iOS kaya is the process), sendActionsForControlEvents drives the real action path, and simulator builds are unsigned — tools/ios/run-sim.sh boots, installs, launches with SIMCTL_CHILD_ env, and screenshots via simctl. It shares most of the AppKit bridge layer and has the same protocols where it matters: `UITextInput` for IME, UIKit accessibility, Core Animation compositing, and pull-based `UITableView` virtualization. The platform-specific wrinkle is the suspension lifecycle ("save state now"), which falls into the occurrence-plus-deadline class. Building and deploying to a device from a Linux host is feasible with xtool-style SwiftPM cross-compilation; the Simulator still requires macOS. |
 | Windows  | WinUI 3 via `windows-rs`/COM, with no bridge language needed. The bet is validated: the milestone-0 skeleton (window, button, label, ring round trip) runs on Windows 11 ARM from pure Rust. Bindings are generated by windows-bindgen from the App SDK winmd (tools/winui-bindgen); a plain `Application` with no subclass suffices, with the scene built from a deferred dispatcher callback; `DispatcherQueue::TryEnqueue` is the doorbell; the bootstrap DLL is loaded dynamically (`MddBootstrapInitialize2`). All milestone-0 validations pass in the VM with clean exit codes: Rust exe, Python over the function floor, and two direct-ring consumers — Go (llvm-mingw cgo against the msvc-ABI dll) and C# (P/Invoke for the calls, `Volatile.Read`/`Write` on the ring), which together validate the exposed ring layout from both an unmanaged-FFI and a managed runtime. Shutdown lessons, learned the hard way: exit goes through `Application::Exit`; after `Start` returns, XAML COM references must be leaked rather than dropped (Rust TLS destructors run during process exit on Windows and releasing into the dead apartment is an access violation); `MddBootstrapShutdown` must be called while the process is healthy or `Microsoft.UI.Xaml.dll` crashes during `DLL_PROCESS_DETACH` in hosted processes; and `kaya_run` returns the exit code rather than exiting, because a library must not tear down its host process — hosts join their app thread before exiting (a daemon thread re-entering CPython during finalization crashes). WinUI requires an interactive desktop session, so SSH-driven runs go through a `schtasks /it` task, which matters for CI later. Win32 common controls remain the fallback but are no longer expected to be needed. WPF is possible later through hostfxr and a C# shim. |
 | Linux    | GTK4 via gtk4-rs. Linux has no OS-native toolkit; GTK is the conventional stand-in. The milestone-0 skeleton runs the same architecture: `glib::idle_add` (g_idle_add) is the doorbell, the clicked signal feeds the occurrence sink, and the self-test drives the real signal path via `emit_clicked`. GTK teardown is orderly (none of WinUI's exit ceremony); the process exit code flows through `run_core` like the other backends. The backend contains no display-protocol-specific code; GTK4's GDK backends provide both X11 and Wayland, and validation exercises both — the four language suites run under Xvfb (X11) and under headless Weston (Wayland) in a Debian container (tools/validate-linux.sh), unattended, since Linux has no interactive-session constraint. |
 | Android  | Platform views over a JNI bridge. |
@@ -322,7 +322,64 @@ platform flavor". The gallery doubles as the permanent regression suite.
   thread, so the core attaches its dispatcher to that thread instead of
   owning it. The hosting relationship flips there; the threading invariant
   does not.
-- App logic runs on its own thread, the language runtime's thread.
+- App logic runs on its own thread. The contract is minimal: some
+  blockable thread runs the guest loop, because occurrence consumption
+  blocks by design; either side may provide the thread. Native guests
+  (Rust, C, Swift) run on any thread — a host-spawned thread calling a
+  blocking guest entry is equivalent to the guest spawning its own
+  (a guest staticlib can equally spawn internally behind one C entry, as
+  the retired Swift-shell leg demonstrated). Managed runtimes prefer providing their own thread,
+  for attachment reasons rather than correctness: JNI requires
+  AttachCurrentThread for foreign threads, Go code runs on goroutines
+  behind a cgo handshake, Python requires PyGILState on foreign threads.
+- The hosting scaffolding differs per platform and per composition — who
+  owns main (the core on desktop, UIApplicationMain on iOS, @main on the
+  SwiftUI leg, the OS on Android), who starts the backend, who spawns the
+  guest — and none of it is the app developer's concern. The app is
+  exactly one thing on every platform: a loop consuming occurrences and
+  writing commands. Scaffolding is provided by kaya or generated by its
+  distribution tooling.
+- Distinct from thread provisioning is runtime boot, and guest languages
+  fall into three classes. No runtime (Rust, C, Swift): link and call the
+  entry symbol. Self-booting on load (Go via c-archive constructors, .NET
+  NativeAOT, GraalVM native-image): the same, effectively. Embedded
+  interpreters (CPython, JVM via libjvm, .NET via hostfxr): the VM must
+  be created and configured when the language does not own the process.
+  Two canonical compositions cover everything: guest-hosts (the language
+  owns the process and calls a run entry — the desktop Python/Go/C# legs,
+  and Python hosting the SwiftUI backend via kaya_swiftui_run, since
+  @main is compiler sugar over the callable App.main()) and shell-hosts
+  (a native shell owns main and calls one guest entry symbol on a
+  blockable thread — the SwiftUI + Rust-guest leg). Which composition
+  applies is determined by the platform's launch model, not by the
+  backend technology. iOS's constraint, stated precisely: the OS execs
+  the native executable named in the bundle, so the process entry must be
+  a compiled binary — which is indistinguishable from guest-hosts for
+  compiled guests (the UIKit leg's bundle executable is milestone0.rs's
+  main, and the rust-swiftui leg validates a Rust entry dispatching to
+  the SwiftUI backend dlopen'd from inside the bundle), and means
+  interpreted guests need their binding's native bootstrap as main. On
+  desktop either composition works with any backend.
+- Backends are runtime-selectable: KAYA_BACKEND=swiftui routes both
+  kaya::run and kaya_run to the SwiftUI backend (environment selection is
+  the interim mechanism — fine on desktop and via SIMCTL_CHILD_ in the
+  simulator, but real iOS devices don't pass user environment to apps, so
+  the shipping mechanism becomes an Info.plist key or compiled-in
+  configuration), so the unchanged milestone-0 examples run against
+  either backend — validated for all four guest languages on macOS and
+  for the Rust example on iOS. The dylib handoff taught a structural lesson: a
+  guest-language backend must receive the host's functions as an
+  explicit vtable (KayaHostApi, passed to kaya_swiftui_run) rather than
+  bind kaya symbols through the dynamic linker, because hosts may carry
+  kaya statically (a Rust executable) or load it RTLD_LOCAL (ctypes),
+  and a process can otherwise end up with two kaya instances talking
+  past each other. The vtable pins the live instance by construction
+  and is the seed of the guest-language-backend contract. Class-3
+  runtimes in a shell-hosted app get a bootstrap owned by their binding,
+  written once, conforming to the entry contract and owning VM boot and
+  thread discipline internally; PyInstaller's bootloader and BeeWare's
+  briefcase are the precedents, and CPython officially supports iOS as of
+  3.13 (PEP 730). App developers see none of this in any composition.
 - Nothing crosses the boundary synchronously: no callbacks, no unbounded
   rendezvous. All communication reduces to two primitives plus an arena.
   - Logs: lock-free SPSC rings for ordered, lossless, consumed-once

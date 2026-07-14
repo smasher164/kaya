@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Build, install, and self-test milestone 0 in the iOS Simulator.
-# Usage: tools/ios/run-sim.sh [rust|swift|all]
+# Usage: tools/ios/run-sim.sh [rust|swift|rust-swiftui|all]
+#
+# rust         - the kaya example app (UIKit backend)
+# swift        - Swift over the C ABI function floor (UIKit backend)
+# rust-swiftui - the Rust example with the SwiftUI backend selected at
+#                runtime (dylib embedded in the bundle)
 #
 # Requires full Xcode (simctl, the iOS SDK, and a downloaded simulator
 # runtime); simulator builds are unsigned, so no developer account is
@@ -90,6 +95,37 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/milestone0swift-bin"
     APP=$(make_bundle milestone0swift dev.kaya.milestone0swift "$BUNDLES/milestone0swift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.milestone0swift swift || status=1
+fi
+
+if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
+    # Rust entrypoint + SwiftUI backend: the bundle executable is the Rust
+    # example's main; KAYA_BACKEND=swiftui makes kaya::run dlopen the
+    # SwiftUI dylib embedded in the bundle.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone0
+    mkdir -p "$BUNDLES"
+    xcrun -sdk iphonesimulator swiftc \
+        -emit-library \
+        -target "arm64-apple-ios17.0-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \
+        -framework UIKit -framework Foundation \
+        -o "$BUNDLES/libkaya_swiftui_ios.dylib"
+    APP=$(make_bundle milestone0rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone0")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    xcrun simctl install "$UDID" "$APP"
+    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.rustswiftui app)
+    echo "== rust-swiftui =="
+    out=$(SIMCTL_CHILD_KAYA_SELFTEST=1 \
+        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
+        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
+        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.rustswiftui 2>&1 | tee /dev/stderr) || true
+    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-rust-swiftui.png" >/dev/null 2>&1 || true
+    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
+        echo "rust-swiftui: PASS"
+    else
+        echo "rust-swiftui: FAIL"
+        status=1
+    fi
 fi
 
 exit "$status"

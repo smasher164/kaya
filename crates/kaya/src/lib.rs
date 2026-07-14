@@ -19,6 +19,9 @@ mod gtk;
 #[cfg(target_os = "ios")]
 mod uikit;
 
+#[cfg(target_os = "macos")]
+mod swiftui_host;
+
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
@@ -49,6 +52,25 @@ pub(crate) use uikit as backend;
 ))]
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     use std::sync::mpsc;
+
+    // Runtime backend selection (interim mechanism: environment). The
+    // SwiftUI backend's Swift pump consumes commands through the C API's
+    // channel, and its emissions are routed into this AppCtx's inbox.
+    #[cfg(target_os = "macos")]
+    if std::env::var("KAYA_BACKEND").as_deref() == Ok("swiftui") {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let ctx = AppCtx {
+            occurrences: occ_rx,
+            commands: capi::presentation_cmd_sender(),
+        };
+        std::thread::Builder::new()
+            .name("kaya-app".into())
+            .spawn(move || app_main(ctx))
+            .expect("failed to spawn the app thread");
+        capi::set_presentation_sink(protocol::OccSink::Mpsc(occ_tx));
+        std::process::exit(swiftui_host::run());
+    }
+
     let (occ_tx, occ_rx) = mpsc::channel();
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let ctx = AppCtx {
