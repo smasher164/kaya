@@ -1,0 +1,7 @@
+# Windows CRT policy lives in crates/kaya/build.rs (static_vcruntime):
+# static vcruntime, dynamic UCRT. vcruntime is not an OS contract (it
+# arrives with the VC++ redist), so it is linked in; the UCRT ships with
+# Windows 10+ and stays dynamic so the OS keeps servicing it. Verified
+# under clang-cl/lld-link (cargo-xwin). Full +crt-static was the earlier
+# approach; the hybrid keeps OS-patched UCRT with the same
+# copy-the-files deployment.

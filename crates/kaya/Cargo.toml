@@ -6,4 +6,22 @@ license = "MIT"
 description = "Cross-platform GUI library that wraps each platform's native widgets"
 repository = "https://github.com/smasher164/kaya"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
+
+[build-dependencies]
+# Emits msvc linker directives at build time; no-op for other targets.
+static_vcruntime = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-core = "0.62"
+windows-numerics = "0.3"
+windows-collections = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"

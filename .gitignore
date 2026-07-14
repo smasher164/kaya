@@ -1,3 +1,7 @@
 /target
 result
 .direnv
+/third_party/
+tools/winui-bindgen/target
+/crates/kaya/examples/obj/
+/crates/kaya/examples/bin/

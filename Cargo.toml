@@ -1,3 +1,5 @@
 [workspace]
 resolver = "2"
 members = ["crates/kaya"]
+# Dev tool, not part of the build graph: regenerates WinUI bindings.
+exclude = ["tools/winui-bindgen"]
