@@ -1,0 +1,8 @@
+[package]
+name = "kaya"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+description = "Cross-platform GUI library that wraps each platform's native widgets"
+
+[dependencies]
