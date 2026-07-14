@@ -7,7 +7,9 @@ description = "Cross-platform GUI library that wraps each platform's native widg
 repository = "https://github.com/smasher164/kaya"
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+# staticlib is for iOS, where app bundles prefer static linking and the
+# Swift validation leg links libkaya.a directly.
+crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 
@@ -28,3 +30,10 @@ objc2-foundation = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk4 = "0.11.4"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-core-foundation = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-ui-kit = "0.3.2"

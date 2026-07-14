@@ -5,3 +5,11 @@
 # under clang-cl/lld-link (cargo-xwin). Full +crt-static was the earlier
 # approach; the hybrid keeps OS-patched UCRT with the same
 # copy-the-files deployment.
+
+# iOS links against the Xcode SDK; Apple's clang knows how to find it
+# (with SDKROOT exported by tools/ios/run-sim.sh), the nix one does not.
+[target.aarch64-apple-ios]
+linker = "/usr/bin/clang"
+
+[target.aarch64-apple-ios-sim]
+linker = "/usr/bin/clang"

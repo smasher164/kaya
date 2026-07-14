@@ -20,7 +20,12 @@ impl AppCtx {
     /// Queue a command and wake the main loop to apply it.
     pub fn send(&self, command: Command) {
         if self.commands.send(command).is_ok() {
-            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            #[cfg(any(
+                target_os = "macos",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "ios"
+            ))]
             crate::backend::ring_doorbell();
         }
     }

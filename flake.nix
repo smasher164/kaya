@@ -29,6 +29,8 @@
               targets = [
                 "aarch64-pc-windows-msvc"
                 "x86_64-pc-windows-msvc"
+                "aarch64-apple-ios"
+                "aarch64-apple-ios-sim"
               ];
             })
             rust-analyzer

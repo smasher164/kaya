@@ -16,7 +16,15 @@ mod winui;
 #[cfg(target_os = "linux")]
 mod gtk;
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(target_os = "ios")]
+mod uikit;
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "ios"
+))]
 pub mod capi;
 
 pub use app::AppCtx;
@@ -28,10 +36,17 @@ pub(crate) use appkit as backend;
 pub(crate) use winui as backend;
 #[cfg(target_os = "linux")]
 pub(crate) use gtk as backend;
+#[cfg(target_os = "ios")]
+pub(crate) use uikit as backend;
 
 /// Start the core on the current thread (which must be the process main
 /// thread) and run `app_main` on the app thread. Does not return.
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "ios"
+))]
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     use std::sync::mpsc;
     let (occ_tx, occ_rx) = mpsc::channel();
