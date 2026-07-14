@@ -17,6 +17,7 @@ if ! /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
 fi
 
 cargo build --lib
+tools/gen-header.sh --check
 
 mkdir -p target/swiftui
 SDKROOT_MAC=$(/usr/bin/xcrun -sdk macosx --show-sdk-path)

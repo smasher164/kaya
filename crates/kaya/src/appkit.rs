@@ -1,34 +1,59 @@
-//! AppKit backend, milestone 0: one window, one button, one label.
+//! AppKit backend, milestone 1: an interpreter of resolved apply-ops.
 //!
-//! The core owns the main thread and the run loop. Nothing calls into app
-//! code: the button's action pushes an occurrence onto the ring and wakes
-//! the app thread. Commands come back on their own ring; GCD's main queue
-//! is used purely as a doorbell to wake the run loop, never to carry data.
+//! The core owns the main thread and the run loop. The scene arrives as
+//! transactions; the scene core (scene.rs) resolves them — signals and
+//! all — into Create/SetProp/AddChild/Mount ops, and this backend maps
+//! those onto NSStackView, NSButton, and NSTextField. Nothing calls into
+//! app code: a button's action pushes an occurrence carrying its widget
+//! id and wakes the app thread. GCD's main queue is the doorbell,
+//! carrying no data.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSButton, NSTextField, NSWindow, NSWindowStyleMask,
+    NSButton, NSLayoutAttribute, NSStackView, NSTextField, NSUserInterfaceLayoutOrientation,
+    NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
-use crate::protocol::{Command, OccSink, Occurrence, skeleton};
+use crate::protocol::{ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind};
+use crate::scene::Scene;
+
+enum NativeWidget {
+    Column(Retained<NSStackView>),
+    Button(Retained<NSButton>),
+    Label(Retained<NSTextField>),
+}
+
+impl NativeWidget {
+    fn view(&self) -> &objc2_app_kit::NSView {
+        match self {
+            NativeWidget::Column(v) => v,
+            NativeWidget::Button(v) => v,
+            NativeWidget::Label(v) => v,
+        }
+    }
+}
 
 struct CoreState {
-    commands: Receiver<Command>,
+    transactions: Receiver<Transaction>,
+    scene: Scene,
     occurrences: OccSink,
-    label: Retained<NSTextField>,
-    // Held so the target and delegate outlive the objects that reference
-    // them weakly.
-    _button: Retained<NSButton>,
+    widgets: HashMap<WidgetId, NativeWidget>,
+    // The first button and label, for the selftest's round trip.
+    selftest_button: Option<Retained<NSButton>>,
+    selftest_label: Option<Retained<NSTextField>>,
+    // Held so targets and the delegate outlive the objects that
+    // reference them weakly.
+    _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<NSWindow>,
-    _target: Retained<ButtonTarget>,
     _delegate: Retained<AppDelegate>,
 }
 
@@ -43,31 +68,101 @@ thread_local! {
     static CORE: RefCell<Option<CoreState>> = const { RefCell::new(None) };
 }
 
-/// Wake the main loop so it drains the command ring. Safe to call from any
-/// thread. The dispatched closure carries no data; the ring does.
+/// Wake the main loop so it drains pending transactions. Safe to call
+/// from any thread. The dispatched closure carries no data.
 pub(crate) fn ring_doorbell() {
     DispatchQueue::main().exec_async(|| {
-        drain_commands();
+        drain_transactions();
     });
 }
 
-fn drain_commands() {
-    CORE.with_borrow(|core| {
-        let Some(core) = core.as_ref() else { return };
-        while let Ok(command) = core.commands.try_recv() {
-            match command {
-                Command::SetText { id, text } => {
-                    if id == skeleton::LABEL {
-                        core.label.setStringValue(&NSString::from_str(&text));
-                    }
-                }
+fn drain_transactions() {
+    let mtm = MainThreadMarker::new().expect("the doorbell rings on the main thread");
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        while let Ok(tx) = core.transactions.try_recv() {
+            for op in core.scene.apply(tx) {
+                apply(core, mtm, op);
             }
         }
     });
 }
 
+fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
+    match op {
+        ApplyOp::Create { id, kind } => {
+            let native = match kind {
+                WidgetKind::Column => {
+                    let stack = NSStackView::new(mtm);
+                    stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
+                    stack.setAlignment(NSLayoutAttribute::CenterX);
+                    stack.setSpacing(8.0);
+                    NativeWidget::Column(stack)
+                }
+                WidgetKind::Button => {
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), id);
+                    let button = unsafe {
+                        NSButton::buttonWithTitle_target_action(
+                            &NSString::from_str(""),
+                            Some(&target),
+                            Some(sel!(clicked:)),
+                            mtm,
+                        )
+                    };
+                    core._targets.push(target);
+                    if core.selftest_button.is_none() {
+                        core.selftest_button = Some(button.clone());
+                    }
+                    NativeWidget::Button(button)
+                }
+                WidgetKind::Label => {
+                    let label = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+                    if core.selftest_label.is_none() {
+                        core.selftest_label = Some(label.clone());
+                    }
+                    NativeWidget::Label(label)
+                }
+            };
+            core.widgets.insert(id, native);
+        }
+        ApplyOp::SetProp { id, prop, value } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match (widget, prop, value) {
+                (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
+                    button.setTitle(&NSString::from_str(&s));
+                }
+                (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
+                    label.setStringValue(&NSString::from_str(&s));
+                }
+                (_, prop, value) => {
+                    panic!("kaya: appkit cannot apply {prop:?} = {value:?} here")
+                }
+            }
+        }
+        ApplyOp::AddChild { parent, child } => {
+            // Two lookups because split borrows are not expressible
+            // through the map; the retain makes it alias-safe.
+            let child_view = core
+                .widgets
+                .get(&child)
+                .expect("scene validated the id")
+                .view()
+                .retain();
+            match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(stack) => stack.addArrangedSubview(&child_view),
+                _ => panic!("kaya: add_child parent is not a container"),
+            }
+        }
+        ApplyOp::Mount { window: _, root } => {
+            let root_view = core.widgets.get(&root).expect("scene validated the id");
+            core._window.setContentView(Some(root_view.view()));
+        }
+    }
+}
+
 struct TargetIvars {
     occurrences: OccSink,
+    id: WidgetId,
 }
 
 define_class!(
@@ -81,15 +176,15 @@ define_class!(
         #[unsafe(method(clicked:))]
         fn clicked(&self, _sender: Option<&AnyObject>) {
             self.ivars().occurrences.send(Occurrence::ButtonClicked {
-                id: skeleton::BUTTON,
+                id: self.ivars().id,
             });
         }
     }
 );
 
 impl ButtonTarget {
-    fn new(mtm: MainThreadMarker, occurrences: OccSink) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences });
+    fn new(mtm: MainThreadMarker, occurrences: OccSink, id: WidgetId) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, id });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -120,7 +215,7 @@ impl AppDelegate {
 /// The main-thread half, independent of who owns the app thread: the Rust
 /// API spawns one, the C ABI leaves it to the calling language. Returns
 /// the exit code; the host process decides how to exit.
-pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
+pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     let mtm = MainThreadMarker::new()
         .expect("kaya must be run on the main thread; the core owns it");
 
@@ -147,27 +242,7 @@ pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
     // releasing on close would double-free.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str("kaya milestone 0"));
-
-    let target = ButtonTarget::new(mtm, occ_tx.clone());
-    let button = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Click me"),
-            Some(&target),
-            Some(sel!(clicked:)),
-            mtm,
-        )
-    };
-    button.setFrame(NSRect::new(NSPoint::new(20.0, 90.0), NSSize::new(280.0, 32.0)));
-
-    let label = NSTextField::labelWithString(&NSString::from_str("Clicked 0 times"), mtm);
-    label.setFrame(NSRect::new(NSPoint::new(20.0, 40.0), NSSize::new(280.0, 24.0)));
-
-    let content = window.contentView().expect("window has a content view");
-    content.addSubview(&button);
-    content.addSubview(&label);
-
     window.makeKeyAndOrderFront(None);
-    app.activate();
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {
         spawn_selftest();
@@ -175,23 +250,29 @@ pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
 
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
-            commands: cmd_rx,
+            transactions: tx_rx,
+            scene: Scene::new(),
             occurrences: occ_tx,
-            label,
-            _button: button,
+            widgets: HashMap::new(),
+            selftest_button: None,
+            selftest_label: None,
+            _targets: Vec::new(),
             _window: window,
-            _target: target,
             _delegate: delegate,
         });
     });
 
+    // The first transaction may already be queued; drain before running.
+    drain_transactions();
+
+    app.activate();
     app.run();
     0
 }
 
 /// Drives the full round trip without a human: performClick on the main
-/// thread emits a real occurrence, the app thread answers with a command,
-/// and the label text proves both rings worked.
+/// thread emits a real occurrence, the app thread answers with a signal
+/// write, and the label text proves the resolution path worked.
 fn spawn_selftest() {
     fn on_main(f: impl FnOnce() + Send + 'static) {
         DispatchQueue::main().exec_async(f);
@@ -202,7 +283,11 @@ fn spawn_selftest() {
             on_main(|| {
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
-                    unsafe { core._button.performClick(None) };
+                    let button = core
+                        .selftest_button
+                        .as_ref()
+                        .expect("the scene has a button");
+                    unsafe { button.performClick(None) };
                 });
             });
         };
@@ -216,7 +301,8 @@ fn spawn_selftest() {
         on_main(|| {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
-                let text = core.label.stringValue().to_string();
+                let label = core.selftest_label.as_ref().expect("the scene has a label");
+                let text = label.stringValue().to_string();
                 if text == "Clicked 2 times" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);

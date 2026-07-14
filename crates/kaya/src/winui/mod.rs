@@ -23,6 +23,7 @@
 mod bindings;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
@@ -35,14 +36,26 @@ use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, RoutedEventHandler, Window,
 };
 
-use crate::protocol::{Command, OccSink, Occurrence, skeleton};
+use crate::protocol::{
+    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+};
+use crate::scene::Scene;
+
+enum NativeWidget {
+    Column(StackPanel),
+    // The caption TextBlock is the button's text surface.
+    Button { button: Button, caption: TextBlock },
+    Label(TextBlock),
+}
 
 struct CoreState {
-    commands: Receiver<Command>,
+    transactions: Receiver<Transaction>,
+    scene: Scene,
     occurrences: OccSink,
-    label: TextBlock,
-    button: Button,
-    _window: Window,
+    widgets: HashMap<WidgetId, NativeWidget>,
+    selftest_button: Option<WidgetId>,
+    selftest_label: Option<TextBlock>,
+    window: Window,
 }
 
 impl Drop for CoreState {
@@ -77,31 +90,93 @@ fn request_exit(code: i32) {
     }
 }
 
-/// Wake the UI thread so it drains the command ring. Safe to call from
-/// any thread. The enqueued closure carries no data; the ring does.
+/// Wake the UI thread so it drains pending transactions. Safe to call
+/// from any thread. The enqueued closure carries no data.
 pub(crate) fn ring_doorbell() {
     if let Some(dispatcher) = DISPATCHER.get() {
         let handler = DispatcherQueueHandler::new(|| {
-            drain_commands();
+            drain_transactions();
             Ok(())
         });
         let _ = dispatcher.0.TryEnqueue(&handler);
     }
 }
 
-fn drain_commands() {
-    CORE.with_borrow(|core| {
-        let Some(core) = core.as_ref() else { return };
-        while let Ok(command) = core.commands.try_recv() {
-            match command {
-                Command::SetText { id, text } => {
-                    if id == skeleton::LABEL {
-                        let _ = core.label.SetText(&HSTRING::from(&text));
-                    }
-                }
+fn drain_transactions() {
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        while let Ok(tx) = core.transactions.try_recv() {
+            for op in core.scene.apply(tx) {
+                apply(core, op).expect("kaya: applying an op failed");
             }
         }
     });
+}
+
+fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
+    match op {
+        ApplyOp::Create { id, kind } => {
+            let native = match kind {
+                WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
+                WidgetKind::Button => {
+                    let button = Button::new()?;
+                    let caption = TextBlock::new()?;
+                    button.SetContent(&caption)?;
+                    let click_sink = core.occurrences.clone();
+                    let handler = RoutedEventHandler::new(move |_, _| {
+                        click_sink.send(Occurrence::ButtonClicked { id });
+                        Ok(())
+                    });
+                    button.Click(&handler)?;
+                    if core.selftest_button.is_none() {
+                        core.selftest_button = Some(id);
+                    }
+                    NativeWidget::Button { button, caption }
+                }
+                WidgetKind::Label => {
+                    let label = TextBlock::new()?;
+                    if core.selftest_label.is_none() {
+                        core.selftest_label = Some(label.clone());
+                    }
+                    NativeWidget::Label(label)
+                }
+            };
+            core.widgets.insert(id, native);
+        }
+        ApplyOp::SetProp { id, prop, value } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match (widget, prop, value) {
+                (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
+                    caption.SetText(&HSTRING::from(&s))?;
+                }
+                (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
+                    label.SetText(&HSTRING::from(&s))?;
+                }
+                (_, prop, value) => {
+                    panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
+                }
+            }
+        }
+        ApplyOp::AddChild { parent, child } => {
+            let children = match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(panel) => panel.Children()?,
+                _ => panic!("kaya: add_child parent is not a container"),
+            };
+            match core.widgets.get(&child).expect("scene validated the id") {
+                NativeWidget::Column(panel) => children.Append(panel)?,
+                NativeWidget::Button { button, .. } => children.Append(button)?,
+                NativeWidget::Label(label) => children.Append(label)?,
+            }
+        }
+        ApplyOp::Mount { window: _, root } => {
+            match core.widgets.get(&root).expect("scene validated the id") {
+                NativeWidget::Column(panel) => core.window.SetContent(panel)?,
+                NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
+                NativeWidget::Label(label) => core.window.SetContent(label)?,
+            }
+        }
+    }
+    Ok(())
 }
 
 // --- Windows App Runtime bootstrap (unpackaged apps) ---------------------
@@ -171,7 +246,7 @@ fn bootstrap_windows_app_runtime() {
 /// The UI-thread half, independent of who owns the app thread. Returns
 /// the exit code; the host process decides how to exit (a library must
 /// not tear down someone else's process).
-pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
+pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     bootstrap_windows_app_runtime();
 
     const COINIT_APARTMENTTHREADED: u32 = 0x2;
@@ -179,19 +254,19 @@ pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
 
     // Application::Start creates the XAML UI thread machinery and calls
     // back once it is ready; the callback runs on the UI thread. Building
-    // the scene is deferred through the dispatcher so it runs after the
+    // the core is deferred through the dispatcher so it runs after the
     // launch sequence completes.
     let callback = ApplicationInitializationCallback::new(move |_params| {
         let _app = Application::new()?;
         let dispatcher = DispatcherQueue::GetForCurrentThread()?;
         let occ_tx = occ_tx.clone();
-        let cmd_rx_cell = RefCell::new(Some(cmd_rx_take()));
+        let tx_rx_cell = RefCell::new(Some(tx_rx_take()));
         let build = DispatcherQueueHandler::new(move || {
-            let cmd_rx = cmd_rx_cell
+            let tx_rx = tx_rx_cell
                 .borrow_mut()
                 .take()
-                .expect("scene built once");
-            build_scene(occ_tx.clone(), cmd_rx)
+                .expect("core set up once");
+            setup(occ_tx.clone(), tx_rx)
         });
         dispatcher.TryEnqueue(&build)?;
         DISPATCHER
@@ -201,9 +276,9 @@ pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
         Ok(())
     });
 
-    // Application::Start's callback cannot capture cmd_rx directly because
+    // Application::Start's callback cannot capture tx_rx directly because
     // the callback type requires Fn semantics; park it in a static slot.
-    cmd_rx_put(cmd_rx);
+    tx_rx_put(tx_rx);
 
     Application::Start(&callback).expect("Application::Start failed");
 
@@ -225,49 +300,26 @@ pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
     EXIT_CODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-// Receiver<Command> is !Sync, and the WinRT callback signature forces the
-// closure to be Fn + Send. The receiver crosses into the UI thread through
-// this slot instead of the closure environment.
-static CMD_RX_SLOT: std::sync::Mutex<Option<Receiver<Command>>> = std::sync::Mutex::new(None);
+// Receiver<Transaction> is !Sync, and the WinRT callback signature forces
+// the closure to be Fn + Send. The receiver crosses into the UI thread
+// through this slot instead of the closure environment.
+static TX_RX_SLOT: std::sync::Mutex<Option<Receiver<Transaction>>> = std::sync::Mutex::new(None);
 
-fn cmd_rx_put(rx: Receiver<Command>) {
-    *CMD_RX_SLOT.lock().unwrap() = Some(rx);
+fn tx_rx_put(rx: Receiver<Transaction>) {
+    *TX_RX_SLOT.lock().unwrap() = Some(rx);
 }
 
-fn cmd_rx_take() -> Receiver<Command> {
-    CMD_RX_SLOT
+fn tx_rx_take() -> Receiver<Transaction> {
+    TX_RX_SLOT
         .lock()
         .unwrap()
         .take()
-        .expect("command receiver already taken")
+        .expect("transaction receiver already taken")
 }
 
-fn build_scene(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> windows_core::Result<()> {
+fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
     let window = Window::new()?;
     window.SetTitle(&HSTRING::from("kaya milestone 0"))?;
-
-    let panel = StackPanel::new()?;
-    let button = Button::new()?;
-    let caption = TextBlock::new()?;
-    caption.SetText(&HSTRING::from("Click me"))?;
-    button.SetContent(&caption)?;
-
-    let label = TextBlock::new()?;
-    label.SetText(&HSTRING::from("Clicked 0 times"))?;
-
-    let children = panel.Children()?;
-    children.Append(&button)?;
-    children.Append(&label)?;
-    window.SetContent(&panel)?;
-
-    let click_sink = occ_tx.clone();
-    let handler = RoutedEventHandler::new(move |_, _| {
-        click_sink.send(Occurrence::ButtonClicked {
-            id: skeleton::BUTTON,
-        });
-        Ok(())
-    });
-    button.Click(&handler)?;
 
     // Closing the window exits the app, matching the AppKit backend's
     // terminate-after-last-window-closed behavior.
@@ -276,7 +328,6 @@ fn build_scene(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> windows_core::Resu
         Ok(())
     });
     window.Closed(&closed)?;
-
     window.Activate()?;
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {
@@ -285,13 +336,18 @@ fn build_scene(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> windows_core::Resu
 
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
-            commands: cmd_rx,
+            transactions: tx_rx,
+            scene: Scene::new(),
             occurrences: occ_tx,
-            label,
-            button,
-            _window: window,
+            widgets: HashMap::new(),
+            selftest_button: None,
+            selftest_label: None,
+            window,
         });
     });
+
+    // The first transaction may already be queued; drain now.
+    drain_transactions();
     Ok(())
 }
 
@@ -316,7 +372,7 @@ fn spawn_selftest() {
                     // automation bindings are generated, to exercise the
                     // real input path instead of the handler directly.
                     core.occurrences.send(Occurrence::ButtonClicked {
-                        id: skeleton::BUTTON,
+                        id: core.selftest_button.expect("the scene has a button"),
                     });
                 });
                 Ok(())
@@ -332,8 +388,12 @@ fn spawn_selftest() {
         on_ui(|| {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
-                let text = core.label.Text()?.to_string();
-                let _ = &core.button;
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .Text()?
+                    .to_string();
                 if text == "Clicked 2 times" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);

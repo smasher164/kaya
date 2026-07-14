@@ -6,6 +6,8 @@
 mod app;
 mod protocol;
 mod ring;
+mod scene;
+mod wire;
 
 #[cfg(target_os = "macos")]
 mod appkit;
@@ -36,8 +38,10 @@ mod swiftui_host;
 ))]
 pub mod capi;
 
-pub use app::AppCtx;
-pub use protocol::{Command, Occurrence, WidgetId, skeleton};
+pub use app::{AppCtx, Tx};
+pub use protocol::{
+    DEFAULT_WINDOW, Occurrence, Prop, SignalId, Value, WidgetId, WidgetKind, WindowId,
+};
 
 #[cfg(target_os = "macos")]
 pub(crate) use appkit as backend;
@@ -72,10 +76,7 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     #[cfg(target_os = "macos")]
     if std::env::var("KAYA_BACKEND").as_deref() == Ok("swiftui") {
         let (occ_tx, occ_rx) = mpsc::channel();
-        let ctx = AppCtx {
-            occurrences: occ_rx,
-            commands: capi::presentation_cmd_sender(),
-        };
+        let ctx = AppCtx::new(occ_rx, capi::presentation_tx_sender());
         std::thread::Builder::new()
             .name("kaya-app".into())
             .spawn(move || app_main(ctx))
@@ -85,14 +86,11 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     }
 
     let (occ_tx, occ_rx) = mpsc::channel();
-    let (cmd_tx, cmd_rx) = mpsc::channel();
-    let ctx = AppCtx {
-        occurrences: occ_rx,
-        commands: cmd_tx,
-    };
+    let (tx_tx, tx_rx) = mpsc::channel();
+    let ctx = AppCtx::new(occ_rx, tx_tx);
     std::thread::Builder::new()
         .name("kaya-app".into())
         .spawn(move || app_main(ctx))
         .expect("failed to spawn the app thread");
-    std::process::exit(backend::run_core(protocol::OccSink::Mpsc(occ_tx), cmd_rx))
+    std::process::exit(backend::run_core(protocol::OccSink::Mpsc(occ_tx), tx_rx))
 }

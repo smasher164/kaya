@@ -13,10 +13,11 @@
 #     release unpacked under C:\kaya (cgo needs a C compiler; policy is
 #     clang everywhere)
 #
-# Cross-compile first (release: the hybrid CRT policy in build.rs makes
-# release artifacts self-contained; debug builds still import vcruntime):
-#   cargo xwin build --release --target aarch64-pc-windows-msvc
-#   cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone0
+# Builds before deploying (release: the hybrid CRT policy in build.rs
+# makes release artifacts self-contained; debug builds still import
+# vcruntime), so the VM can never run yesterday's artifacts against
+# today's sources. Run inside the dev shell (cargo-xwin comes from the
+# flake).
 set -euo pipefail
 
 HOST="${1:?usage: deploy-win.sh user@host [--provision] [rust|python|go|all]}"
@@ -37,6 +38,23 @@ SDK="$ROOT/third_party/winappsdk"
 BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-arm64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll"
 
 run_ssh() { ssh -n -o BatchMode=yes "$HOST" "$@"; }
+
+echo "== building (aarch64-pc-windows-msvc, release) =="
+(cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
+    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone0)
+"$ROOT/tools/gen-header.sh" --check
+
+# Every kaya_* function declared in kaya.h must be exported by the DLL;
+# a missing export would otherwise surface as a remote link or load
+# error, or worse, pass by resolving against a stale deployed copy.
+declared=$(sed -nE 's/^[A-Za-z_].*[ *](kaya_[a-z0-9_]+)\(.*/\1/p' "$ROOT/crates/kaya/include/kaya.h" | sort -u)
+exported=$(objdump -p "$TARGET/kaya.dll" | awk '/Export Table:/,/^$/' | grep -oE 'kaya_[a-z0-9_]+' | sort -u)
+missing=$(comm -23 <(echo "$declared") <(echo "$exported"))
+if [ -n "$missing" ]; then
+    echo "kaya.dll does not export functions declared in kaya.h:" >&2
+    echo "$missing" >&2
+    exit 1
+fi
 
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 
@@ -61,6 +79,23 @@ run_ssh 'cmd /c if not exist C:\kaya\cs mkdir C:\kaya\cs'
 scp -q "$ROOT/crates/kaya/examples/milestone0.cs" \
     "$ROOT/crates/kaya/examples/milestone0.csproj" \
     "$HOST:C:/kaya/cs/"
+
+# What landed must be what was built: Windows keeps loaded DLLs locked,
+# so an overwrite can fail while everything else copies fine, and the
+# suites would then run against the previous deploy.
+verify_remote() {
+    local local_path="$1" remote_path="$2"
+    local want got
+    want=$(shasum -a 256 "$local_path" | awk '{print tolower($1)}')
+    got=$(run_ssh "powershell -Command \"(Get-FileHash $remote_path -Algorithm SHA256).Hash\"" \
+        | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+    if [ "$want" != "$got" ]; then
+        echo "$remote_path does not match $local_path after copy" >&2
+        exit 1
+    fi
+}
+verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
+verify_remote "$TARGET/examples/milestone0.exe" 'C:\kaya\milestone0.exe'
 
 run_suite() {
     local name="$1"

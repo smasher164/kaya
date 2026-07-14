@@ -1,4 +1,4 @@
-//! Minimal C ABI for milestone 0.
+//! The C ABI, milestone-1 shape.
 //!
 //! The boundary is two-tier. Functions are the portable floor: any
 //! language can call `kaya_next_occurrence` and never think about memory
@@ -19,17 +19,23 @@
 //!      declared in the header.
 //!   3. release-store *head advanced by header.size.
 //!
-//! Commands travel through functions in both tiers; a transaction commits
-//! as one call, so the per-record boundary cost never multiplies.
+//! The other direction is transactions: the guest packs a buffer of
+//! records — same framing as the ring, layouts documented on the KAYA_TX_*
+//! constants — and one kaya_submit call commits it atomically. No second
+//! ring: the write path asks no atomics of any language.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::protocol::{Command, OccSink, Occurrence, WidgetId};
+use crate::protocol::{OccSink, Occurrence, Transaction, WidgetId};
 use crate::ring::{self, OccRing};
+use crate::scene::Scene;
+use crate::wire;
 
 // Literal values: cbindgen drops constants defined by path references.
-// The asserts below keep them locked to the ring's record kinds.
+// The asserts below keep them locked to the wire module's values.
+
+/// Occurrence record kinds (the ring, core -> guest).
 pub const KAYA_OCCURRENCE_PAD: u16 = 0;
 pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
 const _: () = assert!(
@@ -37,9 +43,80 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
 );
 
-/// Widget ids of the fixed milestone-0 scene.
-pub const KAYA_WIDGET_BUTTON: u64 = 1;
-pub const KAYA_WIDGET_LABEL: u64 = 2;
+/// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
+/// after the common 8-byte header, little-endian, 8-aligned:
+///   CREATE_SIGNAL: u64 signal_id, value
+///   WRITE_SIGNAL:  u64 signal_id, value
+///   CREATE_WIDGET: u64 widget_id, u32 kind, u32 pad
+///   SET_PROPERTY:  u64 widget_id, u32 prop, u32 source,
+///                  then value (SOURCE_CONST) or u64 signal_id (SOURCE_SIGNAL)
+///   ADD_CHILD:     u64 parent, u64 child
+///   MOUNT:         u64 window (0 = the default window), u64 root
+/// where value is { u32 type, u32 len, payload padded to 8 }.
+pub const KAYA_TX_CREATE_SIGNAL: u16 = 1;
+pub const KAYA_TX_WRITE_SIGNAL: u16 = 2;
+pub const KAYA_TX_CREATE_WIDGET: u16 = 3;
+pub const KAYA_TX_SET_PROPERTY: u16 = 4;
+pub const KAYA_TX_ADD_CHILD: u16 = 5;
+pub const KAYA_TX_MOUNT: u16 = 6;
+const _: () = assert!(
+    KAYA_TX_CREATE_SIGNAL == wire::TX_CREATE_SIGNAL
+        && KAYA_TX_WRITE_SIGNAL == wire::TX_WRITE_SIGNAL
+        && KAYA_TX_CREATE_WIDGET == wire::TX_CREATE_WIDGET
+        && KAYA_TX_SET_PROPERTY == wire::TX_SET_PROPERTY
+        && KAYA_TX_ADD_CHILD == wire::TX_ADD_CHILD
+        && KAYA_TX_MOUNT == wire::TX_MOUNT
+);
+
+/// Apply record kinds (core -> presentation pump, via kaya_next_commands).
+/// Layouts after the header:
+///   CREATE:    u64 widget_id, u32 kind, u32 pad
+///   SET_PROP:  u64 widget_id, u32 prop, u32 pad, value (always resolved)
+///   ADD_CHILD: u64 parent, u64 child
+///   MOUNT:     u64 window, u64 root
+pub const KAYA_APPLY_CREATE: u16 = 1;
+pub const KAYA_APPLY_SET_PROP: u16 = 2;
+pub const KAYA_APPLY_ADD_CHILD: u16 = 3;
+pub const KAYA_APPLY_MOUNT: u16 = 4;
+const _: () = assert!(
+    KAYA_APPLY_CREATE == wire::APPLY_CREATE
+        && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
+        && KAYA_APPLY_ADD_CHILD == wire::APPLY_ADD_CHILD
+        && KAYA_APPLY_MOUNT == wire::APPLY_MOUNT
+);
+
+/// Value types.
+pub const KAYA_VALUE_BOOL: u32 = 1;
+pub const KAYA_VALUE_I64: u32 = 2;
+pub const KAYA_VALUE_F64: u32 = 3;
+pub const KAYA_VALUE_STR: u32 = 4;
+const _: () = assert!(
+    KAYA_VALUE_BOOL == wire::VALUE_BOOL
+        && KAYA_VALUE_I64 == wire::VALUE_I64
+        && KAYA_VALUE_F64 == wire::VALUE_F64
+        && KAYA_VALUE_STR == wire::VALUE_STR
+);
+
+/// Widget kinds.
+pub const KAYA_KIND_COLUMN: u32 = 1;
+pub const KAYA_KIND_BUTTON: u32 = 2;
+pub const KAYA_KIND_LABEL: u32 = 3;
+const _: () = assert!(
+    KAYA_KIND_COLUMN == wire::KIND_COLUMN
+        && KAYA_KIND_BUTTON == wire::KIND_BUTTON
+        && KAYA_KIND_LABEL == wire::KIND_LABEL
+);
+
+/// Property keys.
+pub const KAYA_PROP_TEXT: u32 = 1;
+const _: () = assert!(KAYA_PROP_TEXT == wire::PROP_TEXT);
+
+/// set_property sources.
+pub const KAYA_SOURCE_CONST: u32 = 0;
+pub const KAYA_SOURCE_SIGNAL: u32 = 1;
+const _: () = assert!(
+    KAYA_SOURCE_CONST == wire::SOURCE_CONST && KAYA_SOURCE_SIGNAL == wire::SOURCE_SIGNAL
+);
 
 #[repr(C)]
 pub struct KayaOccurrence {
@@ -58,26 +135,26 @@ pub struct KayaRingInfo {
 
 struct CState {
     ring: Arc<OccRing>,
-    cmd_tx: Sender<Command>,
-    core_ends: Mutex<Option<(OccSink, Receiver<Command>)>>,
+    tx_tx: Sender<Transaction>,
+    core_ends: Mutex<Option<(OccSink, Receiver<Transaction>)>>,
 }
 
 fn state() -> &'static CState {
     static STATE: OnceLock<CState> = OnceLock::new();
     STATE.get_or_init(|| {
         let ring = Arc::new(OccRing::new(64 * 1024));
-        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
         CState {
             ring: ring.clone(),
-            cmd_tx,
-            core_ends: Mutex::new(Some((OccSink::Ring(ring), cmd_rx))),
+            tx_tx,
+            core_ends: Mutex::new(Some((OccSink::Ring(ring), tx_rx))),
         }
     })
 }
 
 /// Take over the calling thread, which must be the process main thread,
-/// and run the milestone-0 scene. Returns when the app exits, with the
-/// exit code; the host decides how to terminate its own process.
+/// and run the core. Returns when the app exits, with the exit code; the
+/// host decides how to terminate its own process.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_run() -> i32 {
     // Runtime backend selection (interim mechanism: environment). The
@@ -88,14 +165,15 @@ pub extern "C" fn kaya_run() -> i32 {
         return crate::swiftui_host::run();
     }
 
-    let (occ_sink, cmd_rx) = take_core_ends().expect("kaya_run may only be called once");
-    crate::backend::run_core(occ_sink, cmd_rx)
+    let (occ_sink, tx_rx) = take_core_ends().expect("kaya_run may only be called once");
+    crate::backend::run_core(occ_sink, tx_rx)
 }
 
 /// The core's ends of the transport: the ring-backed occurrence sink and
-/// the command receiver. Taken once, by whichever entry starts the core
-/// (kaya_run here; KayaRing.attach on Android, where the OS owns main).
-pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Command>)> {
+/// the transaction receiver. Taken once, by whichever entry starts the
+/// core (kaya_run here; KayaRing.attach on Android, where the OS owns
+/// main).
+pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Transaction>)> {
     state().core_ends.lock().unwrap().take()
 }
 
@@ -104,6 +182,22 @@ pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Command>)> {
 #[cfg(target_os = "android")]
 pub(crate) fn ring_raw() -> (*mut u8, u32, *mut u32, *mut u32) {
     state().ring.raw()
+}
+
+/// Submit one transaction: `len` bytes of records at `records`, applied
+/// atomically on the UI thread. The buffer is copied before this call
+/// returns. Malformed records are a broken binding and fail loudly.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
+    let buf = if records.is_null() || len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(records, len) }
+    };
+    let tx = wire::decode_transaction(buf);
+    if state().tx_tx.send(tx).is_ok() {
+        crate::backend::ring_doorbell();
+    }
 }
 
 /// Function-floor consumption: block until the next occurrence and write
@@ -150,39 +244,30 @@ pub extern "C" fn kaya_wait_occurrences() -> bool {
 
 // --- Presentation-side API (guest-language backends) --------------------
 //
-// A guest-language presentation layer (the SwiftUI backend) plays the
-// core's presentation role: it emits occurrences and consumes commands,
-// instead of calling kaya_run. The shape mirrors the guest side:
-// kaya_next_command blocks the way kaya_next_occurrence does, and
-// kaya_emit_* is the counterpart of kaya_set_text. Exclusive with
-// kaya_run — one presentation layer per process. The full contract grows
-// with the reactive surface; this is the milestone-0 subset.
+// A guest-language presentation layer (the SwiftUI and Compose backends)
+// plays the core's presentation role: it emits occurrences and consumes
+// resolved apply-ops, instead of calling kaya_run. kaya_next_commands
+// blocks the way kaya_next_occurrence does; the scene resolution (signals
+// to concrete property sets) happens here, core-side, so a presentation
+// layer never grows signal machinery. Exclusive with kaya_run — one
+// presentation layer per process.
 
-pub const KAYA_COMMAND_SET_TEXT: u16 = 1;
-
-#[repr(C)]
-pub struct KayaCommand {
-    pub kind: u16,
-    pub widget_id: u64,
-    pub text_len: u32,
-    pub text: [u8; 256],
-}
-
-static PRESENTATION_CMD_RX: Mutex<Option<Receiver<Command>>> = Mutex::new(None);
+static PRESENTATION_TX_RX: Mutex<Option<Receiver<Transaction>>> = Mutex::new(None);
+static PRESENTATION_SCENE: Mutex<Option<Scene>> = Mutex::new(None);
 
 // Where presentation-side emissions land. Defaults to the byte ring
 // (foreign guests read it via kaya_next_occurrence); the Rust API's
-// SwiftUI mode routes emissions into the AppCtx mpsc instead.
+// runtime-selected modes route emissions into the AppCtx mpsc instead.
 static PRESENTATION_SINK: Mutex<Option<OccSink>> = Mutex::new(None);
 
 pub(crate) fn set_presentation_sink(sink: OccSink) {
     *PRESENTATION_SINK.lock().unwrap() = Some(sink);
 }
 
-/// The command sender feeding whatever presentation layer is running,
+/// The transaction sender feeding whatever presentation layer is running,
 /// for the Rust API's runtime-selected backends.
-pub(crate) fn presentation_cmd_sender() -> mpsc::Sender<Command> {
-    state().cmd_tx.clone()
+pub(crate) fn presentation_tx_sender() -> mpsc::Sender<Transaction> {
+    state().tx_tx.clone()
 }
 
 /// Presentation side: emit a button-clicked occurrence, exactly as a
@@ -198,53 +283,39 @@ pub extern "C" fn kaya_emit_button_clicked(widget_id: u64) {
     state().ring.push(ring::REC_BUTTON_CLICKED, widget_id);
 }
 
-/// Presentation side: block until the next command and write it to `out`.
-/// Returns false if command consumption could not be acquired (kaya_run
-/// owns it). Call from a single presentation pump thread; process exit is
-/// the shutdown path for a presentation leg at milestone-0 grade.
+/// Presentation side: block until the next transaction, resolve it
+/// through the scene, and write the apply-op records into `buf`.
+/// Returns the byte length written, or 0 when the core has shut down.
+/// Call from a single pump thread with a buffer of at least 64 KiB;
+/// an overflowing batch fails loudly.
 #[unsafe(no_mangle)]
-pub extern "C" fn kaya_next_command(out: *mut KayaCommand) -> bool {
-    if out.is_null() {
-        return false;
+pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
+    if buf.is_null() {
+        return 0;
     }
-    let mut slot = PRESENTATION_CMD_RX.lock().unwrap();
-    if slot.is_none() {
-        let Some((_occ, cmd_rx)) = state().core_ends.lock().unwrap().take() else {
-            return false;
+    let mut rx_slot = PRESENTATION_TX_RX.lock().unwrap();
+    if rx_slot.is_none() {
+        let Some((_occ, tx_rx)) = state().core_ends.lock().unwrap().take() else {
+            return 0;
         };
-        *slot = Some(cmd_rx);
+        *rx_slot = Some(tx_rx);
+        *PRESENTATION_SCENE.lock().unwrap() = Some(Scene::new());
     }
-    match slot.as_ref().unwrap().recv() {
-        Ok(Command::SetText { id, text }) => {
-            let bytes = text.as_bytes();
-            let len = bytes.len().min(256);
-            unsafe {
-                let out = &mut *out;
-                out.kind = KAYA_COMMAND_SET_TEXT;
-                out.widget_id = id.0;
-                out.text_len = len as u32;
-                out.text[..len].copy_from_slice(&bytes[..len]);
-            }
-            true
-        }
-        Err(_) => false,
-    }
-}
-
-/// Set a widget's text. `text` points to `len` bytes of UTF-8; invalid
-/// sequences are replaced rather than rejected.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn kaya_set_text(widget_id: u64, text: *const u8, len: usize) {
-    let text = if text.is_null() {
-        String::new()
-    } else {
-        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(text, len) }).into_owned()
+    let Ok(tx) = rx_slot.as_ref().unwrap().recv() else {
+        return 0;
     };
-    let command = Command::SetText {
-        id: WidgetId(widget_id),
-        text,
-    };
-    if state().cmd_tx.send(command).is_ok() {
-        crate::backend::ring_doorbell();
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    let ops = scene_slot.as_mut().unwrap().apply(tx);
+    let mut writer = wire::Writer::new();
+    for op in &ops {
+        writer.apply_op(op);
     }
+    let bytes = writer.into_bytes();
+    assert!(
+        bytes.len() <= cap,
+        "kaya: apply batch of {} bytes exceeds the pump buffer of {cap}",
+        bytes.len()
+    );
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, bytes.len()) };
+    bytes.len()
 }

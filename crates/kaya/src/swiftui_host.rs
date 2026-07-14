@@ -12,13 +12,16 @@
 
 use std::ffi::{CString, c_char, c_int, c_void};
 
-use crate::capi::{KayaCommand, kaya_emit_button_clicked, kaya_next_command};
+use crate::capi::{kaya_emit_button_clicked, kaya_next_commands};
 
 /// The presentation-side functions handed to a guest-language backend.
+/// next_commands blocks until a transaction is resolved and fills the
+/// buffer with apply-op records (KAYA_APPLY_*); returns the byte length,
+/// 0 on shutdown.
 #[repr(C)]
 pub struct KayaHostApi {
     pub emit_button_clicked: extern "C" fn(u64),
-    pub next_command: extern "C" fn(*mut KayaCommand) -> bool,
+    pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
 }
 
 unsafe extern "C" {
@@ -47,7 +50,7 @@ pub(crate) fn run() -> i32 {
     );
     let api = KayaHostApi {
         emit_button_clicked: kaya_emit_button_clicked,
-        next_command: kaya_next_command,
+        next_commands: kaya_next_commands,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

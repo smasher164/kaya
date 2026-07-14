@@ -21,10 +21,11 @@ import android.app.Activity
  */
 object KayaRing {
     @JvmStatic external fun attach(activity: Activity)
+    /** One transaction as packed records (KAYA_TX_*), applied atomically. */
+    @JvmStatic external fun submit(records: ByteArray)
     @JvmStatic external fun dataAddress(): Long
     @JvmStatic external fun capacity(): Int
     @JvmStatic external fun headAddress(): Long
     @JvmStatic external fun tailAddress(): Long
     @JvmStatic external fun waitOccurrences(): Boolean
-    @JvmStatic external fun setText(widgetId: Long, text: String)
 }

@@ -33,6 +33,10 @@ IOS_MIN="16.0"
 
 cd "$ROOT"
 
+# The swift and rust-swiftui suites compile against kaya.h; fail loudly
+# if it has drifted from the Rust source.
+tools/gen-header.sh --check
+
 make_bundle() {
     local name="$1" bundle_id="$2" executable_path="$3"
     local app="$BUNDLES/$name.app"

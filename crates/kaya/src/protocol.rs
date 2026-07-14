@@ -1,16 +1,24 @@
 //! Traffic types between the core (main thread) and app logic (its own
 //! thread).
 //!
-//! Transport policy: while the crate is in-process-only, the logs ride
-//! `std::sync::mpsc`, which already has the semantics the design asks of a
-//! log (unbounded, ordered, lossless, single consumer, and it grows by
-//! linked blocks internally). The byte-level record ring in shared memory
-//! arrives with the C ABI, where nothing off the shelf fits; it will be
-//! written once and tested with loom and miri. The real-time audio ring is
-//! a separate case and should use `rtrb`.
+//! Transport policy: while the crate is in-process-only, transactions ride
+//! `std::sync::mpsc` as parsed values, and the Rust API constructs them
+//! directly — serialization is for the C boundary (wire.rs), where foreign
+//! guests submit the same records as bytes. Occurrences travel the
+//! byte-record ring (ring.rs) or mpsc, per consumer.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WidgetId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SignalId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WindowId(pub u64);
+
+/// The implicit window every scene can mount into until the window
+/// vocabulary arrives (see DESIGN.md: windows are a scene layer).
+pub const DEFAULT_WINDOW: WindowId = WindowId(0);
 
 /// Core -> app. Ordered, lossless, consumed exactly once.
 #[derive(Debug)]
@@ -21,17 +29,72 @@ pub enum Occurrence {
     Shutdown,
 }
 
-/// App -> core. One-shot imperatives and property writes.
-#[derive(Debug)]
-pub enum Command {
-    SetText { id: WidgetId, text: String },
+/// A signal or property value. The milestone-1 set; grows with widgets.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Str(String),
 }
 
-/// Fixed ids for the milestone-0 scene, identical on every backend.
-pub mod skeleton {
-    use super::WidgetId;
-    pub const BUTTON: WidgetId = WidgetId(1);
-    pub const LABEL: WidgetId = WidgetId(2);
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Str(s.to_owned())
+    }
+}
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::Str(s)
+    }
+}
+
+/// Widget kinds of the milestone-1 vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetKind {
+    Column,
+    Button,
+    Label,
+}
+
+/// Property keys. One so far; grows with widgets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Prop {
+    Text,
+}
+
+/// A bound property's source: a constant, or a signal reference —
+/// nothing else (the binding rule, wire-concrete).
+#[derive(Debug, Clone)]
+pub enum PropValue {
+    Const(Value),
+    Signal(SignalId),
+}
+
+/// One record of a transaction, app -> core.
+#[derive(Debug)]
+pub enum TxOp {
+    CreateSignal { id: SignalId, initial: Value },
+    WriteSignal { id: SignalId, value: Value },
+    CreateWidget { id: WidgetId, kind: WidgetKind },
+    SetProperty { widget: WidgetId, prop: Prop, value: PropValue },
+    AddChild { parent: WidgetId, child: WidgetId },
+    Mount { window: WindowId, root: WidgetId },
+}
+
+/// A transaction: applied atomically, in submission order, last write
+/// wins per signal within the batch.
+pub type Transaction = Vec<TxOp>;
+
+/// What a backend applies, produced by the scene core from a transaction
+/// with every signal reference already resolved. Backends stay appliers:
+/// no diffing, no reconciliation, no subscriptions.
+#[derive(Debug, PartialEq)]
+pub enum ApplyOp {
+    Create { id: WidgetId, kind: WidgetKind },
+    SetProp { id: WidgetId, prop: Prop, value: Value },
+    AddChild { parent: WidgetId, child: WidgetId },
+    Mount { window: WindowId, root: WidgetId },
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

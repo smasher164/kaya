@@ -4,66 +4,133 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.concurrent.thread
 
 /**
  * KayaCompose: the Kotlin half of the Compose backend, the Android
- * sibling of KayaSwiftUI.swift. Plays the presentation role of kaya's
- * protocol over the JNI presentation surface:
+ * sibling of KayaSwiftUI.swift — an interpreter of resolved apply-op
+ * records:
  *
- *   kaya signal      -> snapshot state (recomposition renders)
- *   occurrence       <- Compose onClick -> KayaPresent.emitButtonClicked
- *   command SetText  -> KayaPresent.nextCommand (blocking pump) -> state write
+ *   create/add_child/mount -> a snapshot-state node tree (recomposition renders)
+ *   set_prop               -> observable writes on the nodes
+ *   occurrence             <- Compose onClick -> KayaPresent.emitButtonClicked
  *
- * The command pump blocks in nextCommand on its own thread and hops to
- * the UI thread to write snapshot state — the doorbell equivalent, no
- * polling, no callbacks across the ABI.
- *
- * Milestone-0 grade: the scene is hardcoded here, exactly as it is in
- * every other backend. The scene-as-data interpreter arrives with the
- * reactive surface.
+ * The pump blocks in nextCommands on its own thread and hops to the UI
+ * thread to apply — the doorbell equivalent, no polling, no callbacks
+ * across the ABI. Signals never reach this layer; the core resolves them
+ * before the records leave kaya_next_commands.
  */
-object KayaModel {
-    var labelText by mutableStateOf("Clicked 0 times")
+class KayaNode(val id: Long, val kind: Int) {
+    var text by mutableStateOf("")
+    val children = mutableStateListOf<KayaNode>()
+}
+
+object KayaSceneModel {
+    var root by mutableStateOf<KayaNode?>(null)
+    val nodes = HashMap<Long, KayaNode>() // UI thread only
+    var firstButton: KayaNode? = null
+    var firstLabel: KayaNode? = null
 }
 
 object KayaCompose {
-    const val WIDGET_BUTTON = 1L
-    const val WIDGET_LABEL = 2L
-    const val COMMAND_SET_TEXT = 1
+    // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
+    // in kaya.h.
+    private const val APPLY_CREATE = 1
+    private const val APPLY_SET_PROP = 2
+    private const val APPLY_ADD_CHILD = 3
+    private const val APPLY_MOUNT = 4
+    const val KIND_COLUMN = 1
+    const val KIND_BUTTON = 2
+    const val KIND_LABEL = 3
+    private const val VALUE_STR = 4
 
     /**
-     * Mount the milestone-0 scene and start the command pump. Call from
-     * onCreate when [Kaya.attach] returns [Kaya.PRESENT_GUEST].
+     * Start the pump and mount the interpreter. Call from onCreate when
+     * [Kaya.attach] returns [Kaya.PRESENT_GUEST].
      */
     @JvmStatic
     fun mount(activity: ComponentActivity) {
-        startCommandPump(activity)
+        startPump(activity)
         activity.setContent { KayaRoot() }
         if (System.getenv("KAYA_SELFTEST") != null) startSelftest(activity)
     }
 
-    private fun startCommandPump(activity: ComponentActivity) {
+    private fun startPump(activity: ComponentActivity) {
         thread(name = "kaya-compose-pump") {
-            val command = KayaCommand()
-            while (KayaPresent.nextCommand(command)) {
-                if (command.kind == COMMAND_SET_TEXT && command.widgetId == WIDGET_LABEL) {
-                    val text = command.text
-                    activity.runOnUiThread { KayaModel.labelText = text }
-                }
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val length = KayaPresent.nextCommands(buffer)
+                if (length == 0) break
+                val batch = buffer.copyOf(length)
+                activity.runOnUiThread { apply(batch) }
             }
         }
+    }
+
+    private fun apply(batch: ByteArray) {
+        val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
+        while (b.remaining() >= 8) {
+            val start = b.position()
+            val size = b.int
+            val kind = b.short.toInt()
+            b.short // flags
+            when (kind) {
+                APPLY_CREATE -> {
+                    val id = b.long
+                    val widgetKind = b.int
+                    val node = KayaNode(id, widgetKind)
+                    KayaSceneModel.nodes[id] = node
+                    if (widgetKind == KIND_BUTTON && KayaSceneModel.firstButton == null) {
+                        KayaSceneModel.firstButton = node
+                    }
+                    if (widgetKind == KIND_LABEL && KayaSceneModel.firstLabel == null) {
+                        KayaSceneModel.firstLabel = node
+                    }
+                }
+                APPLY_SET_PROP -> {
+                    val id = b.long
+                    b.int // prop: text is the only one at milestone 1
+                    b.int // pad
+                    KayaSceneModel.nodes[id]!!.text = readString(b)
+                }
+                APPLY_ADD_CHILD -> {
+                    val parent = b.long
+                    val child = b.long
+                    KayaSceneModel.nodes[parent]!!.children
+                        .add(KayaSceneModel.nodes[child]!!)
+                }
+                APPLY_MOUNT -> {
+                    b.long // window: the default until the window vocabulary
+                    val root = b.long
+                    KayaSceneModel.root = KayaSceneModel.nodes[root]
+                }
+            }
+            b.position(start + size)
+        }
+    }
+
+    private fun readString(b: ByteBuffer): String {
+        val type = b.int
+        val len = b.int
+        val bytes = ByteArray(len)
+        b.get(bytes)
+        check(type == VALUE_STR) { "kaya: expected a string value, got type $type" }
+        return String(bytes, Charsets.UTF_8)
     }
 
     /**
@@ -75,12 +142,12 @@ object KayaCompose {
     private fun startSelftest(activity: ComponentActivity) {
         thread(name = "kaya-selftest") {
             Thread.sleep(1500)
-            KayaPresent.emitButtonClicked(WIDGET_BUTTON)
+            KayaSceneModel.firstButton?.let { KayaPresent.emitButtonClicked(it.id) }
             Thread.sleep(300)
-            KayaPresent.emitButtonClicked(WIDGET_BUTTON)
+            KayaSceneModel.firstButton?.let { KayaPresent.emitButtonClicked(it.id) }
             Thread.sleep(700)
             activity.runOnUiThread {
-                val text = KayaModel.labelText
+                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
                 val code = if (text == "Clicked 2 times") {
                     Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
                     0
@@ -95,17 +162,28 @@ object KayaCompose {
     }
 }
 
-/** The milestone-0 scene. */
+/** The interpreter's render: the node tree as Compose declarations. */
+@Composable
+fun KayaRender(node: KayaNode) {
+    when (node.kind) {
+        KayaCompose.KIND_COLUMN ->
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                node.children.forEach { KayaRender(it) }
+            }
+        KayaCompose.KIND_BUTTON ->
+            Button(onClick = { KayaPresent.emitButtonClicked(node.id) }) {
+                Text(node.text)
+            }
+        KayaCompose.KIND_LABEL -> Text(node.text)
+    }
+}
+
 @Composable
 fun KayaRoot() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Button(onClick = { KayaPresent.emitButtonClicked(KayaCompose.WIDGET_BUTTON) }) {
-            Text("Click me")
-        }
-        Text(KayaModel.labelText)
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        KayaSceneModel.root?.let { KayaRender(it) }
     }
 }

@@ -8,7 +8,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-cargo build --example milestone0 || exit 1
+# --lib as well as --example: the foreign guests load the cdylib, and
+# --example alone would leave a stale libkaya.dylib in place. The header
+# check keeps guests from compiling against an ABI the source has left
+# behind.
+cargo build --lib --example milestone0 || exit 1
+tools/gen-header.sh --check || exit 1
 
 status=0
 run() {

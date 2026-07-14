@@ -1,7 +1,9 @@
-// Milestone 0 through the direct ring tier: Go reads the occurrence ring
-// with its own atomics, using the record structs declared in kaya.h. cgo
-// is crossed only to start the core, to wait on an empty ring, and to
-// send commands. The data path is pure Go.
+// Milestone 1 through the direct ring tier: Go reads the occurrence ring
+// with its own atomics, using the record structs declared in kaya.h, and
+// answers with packed transaction records through kaya_submit. The scene
+// arrives as one transaction; the label's text is a signal binding this
+// guest writes on every click. cgo is crossed only to start the core, to
+// wait on an empty ring, and to submit.
 //
 // Build the library first (cargo build / cargo xwin build --release),
 // then:
@@ -18,6 +20,7 @@ package main
 import "C"
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"runtime"
@@ -30,9 +33,114 @@ func init() {
 	runtime.LockOSThread()
 }
 
-func setText(widget uint64, text string) {
-	b := append([]byte(text), 0)
-	C.kaya_set_text(C.uint64_t(widget), (*C.uint8_t)(unsafe.Pointer(&b[0])), C.size_t(len(text)))
+// Guest-allocated ids, counted from 1 per space.
+const (
+	sigText = 1
+	wColumn = 1
+	wButton = 2
+	wLabel  = 3
+)
+
+// --- Transaction packing (KAYA_TX_* layouts from kaya.h) ---------------
+
+type tx struct {
+	bytes []byte
+}
+
+// record starts a record ({u32 size, u16 kind, u16 flags}; body follows)
+// and returns its start for finish.
+func (t *tx) record(kind uint16) int {
+	start := len(t.bytes)
+	t.bytes = append(t.bytes, 0, 0, 0, 0)
+	t.bytes = binary.LittleEndian.AppendUint16(t.bytes, kind)
+	t.bytes = append(t.bytes, 0, 0)
+	return start
+}
+
+func (t *tx) u32(v uint32) { t.bytes = binary.LittleEndian.AppendUint32(t.bytes, v) }
+func (t *tx) u64(v uint64) { t.bytes = binary.LittleEndian.AppendUint64(t.bytes, v) }
+
+func (t *tx) str(s string) {
+	t.u32(C.KAYA_VALUE_STR)
+	t.u32(uint32(len(s)))
+	t.bytes = append(t.bytes, s...)
+}
+
+func (t *tx) finish(start int) {
+	for len(t.bytes)%8 != 0 {
+		t.bytes = append(t.bytes, 0)
+	}
+	binary.LittleEndian.PutUint32(t.bytes[start:], uint32(len(t.bytes)-start))
+}
+
+func (t *tx) submit() {
+	C.kaya_submit((*C.uint8_t)(unsafe.Pointer(&t.bytes[0])), C.size_t(len(t.bytes)))
+}
+
+func sceneTx() {
+	var t tx
+	s := t.record(C.KAYA_TX_CREATE_SIGNAL)
+	t.u64(sigText)
+	t.str("Clicked 0 times")
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_CREATE_WIDGET)
+	t.u64(wColumn)
+	t.u32(C.KAYA_KIND_COLUMN)
+	t.u32(0)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_CREATE_WIDGET)
+	t.u64(wButton)
+	t.u32(C.KAYA_KIND_BUTTON)
+	t.u32(0)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_SET_PROPERTY)
+	t.u64(wButton)
+	t.u32(C.KAYA_PROP_TEXT)
+	t.u32(C.KAYA_SOURCE_CONST)
+	t.str("Click me")
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_CREATE_WIDGET)
+	t.u64(wLabel)
+	t.u32(C.KAYA_KIND_LABEL)
+	t.u32(0)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_SET_PROPERTY)
+	t.u64(wLabel)
+	t.u32(C.KAYA_PROP_TEXT)
+	t.u32(C.KAYA_SOURCE_SIGNAL)
+	t.u64(sigText)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_ADD_CHILD)
+	t.u64(wColumn)
+	t.u64(wButton)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_ADD_CHILD)
+	t.u64(wColumn)
+	t.u64(wLabel)
+	t.finish(s)
+
+	s = t.record(C.KAYA_TX_MOUNT)
+	t.u64(0) // window 0: the default
+	t.u64(wColumn)
+	t.finish(s)
+
+	t.submit()
+}
+
+func writeTx(text string) {
+	var t tx
+	s := t.record(C.KAYA_TX_WRITE_SIGNAL)
+	t.u64(sigText)
+	t.str(text)
+	t.finish(s)
+	t.submit()
 }
 
 func app(info C.KayaRingInfo) {
@@ -40,6 +148,8 @@ func app(info C.KayaRingInfo) {
 	tail := (*uint32)(unsafe.Pointer(info.tail))
 	data := uintptr(unsafe.Pointer(info.data))
 	mask := uint32(info.capacity) - 1
+
+	sceneTx()
 
 	count := 0
 	h := atomic.LoadUint32(head)
@@ -60,7 +170,7 @@ func app(info C.KayaRingInfo) {
 			if count != 1 {
 				noun = "times"
 			}
-			setText(C.KAYA_WIDGET_LABEL, fmt.Sprintf("Clicked %d %s", count, noun))
+			writeTx(fmt.Sprintf("Clicked %d %s", count, noun))
 		}
 		h += uint32(header.size)
 		atomic.StoreUint32(head, h) // release: hand the space back

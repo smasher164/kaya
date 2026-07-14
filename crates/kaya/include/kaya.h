@@ -12,18 +12,128 @@
 
 #define REC_BUTTON_CLICKED 1
 
+#define HEADER_SIZE 8
+
+#define TX_CREATE_SIGNAL 1
+
+#define TX_WRITE_SIGNAL 2
+
+#define TX_CREATE_WIDGET 3
+
+#define TX_SET_PROPERTY 4
+
+#define TX_ADD_CHILD 5
+
+#define TX_MOUNT 6
+
+#define APPLY_CREATE 1
+
+#define APPLY_SET_PROP 2
+
+#define APPLY_ADD_CHILD 3
+
+#define APPLY_MOUNT 4
+
+#define VALUE_BOOL 1
+
+#define VALUE_I64 2
+
+#define VALUE_F64 3
+
+#define VALUE_STR 4
+
+#define KIND_COLUMN 1
+
+#define KIND_BUTTON 2
+
+#define KIND_LABEL 3
+
+#define PROP_TEXT 1
+
+#define SOURCE_CONST 0
+
+#define SOURCE_SIGNAL 1
+
+/**
+ * Occurrence record kinds (the ring, core -> guest).
+ */
 #define KAYA_OCCURRENCE_PAD 0
 
 #define KAYA_OCCURRENCE_BUTTON_CLICKED 1
 
 /**
- * Widget ids of the fixed milestone-0 scene.
+ * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
+ * after the common 8-byte header, little-endian, 8-aligned:
+ *   CREATE_SIGNAL: u64 signal_id, value
+ *   WRITE_SIGNAL:  u64 signal_id, value
+ *   CREATE_WIDGET: u64 widget_id, u32 kind, u32 pad
+ *   SET_PROPERTY:  u64 widget_id, u32 prop, u32 source,
+ *                  then value (SOURCE_CONST) or u64 signal_id (SOURCE_SIGNAL)
+ *   ADD_CHILD:     u64 parent, u64 child
+ *   MOUNT:         u64 window (0 = the default window), u64 root
+ * where value is { u32 type, u32 len, payload padded to 8 }.
  */
-#define KAYA_WIDGET_BUTTON 1
+#define KAYA_TX_CREATE_SIGNAL 1
 
-#define KAYA_WIDGET_LABEL 2
+#define KAYA_TX_WRITE_SIGNAL 2
 
-#define KAYA_COMMAND_SET_TEXT 1
+#define KAYA_TX_CREATE_WIDGET 3
+
+#define KAYA_TX_SET_PROPERTY 4
+
+#define KAYA_TX_ADD_CHILD 5
+
+#define KAYA_TX_MOUNT 6
+
+/**
+ * Apply record kinds (core -> presentation pump, via kaya_next_commands).
+ * Layouts after the header:
+ *   CREATE:    u64 widget_id, u32 kind, u32 pad
+ *   SET_PROP:  u64 widget_id, u32 prop, u32 pad, value (always resolved)
+ *   ADD_CHILD: u64 parent, u64 child
+ *   MOUNT:     u64 window, u64 root
+ */
+#define KAYA_APPLY_CREATE 1
+
+#define KAYA_APPLY_SET_PROP 2
+
+#define KAYA_APPLY_ADD_CHILD 3
+
+#define KAYA_APPLY_MOUNT 4
+
+/**
+ * Value types.
+ */
+#define KAYA_VALUE_BOOL 1
+
+#define KAYA_VALUE_I64 2
+
+#define KAYA_VALUE_F64 3
+
+#define KAYA_VALUE_STR 4
+
+/**
+ * Widget kinds.
+ */
+#define KAYA_KIND_COLUMN 1
+
+#define KAYA_KIND_BUTTON 2
+
+#define KAYA_KIND_LABEL 3
+
+/**
+ * Property keys.
+ */
+#define KAYA_PROP_TEXT 1
+
+/**
+ * set_property sources.
+ */
+#define KAYA_SOURCE_CONST 0
+
+#define KAYA_SOURCE_SIGNAL 1
+
+typedef struct WindowId WindowId;
 
 typedef struct KayaOccurrence {
   uint16_t kind;
@@ -39,13 +149,6 @@ typedef struct KayaRingInfo {
   uint32_t *head;
   uint32_t *tail;
 } KayaRingInfo;
-
-typedef struct KayaCommand {
-  uint16_t kind;
-  uint64_t widget_id;
-  uint32_t text_len;
-  uint8_t text[256];
-} KayaCommand;
 
 /**
  * Wire framing of every record, exported through the C header so direct
@@ -70,13 +173,14 @@ typedef struct KayaRecordButtonClicked {
 
 /**
  * The presentation-side functions handed to a guest-language backend.
+ * next_commands blocks until a transaction is resolved and fills the
+ * buffer with apply-op records (KAYA_APPLY_*); returns the byte length,
+ * 0 on shutdown.
  */
 typedef struct KayaHostApi {
   void (*emit_button_clicked)(uint64_t);
-  bool (*next_command)(struct KayaCommand*);
+  uintptr_t (*next_commands)(uint8_t*, uintptr_t);
 } KayaHostApi;
-
-
 
 
 
@@ -86,10 +190,17 @@ extern void *dlsym(void *handle, const char *symbol);
 
 /**
  * Take over the calling thread, which must be the process main thread,
- * and run the milestone-0 scene. Returns when the app exits, with the
- * exit code; the host decides how to terminate its own process.
+ * and run the core. Returns when the app exits, with the exit code; the
+ * host decides how to terminate its own process.
  */
 int32_t kaya_run(void);
+
+/**
+ * Submit one transaction: `len` bytes of records at `records`, applied
+ * atomically on the UI thread. The buffer is copied before this call
+ * returns. Malformed records are a broken binding and fail loudly.
+ */
+void kaya_submit(const uint8_t *records, uintptr_t len);
 
 /**
  * Function-floor consumption: block until the next occurrence and write
@@ -117,17 +228,12 @@ bool kaya_wait_occurrences(void);
 void kaya_emit_button_clicked(uint64_t widget_id);
 
 /**
- * Presentation side: block until the next command and write it to `out`.
- * Returns false if command consumption could not be acquired (kaya_run
- * owns it). Call from a single presentation pump thread; process exit is
- * the shutdown path for a presentation leg at milestone-0 grade.
+ * Presentation side: block until the next transaction, resolve it
+ * through the scene, and write the apply-op records into `buf`.
+ * Returns the byte length written, or 0 when the core has shut down.
+ * Call from a single pump thread with a buffer of at least 64 KiB;
+ * an overflowing batch fails loudly.
  */
-bool kaya_next_command(struct KayaCommand *out);
-
-/**
- * Set a widget's text. `text` points to `len` bytes of UTF-8; invalid
- * sequences are replaced rather than rejected.
- */
-void kaya_set_text(uint64_t widget_id, const uint8_t *text, uintptr_t len);
+uintptr_t kaya_next_commands(uint8_t *buf, uintptr_t cap);
 
 #endif  /* KAYA_H */

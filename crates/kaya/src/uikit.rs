@@ -1,4 +1,4 @@
-//! UIKit backend, milestone 0: one window, one button, one label.
+//! UIKit backend, milestone 1: an interpreter of resolved apply-ops.
 //!
 //! Same architecture as the other backends. iOS is strict about the main
 //! thread: UIApplicationMain must run on the actual process main thread
@@ -9,6 +9,7 @@
 //! ends reach it through a slot rather than closure capture.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::{CString, c_char};
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
@@ -16,22 +17,45 @@ use std::sync::mpsc::Receiver;
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_foundation::CGRect;
 use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
-    UIControlEvents, UIControlState, UILabel, UIScreen, UIViewController, UIWindow,
+    UIControlEvents, UIControlState, UILabel, UILayoutConstraintAxis, UIScreen, UIStackView,
+    UIView, UIViewAutoresizing, UIViewController, UIWindow,
 };
 
-use crate::protocol::{Command, OccSink, Occurrence, skeleton};
+use crate::protocol::{
+    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+};
+use crate::scene::Scene;
+
+enum NativeWidget {
+    Column(Retained<UIStackView>),
+    Button(Retained<UIButton>),
+    Label(Retained<UILabel>),
+}
+
+impl NativeWidget {
+    fn view(&self) -> &UIView {
+        match self {
+            NativeWidget::Column(v) => v,
+            NativeWidget::Button(v) => v,
+            NativeWidget::Label(v) => v,
+        }
+    }
+}
 
 struct CoreState {
-    commands: Receiver<Command>,
+    transactions: Receiver<Transaction>,
+    scene: Scene,
     occurrences: OccSink,
-    label: Retained<UILabel>,
-    button: Retained<UIButton>,
+    widgets: HashMap<WidgetId, NativeWidget>,
+    selftest_button: Option<Retained<UIButton>>,
+    selftest_label: Option<Retained<UILabel>>,
+    content: Retained<UIView>,
+    _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
-    _target: Retained<ButtonTarget>,
 }
 
 impl Drop for CoreState {
@@ -46,33 +70,119 @@ thread_local! {
 
 // UIKit constructs the delegate; the channel ends travel through this
 // slot instead of a closure environment.
-static CHANNEL_SLOT: Mutex<Option<(OccSink, Receiver<Command>)>> = Mutex::new(None);
+static CHANNEL_SLOT: Mutex<Option<(OccSink, Receiver<Transaction>)>> = Mutex::new(None);
 
-/// Wake the main loop so it drains the command ring. Safe to call from
-/// any thread. The dispatched closure carries no data; the ring does.
+/// Wake the main loop so it drains pending transactions. Safe to call
+/// from any thread. The dispatched closure carries no data.
 pub(crate) fn ring_doorbell() {
     DispatchQueue::main().exec_async(|| {
-        drain_commands();
+        drain_transactions();
     });
 }
 
-fn drain_commands() {
-    CORE.with_borrow(|core| {
-        let Some(core) = core.as_ref() else { return };
-        while let Ok(command) = core.commands.try_recv() {
-            match command {
-                Command::SetText { id, text } => {
-                    if id == skeleton::LABEL {
-                        core.label.setText(Some(&NSString::from_str(&text)));
-                    }
-                }
+fn drain_transactions() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        while let Ok(tx) = core.transactions.try_recv() {
+            for op in core.scene.apply(tx) {
+                apply(core, mtm, op);
             }
         }
     });
 }
 
+fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
+    match op {
+        ApplyOp::Create { id, kind } => {
+            let native = match kind {
+                WidgetKind::Column => {
+                    let stack = UIStackView::new(mtm);
+                    unsafe {
+                        stack.setAxis(UILayoutConstraintAxis::Vertical);
+                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
+                        stack.setSpacing(8.0);
+                    }
+                    NativeWidget::Column(stack)
+                }
+                WidgetKind::Button => {
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), id);
+                    let button = UIButton::buttonWithType(UIButtonType::System, mtm);
+                    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
+                    unsafe {
+                        button.addTarget_action_forControlEvents(
+                            Some(target_obj),
+                            sel!(clicked:),
+                            UIControlEvents::TouchUpInside,
+                        );
+                    }
+                    core._targets.push(target);
+                    if core.selftest_button.is_none() {
+                        core.selftest_button = Some(button.clone());
+                    }
+                    NativeWidget::Button(button)
+                }
+                WidgetKind::Label => {
+                    let label = UILabel::new(mtm);
+                    unsafe { label.setTextColor(Some(&objc2_ui_kit::UIColor::labelColor())) };
+                    if core.selftest_label.is_none() {
+                        core.selftest_label = Some(label.clone());
+                    }
+                    NativeWidget::Label(label)
+                }
+            };
+            core.widgets.insert(id, native);
+        }
+        ApplyOp::SetProp { id, prop, value } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match (widget, prop, value) {
+                (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
+                    button.setTitle_forState(
+                        Some(&NSString::from_str(&s)),
+                        UIControlState::Normal,
+                    );
+                }
+                (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
+                    label.setText(Some(&NSString::from_str(&s)));
+                }
+                (_, prop, value) => {
+                    panic!("kaya: uikit cannot apply {prop:?} = {value:?} here")
+                }
+            }
+        }
+        ApplyOp::AddChild { parent, child } => {
+            let child_view = {
+                use objc2::Message;
+                core.widgets
+                    .get(&child)
+                    .expect("scene validated the id")
+                    .view()
+                    .retain()
+            };
+            match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(stack) => unsafe {
+                    stack.addArrangedSubview(&child_view);
+                },
+                _ => panic!("kaya: add_child parent is not a container"),
+            }
+        }
+        ApplyOp::Mount { window: _, root } => {
+            let root_view = core.widgets.get(&root).expect("scene validated the id");
+            let bounds: CGRect = core.content.bounds();
+            root_view.view().setFrame(bounds);
+            unsafe {
+                root_view.view().setAutoresizingMask(
+                    UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
+                );
+            }
+            core.content.addSubview(root_view.view());
+        }
+    }
+}
+
 struct TargetIvars {
     occurrences: OccSink,
+    id: WidgetId,
 }
 
 define_class!(
@@ -86,15 +196,15 @@ define_class!(
         #[unsafe(method(clicked:))]
         fn clicked(&self, _sender: Option<&objc2::runtime::AnyObject>) {
             self.ivars().occurrences.send(Occurrence::ButtonClicked {
-                id: skeleton::BUTTON,
+                id: self.ivars().id,
             });
         }
     }
 );
 
 impl ButtonTarget {
-    fn new(mtm: MainThreadMarker, occurrences: OccSink) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences });
+    fn new(mtm: MainThreadMarker, occurrences: OccSink, id: WidgetId) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, id });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -115,45 +225,24 @@ define_class!(
             _options: Option<&objc2_foundation::NSDictionary>,
         ) -> bool {
             let mtm = MainThreadMarker::new().expect("UIKit callbacks run on the main thread");
-            let (occ_tx, cmd_rx) = CHANNEL_SLOT
+            let (occ_tx, tx_rx) = CHANNEL_SLOT
                 .lock()
                 .unwrap()
                 .take()
                 .expect("run_core stocked the channel slot");
-            build_scene(mtm, occ_tx, cmd_rx);
+            setup(mtm, occ_tx, tx_rx);
             true
         }
     }
 );
 
-fn build_scene(mtm: MainThreadMarker, occ_tx: OccSink, cmd_rx: Receiver<Command>) {
+fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
     let screen_bounds = UIScreen::mainScreen(mtm).bounds();
     let window = unsafe { UIWindow::initWithFrame(UIWindow::alloc(mtm), screen_bounds) };
 
     let controller = UIViewController::new(mtm);
     let view = controller.view().expect("controller has a view");
     view.setBackgroundColor(Some(&objc2_ui_kit::UIColor::systemBackgroundColor()));
-
-    let target = ButtonTarget::new(mtm, occ_tx.clone());
-    let button = UIButton::buttonWithType(UIButtonType::System, mtm);
-    button.setTitle_forState(Some(&NSString::from_str("Click me")), UIControlState::Normal);
-    button.setFrame(CGRect::new(CGPoint::new(20.0, 120.0), CGSize::new(280.0, 44.0)));
-    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
-    unsafe {
-        button.addTarget_action_forControlEvents(
-            Some(target_obj),
-            sel!(clicked:),
-            UIControlEvents::TouchUpInside,
-        );
-    }
-
-    let label = UILabel::new(mtm);
-    unsafe { label.setTextColor(Some(&objc2_ui_kit::UIColor::labelColor())) };
-    label.setText(Some(&NSString::from_str("Clicked 0 times")));
-    label.setFrame(CGRect::new(CGPoint::new(20.0, 180.0), CGSize::new(280.0, 32.0)));
-
-    view.addSubview(&button);
-    view.addSubview(&label);
 
     window.setRootViewController(Some(&controller));
     window.makeKeyAndVisible();
@@ -164,21 +253,27 @@ fn build_scene(mtm: MainThreadMarker, occ_tx: OccSink, cmd_rx: Receiver<Command>
 
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
-            commands: cmd_rx,
+            transactions: tx_rx,
+            scene: Scene::new(),
             occurrences: occ_tx,
-            label,
-            button,
+            widgets: HashMap::new(),
+            selftest_button: None,
+            selftest_label: None,
+            content: view,
+            _targets: Vec::new(),
             _window: window,
-            _target: target,
         });
     });
+
+    // The first transaction may already be queued; drain now.
+    drain_transactions();
 }
 
 /// The main-thread half. On iOS, UIApplicationMain never returns, so the
 /// declared return type is for signature parity with the other backends;
 /// the self-test terminates the process directly.
-pub(crate) fn run_core(occ_tx: OccSink, cmd_rx: Receiver<Command>) -> i32 {
-    *CHANNEL_SLOT.lock().unwrap() = Some((occ_tx, cmd_rx));
+pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
+    *CHANNEL_SLOT.lock().unwrap() = Some((occ_tx, tx_rx));
 
     let mtm = MainThreadMarker::new()
         .expect("kaya must be run on the main thread; the core owns it");
@@ -214,7 +309,9 @@ fn spawn_selftest() {
             on_main(|| {
                 CORE.with_borrow(|core| {
                     if let Some(core) = core.as_ref() {
-                        core.button
+                        core.selftest_button
+                            .as_ref()
+                            .expect("the scene has a button")
                             .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
                     }
                 });
@@ -231,7 +328,9 @@ fn spawn_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .label
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
                     .text()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
