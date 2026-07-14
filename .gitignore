@@ -5,6 +5,13 @@ result
 tools/winui-bindgen/target
 /crates/kaya/examples/obj/
 /crates/kaya/examples/bin/
+# ocamlopt and ghc write intermediates beside the source when run
+# in-place (the validation scripts copy to target/ first, but ad-hoc
+# runs don't).
+/crates/kaya/examples/*.cmi
+/crates/kaya/examples/*.cmx
+/crates/kaya/examples/*.o
+/crates/kaya/examples/*.hi
 /target-linux/
 /android/.gradle/
 /android/**/build/
