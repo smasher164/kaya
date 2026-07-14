@@ -101,23 +101,30 @@ fn init_logging() {
     log_panics::init();
 }
 
-/// Called on the UI thread from Activity.onCreate (through the JNI entry
-/// that android_main! exports). Spawns the app thread and either builds
-/// the Views scene (returning PRESENT_CORE) or, under
-/// KAYA_BACKEND=compose, wires the presentation-side plumbing and
-/// returns PRESENT_GUEST so the Kotlin side mounts the Compose scene.
-/// Either way Android's Looper keeps the thread from here on.
-pub fn native_start(
+/// Android's attach, with the platform anchor explicit: the shell
+/// Activity calls Kaya.attach(this) from onCreate on the UI thread, kaya
+/// spawns the app thread, adds its scene, and returns the thread to the
+/// Looper — the host-owns-the-loop shape every Android app has by
+/// construction. Desktop attach takes no anchor because its anchors are
+/// ambient (NSApp, the main context, the thread's dispatcher); Android's
+/// Context is an argument by the platform's own design.
+///
+/// Runtime backend selection lives inside the entry, as it does in
+/// kaya::run: the return value says who presents. PRESENT_CORE means
+/// kaya built the Views scene; under KAYA_BACKEND=compose the
+/// presentation-side plumbing is wired instead and PRESENT_GUEST tells
+/// the Kotlin side to mount the Compose scene.
+pub fn attach(
     mut env: JNIEnv,
     activity: JObject,
     app_main: impl FnOnce(AppCtx) + Send + 'static,
 ) -> i32 {
     init_logging();
 
-    // Runtime backend selection (interim mechanism: environment, mapped
-    // from intent extras by the Activity). Same shape as kaya::run's
-    // SwiftUI branch: the Compose pump consumes commands through the C
-    // API's channel, and its emissions route into this AppCtx's inbox.
+    // Same shape as kaya::run's SwiftUI branch: the Compose pump consumes
+    // commands through the C API's channel, and its emissions route into
+    // this AppCtx's inbox. (The environment is mapped from intent extras
+    // by the Activity.)
     if std::env::var("KAYA_BACKEND").as_deref() == Ok("compose") {
         let (occ_tx, occ_rx) = mpsc::channel();
         let ctx = AppCtx {
@@ -208,20 +215,22 @@ extern "system" fn present_next_command(
     }
 }
 
-/// The kaya_run analog when the JVM app itself is the guest: builds the
-/// scene with the ring as the occurrence sink and returns; the app's own
-/// thread consumes the ring through KayaRing (direct tier) and answers
-/// with kaya_set_text. Exported by name — this lives in kaya's own
-/// cdylib, so there is no macro indirection to route through.
+/// Attach when the JVM app itself is the guest: builds the scene with
+/// the ring as the occurrence sink and returns; the app's own thread
+/// consumes the ring through KayaRing (direct tier) and answers with
+/// kaya_set_text — the same core ends kaya_attach hands a C host on the
+/// desktop, plus the Activity anchor Android requires. Exported by name;
+/// this lives in kaya's own cdylib, so there is no macro to route
+/// through.
 #[unsafe(no_mangle)]
-extern "system" fn Java_dev_kaya_Kaya_nativeRun(
+extern "system" fn Java_dev_kaya_KayaRing_attach(
     mut env: JNIEnv,
     _class: JClass,
     activity: JObject,
 ) {
     init_logging();
     let (occ_sink, cmd_rx) =
-        crate::capi::take_core_ends().expect("Kaya.nativeRun may only be called once");
+        crate::capi::take_core_ends().expect("KayaRing.attach may only be called once");
     register_ring_natives(&mut env).expect("kaya: registering KayaRing natives failed");
     setup(&mut env, &activity, occ_sink, cmd_rx)
         .expect("kaya: building the milestone-0 scene failed");
@@ -556,21 +565,21 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
     unsafe { libc::_exit(code) };
 }
 
-/// Export the JNI entry that `dev.kaya.Kaya.nativeStart` resolves,
-/// wiring `$app` as the app-thread logic. The Android analog of calling
-/// `kaya::run(app)` from main on platforms where the process is yours.
+/// Export the JNI entry that `dev.kaya.Kaya.attach` resolves, wiring
+/// `$app` as the app-thread logic. The Android spelling of attach: the
+/// shell Activity calls Kaya.attach(this) and this expansion answers it.
 /// Returns who presents (Kaya.PRESENT_CORE or PRESENT_GUEST), decided by
 /// runtime backend selection.
 #[macro_export]
 macro_rules! android_main {
     ($app:path) => {
         #[unsafe(no_mangle)]
-        extern "system" fn Java_dev_kaya_Kaya_nativeStart<'local>(
+        extern "system" fn Java_dev_kaya_Kaya_attach<'local>(
             env: $crate::android::JNIEnv<'local>,
             _class: $crate::android::JClass<'local>,
             activity: $crate::android::JObject<'local>,
         ) -> $crate::android::jint {
-            $crate::android::native_start(env, activity, $app)
+            $crate::android::attach(env, activity, $app)
         }
     };
 }

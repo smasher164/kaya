@@ -50,8 +50,16 @@ run() {
     fi
 }
 
+# The C guest: the ABI's home language over the function floor.
+clang crates/kaya/examples/milestone0.c \
+    -I crates/kaya/include \
+    -o /tmp/milestone0-c \
+    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
+    || status=1
+
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone0"
+    run "$proto" c /tmp/milestone0-c
     run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone0.py
     run "$proto" go go run crates/kaya/examples/milestone0.go
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone0.csproj

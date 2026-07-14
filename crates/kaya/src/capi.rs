@@ -94,7 +94,7 @@ pub extern "C" fn kaya_run() -> i32 {
 
 /// The core's ends of the transport: the ring-backed occurrence sink and
 /// the command receiver. Taken once, by whichever entry starts the core
-/// (kaya_run here; Kaya.nativeRun on Android, where the OS owns main).
+/// (kaya_run here; KayaRing.attach on Android, where the OS owns main).
 pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Command>)> {
     state().core_ends.lock().unwrap().take()
 }

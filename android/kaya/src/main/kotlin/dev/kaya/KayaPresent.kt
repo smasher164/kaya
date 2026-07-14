@@ -5,7 +5,7 @@ package dev.kaya
  * occurrences exactly as a core backend's action handler would, and pump
  * commands with a blocking call — the same contract the SwiftUI backend
  * consumes through KayaHostApi. Natives are registered when
- * [Kaya.nativeStart] selects a guest-side backend.
+ * [Kaya.attach] selects a guest-side backend.
  */
 object KayaPresent {
     @JvmStatic external fun emitButtonClicked(widgetId: Long)

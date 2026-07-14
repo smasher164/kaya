@@ -3,7 +3,7 @@ package dev.kaya.milestone0kt
 import android.app.Activity
 import android.os.Bundle
 import android.system.Os
-import dev.kaya.Kaya
+import dev.kaya.KayaRing
 
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -20,10 +20,10 @@ class MainActivity : Activity() {
             }
         }
 
-        // The JVM app is the guest here: kaya presents, this process's
-        // own thread consumes the ring.
+        // The JVM app is the guest here: kaya attaches its scene to this
+        // Activity, and this process's own thread consumes the ring.
         System.loadLibrary("kaya")
-        Kaya.nativeRun(this)
+        KayaRing.attach(this)
         Thread(Milestone0::app, "kaya-app").start()
     }
 }

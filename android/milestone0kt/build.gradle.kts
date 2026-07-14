@@ -10,8 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "dev.kaya.milestone0kt"
-        // VarHandle (the direct ring tier) exists on ART from API 33.
-        minSdk = 33
+        // The ring consumer binds Unsafe through MethodHandles, which ART
+        // has from API 26. (It would be 33 if ART's VarHandle worked on
+        // foreign memory; see Milestone0.java.) Validated on 35.
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.0"

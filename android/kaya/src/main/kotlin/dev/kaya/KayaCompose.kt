@@ -45,7 +45,7 @@ object KayaCompose {
 
     /**
      * Mount the milestone-0 scene and start the command pump. Call from
-     * onCreate when [Kaya.nativeStart] returns [Kaya.PRESENT_GUEST].
+     * onCreate when [Kaya.attach] returns [Kaya.PRESENT_GUEST].
      */
     @JvmStatic
     fun mount(activity: ComponentActivity) {

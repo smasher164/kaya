@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
         }
 
         System.loadLibrary("milestone0_android")
-        if (Kaya.nativeStart(this) == Kaya.PRESENT_GUEST) {
+        if (Kaya.attach(this) == Kaya.PRESENT_GUEST) {
             KayaCompose.mount(this)
         }
     }
