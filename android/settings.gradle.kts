@@ -17,7 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "kaya-android"
 
 // :kaya is the library's own Kotlin half (entry declaration + the shim
-// classes whose natives the Rust side registers). :milestone0 is the
-// Rust-guest validation app; :milestone0kt is the JVM-guest one (direct
+// classes whose natives the Rust side registers). :milestone2 is the
+// Rust-guest validation app; :milestone2kt is the JVM-guest one (direct
 // ring via VarHandle).
-include(":kaya", ":milestone0", ":milestone0kt")
+include(":kaya", ":milestone2", ":milestone2kt")

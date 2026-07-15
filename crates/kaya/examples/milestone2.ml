@@ -12,7 +12,7 @@
    kind, so nothing boxes (int32/int64 Bigarray elements would allocate
    per read). The head/tail cursors need ordering that OCaml does not
    expose for foreign memory (Atomic covers OCaml-heap cells only), so
-   two noalloc C stubs (milestone0_ml_stubs.c) carry the acquire load
+   two noalloc C stubs (milestone2_ml_stubs.c) carry the acquire load
    and release store as bare C calls. The transaction side needs no
    atomics at all: pack records into a Buffer, one submit per batch.
 
@@ -21,7 +21,7 @@
 
    Build the library first (cargo build), then:
        ocamlfind ocamlopt -package ctypes,ctypes-foreign,threads.posix \
-           -linkpkg milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml *)
+           -linkpkg milestone2_ml_stubs.c milestone2.ml -o milestone2-ocaml *)
 
 open Ctypes
 open Foreign
@@ -62,7 +62,7 @@ let kaya_wait_occurrences =
 let kaya_submit =
   foreign ~from:lib "kaya_submit" (string @-> size_t @-> returning void)
 
-(* The ordered cursor accesses; see milestone0_ml_stubs.c. *)
+(* The ordered cursor accesses; see milestone2_ml_stubs.c. *)
 external load_acquire_u32 : nativeint -> int = "kaya_ml_load_acquire_u32"
   [@@noalloc]
 external store_release_u32 : nativeint -> int -> unit

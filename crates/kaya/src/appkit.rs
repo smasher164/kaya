@@ -252,7 +252,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // Retained<NSWindow> manages the lifetime; the AppKit default of
     // releasing on close would double-free.
     unsafe { window.setReleasedWhenClosed(false) };
-    window.setTitle(&NSString::from_str("kaya milestone 0"));
+    window.setTitle(&NSString::from_str("kaya milestone 2"));
     window.makeKeyAndOrderFront(None);
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {

@@ -180,7 +180,7 @@ fn request_exit(code: i32) {
 /// the exit code; the host process decides how to exit.
 pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     let app = gtk4::Application::builder()
-        .application_id("dev.kaya.Milestone0")
+        .application_id("dev.kaya.Milestone2")
         .build();
 
     // activate can fire more than once; the core is set up once.
@@ -191,7 +191,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         };
         let window = gtk4::ApplicationWindow::builder()
             .application(app)
-            .title("kaya milestone 0")
+            .title("kaya milestone 2")
             .default_width(320)
             .default_height(160)
             .build();

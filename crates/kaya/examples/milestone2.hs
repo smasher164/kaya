@@ -9,7 +9,7 @@
 
    The data path is plain peeks on the ring's memory — GHC inlines them
    to real loads, so no call and no boxing survives a tight loop — with
-   ordering carried by two C stubs (milestone0_hs_stubs.c) imported
+   ordering carried by two C stubs (milestone2_hs_stubs.c) imported
    `ccall unsafe`, the same cursor recipe as the OCaml example; the
    stubs' header explains why GHC's own Addr# atomics are the wrong
    shape for these two accesses. The transaction side needs no atomics
@@ -20,8 +20,8 @@
    -threaded runtime is required for that.
 
    Build the library first (cargo build), then:
-       ghc -threaded -O -o milestone0-hs \
-           milestone0_hs_stubs.c milestone0.hs \
+       ghc -threaded -O -o milestone2-hs \
+           milestone2_hs_stubs.c milestone2.hs \
            -L target/debug -lkaya -optl-Wl,-rpath,<abs path to target/debug>
 
    Linked against libkaya at build time; kaya_run must own the process
@@ -66,7 +66,7 @@ foreign import ccall safe "kaya_wait_occurrences"
 foreign import ccall unsafe "kaya_submit"
   kayaSubmit :: Ptr Word8 -> CSize -> IO ()
 
--- The ordered cursor accesses; see milestone0_hs_stubs.c.
+-- The ordered cursor accesses; see milestone2_hs_stubs.c.
 foreign import ccall unsafe "kaya_hs_load_acquire_u32"
   loadAcquireU32 :: Ptr Word32 -> IO Word32
 

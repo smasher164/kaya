@@ -64,7 +64,7 @@ fi
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
-    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone0)
+    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone2)
 "$ROOT/tools/gen-header.sh" --check
 
 # Every kaya_* function declared in kaya.h must be exported by the DLL;
@@ -89,18 +89,21 @@ fi
 
 echo "== deploying artifacts =="
 scp -q \
-    "$TARGET/examples/milestone0.exe" \
+    "$TARGET/examples/milestone2.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
-    "$ROOT/crates/kaya/examples/milestone0.py" \
-    "$ROOT/crates/kaya/examples/milestone0.go" \
+    "$ROOT/crates/kaya/examples/milestone2.py" \
+    "$ROOT/crates/kaya/examples/milestone2.go" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
     "$ROOT/tools/guest/shot.ps1" \
     "$HOST:C:/kaya/"
-run_ssh 'cmd /c if not exist C:\kaya\cs mkdir C:\kaya\cs'
-scp -q "$ROOT/crates/kaya/examples/milestone0.cs" \
-    "$ROOT/crates/kaya/examples/milestone0.csproj" \
+# Recreated from scratch every deploy: dotnet run picks up whatever
+# sources and project files are in the directory, so a leftover from a
+# renamed or removed example would poison the build.
+run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
+scp -q "$ROOT/crates/kaya/examples/milestone2.cs" \
+    "$ROOT/crates/kaya/examples/milestone2.csproj" \
     "$HOST:C:/kaya/cs/"
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
@@ -118,7 +121,7 @@ verify_remote() {
     fi
 }
 verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
-verify_remote "$TARGET/examples/milestone0.exe" 'C:\kaya\milestone0.exe'
+verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
 
 run_suite() {
     local name="$1"
@@ -133,7 +136,12 @@ run_suite() {
         sleep 5
     done
     echo "== $name =="
-    run_ssh "type C:\\kaya\\out_$name.txt"
+    local out
+    out=$(run_ssh "type C:\\kaya\\out_$name.txt")
+    printf '%s\n' "$out"
+    # The suite's verdict lives in the output file, not in any ssh exit
+    # code; a failure that isn't parsed here would read as green.
+    grep -q "EXIT=0" <<<"$out"
 }
 
 status=0

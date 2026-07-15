@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, install, and self-test milestone 0 in the iOS Simulator.
+# Build, install, and self-test the milestone scene in the iOS Simulator.
 # Usage: tools/ios/run-sim.sh [rust|swift|rust-swiftui|all]
 #
 # rust         - the kaya example app (UIKit backend)
@@ -81,9 +81,9 @@ UDID=$(boot_simulator)
 SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone0
-    APP=$(make_bundle milestone0 dev.kaya.milestone0 "$TARGET_DIR/examples/milestone0")
-    run_bundle "$UDID" "$APP" dev.kaya.milestone0 rust || status=1
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone2
+    APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
+    run_bundle "$UDID" "$APP" dev.kaya.milestone2 rust || status=1
 fi
 
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
@@ -92,20 +92,20 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        tools/ios/milestone0.swift \
+        tools/ios/milestone2.swift \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/milestone0swift-bin"
-    APP=$(make_bundle milestone0swift dev.kaya.milestone0swift "$BUNDLES/milestone0swift-bin")
-    run_bundle "$UDID" "$APP" dev.kaya.milestone0swift swift || status=1
+        -o "$BUNDLES/milestone2swift-bin"
+    APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
+    run_bundle "$UDID" "$APP" dev.kaya.milestone2swift swift || status=1
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # Rust entrypoint + SwiftUI backend: the bundle executable is the Rust
     # example's main; KAYA_BACKEND=swiftui makes kaya::run dlopen the
     # SwiftUI dylib embedded in the bundle.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone0
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone2
     mkdir -p "$BUNDLES"
     xcrun -sdk iphonesimulator swiftc \
         -emit-library \
@@ -114,7 +114,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \
         -framework UIKit -framework Foundation \
         -o "$BUNDLES/libkaya_swiftui_ios.dylib"
-    APP=$(make_bundle milestone0rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone0")
+    APP=$(make_bundle milestone2rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone2")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     xcrun simctl install "$UDID" "$APP"
     CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.rustswiftui app)

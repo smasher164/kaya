@@ -1,4 +1,4 @@
-package dev.kaya.milestone0kt;
+package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaRing;
 
@@ -25,7 +25,7 @@ import java.util.List;
  * it). The transaction side needs no atomics at all: pack records, one
  * submit per batch.
  */
-final class Milestone0 {
+final class Milestone2 {
     private static final int BUTTON_CLICKED = 1; // KAYA_OCCURRENCE_BUTTON_CLICKED
 
     // KAYA_TX_* record kinds and value/source tags.
@@ -355,5 +355,5 @@ final class Milestone0 {
         }
     }
 
-    private Milestone0() {}
+    private Milestone2() {}
 }

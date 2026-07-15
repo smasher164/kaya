@@ -1,4 +1,4 @@
-package dev.kaya.milestone0
+package dev.kaya.milestone2
 
 import android.os.Bundle
 import android.system.Os
@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        System.loadLibrary("milestone0_android")
+        System.loadLibrary("milestone2_android")
         if (Kaya.attach(this) == Kaya.PRESENT_GUEST) {
             KayaCompose.mount(this)
         }

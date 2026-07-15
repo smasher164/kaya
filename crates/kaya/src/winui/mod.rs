@@ -1,4 +1,4 @@
-//! WinUI 3 backend, milestone 0: one window, one button, one label.
+//! WinUI 3 backend: an interpreter of resolved apply-ops.
 //!
 //! Same architecture as the AppKit backend: the core owns the UI thread
 //! and the XAML dispatcher; the button's Click handler pushes an
@@ -351,7 +351,7 @@ fn tx_rx_take() -> Receiver<Transaction> {
 
 fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
     let window = Window::new()?;
-    window.SetTitle(&HSTRING::from("kaya milestone 0"))?;
+    window.SetTitle(&HSTRING::from("kaya milestone 2"))?;
 
     // Closing the window exits the app, matching the AppKit backend's
     // terminate-after-last-window-closed behavior.

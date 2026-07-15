@@ -1,4 +1,4 @@
-package dev.kaya.milestone0kt
+package dev.kaya.milestone2kt
 
 import android.app.Activity
 import android.os.Bundle
@@ -10,7 +10,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         // Map KAYA_* intent extras to environment variables; see the
-        // milestone0 module for the reasoning.
+        // milestone2 module for the reasoning.
         intent.extras?.let { extras ->
             for (key in extras.keySet()) {
                 if (key.startsWith("KAYA_")) {
@@ -24,6 +24,6 @@ class MainActivity : Activity() {
         // Activity, and this process's own thread consumes the ring.
         System.loadLibrary("kaya")
         KayaRing.attach(this)
-        Thread(Milestone0::app, "kaya-app").start()
+        Thread(Milestone2::app, "kaya-app").start()
     }
 }

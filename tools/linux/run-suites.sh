@@ -11,7 +11,7 @@ export CARGO_TARGET_DIR=/work/target-linux
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone0 || exit 1
+cargo build --lib --example milestone2 || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -19,7 +19,7 @@ status=0
 # dotnet writes obj/bin next to the csproj; build in a scratch copy so the
 # host's in-tree dotnet artifacts (different RID) are untouched.
 mkdir -p /tmp/cs
-cp crates/kaya/examples/milestone0.cs crates/kaya/examples/milestone0.csproj /tmp/cs/
+cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj /tmp/cs/
 
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
@@ -51,9 +51,9 @@ run() {
 }
 
 # The C guest: the ABI's home language over the function floor.
-clang crates/kaya/examples/milestone0.c \
+clang crates/kaya/examples/milestone2.c \
     -I crates/kaya/include \
-    -o /tmp/milestone0-c \
+    -o /tmp/milestone2-c \
     -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
     || status=1
 
@@ -64,27 +64,27 @@ clang crates/kaya/examples/milestone0.c \
 FOREIGN=ctypes-foreign
 ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
 mkdir -p /tmp/ocaml
-cp crates/kaya/examples/milestone0.ml crates/kaya/examples/milestone0_ml_stubs.c /tmp/ocaml/
+cp crates/kaya/examples/milestone2.ml crates/kaya/examples/milestone2_ml_stubs.c /tmp/ocaml/
 (cd /tmp/ocaml && ocamlfind ocamlopt \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    milestone0_ml_stubs.c milestone0.ml -o milestone0-ocaml) || status=1
+    milestone2_ml_stubs.c milestone2.ml -o milestone2-ocaml) || status=1
 
 # The Haskell guest (direct ring: inline peeks + the same cursor stubs).
 mkdir -p /tmp/haskell
-cp crates/kaya/examples/milestone0.hs crates/kaya/examples/milestone0_hs_stubs.c /tmp/haskell/
-(cd /tmp/haskell && ghc -threaded -O -o milestone0-hs \
-    milestone0_hs_stubs.c milestone0.hs \
+cp crates/kaya/examples/milestone2.hs crates/kaya/examples/milestone2_hs_stubs.c /tmp/haskell/
+(cd /tmp/haskell && ghc -threaded -O -o milestone2-hs \
+    milestone2_hs_stubs.c milestone2.hs \
     -L"$CARGO_TARGET_DIR/debug" -lkaya \
     -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug") || status=1
 
 for proto in x11 wayland; do
-    run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone0"
-    run "$proto" c /tmp/milestone0-c
-    run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone0.py
-    run "$proto" go go run crates/kaya/examples/milestone0.go
-    run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone0.csproj
-    run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone0-ocaml
-    run "$proto" haskell /tmp/haskell/milestone0-hs
+    run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
+    run "$proto" c /tmp/milestone2-c
+    run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone2.py
+    run "$proto" go go run crates/kaya/examples/milestone2.go
+    run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone2.csproj
+    run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone2-ocaml
+    run "$proto" haskell /tmp/haskell/milestone2-hs
 done
 
 kill "$WESTON_PID" 2>/dev/null
@@ -92,7 +92,7 @@ kill "$WESTON_PID" 2>/dev/null
 # Best-effort screenshot of the running scene (X11 leg) for visual
 # validation.
 xvfb-run -a bash -c "
-    \"$CARGO_TARGET_DIR/debug/examples/milestone0\" &
+    \"$CARGO_TARGET_DIR/debug/examples/milestone2\" &
     sleep 3
     import -window root /work/target-linux/shot-linux.png
     kill %1

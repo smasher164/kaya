@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, install, and self-test milestone 0 in the Android emulator.
+# Build, install, and self-test the milestone scene in the Android emulator.
 # Usage: tools/android/run-emulator.sh [rust|jvm|compose|all]
 #
 # rust    - the milestone-0 app logic as a Rust cdylib behind the JNI
@@ -63,38 +63,38 @@ run_apk() {
 }
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
-    JNILIBS="$ROOT/android/milestone0/src/main/jniLibs/arm64-v8a"
+    JNILIBS="$ROOT/android/milestone2/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --example milestone0_android
-    cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone0_android.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone0:assembleDebug)
+    cargo ndk -t arm64-v8a build --example milestone2_android
+    cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
+    (cd android && gradle --console=plain -q :milestone2:assembleDebug)
     run_apk rust \
-        "$ROOT/android/milestone0/build/outputs/apk/debug/milestone0-debug.apk" \
-        dev.kaya.milestone0/.MainActivity
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity
 fi
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # Identical app to the rust suite; the backend is a runtime choice.
-    JNILIBS="$ROOT/android/milestone0/src/main/jniLibs/arm64-v8a"
+    JNILIBS="$ROOT/android/milestone2/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --example milestone0_android
-    cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone0_android.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone0:assembleDebug)
+    cargo ndk -t arm64-v8a build --example milestone2_android
+    cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
+    (cd android && gradle --console=plain -q :milestone2:assembleDebug)
     run_apk compose \
-        "$ROOT/android/milestone0/build/outputs/apk/debug/milestone0-debug.apk" \
-        dev.kaya.milestone0/.MainActivity \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity \
         --es KAYA_BACKEND compose
 fi
 
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
-    JNILIBS="$ROOT/android/milestone0kt/src/main/jniLibs/arm64-v8a"
+    JNILIBS="$ROOT/android/milestone2kt/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
     cargo ndk -t arm64-v8a build --lib
     cp "$ROOT/target/aarch64-linux-android/debug/libkaya.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone0kt:assembleDebug)
+    (cd android && gradle --console=plain -q :milestone2kt:assembleDebug)
     run_apk jvm \
-        "$ROOT/android/milestone0kt/build/outputs/apk/debug/milestone0kt-debug.apk" \
-        dev.kaya.milestone0kt/.MainActivity
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity
 fi
 
 exit "$status"

@@ -9,7 +9,7 @@ plus key path, and the app answers by removing that entry — the screen
 follows the data.
 
 Build the library first (cargo build), then:
-    KAYA_SELFTEST=1 python3 crates/kaya/examples/milestone0.py
+    KAYA_SELFTEST=1 python3 crates/kaya/examples/milestone2.py
 On Windows, ensure the directory holding kaya.dll and the bootstrap DLL
 is on PATH (or run from that directory).
 """

@@ -8,7 +8,7 @@
 //
 // Build the library first (cargo build / cargo xwin build --release),
 // then:
-//     KAYA_SELFTEST=1 go run crates/kaya/examples/milestone0.go
+//     KAYA_SELFTEST=1 go run crates/kaya/examples/milestone2.go
 package main
 
 /*

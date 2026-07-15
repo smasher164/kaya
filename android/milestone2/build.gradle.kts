@@ -4,16 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "dev.kaya.milestone0kt"
+    namespace = "dev.kaya.milestone2"
     compileSdk = 35
     buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        applicationId = "dev.kaya.milestone0kt"
-        // The ring consumer binds Unsafe through MethodHandles, which ART
-        // has from API 26. (It would be 33 if ART's VarHandle worked on
-        // foreign memory; see Milestone0.java.) Validated on 35.
-        minSdk = 26
+        applicationId = "dev.kaya.milestone2"
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "0.0"
