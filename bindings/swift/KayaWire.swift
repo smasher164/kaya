@@ -218,14 +218,19 @@ struct KayaTx {
     }
 }
 
-/// Decode one occurrence record (header included). nil for non-click
-/// records. keys is [] for a click on a guest-created widget (id is a
-/// widget id); otherwise id is a template node id and keys is the
-/// copy's key path, outermost first.
-func kayaParseClick(_ rec: [UInt8]) -> (id: UInt64, keys: [KayaValue])? {
+/// Decode one occurrence record (header included); nil for pad or
+/// unknown kinds. keys is [] when id is a widget id; otherwise id is
+/// a template node id and keys is the copy's key path, outermost
+/// first. text is the entry's new content for TEXT_CHANGED, nil for
+/// clicks.
+func kayaParseOccurrence(_ rec: [UInt8])
+    -> (kind: UInt16, id: UInt64, keys: [KayaValue], text: String?)?
+{
     rec.withUnsafeBytes { raw in
         let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
-        guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED) else { return nil }
+        guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED)
+            || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
+        else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []
@@ -248,6 +253,11 @@ func kayaParseClick(_ rec: [UInt8]) -> (id: UInt64, keys: [KayaValue])? {
             }
             at += 8 + ((vlen + 7) & ~7)
         }
-        return (id, keys)
+        var text: String? = nil
+        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED) {
+            let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+            text = String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)
+        }
+        return (kind, id, keys, text)
     }
 }

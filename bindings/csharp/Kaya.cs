@@ -73,11 +73,13 @@ static class Kaya
         kaya_submit(tx, (nuint)tx.Length);
     }
 
-    /// Block for the next click; false when the core has shut down.
-    /// keys is empty for a click on a guest-created widget (id is a
-    /// widget id), else id is a template node id and keys is the stamped
-    /// copy's key path, outermost first.
-    public static unsafe bool NextClick(out ulong id, out List<object> keys)
+    /// Block for the next occurrence; false when the core has shut
+    /// down. keys is empty when id is a widget id, else id is a
+    /// template node id and keys is the stamped copy's key path,
+    /// outermost first. text carries the entry's new content for
+    /// OccKindTextChanged, null for clicks.
+    public static unsafe bool NextOccurrence(
+        out ushort kind, out ulong id, out List<object> keys, out string text)
     {
         uint* head = (uint*)ring.Head;
         uint* tail = (uint*)ring.Tail;
@@ -92,8 +94,10 @@ static class Kaya
             {
                 if (!kaya_wait_occurrences())
                 {
+                    kind = 0;
                     id = 0;
                     keys = new List<object>();
+                    text = null;
                     return false; // shutdown
                 }
                 continue;
@@ -102,10 +106,10 @@ static class Kaya
             uint size = *(uint*)at;
             byte[] rec = new byte[size];
             Marshal.Copy((IntPtr)at, rec, 0, (int)size);
-            bool isClick = KayaWire.ParseOccurrence(rec, out id, out keys);
+            bool valid = KayaWire.ParseOccurrence(rec, out kind, out id, out keys, out text);
             h += size;
             Volatile.Write(ref *head, h); // release: hand the space back
-            if (isClick)
+            if (valid)
                 return true;
         }
     }

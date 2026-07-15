@@ -177,11 +177,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    /// for non-click records. keys is empty for a click on a");
     c.line("    /// guest-created widget (id is a widget id); otherwise id is a");
     c.line("    /// template node id and keys is the copy's key path.");
-    c.line("    public static bool ParseOccurrence(byte[] rec, out ulong id, out List<object> keys)");
+    c.line("    public static bool ParseOccurrence(");
+    c.line("        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out string text)");
     c.line("    {");
     c.line("        id = 0;");
     c.line("        keys = new List<object>();");
-    c.line("        if (BitConverter.ToUInt16(rec, 4) != OccKindButtonClicked)");
+    c.line("        text = null;");
+    c.line("        kind = BitConverter.ToUInt16(rec, 4);");
+    c.line("        if (kind != OccKindButtonClicked && kind != OccKindTextChanged)");
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
@@ -198,6 +201,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                default: keys.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;");
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7);");
+    c.line("        }");
+    c.line("        if (kind == OccKindTextChanged)");
+    c.line("        {");
+    c.line("            int tlen = BitConverter.ToInt32(rec, at + 4);");
+    c.line("            text = Encoding.UTF8.GetString(rec, at + 8, tlen);");
     c.line("        }");
     c.line("        return true;");
     c.line("    }");

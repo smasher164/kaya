@@ -19,3 +19,5 @@ __pycache__/
 /android/**/build/
 /android/*/src/main/jniLibs/
 /android/.kotlin/
+crates/kaya/examples/bin-entry/
+crates/kaya/examples/obj-entry/

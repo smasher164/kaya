@@ -30,6 +30,8 @@ module KayaApp
     submitTx,
     onClick,
     onClickNode,
+    onChange,
+    onChangeNode,
     signal,
     writeSignal,
     at,
@@ -51,7 +53,7 @@ import qualified Data.Map.Strict as Map
 import Data.Word (Word32, Word64)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
-import KayaRuntime (kayaRun, kayaSubmit, nextClick)
+import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence)
 import qualified KayaWire as W
 
 newtype Signal = Signal Word64
@@ -336,7 +338,9 @@ data App = App
   { appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
-    appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ()))
+    appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
+    appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
+    appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ()))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -366,6 +370,19 @@ onClickNode :: App -> Node -> ([W.Value] -> IO ()) -> IO ()
 onClickNode app (Node n) handler =
   modifyIORef' (appNodeHandlers app) (Map.insert n handler)
 
+-- | Register a change handler for a live entry: the widget owns its
+-- text and reports each edit here; the app folds the text into its own
+-- state — there is no read-back, by doctrine.
+onChange :: App -> Widget -> (String -> IO ()) -> IO ()
+onChange app (Widget n) handler =
+  modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+
+-- | Register a change handler for a template entry; it also receives
+-- the stamped copy's keys, outermost first.
+onChangeNode :: App -> Node -> ([W.Value] -> String -> IO ()) -> IO ()
+onChangeNode app (Node n) handler =
+  modifyIORef' (appNodeChanges app) (Map.insert n handler)
+
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
 -- which must be the process main thread (GHC's main runs bound to it;
@@ -378,6 +395,8 @@ kayaMain setup = do
       <*> newIORef (Map.empty, Map.empty)
       <*> newIORef Map.empty
       <*> newIORef Map.empty
+      <*> newIORef Map.empty
+      <*> newIORef Map.empty
   setup app
   done <- newEmptyMVar
   _ <- forkIO (dispatchLoop app >> putMVar done ())
@@ -387,14 +406,25 @@ kayaMain setup = do
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
-  click <- nextClick
-  case click of
+  occurrence <- nextOccurrence
+  case occurrence of
     Nothing -> return () -- shutdown
-    Just (ident, []) -> do
+    Just (kind, ident, keys, text)
+      | kind == W.occKindTextChanged -> do
+          let content = maybe "" id text
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetChanges app)
+              mapM_ ($ content) (Map.lookup ident handlers)
+            _ -> do
+              handlers <- readIORef (appNodeChanges app)
+              mapM_ (\h -> h keys content) (Map.lookup ident handlers)
+          dispatchLoop app
+    Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)
       mapM_ id (Map.lookup ident handlers)
       dispatchLoop app
-    Just (ident, keys) -> do
+    Just (_, ident, keys, _) -> do
       handlers <- readIORef (appNodeHandlers app)
       mapM_ ($ keys) (Map.lookup ident handlers)
       dispatchLoop app

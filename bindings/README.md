@@ -120,6 +120,14 @@ Per-language status:
 | Java    | KayaWire.java | (ring recipe lives in KayaApp) | KayaApp.java | needs API 26 (invokeExact); Android's kaya module minSdk says so |
 | C       | kaya_wire.h | kaya.h is the runtime | — none, by decision | flat functions over a caller-owned buffer *are* C's idiomatic surface; a C app that wants handles is a C app about to become a binding |
 
+Entry (the first owned-state widget) is in every layer-3 surface:
+`on_change` registration beside `on_click`, dispatch keyed by
+(occurrence kind, id) per id space, and an entry example per language
+proving the uncontrolled fold end to end ("added milk, 1 total").
+Backends: AppKit, GTK, UIKit, SwiftUI. WinUI's TextBox is implemented
+but blocked on the unpackaged-app resource story; Android's entry
+(EditText + Compose TextField) is the next backend pass.
+
 The north star for what layer 3 grows into is DESIGN.md's appendix
 ("the shape of an app"); the tier-1 sugar there (container
 auto-parenting, co-located handlers, ambient transactions, mirrors,

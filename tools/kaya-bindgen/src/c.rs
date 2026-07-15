@@ -254,6 +254,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return 1;");
     c.line("}");
     c.line("");
+    c.line("/* Decode a text_changed occurrence: same identity head as a click,");
+    c.line(" * then the entry's new text as one value (text->s/s_len point into");
+    c.line(" * rec). Returns 1 and fills the outputs, or 0 for other kinds. */");
+    c.line("static inline int kaya_parse_text_changed(const uint8_t *rec, uint64_t *id,");
+    c.line("                                          KayaVal *keys, uint32_t max_keys,");
+    c.line("                                          uint32_t *n_keys, KayaVal *text) {");
+    c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+    c.line("    if (r->header.kind != KAYA_OCCURRENCE_TEXT_CHANGED)");
+    c.line("        return 0;");
+    c.line("    *id = r->id;");
+    c.line("    *n_keys = r->path_len;");
+    c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+    c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
+    c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+    c.line("    kaya_parse_value(rec, at, text);");
+    c.line("    return 1;");
+    c.line("}");
+    c.line("");
     c.line("#endif /* KAYA_WIRE_H */");
     c.out
 }

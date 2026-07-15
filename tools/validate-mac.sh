@@ -12,7 +12,7 @@ cd "$ROOT"
 # --example alone would leave a stale libkaya.dylib in place. The header
 # check keeps guests from compiling against an ABI the source has left
 # behind.
-cargo build --lib --example milestone2 || exit 1
+cargo build --lib --example milestone2 --example entry || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
@@ -42,11 +42,15 @@ run() {
 mkdir -p target/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml target/ocaml/
+    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml target/ocaml/
 (cd target/ocaml && ocamlfind ocamlopt \
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
     -o milestone2-ocaml) >/dev/null
+(cd target/ocaml && ocamlfind ocamlopt \
+    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
+    -o entry-ocaml) >/dev/null
 
 # The Haskell guest, likewise compiled once (its intermediates go to
 # target/haskell via -outputdir).
@@ -54,6 +58,12 @@ mkdir -p target/haskell
 ghc -threaded -O -ibindings/haskell -outputdir target/haskell \
     -o target/haskell/milestone2-hs \
     bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
+    -L"$ROOT/target/debug" -lkaya \
+    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
+mkdir -p target/haskell-entry
+ghc -threaded -O -ibindings/haskell -outputdir target/haskell-entry \
+    -o target/haskell/entry-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
     -L"$ROOT/target/debug" -lkaya \
     -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
 
@@ -68,9 +78,16 @@ run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run haskell target/haskell/milestone2-hs
 
 # The entry scene (uncontrolled text field; text arrives as occurrences
-# the app folds into its own state), AppKit only until the breadth pass.
-# The inner env overrides run()'s KAYA_SELFTEST=1 with the entry script.
-run entry env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+# the app folds into its own state), every language against AppKit. The
+# inner env overrides run()'s KAYA_SELFTEST=1 with the entry script.
+run entry-rust env KAYA_SELFTEST=entry cargo run --quiet --example entry
+run entry-python env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+run entry-go env KAYA_SELFTEST=entry go run crates/kaya/examples/entry.go
+run entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet run --project crates/kaya/examples/entry.csproj
+run entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/entry-ocaml
+run entry-haskell env KAYA_SELFTEST=entry target/haskell/entry-hs
 
 # The same six guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.
@@ -85,6 +102,14 @@ run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/milestone2-ocaml
 run haskell-swiftui target/haskell/milestone2-hs
+run entry-rust-swiftui env KAYA_SELFTEST=entry cargo run --quiet --example entry
+run entry-python-swiftui env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+run entry-go-swiftui env KAYA_SELFTEST=entry go run crates/kaya/examples/entry.go
+run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet run --project crates/kaya/examples/entry.csproj
+run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/entry-ocaml
+run entry-haskell-swiftui env KAYA_SELFTEST=entry target/haskell/entry-hs
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
 # The one-line verdict: suites accumulate failures rather than abort,

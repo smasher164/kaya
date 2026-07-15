@@ -246,11 +246,14 @@ static class KayaWire
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
     /// template node id and keys is the copy's key path.
-    public static bool ParseOccurrence(byte[] rec, out ulong id, out List<object> keys)
+    public static bool ParseOccurrence(
+        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out string text)
     {
         id = 0;
         keys = new List<object>();
-        if (BitConverter.ToUInt16(rec, 4) != OccKindButtonClicked)
+        text = null;
+        kind = BitConverter.ToUInt16(rec, 4);
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         uint pathLen = BitConverter.ToUInt32(rec, 16);
@@ -267,6 +270,11 @@ static class KayaWire
                 default: keys.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;
             }
             at += 8 + ((vlen + 7) & ~7);
+        }
+        if (kind == OccKindTextChanged)
+        {
+            int tlen = BitConverter.ToInt32(rec, at + 4);
+            text = Encoding.UTF8.GetString(rec, at + 8, tlen);
         }
         return true;
     }

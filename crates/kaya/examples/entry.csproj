@@ -5,17 +5,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-  </PropertyGroup>
-  <PropertyGroup>
-    <!-- Two example programs share this directory; each project names
-         its own sources so the default glob cannot pull in two Mains. -->
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <BaseOutputPath>bin-entry</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj-entry</BaseIntermediateOutputPath>
   </PropertyGroup>
-  <!-- The kaya bindings: the generated vocabulary and the runtime. The
-       glob is empty on the Windows VM, where the deploy copies the same
-       files next to this project instead. -->
   <ItemGroup>
-    <Compile Include="milestone2.cs" />
+    <Compile Include="entry.cs" />
     <!-- Dev layout: the bindings live in the repo. VM layout: the deploy
          copies them next to this project, where the repo glob is empty
          and the Kaya*.cs one picks them up instead. -->

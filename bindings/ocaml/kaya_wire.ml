@@ -212,11 +212,13 @@ let parse_value byte at =
   (v, next)
 
 (* Decode one occurrence record (header included) through the byte
-   accessor. Some (id, keys) for a click — keys is [] for a click on
-   a guest-created widget (id is a widget id), else id is a template
-   node id and keys is the copy's key path. None otherwise. *)
-let parse_click byte =
-  if u16_at byte 4 <> occ_kind_button_clicked then None
+   accessor. Some (kind, id, keys, text) — keys is [] when id is a
+   widget id, else id is a template node id and keys is the copy's
+   key path; text is Some for text_changed, None for clicks. None
+   for pad/unknown kinds. *)
+let parse_occurrence byte =
+  let kind = u16_at byte 4 in
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -228,5 +230,10 @@ let parse_click byte =
       keys := v :: !keys;
       at := next
     done;
-    Some (Int64.of_int id, List.rev !keys)
+    let text =
+      if kind = occ_kind_text_changed then
+        match parse_value byte !at with Str s, _ -> Some s | _ -> None
+      else None
+    in
+    Some (kind, Int64.of_int id, List.rev !keys, text)
   end

@@ -31,7 +31,9 @@ use std::sync::OnceLock;
 use windows_core::HSTRING;
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
-use bindings::Microsoft::UI::Xaml::Controls::{Button, StackPanel, TextBlock};
+use bindings::Microsoft::UI::Xaml::Controls::{
+    Button, StackPanel, TextBlock, TextBox, TextChangedEventHandler,
+};
 use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement, Window,
 };
@@ -46,6 +48,7 @@ enum NativeWidget {
     // The caption TextBlock is the button's text surface.
     Button { button: Button, caption: TextBlock },
     Label(TextBlock),
+    Entry(TextBox),
 }
 
 impl NativeWidget {
@@ -55,6 +58,7 @@ impl NativeWidget {
             NativeWidget::Column(panel) => panel.cast(),
             NativeWidget::Button { button, .. } => button.cast(),
             NativeWidget::Label(label) => label.cast(),
+            NativeWidget::Entry(field) => field.cast(),
         }
     }
 }
@@ -71,6 +75,7 @@ struct CoreState {
     selftest_button: Option<Vec<u8>>,
     selftest_last_button: Option<Vec<u8>>,
     selftest_label: Option<TextBlock>,
+    selftest_entry: Option<TextBox>,
     window: Window,
 }
 
@@ -134,9 +139,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Entry => {
-                    // Landed on macOS first; this backend's turn comes
-                    // with the breadth pass.
-                    panic!("kaya: entry is not yet implemented on this backend")
+                    // Uncontrolled: the field owns its text; TextChanged
+                    // reports each edit (programmatic SetText included,
+                    // which is what lets the selftest type like a user)
+                    // with the entry's identity tag, and the app folds
+                    // it into its own model.
+                    //
+                    // KNOWN LIMITATION: in this unpackaged, code-only
+                    // Application, TextBox's default style cannot
+                    // resolve (XamlControlsResources creation itself
+                    // crashes here) and creation dies with a stowed
+                    // exception. The entry suites stay off the Windows
+                    // matrix until the WinUI resource story lands; see
+                    // deploy-win.sh.
+                    let field = TextBox::new()?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("entries carry a tag");
+                    let field_for_handler = field.clone();
+                    let handler = TextChangedEventHandler::new(move |_, _| {
+                        let text = field_for_handler.Text()?.to_string();
+                        sink.send_text_tag(&tag, &text);
+                        Ok(())
+                    });
+                    field.TextChanged(&handler)?;
+                    if core.selftest_entry.is_none() {
+                        core.selftest_entry = Some(field.clone());
+                    }
+                    NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
                 WidgetKind::Button => {
@@ -187,6 +216,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.SetText(&HSTRING::from(&s))?;
                 }
+                (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
+                    field.SetText(&HSTRING::from(&s))?;
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -202,6 +234,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Column(p) => children.Append(p)?,
                 NativeWidget::Button { button, .. } => children.Append(button)?,
                 NativeWidget::Label(label) => children.Append(label)?,
+                NativeWidget::Entry(field) => children.Append(field)?,
             }
             core.parents.insert(child, panel);
         }
@@ -210,6 +243,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Column(panel) => core.window.SetContent(panel)?,
                 NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
                 NativeWidget::Label(label) => core.window.SetContent(label)?,
+                NativeWidget::Entry(field) => core.window.SetContent(field)?,
             }
         }
     }
@@ -367,8 +401,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     window.Closed(&closed)?;
     window.Activate()?;
 
-    if std::env::var_os("KAYA_SELFTEST").is_some() {
-        spawn_selftest();
+    match std::env::var("KAYA_SELFTEST") {
+        Ok(script) if script == "entry" => spawn_entry_selftest(),
+        Ok(_) => spawn_selftest(),
+        Err(_) => {}
     }
 
     CORE.with_borrow_mut(|core| {
@@ -381,6 +417,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selftest_button: None,
             selftest_last_button: None,
             selftest_label: None,
+            selftest_entry: None,
             window,
         });
     });
@@ -451,6 +488,64 @@ fn spawn_selftest() {
                     .Text()?
                     .to_string();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+                Ok(())
+            })
+        });
+    });
+}
+
+/// The entry scene's round trip (KAYA_SELFTEST=entry): SetText raises
+/// TextChanged — the same path a keystroke takes — then the add button,
+/// then the status label.
+fn spawn_entry_selftest() {
+    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
+        if let Some(dispatcher) = DISPATCHER.get() {
+            let handler = DispatcherQueueHandler::new(move || f());
+            let _ = dispatcher.0.TryEnqueue(&handler);
+        }
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                core.selftest_entry
+                    .as_ref()
+                    .expect("the scene has an entry")
+                    .SetText(&HSTRING::from("milk"))?;
+                Ok(())
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                core.occurrences.send_click_tag(
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button"),
+                );
+            });
+            Ok(())
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .Text()?
+                    .to_string();
+                if text == "added milk, 1 total" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

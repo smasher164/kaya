@@ -26,6 +26,7 @@ private let applyDestroy: UInt16 = 5
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
+private let kindEntry: UInt32 = 4
 private let valueStr: UInt32 = 4
 
 @Observable
@@ -51,6 +52,7 @@ final class KayaSceneModel {
     var firstButton: KayaNode?
     var lastButton: KayaNode?
     var firstLabel: KayaNode?
+    var firstEntry: KayaNode?
 }
 
 let kayaScene = KayaSceneModel()
@@ -65,6 +67,15 @@ enum KayaHost {
     static func emit(_ tag: [UInt8]) {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_clicked(buffer.baseAddress, UInt(buffer.count))
+        }
+    }
+
+    static func emitText(_ tag: [UInt8], _ text: String) {
+        let utf8 = Array(text.utf8)
+        tag.withUnsafeBufferPointer { t in
+            utf8.withUnsafeBufferPointer { s in
+                api.emit_text_changed(t.baseAddress, UInt(t.count), s.baseAddress, UInt(s.count))
+            }
         }
     }
 
@@ -112,6 +123,9 @@ private func kayaApply(_ batch: Data) {
                 if widgetKind == kindLabel && kayaScene.firstLabel == nil {
                     kayaScene.firstLabel = node
                 }
+                if widgetKind == kindEntry && kayaScene.firstEntry == nil {
+                    kayaScene.firstEntry = node
+                }
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 // prop (u32) is text — the only property so far — then
@@ -151,7 +165,11 @@ private func kayaApply(_ batch: Data) {
 /// groups, items, and the When), one on the most recently stamped
 /// button, and the status label proves the whole loop.
 func kayaStartSelftest() {
-    guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    guard let script = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] else { return }
+    if script == "entry" {
+        kayaStartEntrySelftest()
+        return
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
         if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
     }
@@ -175,6 +193,31 @@ func kayaStartSelftest() {
 }
 
 /// The interpreter's render: the node tree as SwiftUI declarations.
+/// The entry scene's round trip (KAYA_SELFTEST=entry): drive the same
+/// binding path a keystroke takes, click add, read the status label.
+func kayaStartEntrySelftest() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        if let entry = kayaScene.firstEntry {
+            entry.text = "milk"
+            KayaHost.emitText(entry.tag, "milk")
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
+        let text = kayaScene.firstLabel?.text ?? "(no label)"
+        if text == "added milk, 1 total" {
+            print("KAYA_SELFTEST: OK (\(text))")
+            exit(0)
+        } else {
+            FileHandle.standardError.write(
+                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
+            exit(1)
+        }
+    }
+}
+
 struct KayaRender: View {
     let node: KayaNode
 
@@ -192,6 +235,22 @@ struct KayaRender: View {
             }
         case kindLabel:
             Text(node.text)
+        case kindEntry:
+            // Uncontrolled toward the app: the node mirrors what the
+            // user types (SwiftUI needs the binding), and every edit is
+            // emitted with the entry's identity tag for the app to fold
+            // into its own model — nothing here is read back.
+            TextField(
+                "",
+                text: Binding(
+                    get: { node.text },
+                    set: { newValue in
+                        node.text = newValue
+                        KayaHost.emitText(node.tag, newValue)
+                    })
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 200)
         default:
             EmptyView()
         }

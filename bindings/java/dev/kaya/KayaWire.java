@@ -225,24 +225,32 @@ public final class KayaWire {
         return out;
     }
 
-    /** A parsed click: the id and the copy's key path (empty for a
-     * click on a guest-created widget, where id is a widget id;
-     * otherwise id is a template node id). */
-    public static final class Click {
+    /** A parsed occurrence: the kind, the id, the copy's key path
+     * (empty when id is a widget id; otherwise id is a template
+     * node id), and — for TEXT_CHANGED — the entry's new text
+     * (null for clicks). */
+    public static final class Occ {
+        public final short kind;
         public final long id;
         public final List<Object> keys;
+        public final String text;
 
-        Click(long id, List<Object> keys) {
+        Occ(short kind, long id, List<Object> keys, String text) {
+            this.kind = kind;
             this.id = id;
             this.keys = keys;
+            this.text = text;
         }
     }
 
-    /** Decode one occurrence record (header included); null for
-     * non-click records. */
-    public static Click parseClick(byte[] rec) {
+    /** Decode one occurrence record (header included); null for pad
+     * or unknown kinds. */
+    public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
-        if (b.getShort(4) != OCC_KIND_BUTTON_CLICKED) return null;
+        short kind = b.getShort(4);
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED) {
+            return null;
+        }
         long id = b.getLong(8);
         int pathLen = b.getInt(16);
         List<Object> keys = new ArrayList<>();
@@ -259,7 +267,12 @@ public final class KayaWire {
             }
             at += 8 + ((vlen + 7) & ~7);
         }
-        return new Click(id, keys);
+        String text = null;
+        if (kind == OCC_KIND_TEXT_CHANGED) {
+            int vlen = b.getInt(at + 4);
+            text = new String(rec, at + 8, vlen, StandardCharsets.UTF_8);
+        }
+        return new Occ(kind, id, keys, text);
     }
 
     private KayaWire() {}

@@ -70,11 +70,11 @@ let submit records =
   let tx = String.concat "" records in
   kaya_submit tx (Unsigned.Size_t.of_int (String.length tx))
 
-(* Block for the next click; None when the core has shut down. Keys are
-   [] for a click on a guest-created widget (the id is a widget id),
-   else the id is a template node id and the keys are the stamped copy's
-   key path, outermost first. *)
-let next_click =
+(* Block for the next occurrence; None when the core has shut down.
+   Some (kind, id, keys, text): keys are [] when the id is a widget id,
+   else the id is a template node id and the keys are the stamped
+   copy's key path, outermost first; text is Some for text_changed. *)
+let next_occurrence =
   let state = ref None in
   fun () ->
     let data, mask, head_addr, tail_addr, h =
@@ -105,12 +105,12 @@ let next_click =
       else begin
         let at = !h land mask in
         let size = Kaya_wire.u32_at byte at in
-        let parsed = Kaya_wire.parse_click (fun i -> byte (at + i)) in
+        let parsed = Kaya_wire.parse_occurrence (fun i -> byte (at + i)) in
         (* The cursors are u32 and wrap; OCaml ints are wider, so wrap by
            hand before handing the space back with a release store. *)
         h := (!h + size) land 0xFFFFFFFF;
         store_release_u32 head_addr !h;
-        match parsed with Some click -> Some click | None -> scan ()
+        match parsed with Some occ -> Some occ | None -> scan ()
       end
     in
     scan ()

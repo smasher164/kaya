@@ -242,12 +242,14 @@ func TxBindTextElement(widgetID uint64, level uint32) []byte {
 }
 
 // ParseOccurrence decodes one occurrence record (header included).
-// keys is nil for a click on a guest-created widget (id is a widget
-// id); otherwise id is a template node id and keys is the copy's key
-// path, outermost first. ok is false for non-click records.
-func ParseOccurrence(rec []byte) (id uint64, keys []any, ok bool) {
-	if binary.LittleEndian.Uint16(rec[4:]) != occButtonClicked {
-		return 0, nil, false
+// keys is nil when id is a widget id; otherwise id is a template
+// node id and keys is the copy's key path, outermost first. text is
+// the entry's new content for occTextChanged, "" for clicks. ok is
+// false for pad/unknown records.
+func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, text string, ok bool) {
+	kind = binary.LittleEndian.Uint16(rec[4:])
+	if kind != occButtonClicked && kind != occTextChanged {
+		return 0, 0, nil, "", false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
 	pathLen := binary.LittleEndian.Uint32(rec[16:])
@@ -268,5 +270,9 @@ func ParseOccurrence(rec []byte) (id uint64, keys []any, ok bool) {
 		}
 		at += 8 + (vlen+7)&^7
 	}
-	return id, keys, true
+	if kind == occTextChanged {
+		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
+		text = string(rec[at+8 : at+8+vlen])
+	}
+	return kind, id, keys, text, true
 }

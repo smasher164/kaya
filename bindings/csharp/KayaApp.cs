@@ -102,6 +102,8 @@ sealed class KayaApp
     ulong signals, widgets, collections, nodes;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
+    readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -179,18 +181,40 @@ sealed class KayaApp
     /// the stamped copy's keys, outermost first.
     public void OnClick(Node n, Action<Tx, List<object>> handler) => nodeHandlers[n.Id] = handler;
 
+    /// Register a change handler for a live entry: the widget owns its
+    /// text and reports each edit here; the app folds the text into its
+    /// own state — there is no read-back, by doctrine.
+    public void OnChange(Widget w, Action<Tx, string> handler) => widgetChanges[w.Id] = handler;
+
+    /// Register a change handler for a template entry; it also receives
+    /// the stamped copy's keys, outermost first.
+    public void OnChange(Node n, Action<Tx, List<object>, string> handler) =>
+        nodeChanges[n.Id] = handler;
+
     void DispatchLoop()
     {
-        while (Kaya.NextClick(out ulong id, out List<object> keys))
+        while (Kaya.NextOccurrence(
+            out ushort kind, out ulong id, out List<object> keys, out string text))
         {
-            if (keys.Count == 0)
+            if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
             {
                 if (widgetHandlers.TryGetValue(id, out var fn))
                     Build(fn);
             }
-            else if (nodeHandlers.TryGetValue(id, out var fn))
+            else if (kind == KayaWire.OccKindButtonClicked)
             {
-                Build(tx => fn(tx, keys));
+                if (nodeHandlers.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, keys));
+            }
+            else if (kind == KayaWire.OccKindTextChanged && keys.Count == 0)
+            {
+                if (widgetChanges.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, text));
+            }
+            else if (kind == KayaWire.OccKindTextChanged)
+            {
+                if (nodeChanges.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, keys, text));
             }
         }
     }

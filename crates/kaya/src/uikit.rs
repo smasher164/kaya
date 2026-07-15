@@ -22,7 +22,7 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
     UIControlEvents, UIControlState, UILabel, UILayoutConstraintAxis, UIScreen, UIStackView,
-    UIView, UIViewAutoresizing, UIViewController, UIWindow,
+    UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
 };
 
 use crate::protocol::{
@@ -34,6 +34,7 @@ enum NativeWidget {
     Column(Retained<UIStackView>),
     Button(Retained<UIButton>),
     Label(Retained<UILabel>),
+    Entry(Retained<UITextField>),
 }
 
 impl NativeWidget {
@@ -42,6 +43,7 @@ impl NativeWidget {
             NativeWidget::Column(v) => v,
             NativeWidget::Button(v) => v,
             NativeWidget::Label(v) => v,
+            NativeWidget::Entry(v) => v,
         }
     }
 }
@@ -54,6 +56,7 @@ struct CoreState {
     selftest_button: Option<Retained<UIButton>>,
     selftest_last_button: Option<Retained<UIButton>>,
     selftest_label: Option<Retained<UILabel>>,
+    selftest_entry: Option<Retained<UITextField>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -98,9 +101,26 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Entry => {
-                    // Landed on macOS first; this backend's turn comes
-                    // with the breadth pass.
-                    panic!("kaya: entry is not yet implemented on this backend")
+                    // Uncontrolled: the field owns its text; the target
+                    // reports each edit (EditingChanged) with the
+                    // entry's identity tag, and the app folds it into
+                    // its own model.
+                    let tag = tag.expect("entries carry a tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    let field = UITextField::new(mtm);
+                    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
+                    unsafe {
+                        field.addTarget_action_forControlEvents(
+                            Some(target_obj),
+                            sel!(textChanged:),
+                            UIControlEvents::EditingChanged,
+                        );
+                    }
+                    core._targets.push(target);
+                    if core.selftest_entry.is_none() {
+                        core.selftest_entry = Some(field.clone());
+                    }
+                    NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => {
                     let stack = UIStackView::new(mtm);
@@ -159,6 +179,9 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.setText(Some(&NSString::from_str(&s)));
                 }
+                (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
+                    unsafe { field.setText(Some(&NSString::from_str(&s))) };
+                }
                 (_, prop, value) => {
                     panic!("kaya: uikit cannot apply {prop:?} = {value:?} here")
                 }
@@ -213,6 +236,18 @@ define_class!(
                 .occurrences
                 .send_click_tag(&self.ivars().tag);
         }
+
+        #[unsafe(method(textChanged:))]
+        fn text_changed(&self, sender: Option<&objc2::runtime::AnyObject>) {
+            let text = sender
+                .and_then(|s| s.downcast_ref::<UITextField>())
+                .and_then(|f| unsafe { f.text() })
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            self.ivars()
+                .occurrences
+                .send_text_tag(&self.ivars().tag, &text);
+        }
     }
 );
 
@@ -261,8 +296,10 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
     window.setRootViewController(Some(&controller));
     window.makeKeyAndVisible();
 
-    if std::env::var_os("KAYA_SELFTEST").is_some() {
-        spawn_selftest();
+    match std::env::var("KAYA_SELFTEST") {
+        Ok(script) if script == "entry" => spawn_entry_selftest(),
+        Ok(_) => spawn_selftest(),
+        Err(_) => {}
     }
 
     CORE.with_borrow_mut(|core| {
@@ -274,6 +311,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             selftest_button: None,
             selftest_last_button: None,
             selftest_label: None,
+            selftest_entry: None,
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -364,6 +402,63 @@ fn spawn_selftest() {
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The entry scene's round trip (KAYA_SELFTEST=entry): set the field's
+/// text and send EditingChanged through the control's own action path —
+/// what a keystroke produces — then the add button, then the status
+/// label.
+fn spawn_entry_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    let field = core
+                        .selftest_entry
+                        .as_ref()
+                        .expect("the scene has an entry");
+                    unsafe { field.setText(Some(&NSString::from_str("milk"))) };
+                    field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button")
+                        .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                if text == "added milk, 1 total" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

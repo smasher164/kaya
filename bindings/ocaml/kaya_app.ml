@@ -52,6 +52,8 @@ type app = {
   mutable c_node : int64;
   widget_handlers : (int64, tx -> unit) Hashtbl.t;
   node_handlers : (int64, Kaya_wire.value list -> tx -> unit) Hashtbl.t;
+  widget_changes : (int64, string -> tx -> unit) Hashtbl.t;
+  node_changes : (int64, Kaya_wire.value list -> string -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
      (items, count) are exactly the writes. [children] records the
@@ -85,6 +87,8 @@ let create () =
     c_node = 0L;
     widget_handlers = Hashtbl.create 8;
     node_handlers = Hashtbl.create 8;
+    widget_changes = Hashtbl.create 8;
+    node_changes = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
     open_fors = [];
@@ -327,19 +331,40 @@ let on_click app (Widget id) (handler : unit decl) =
 let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit decl) =
   Hashtbl.replace app.node_handlers id handler
 
+(* Register a change handler for a live entry: the widget owns its text
+   and reports each edit here; the app folds the text into its own
+   state — there is no read-back, by doctrine. *)
+let on_change app (Widget id) (handler : string -> unit decl) =
+  Hashtbl.replace app.widget_changes id handler
+
+(* Register a change handler for a template entry; it also receives the
+   stamped copy's keys, outermost first. *)
+let on_change_node app (Node id) (handler : Kaya_wire.value list -> string -> unit decl) =
+  Hashtbl.replace app.node_changes id handler
+
 let dispatch_loop app =
   let rec loop () =
-    match Kaya_runtime.next_click () with
+    match Kaya_runtime.next_occurrence () with
     | None -> () (* shutdown *)
-    | Some (id, []) ->
-        (match Hashtbl.find_opt app.widget_handlers id with
-        | Some handler -> build app handler
-        | None -> ());
-        loop ()
-    | Some (id, keys) ->
-        (match Hashtbl.find_opt app.node_handlers id with
-        | Some handler -> build app (handler keys)
-        | None -> ());
+    | Some (kind, id, keys, text) ->
+        (match (kind = Kaya_wire.occ_kind_text_changed, text, keys) with
+        | false, _, [] ->
+            (match Hashtbl.find_opt app.widget_handlers id with
+            | Some handler -> build app handler
+            | None -> ())
+        | false, _, keys ->
+            (match Hashtbl.find_opt app.node_handlers id with
+            | Some handler -> build app (handler keys)
+            | None -> ())
+        | true, Some text, [] ->
+            (match Hashtbl.find_opt app.widget_changes id with
+            | Some handler -> build app (handler text)
+            | None -> ())
+        | true, Some text, keys ->
+            (match Hashtbl.find_opt app.node_changes id with
+            | Some handler -> build app (handler keys text)
+            | None -> ())
+        | true, None, _ -> ());
         loop ()
   in
   loop ()

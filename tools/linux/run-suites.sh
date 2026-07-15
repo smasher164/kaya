@@ -11,7 +11,7 @@ export CARGO_TARGET_DIR=/work/target-linux
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 || exit 1
+cargo build --lib --example milestone2 --example entry || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -20,6 +20,7 @@ status=0
 # host's in-tree dotnet artifacts (different RID) are untouched.
 mkdir -p /tmp/cs
 cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj \
+    crates/kaya/examples/entry.cs crates/kaya/examples/entry.csproj \
     bindings/csharp/*.cs /tmp/cs/
 
 # Headless Weston for the Wayland leg.
@@ -51,10 +52,15 @@ run() {
     fi
 }
 
-# The C guest: the ABI's home language over the function floor.
+# The C guests: the ABI's home language over the function floor.
 clang crates/kaya/examples/milestone2.c \
     -I crates/kaya/include -I bindings/c \
     -o /tmp/milestone2-c \
+    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
+    || status=1
+clang crates/kaya/examples/entry.c \
+    -I crates/kaya/include -I bindings/c \
+    -o /tmp/entry-c \
     -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
     || status=1
 
@@ -67,17 +73,27 @@ ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
 mkdir -p /tmp/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml /tmp/ocaml/
+    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml /tmp/ocaml/
 (cd /tmp/ocaml && ocamlfind ocamlopt \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
     -o milestone2-ocaml) || status=1
+(cd /tmp/ocaml && ocamlfind ocamlopt \
+    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
+    -o entry-ocaml) || status=1
 
 # The Haskell guest (direct ring: inline peeks + the same cursor stubs).
 mkdir -p /tmp/haskell
 ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell \
     -o /tmp/haskell/milestone2-hs \
     bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
+    -L"$CARGO_TARGET_DIR/debug" -lkaya \
+    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
+mkdir -p /tmp/haskell-entry
+ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-entry \
+    -o /tmp/haskell/entry-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
     -L"$CARGO_TARGET_DIR/debug" -lkaya \
     -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
 
@@ -89,6 +105,16 @@ for proto in x11 wayland; do
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet run --project /tmp/cs/milestone2.csproj
     run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone2-ocaml
     run "$proto" haskell /tmp/haskell/milestone2-hs
+    # The entry scene: the inner env overrides run()'s KAYA_SELFTEST=1.
+    run "$proto" entry-rust env KAYA_SELFTEST=entry "$CARGO_TARGET_DIR/debug/examples/entry"
+    run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/entry-c
+    run "$proto" entry-python env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
+        python3 crates/kaya/examples/entry.py
+    run "$proto" entry-go env KAYA_SELFTEST=entry go run crates/kaya/examples/entry.go
+    run "$proto" entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
+        dotnet run --project /tmp/cs/entry.csproj
+    run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" /tmp/ocaml/entry-ocaml
+    run "$proto" entry-haskell env KAYA_SELFTEST=entry /tmp/haskell/entry-hs
 done
 
 kill "$WESTON_PID" 2>/dev/null

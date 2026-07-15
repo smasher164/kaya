@@ -79,6 +79,8 @@ type App struct {
 	c              counters
 	widgetHandlers map[uint64]func(*Tx)
 	nodeHandlers   map[uint64]func(*Tx, []any)
+	widgetChanges  map[uint64]func(*Tx, string)
+	nodeChanges    map[uint64]func(*Tx, []any, string)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
@@ -92,6 +94,8 @@ func NewApp() *App {
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
+		widgetChanges:  make(map[uint64]func(*Tx, string)),
+		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
 	}
@@ -349,6 +353,19 @@ func (a *App) OnClickNode(n Node, fn func(*Tx, []any)) {
 	a.nodeHandlers[n.id] = fn
 }
 
+// OnChange registers a handler for a live entry's edits: the widget
+// owns its text and reports each edit here; the app folds the text
+// into its own state — there is no read-back, by doctrine.
+func (a *App) OnChange(w Widget, fn func(*Tx, string)) {
+	a.widgetChanges[w.id] = fn
+}
+
+// OnChangeNode registers a change handler for a template entry; the
+// handler also receives the stamped copy's keys, outermost first.
+func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
+	a.nodeChanges[n.id] = fn
+}
+
 // Run enters the core on the calling goroutine's thread (which must be
 // the process main thread; use runtime.LockOSThread in an init
 // function), dispatching occurrences on a second goroutine. Returns the
@@ -358,16 +375,27 @@ func (a *App) Run() int {
 	go func() {
 		defer close(done)
 		for {
-			id, keys, ok := NextClick()
+			kind, id, keys, text, ok := NextOccurrence()
 			if !ok {
 				return // shutdown
 			}
-			if len(keys) == 0 {
+			switch {
+			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
 					a.Build(func(tx *Tx) { fn(tx) })
 				}
-			} else if fn := a.nodeHandlers[id]; fn != nil {
-				a.Build(func(tx *Tx) { fn(tx, keys) })
+			case kind == occButtonClicked:
+				if fn := a.nodeHandlers[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, keys) })
+				}
+			case kind == occTextChanged && len(keys) == 0:
+				if fn := a.widgetChanges[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, text) })
+				}
+			case kind == occTextChanged:
+				if fn := a.nodeChanges[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, keys, text) })
+				}
 			}
 		}
 	}()

@@ -10,7 +10,7 @@
 -- while C blocks; the -threaded runtime is required. Link against
 -- libkaya at build time; kaya_run must own the process main thread, and
 -- GHC's main runs bound to it.
-module KayaRuntime (kayaRun, kayaSubmit, nextClick) where
+module KayaRuntime (kayaRun, kayaSubmit, nextOccurrence) where
 
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
@@ -19,14 +19,14 @@ import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
-import Data.Word (Word32, Word64, Word8)
+import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CSize (..))
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import System.IO.Unsafe (unsafePerformIO)
 
-import KayaWire (Value, parseClick)
+import KayaWire (Value, parseOccurrence)
 
 foreign import ccall safe "kaya_run"
   c_kaya_run :: IO Int32
@@ -85,12 +85,13 @@ ring = do
       writeIORef ringRef (Just r)
       return r
 
--- | Block for the next click; Nothing when the core has shut down.
--- Keys are [] for a click on a guest-created widget (the id is a
--- widget id), else the id is a template node id and the keys are the
--- stamped copy's key path, outermost first. Single consumer.
-nextClick :: IO (Maybe (Word64, [Value]))
-nextClick = do
+-- | Block for the next occurrence; Nothing when the core has shut
+-- down. Keys are [] when the id is a widget id, else the id is a
+-- template node id and the keys are the stamped copy's key path,
+-- outermost first; the last member is the entry's new text for
+-- text_changed. Single consumer.
+nextOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe String))
+nextOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1
       loop hh = do
@@ -104,7 +105,7 @@ nextClick = do
           else do
             let at = fromIntegral (hh .&. mask)
             size <- peekByteOff dat at :: IO Word32
-            parsed <- parseClick (dat `plusPtr` at)
+            parsed <- parseOccurrence (dat `plusPtr` at)
             -- Word32 wraps on its own; hand the space back with release.
             let hh' = hh + size
             storeReleaseU32 headPtr hh'
@@ -114,6 +115,6 @@ nextClick = do
                 writeIORef ringRef (Just (Ring d c hp tp hh'))
               Nothing -> return ()
             case parsed of
-              Just click -> return (Just click)
+              Just occ -> return (Just occ)
               Nothing -> loop hh'
   loop h

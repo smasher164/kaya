@@ -9,7 +9,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encodeValue", "encodePath", "wireRecord", "parseValue", "parseClick",
+    "encodeValue", "encodePath", "wireRecord", "parseValue", "parseOccurrence",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -159,23 +159,30 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  return (v, next)");
     c.line("");
     c.line("-- Decode one occurrence record at `rec` (header included). Just");
-    c.line("-- (id, keys) for a click — keys is [] for a click on a guest-created");
-    c.line("-- widget (id is a widget id), else id is a template node id and keys");
-    c.line("-- is the copy's key path. Nothing otherwise.");
-    c.line("parseClick :: Ptr Word8 -> IO (Maybe (Word64, [Value]))");
-    c.line("parseClick rec = do");
+    c.line("-- (kind, id, keys, text) — keys is [] when id is a widget id, else");
+    c.line("-- id is a template node id and keys is the copy's key path; text is");
+    c.line("-- Just for text_changed, Nothing for clicks. Nothing for pad or");
+    c.line("-- unknown kinds.");
+    c.line("parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe String))");
+    c.line("parseOccurrence rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
-    c.line("  if kind /= occKindButtonClicked");
+    c.line("  if kind /= occKindButtonClicked && kind /= occKindTextChanged");
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
     c.line("      pathLen <- peekByteOff rec 16 :: IO Word32");
-    c.line("      let go at 0 acc = return (reverse acc)");
+    c.line("      let go at 0 acc = return (reverse acc, at)");
     c.line("          go at n acc = do");
     c.line("            (v, next) <- parseValue rec at");
     c.line("            go next (n - 1 :: Word32) (v : acc)");
-    c.line("      keys <- go 24 pathLen []");
-    c.line("      return (Just (ident, keys))");
+    c.line("      (keys, at') <- go (24 :: Int) pathLen []");
+    c.line("      text <-");
+    c.line("        if kind == occKindTextChanged");
+    c.line("          then do");
+    c.line("            (v, _) <- parseValue rec at'");
+    c.line("            return (case v of VStr s -> Just s; _ -> Nothing)");
+    c.line("          else return Nothing");
+    c.line("      return (Just (kind, ident, keys, text))");
     c.out
 }
 

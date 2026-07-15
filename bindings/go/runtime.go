@@ -48,11 +48,11 @@ func Submit(records ...[]byte) {
 	C.kaya_submit((*C.uint8_t)(unsafe.Pointer(&tx[0])), C.size_t(len(tx)))
 }
 
-// NextClick blocks for the next click; ok is false when the core has
-// shut down. keys is nil for a click on a guest-created widget (id is a
-// widget id), else id is a template node id and keys is the stamped
-// copy's key path, outermost first.
-func NextClick() (id uint64, keys []any, ok bool) {
+// NextOccurrence blocks for the next occurrence; ok is false when the
+// core has shut down. keys is nil when id is a widget id, else id is a
+// template node id and keys is the stamped copy's key path, outermost
+// first. text carries the entry's new content for OccurrenceTextChanged.
+func NextOccurrence() (kind uint16, id uint64, keys []any, text string, ok bool) {
 	head := (*uint32)(unsafe.Pointer(ring.head))
 	tail := (*uint32)(unsafe.Pointer(ring.tail))
 	data := uintptr(unsafe.Pointer(ring.data))
@@ -63,18 +63,18 @@ func NextClick() (id uint64, keys []any, ok bool) {
 		t := atomic.LoadUint32(tail) // acquire: records below are visible
 		if h == t {
 			if !C.kaya_wait_occurrences() {
-				return 0, nil, false // shutdown
+				return 0, 0, nil, "", false // shutdown
 			}
 			continue
 		}
 		at := data + uintptr(h&mask)
 		size := *(*uint32)(unsafe.Pointer(at))
 		rec := unsafe.Slice((*byte)(unsafe.Pointer(at)), size)
-		id, keys, isClick := ParseOccurrence(rec)
+		kind, id, keys, text, valid := ParseOccurrence(rec)
 		h += size
 		atomic.StoreUint32(head, h) // release: hand the space back
-		if isClick {
-			return id, keys, true
+		if valid {
+			return kind, id, keys, text, true
 		}
 	}
 }

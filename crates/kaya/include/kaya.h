@@ -254,6 +254,7 @@ typedef struct KayaRecordButtonClicked {
 typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
   uintptr_t (*next_commands)(uint8_t*, uintptr_t);
+  void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 

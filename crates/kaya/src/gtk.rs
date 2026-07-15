@@ -25,6 +25,7 @@ enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
     Label(gtk4::Label),
+    Entry(gtk4::Entry),
 }
 
 impl NativeWidget {
@@ -33,6 +34,7 @@ impl NativeWidget {
             NativeWidget::Column(w) => w.clone().upcast(),
             NativeWidget::Button(w) => w.clone().upcast(),
             NativeWidget::Label(w) => w.clone().upcast(),
+            NativeWidget::Entry(w) => w.clone().upcast(),
         }
     }
 }
@@ -45,6 +47,7 @@ struct CoreState {
     selftest_button: Option<gtk4::Button>,
     selftest_last_button: Option<gtk4::Button>,
     selftest_label: Option<gtk4::Label>,
+    selftest_entry: Option<gtk4::Entry>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -87,9 +90,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Entry => {
-                    // Landed on macOS first; this backend's turn comes
-                    // with the breadth pass.
-                    panic!("kaya: entry is not yet implemented on this backend")
+                    // Uncontrolled: the widget owns its text; each edit
+                    // goes up with the entry's identity tag, and the
+                    // app folds it into its own model. (GTK fires
+                    // `changed` for programmatic set_text too, which is
+                    // what lets the selftest type like a user.)
+                    let entry = gtk4::Entry::new();
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("entries carry a tag");
+                    entry.connect_changed(move |e| {
+                        sink.send_text_tag(&tag, e.text().as_str());
+                    });
+                    if core.selftest_entry.is_none() {
+                        core.selftest_entry = Some(entry.clone());
+                    }
+                    NativeWidget::Entry(entry)
                 }
                 WidgetKind::Column => {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
@@ -142,6 +157,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.set_text(&s);
+                }
+                (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
+                    entry.set_text(&s);
                 }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
@@ -202,8 +220,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             .build();
         window.present();
 
-        if std::env::var_os("KAYA_SELFTEST").is_some() {
-            spawn_selftest();
+        match std::env::var("KAYA_SELFTEST") {
+            Ok(script) if script == "entry" => spawn_entry_selftest(),
+            Ok(_) => spawn_selftest(),
+            Err(_) => {}
         }
 
         CORE.with_borrow_mut(|core| {
@@ -215,6 +235,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 selftest_button: None,
                 selftest_last_button: None,
                 selftest_label: None,
+                selftest_entry: None,
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -290,6 +311,63 @@ fn spawn_selftest() {
                     .expect("the scene has a label")
                     .text();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The entry scene's round trip (KAYA_SELFTEST=entry): set_text fires
+/// GTK's own `changed` signal — the same path a keystroke takes — then
+/// the add button, then the status label. Proves the uncontrolled-entry
+/// contract: text travels up as occurrences, the app folds it into its
+/// model, and nothing is read back from the widget.
+fn spawn_entry_selftest() {
+    fn on_main(f: impl Fn() + Send + 'static) {
+        glib::idle_add(move || {
+            f();
+            glib::ControlFlow::Break
+        });
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_entry
+                        .as_ref()
+                        .expect("the scene has an entry")
+                        .set_text("milk");
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button")
+                        .emit_clicked();
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text();
+                if text == "added milk, 1 total" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

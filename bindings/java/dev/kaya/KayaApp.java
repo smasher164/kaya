@@ -36,6 +36,14 @@ public final class KayaApp {
     private long signals, widgets, collections, nodes;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
+    private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
+
+    /** A template entry's change handler: the stamped copy's keys, then
+     * the entry's new text. */
+    public interface ChangeHandler {
+        void accept(Tx tx, List<Object> keys, String text);
+    }
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -489,6 +497,23 @@ public final class KayaApp {
         nodeHandlers.put(n.id, handler);
     }
 
+    /**
+     * Register a change handler for a live entry: the widget owns its
+     * text and reports each edit here; the app folds the text into its
+     * own state — there is no read-back, by doctrine.
+     */
+    public void onChange(Widget w, BiConsumer<Tx, String> handler) {
+        widgetChanges.put(w.id, handler);
+    }
+
+    /**
+     * Register a change handler for a template entry; it also receives
+     * the stamped copy's keys, outermost first.
+     */
+    public void onChange(Node n, ChangeHandler handler) {
+        nodeChanges.put(n.id, handler);
+    }
+
     // The ring consumer: Unsafe absolute loads plus explicit fences,
     // bound once as MethodHandles and invoked through invokeExact so the
     // per-record path stays free of boxing and reflection. Raw addresses
@@ -560,20 +585,34 @@ public final class KayaApp {
             STORE_FENCE.invokeExact(); // release: reads complete before the hand-back
             PUT_INT.invokeExact(headAddr, h);
 
-            KayaWire.Click click = KayaWire.parseClick(rec);
-            if (click == null) {
+            KayaWire.Occ occ = KayaWire.parseOccurrence(rec);
+            if (occ == null) {
                 continue;
             }
-            if (click.keys.isEmpty()) {
-                Consumer<Tx> handler = widgetHandlers.get(click.id);
+            if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {
+                Consumer<Tx> handler = widgetHandlers.get(occ.id);
                 if (handler != null) {
                     build(handler);
                 }
-            } else {
-                BiConsumer<Tx, List<Object>> handler = nodeHandlers.get(click.id);
+            } else if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED) {
+                BiConsumer<Tx, List<Object>> handler = nodeHandlers.get(occ.id);
                 if (handler != null) {
                     build(tx -> {
-                        handler.accept(tx, click.keys);
+                        handler.accept(tx, occ.keys);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, String> handler = widgetChanges.get(occ.id);
+                if (handler != null) {
+                    build(tx -> {
+                        handler.accept(tx, occ.text);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED) {
+                ChangeHandler handler = nodeChanges.get(occ.id);
+                if (handler != null) {
+                    build(tx -> {
+                        handler.accept(tx, occ.keys, occ.text);
                     });
                 }
             }

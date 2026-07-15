@@ -78,6 +78,8 @@ final class KayaApp {
     private var nodes: UInt64 = 0
     private var widgetHandlers: [UInt64: (KayaAppTx) -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) -> Void] = [:]
+    private var widgetChanges: [UInt64: (KayaAppTx, String) -> Void] = [:]
+    private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -177,6 +179,21 @@ final class KayaApp {
         nodeHandlers[n.id] = handler
     }
 
+    /// Register a change handler for a live entry: the widget owns its
+    /// text and reports each edit here; the app folds the text into its
+    /// own state — there is no read-back, by doctrine.
+    func onChange(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, String) -> Void) {
+        widgetChanges[w.id] = handler
+    }
+
+    /// Register a change handler for a template entry; it also receives
+    /// the stamped copy's keys, outermost first.
+    func onChange(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) -> Void
+    ) {
+        nodeChanges[n.id] = handler
+    }
+
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
@@ -184,13 +201,26 @@ final class KayaApp {
                 kaya_next_occurrence(p.baseAddress, 256)
             }
             if size == 0 { return } // shutdown
-            guard let (id, keys) = kayaParseClick(buf) else { continue }
-            if keys.isEmpty {
+            guard let (kind, id, keys, text) = kayaParseOccurrence(buf) else { continue }
+            switch (kind, keys.isEmpty) {
+            case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), true):
                 if let handler = widgetHandlers[id] {
                     build(handler)
                 }
-            } else if let handler = nodeHandlers[id] {
-                build { tx in handler(tx, keys) }
+            case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), false):
+                if let handler = nodeHandlers[id] {
+                    build { tx in handler(tx, keys) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), true):
+                if let handler = widgetChanges[id] {
+                    build { tx in handler(tx, text ?? "") }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), false):
+                if let handler = nodeChanges[id] {
+                    build { tx in handler(tx, keys, text ?? "") }
+                }
+            default:
+                break
             }
         }
     }

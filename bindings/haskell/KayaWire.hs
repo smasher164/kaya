@@ -208,20 +208,27 @@ parseValue rec at = do
   return (v, next)
 
 -- Decode one occurrence record at `rec` (header included). Just
--- (id, keys) for a click — keys is [] for a click on a guest-created
--- widget (id is a widget id), else id is a template node id and keys
--- is the copy's key path. Nothing otherwise.
-parseClick :: Ptr Word8 -> IO (Maybe (Word64, [Value]))
-parseClick rec = do
+-- (kind, id, keys, text) — keys is [] when id is a widget id, else
+-- id is a template node id and keys is the copy's key path; text is
+-- Just for text_changed, Nothing for clicks. Nothing for pad or
+-- unknown kinds.
+parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe String))
+parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
       pathLen <- peekByteOff rec 16 :: IO Word32
-      let go at 0 acc = return (reverse acc)
+      let go at 0 acc = return (reverse acc, at)
           go at n acc = do
             (v, next) <- parseValue rec at
             go next (n - 1 :: Word32) (v : acc)
-      keys <- go 24 pathLen []
-      return (Just (ident, keys))
+      (keys, at') <- go (24 :: Int) pathLen []
+      text <-
+        if kind == occKindTextChanged
+          then do
+            (v, _) <- parseValue rec at'
+            return (case v of VStr s -> Just s; _ -> Nothing)
+          else return Nothing
+      return (Just (kind, ident, keys, text))

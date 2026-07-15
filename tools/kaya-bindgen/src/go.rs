@@ -174,12 +174,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
-    c.line("// keys is nil for a click on a guest-created widget (id is a widget");
-    c.line("// id); otherwise id is a template node id and keys is the copy's key");
-    c.line("// path, outermost first. ok is false for non-click records.");
-    c.line("func ParseOccurrence(rec []byte) (id uint64, keys []any, ok bool) {");
-    c.line("\tif binary.LittleEndian.Uint16(rec[4:]) != occButtonClicked {");
-    c.line("\t\treturn 0, nil, false");
+    c.line("// keys is nil when id is a widget id; otherwise id is a template");
+    c.line("// node id and keys is the copy's key path, outermost first. text is");
+    c.line("// the entry's new content for occTextChanged, \"\" for clicks. ok is");
+    c.line("// false for pad/unknown records.");
+    c.line("func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, text string, ok bool) {");
+    c.line("\tkind = binary.LittleEndian.Uint16(rec[4:])");
+    c.line("\tif kind != occButtonClicked && kind != occTextChanged {");
+    c.line("\t\treturn 0, 0, nil, \"\", false");
     c.line("\t}");
     c.line("\tid = binary.LittleEndian.Uint64(rec[8:])");
     c.line("\tpathLen := binary.LittleEndian.Uint32(rec[16:])");
@@ -200,7 +202,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
-    c.line("\treturn id, keys, true");
+    c.line("\tif kind == occTextChanged {");
+    c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
+    c.line("\t\ttext = string(rec[at+8 : at+8+vlen])");
+    c.line("\t}");
+    c.line("\treturn kind, id, keys, text, true");
     c.line("}");
     c.out
 }

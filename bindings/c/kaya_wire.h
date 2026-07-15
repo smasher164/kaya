@@ -285,4 +285,22 @@ static inline int kaya_parse_click(const uint8_t *rec, uint64_t *id,
     return 1;
 }
 
+/* Decode a text_changed occurrence: same identity head as a click,
+ * then the entry's new text as one value (text->s/s_len point into
+ * rec). Returns 1 and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_text_changed(const uint8_t *rec, uint64_t *id,
+                                          KayaVal *keys, uint32_t max_keys,
+                                          uint32_t *n_keys, KayaVal *text) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TEXT_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, text);
+    return 1;
+}
+
 #endif /* KAYA_WIRE_H */

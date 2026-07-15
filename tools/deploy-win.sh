@@ -2,6 +2,15 @@
 # Deploy milestone-0 artifacts to the Windows VM and run the validations.
 #
 # Usage: tools/deploy-win.sh user@host [--provision] [rust|python|go|csharp|all]
+#        tools/deploy-win.sh user@host probe=<exe>   # aliveness probe, e.g. probe=entry
+#
+# Convention: everything that lands on the VM as a FILE is shipped with
+# scp from this repo (tools/guest/*.cmd and the built artifacts) —
+# never constructed remotely by echoing escaped text over ssh. Two
+# escaping layers (bash quoting, then cmd.exe carets) mangle such
+# constructions reliably; run_ssh is for running commands only. New
+# guest-side scripts go in tools/guest/, where the deploy's glob ships
+# them automatically.
 #
 # Requirements in the guest (one-time; snapshot afterward, portsh-style):
 #   - OpenSSH server with key auth, sshd start type Automatic
@@ -32,6 +41,8 @@ for arg in "$@"; do
     case "$arg" in
         --provision) PROVISION=1 ;;
         rust|python|go|csharp|all) SUITE="$arg" ;;
+        entry_rust|entry_python|entry_go|entry_csharp) SUITE="$arg" ;;
+        probe=*) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -68,7 +79,7 @@ fi
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
-    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone2)
+    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone2 --example entry)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -97,10 +108,13 @@ fi
 echo "== deploying artifacts =="
 scp -q \
     "$TARGET/examples/milestone2.exe" \
+    "$TARGET/examples/entry.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
     "$ROOT/crates/kaya/examples/milestone2.py" \
     "$ROOT/crates/kaya/examples/milestone2.go" \
+    "$ROOT/crates/kaya/examples/entry.py" \
+    "$ROOT/crates/kaya/examples/entry.go" \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
@@ -110,12 +124,17 @@ scp -q \
 # sources and project files are in the directory, so a leftover from a
 # renamed or removed example would poison the build.
 run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
+run_ssh 'cmd /c "if exist C:\kaya\cs-entry rmdir /s /q C:\kaya\cs-entry & mkdir C:\kaya\cs-entry"'
 scp -q "$ROOT"/bindings/python/*.py "$HOST:C:/kaya/bindings/python/"
 scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
 scp -q "$ROOT/crates/kaya/examples/milestone2.cs" \
     "$ROOT/crates/kaya/examples/milestone2.csproj" \
     "$ROOT"/bindings/csharp/*.cs \
     "$HOST:C:/kaya/cs/"
+scp -q "$ROOT/crates/kaya/examples/entry.cs" \
+    "$ROOT/crates/kaya/examples/entry.csproj" \
+    "$ROOT"/bindings/csharp/*.cs \
+    "$HOST:C:/kaya/cs-entry/"
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
 # so an overwrite can fail while everything else copies fine, and the
@@ -133,6 +152,25 @@ verify_remote() {
 }
 verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
 verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
+verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
+
+# Start <exe> with no selftest via the shipped probe.cmd and report
+# whether it survives scene construction — the first question when a
+# suite exits with a stowed exception and no output.
+run_probe() {
+    local exe="$1"
+    run_ssh "del C:\\kaya\\out_probe.txt 2>nul & schtasks /create /tn kaya_probe /tr \"C:\\kaya\\probe.cmd $exe\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_probe >nul"
+    local tries=0
+    until run_ssh "type C:\\kaya\\out_probe.txt" 2>/dev/null | grep -q "PROBEDONE"; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 60 ]; then
+            echo "probe: no PROBEDONE after 60 polls" >&2
+            return 1
+        fi
+        sleep 2
+    done
+    run_ssh "type C:\\kaya\\out_probe.txt"
+}
 
 run_suite() {
     local name="$1"
@@ -162,7 +200,14 @@ case "$SUITE" in
         run_suite python || status=1
         run_suite go || status=1
         run_suite csharp || status=1
+        # Entry suites are deployed but not run by default: WinUI's
+        # TextBox cannot resolve its default style in this unpackaged,
+        # code-only Application (XamlControlsResources creation crashes
+        # with a stowed exception), so entry scenes die at creation.
+        # Run them individually once the resource story lands, e.g.:
+        #     deploy-win.sh user@host entry_rust
         ;;
+    probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     *) run_suite "$SUITE" || status=1 ;;
 esac
 exit "$status"

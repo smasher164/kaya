@@ -68,11 +68,11 @@ boot_simulator() {
 }
 
 run_bundle() {
-    local udid="$1" app="$2" bundle_id="$3" name="$4"
+    local udid="$1" app="$2" bundle_id="$3" name="$4" script="${5:-1}"
     xcrun simctl install "$udid" "$app"
     echo "== $name =="
     local out
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST=1 timeout 120 \
+    out=$(SIMCTL_CHILD_KAYA_SELFTEST="$script" timeout 120 \
         xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1 | tee /dev/stderr) || true
     xcrun simctl io "$udid" screenshot "$ROOT/target/ios-shot-$name.png" >/dev/null 2>&1 || true
     if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
@@ -89,9 +89,12 @@ UDID=$(boot_simulator)
 SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone2
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
+        --example milestone2 --example entry
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
     run_bundle "$UDID" "$APP" dev.kaya.milestone2 rust || status=1
+    APP=$(make_bundle entry dev.kaya.entry "$TARGET_DIR/examples/entry")
+    run_bundle "$UDID" "$APP" dev.kaya.entry entry-rust entry || status=1
 fi
 
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
@@ -110,6 +113,18 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/milestone2swift-bin"
     APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.milestone2swift swift || status=1
+
+    cp tools/ios/entry.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/entryswift-bin"
+    APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
+    run_bundle "$UDID" "$APP" dev.kaya.entryswift entry-swift entry || status=1
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
@@ -139,6 +154,25 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         echo "rust-swiftui: PASS"
     else
         echo "rust-swiftui: FAIL"
+        status=1
+    fi
+
+    # The entry scene against the SwiftUI backend, same embedded dylib.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example entry
+    APP=$(make_bundle entryrs-swiftui dev.kaya.entryswiftui "$TARGET_DIR/examples/entry")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    xcrun simctl install "$UDID" "$APP"
+    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.entryswiftui app)
+    echo "== entry-swiftui =="
+    out=$(SIMCTL_CHILD_KAYA_SELFTEST=entry \
+        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
+        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
+        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.entryswiftui 2>&1 | tee /dev/stderr) || true
+    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-entry-swiftui.png" >/dev/null 2>&1 || true
+    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
+        echo "entry-swiftui: PASS"
+    else
+        echo "entry-swiftui: FAIL"
         status=1
     fi
 fi

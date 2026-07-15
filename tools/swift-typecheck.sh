@@ -25,16 +25,17 @@ else
     SDK_ARGS=(-sdk "$SDK")
 fi
 
-# swiftc requires top-level code to live in a file named main.swift.
+# swiftc requires top-level code to live in a file named main.swift;
+# each example program typechecks in its own pass.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-cp tools/ios/milestone2.swift "$TMP/main.swift"
-
-if env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
-    -import-objc-header crates/kaya/include/kaya.h \
-    bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$TMP/main.swift"; then
-    echo "swift-typecheck: OK"
-else
-    echo "swift-typecheck: FAIL"
-    exit 1
-fi
+for example in tools/ios/milestone2.swift tools/ios/entry.swift; do
+    cp "$example" "$TMP/main.swift"
+    if ! env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$TMP/main.swift"; then
+        echo "swift-typecheck: FAIL ($example)"
+        exit 1
+    fi
+done
+echo "swift-typecheck: OK"
