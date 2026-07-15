@@ -21,3 +21,5 @@ __pycache__/
 /android/.kotlin/
 crates/kaya/examples/bin-entry/
 crates/kaya/examples/obj-entry/
+crates/kaya/examples/bin-gallery/
+crates/kaya/examples/obj-gallery/

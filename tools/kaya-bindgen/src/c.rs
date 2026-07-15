@@ -176,16 +176,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits. The constant arm
     // takes a KayaVal; strings stay the common case via kaya_str.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
+        let (ty, ctor) = match kind {
+            crate::PropKind::Str => ("const char *", "kaya_str"),
+            crate::PropKind::Bool => ("int ", "kaya_bool"),
+        };
         c.line("");
         c.line(&format!("/* set_property with a constant {prop} value. */"));
-        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, const char *{prop}) {{"));
+        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {ty}{prop}) {{"));
         c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
-        c.line(&format!("    kaya_wire_value(tx, kaya_str({prop}));"));
+        c.line(&format!("    kaya_wire_value(tx, {ctor}({prop}));"));
         c.line("    kaya_wire_end(tx, start);");
         c.line("}");
         c.line("");
@@ -251,6 +255,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
     c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
     c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+    c.line("    return 1;");
+    c.line("}");
+    c.line("");
+    c.line("/* Decode a toggled occurrence: same identity head as a click, then");
+    c.line(" * the checkbox's new state as one Bool value. Returns 1 and fills");
+    c.line(" * the outputs, or 0 for other kinds. */");
+    c.line("static inline int kaya_parse_toggled(const uint8_t *rec, uint64_t *id,");
+    c.line("                                     KayaVal *keys, uint32_t max_keys,");
+    c.line("                                     uint32_t *n_keys, KayaVal *checked) {");
+    c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+    c.line("    if (r->header.kind != KAYA_OCCURRENCE_TOGGLED)");
+    c.line("        return 0;");
+    c.line("    *id = r->id;");
+    c.line("    *n_keys = r->path_len;");
+    c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+    c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
+    c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+    c.line("    kaya_parse_value(rec, at, checked);");
     c.line("    return 1;");
     c.line("}");
     c.line("");

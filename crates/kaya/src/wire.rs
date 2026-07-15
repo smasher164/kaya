@@ -53,9 +53,12 @@ pub const KIND_COLUMN: u32 = 1;
 pub const KIND_BUTTON: u32 = 2;
 pub const KIND_LABEL: u32 = 3;
 pub const KIND_ENTRY: u32 = 4;
+pub const KIND_ROW: u32 = 5;
+pub const KIND_CHECKBOX: u32 = 6;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
+pub const PROP_CHECKED: u32 = 2;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -124,6 +127,8 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_BUTTON => WidgetKind::Button,
         KIND_LABEL => WidgetKind::Label,
         KIND_ENTRY => WidgetKind::Entry,
+        KIND_ROW => WidgetKind::Row,
+        KIND_CHECKBOX => WidgetKind::Checkbox,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -131,6 +136,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
 fn prop(raw: u32) -> Prop {
     match raw {
         PROP_TEXT => Prop::Text,
+        PROP_CHECKED => Prop::Checked,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -269,6 +275,33 @@ pub fn text_changed_body(tag: &[u8], text: &str) -> Vec<u8> {
     b.extend_from_slice(tag);
     write_value(&mut b, &Value::Str(text.to_owned()));
     b
+}
+
+// A toggled occurrence body: the checkbox's stored tag (identity, same
+// layout as a click) followed by the new state as a value.
+pub fn toggled_body(tag: &[u8], checked: bool) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 16);
+    b.extend_from_slice(tag);
+    write_value(&mut b, &Value::Bool(checked));
+    b
+}
+
+pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0 };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::Toggled {
+            id: WidgetId(id),
+            checked,
+        }
+    } else {
+        Occurrence::InstanceToggled {
+            node: TemplateNodeId(id),
+            path,
+            checked,
+        }
+    }
 }
 
 pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
@@ -450,12 +483,15 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Button => KIND_BUTTON,
         WidgetKind::Label => KIND_LABEL,
         WidgetKind::Entry => KIND_ENTRY,
+        WidgetKind::Row => KIND_ROW,
+        WidgetKind::Checkbox => KIND_CHECKBOX,
     }
 }
 
 fn prop_raw(prop: Prop) -> u32 {
     match prop {
         Prop::Text => PROP_TEXT,
+        Prop::Checked => PROP_CHECKED,
     }
 }
 
@@ -652,6 +688,34 @@ mod tests {
         assert_eq!(r.u64(), 5);
         assert!(r.path().is_empty());
         assert_eq!(r.value(), Value::from("milk"));
+        assert!(body.len() % 8 == 0, "bodies must stay 8-aligned for the ring");
+    }
+
+    /// The same identity tags carry toggles: tag + Bool value out,
+    /// Toggled occurrences back.
+    #[test]
+    fn toggled_round_trips() {
+        assert_eq!(
+            decode_toggled_tag(&click_tag(5, &[]), true),
+            Occurrence::Toggled {
+                id: WidgetId(5),
+                checked: true,
+            }
+        );
+        let path = vec![Value::from("g1")];
+        assert_eq!(
+            decode_toggled_tag(&click_tag(8, &path), false),
+            Occurrence::InstanceToggled {
+                node: TemplateNodeId(8),
+                path,
+                checked: false,
+            }
+        );
+        let body = toggled_body(&click_tag(5, &[]), true);
+        let mut r = Reader { buf: &body, at: 0 };
+        assert_eq!(r.u64(), 5);
+        assert!(r.path().is_empty());
+        assert_eq!(r.value(), Value::Bool(true));
         assert!(body.len() % 8 == 0, "bodies must stay 8-aligned for the ring");
     }
 

@@ -91,7 +91,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
+        let ctor = match kind {
+            crate::PropKind::Str => "Str",
+            crate::PropKind::Bool => "Bool",
+        };
         c.line("");
         c.line(&format!("(* set_property with a constant {prop} value. *)"));
         c.line(&format!("let tx_set_{prop} widget_id {prop} ="));
@@ -99,7 +103,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int64_le b widget_id;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
-        c.line(&format!("      encode_value b (Str {prop}))"));
+        c.line(&format!("      encode_value b ({ctor} {prop}))"));
         c.line("");
         c.line(&format!("(* set_property with a signal-bound {prop} value. *)"));
         c.line(&format!("let tx_bind_{prop} widget_id signal_id ="));
@@ -145,13 +149,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  (v, next)");
     c.line("");
     c.line("(* Decode one occurrence record (header included) through the byte");
-    c.line("   accessor. Some (kind, id, keys, text) — keys is [] when id is a");
-    c.line("   widget id, else id is a template node id and keys is the copy's");
-    c.line("   key path; text is Some for text_changed, None for clicks. None");
-    c.line("   for pad/unknown kinds. *)");
+    c.line("   accessor. Some (kind, id, keys, payload) — keys is [] when id is");
+    c.line("   a widget id, else id is a template node id and keys is the copy's");
+    c.line("   key path; payload is Some for text_changed/toggled (a Str or Bool");
+    c.line("   value), None for clicks. None for pad/unknown kinds. *)");
     c.line("let parse_occurrence byte =");
     c.line("  let kind = u16_at byte 4 in");
-    c.line("  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed then None");
+    c.line("  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed");
+    c.line("     && kind <> occ_kind_toggled then None");
     c.line("  else begin");
     c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
     c.line("    let id = u32_at byte 8 in");
@@ -163,12 +168,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      keys := v :: !keys;");
     c.line("      at := next");
     c.line("    done;");
-    c.line("    let text =");
-    c.line("      if kind = occ_kind_text_changed then");
-    c.line("        match parse_value byte !at with Str s, _ -> Some s | _ -> None");
+    c.line("    let payload =");
+    c.line("      if kind = occ_kind_text_changed || kind = occ_kind_toggled then");
+    c.line("        Some (fst (parse_value byte !at))");
     c.line("      else None");
     c.line("    in");
-    c.line("    Some (kind, Int64.of_int id, List.rev !keys, text)");
+    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload)");
     c.line("  end");
     c.out
 }

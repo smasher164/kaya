@@ -34,9 +34,32 @@ fn pascal(name: &str) -> String {
 fn camel(name: &str) -> String {
     let p = pascal(name);
     let mut chars = p.chars();
-    match chars.next() {
+    let lowered = match chars.next() {
         Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    };
+    // C# keywords are all lowercase, so only camel-cased identifiers can
+    // collide; @ makes any keyword a plain identifier ("checked" is a
+    // spec prop). This is why csharp is exempt from the reserved-name
+    // assert in main.rs.
+    if RESERVED.contains(&lowered.as_str()) {
+        format!("@{lowered}")
+    } else {
+        lowered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::camel;
+
+    /// The prop named "checked" must come out escaped, or TxSetChecked
+    /// fails to compile in every C# guest (found by the mac suite,
+    /// 2026-07-15).
+    #[test]
+    fn camel_escapes_csharp_keywords() {
+        assert_eq!(camel("checked"), "@checked");
+        assert_eq!(camel("text"), "text");
     }
 }
 
@@ -143,12 +166,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let p = camel(prop);
         let pc = pascal(prop);
+        let ty = match kind {
+            crate::PropKind::Str => "string",
+            crate::PropKind::Bool => "bool",
+        };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));
-        c.line(&format!("    public static byte[] TxSet{pc}(ulong widgetId, string {p})"));
+        c.line(&format!("    public static byte[] TxSet{pc}(ulong widgetId, {ty} {p})"));
         c.line("    {");
         c.line("        var w = Begin(out var stream);");
         c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceConst);"));
@@ -178,13 +205,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    /// guest-created widget (id is a widget id); otherwise id is a");
     c.line("    /// template node id and keys is the copy's key path.");
     c.line("    public static bool ParseOccurrence(");
-    c.line("        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out string text)");
+    c.line("        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)");
     c.line("    {");
     c.line("        id = 0;");
     c.line("        keys = new List<object>();");
-    c.line("        text = null;");
+    c.line("        payload = null;");
     c.line("        kind = BitConverter.ToUInt16(rec, 4);");
-    c.line("        if (kind != OccKindButtonClicked && kind != OccKindTextChanged)");
+    c.line("        if (kind != OccKindButtonClicked && kind != OccKindTextChanged");
+    c.line("            && kind != OccKindToggled)");
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
@@ -202,10 +230,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
-    c.line("        if (kind == OccKindTextChanged)");
+    c.line("        if (kind == OccKindTextChanged || kind == OccKindToggled)");
     c.line("        {");
-    c.line("            int tlen = BitConverter.ToInt32(rec, at + 4);");
-    c.line("            text = Encoding.UTF8.GetString(rec, at + 8, tlen);");
+    c.line("            uint ptype = BitConverter.ToUInt32(rec, at);");
+    c.line("            int plen = BitConverter.ToInt32(rec, at + 4);");
+    c.line("            if (ptype == ValueBool)");
+    c.line("                payload = rec[at + 8] != 0;");
+    c.line("            else");
+    c.line("                payload = Encoding.UTF8.GetString(rec, at + 8, plen);");
     c.line("        }");
     c.line("        return true;");
     c.line("    }");

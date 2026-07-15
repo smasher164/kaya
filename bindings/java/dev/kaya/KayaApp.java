@@ -38,11 +38,19 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
+    private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
 
     /** A template entry's change handler: the stamped copy's keys, then
      * the entry's new text. */
     public interface ChangeHandler {
         void accept(Tx tx, List<Object> keys, String text);
+    }
+
+    /** A template checkbox's toggle handler: the stamped copy's keys,
+     * then the box's new state. */
+    public interface ToggleHandler {
+        void accept(Tx tx, List<Object> keys, boolean checked);
     }
 
     // The collection is the model — the only copy: every mutation op
@@ -283,6 +291,14 @@ public final class KayaApp {
             records.add(KayaWire.txSetText(w.id, text));
         }
 
+        public void setChecked(Widget w, boolean checked) {
+            records.add(KayaWire.txSetChecked(w.id, checked));
+        }
+
+        public void bindChecked(Widget w, Signal s) {
+            records.add(KayaWire.txBindChecked(w.id, s.id));
+        }
+
         public void bindText(Widget w, Signal s) {
             records.add(KayaWire.txBindText(w.id, s.id));
         }
@@ -514,6 +530,23 @@ public final class KayaApp {
         nodeChanges.put(n.id, handler);
     }
 
+    /**
+     * Register a toggle handler for a live checkbox: the box owns its
+     * checked bit and reports each flip here; the app folds it into its
+     * own state.
+     */
+    public void onToggle(Widget w, BiConsumer<Tx, Boolean> handler) {
+        widgetToggles.put(w.id, handler);
+    }
+
+    /**
+     * Register a toggle handler for a template checkbox; it also
+     * receives the stamped copy's keys, outermost first.
+     */
+    public void onToggle(Node n, ToggleHandler handler) {
+        nodeToggles.put(n.id, handler);
+    }
+
     // The ring consumer: Unsafe absolute loads plus explicit fences,
     // bound once as MethodHandles and invoked through invokeExact so the
     // per-record path stays free of boxing and reflection. Raw addresses
@@ -605,14 +638,28 @@ public final class KayaApp {
                 BiConsumer<Tx, String> handler = widgetChanges.get(occ.id);
                 if (handler != null) {
                     build(tx -> {
-                        handler.accept(tx, occ.text);
+                        handler.accept(tx, (String) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED) {
                 ChangeHandler handler = nodeChanges.get(occ.id);
                 if (handler != null) {
                     build(tx -> {
-                        handler.accept(tx, occ.keys, occ.text);
+                        handler.accept(tx, occ.keys, (String) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Boolean> handler = widgetToggles.get(occ.id);
+                if (handler != null) {
+                    build(tx -> {
+                        handler.accept(tx, (Boolean) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED) {
+                ToggleHandler handler = nodeToggles.get(occ.id);
+                if (handler != null) {
+                    build(tx -> {
+                        handler.accept(tx, occ.keys, (Boolean) occ.payload);
                     });
                 }
             }

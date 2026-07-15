@@ -560,7 +560,9 @@ mod tests {
                     }
                     Occurrence::InstanceButtonClicked { .. } => {}
                     Occurrence::TextChanged { .. }
-                    | Occurrence::InstanceTextChanged { .. } => {}
+                    | Occurrence::InstanceTextChanged { .. }
+                    | Occurrence::Toggled { .. }
+                    | Occurrence::InstanceToggled { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

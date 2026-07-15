@@ -19,13 +19,17 @@ const (
 	KindButton = 2
 	KindLabel = 3
 	KindEntry = 4
+	KindRow = 5
+	KindCheckbox = 6
 	PropText = 1
+	PropChecked = 2
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
 	OccurrencePad = 0
 	OccurrenceButtonClicked = 1
 	OccurrenceTextChanged = 2
+	OccurrenceToggled = 3
 	txCreateSignal = 1
 	txWriteSignal = 2
 	txCreateWidget = 3
@@ -46,6 +50,7 @@ const (
 	applyDestroy = 5
 	occButtonClicked = 1
 	occTextChanged = 2
+	occToggled = 3
 )
 
 func pad8(b []byte) []byte {
@@ -241,15 +246,48 @@ func TxBindTextElement(widgetID uint64, level uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetChecked: set_property with a constant checked value.
+func TxSetChecked(widgetID uint64, checked bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropChecked)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, checked)
+	return endRecord(b)
+}
+
+// TxBindChecked: set_property with a signal-bound checked value.
+func TxBindChecked(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropChecked)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindCheckedElement: set_property bound to the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindCheckedElement(widgetID uint64, level uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropChecked)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
-// node id and keys is the copy's key path, outermost first. text is
-// the entry's new content for occTextChanged, "" for clicks. ok is
+// node id and keys is the copy's key path, outermost first. payload
+// is the entry's new text (string) for occTextChanged, the
+// checkbox's new state (bool) for occToggled, nil for clicks. ok is
 // false for pad/unknown records.
-func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, text string, ok bool) {
+func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged {
-		return 0, 0, nil, "", false
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled {
+		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
 	pathLen := binary.LittleEndian.Uint32(rec[16:])
@@ -270,9 +308,14 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, text strin
 		}
 		at += 8 + (vlen+7)&^7
 	}
-	if kind == occTextChanged {
+	if kind == occTextChanged || kind == occToggled {
+		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
-		text = string(rec[at+8 : at+8+vlen])
+		if vtype == ValueBool {
+			payload = rec[at+8] != 0
+		} else {
+			payload = string(rec[at+8 : at+8+vlen])
+		}
 	}
-	return kind, id, keys, text, true
+	return kind, id, keys, payload, true
 }

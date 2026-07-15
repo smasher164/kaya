@@ -88,9 +88,10 @@ ring = do
 -- | Block for the next occurrence; Nothing when the core has shut
 -- down. Keys are [] when the id is a widget id, else the id is a
 -- template node id and the keys are the stamped copy's key path,
--- outermost first; the last member is the entry's new text for
--- text_changed. Single consumer.
-nextOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe String))
+-- outermost first; the last member is the payload — the entry's new
+-- text (a VStr) for text_changed, the checkbox's new state (a VBool)
+-- for toggled. Single consumer.
+nextOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe Value))
 nextOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1

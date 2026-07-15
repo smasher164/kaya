@@ -104,6 +104,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
     readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
+    readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -191,11 +193,23 @@ sealed class KayaApp
     public void OnChange(Node n, Action<Tx, List<object>, string> handler) =>
         nodeChanges[n.Id] = handler;
 
+    /// Register a toggle handler for a live checkbox: the box owns its
+    /// checked bit and reports each flip here; the app folds it into
+    /// its own state.
+    public void OnToggle(Widget w, Action<Tx, bool> handler) => widgetToggles[w.Id] = handler;
+
+    /// Register a toggle handler for a template checkbox; it also
+    /// receives the stamped copy's keys, outermost first.
+    public void OnToggle(Node n, Action<Tx, List<object>, bool> handler) =>
+        nodeToggles[n.Id] = handler;
+
     void DispatchLoop()
     {
         while (Kaya.NextOccurrence(
-            out ushort kind, out ulong id, out List<object> keys, out string text))
+            out ushort kind, out ulong id, out List<object> keys, out object payload))
         {
+            string text = payload as string;
+            bool isChecked = payload is bool b && b;
             if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
             {
                 if (widgetHandlers.TryGetValue(id, out var fn))
@@ -215,6 +229,16 @@ sealed class KayaApp
             {
                 if (nodeChanges.TryGetValue(id, out var fn))
                     Build(tx => fn(tx, keys, text));
+            }
+            else if (kind == KayaWire.OccKindToggled && keys.Count == 0)
+            {
+                if (widgetToggles.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, isChecked));
+            }
+            else if (kind == KayaWire.OccKindToggled)
+            {
+                if (nodeToggles.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, keys, isChecked));
             }
         }
     }
@@ -333,6 +357,12 @@ sealed class Tx
     public void SetText(Widget w, string text) => Records.Add(KayaWire.TxSetText(w.Id, text));
 
     public void BindText(Widget w, Signal s) => Records.Add(KayaWire.TxBindText(w.Id, s.Id));
+
+    public void SetChecked(Widget w, bool isChecked) =>
+        Records.Add(KayaWire.TxSetChecked(w.Id, isChecked));
+
+    public void BindChecked(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));

@@ -136,12 +136,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let p = param(prop);
         let pc = camel(prop);
+        let ty = match kind {
+            crate::PropKind::Str => "string",
+            crate::PropKind::Bool => "bool",
+        };
         c.line("");
         c.line(&format!("// TxSet{pc}: set_property with a constant {prop} value."));
-        c.line(&format!("func TxSet{pc}(widgetID uint64, {p} string) []byte {{"));
+        c.line(&format!("func TxSet{pc}(widgetID uint64, {p} {ty}) []byte {{"));
         c.line("\tb := beginRecord(txSetProperty)");
         c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
         c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Prop{pc})"));
@@ -175,13 +179,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
-    c.line("// node id and keys is the copy's key path, outermost first. text is");
-    c.line("// the entry's new content for occTextChanged, \"\" for clicks. ok is");
+    c.line("// node id and keys is the copy's key path, outermost first. payload");
+    c.line("// is the entry's new text (string) for occTextChanged, the");
+    c.line("// checkbox's new state (bool) for occToggled, nil for clicks. ok is");
     c.line("// false for pad/unknown records.");
-    c.line("func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, text string, ok bool) {");
+    c.line("func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {");
     c.line("\tkind = binary.LittleEndian.Uint16(rec[4:])");
-    c.line("\tif kind != occButtonClicked && kind != occTextChanged {");
-    c.line("\t\treturn 0, 0, nil, \"\", false");
+    c.line("\tif kind != occButtonClicked && kind != occTextChanged && kind != occToggled {");
+    c.line("\t\treturn 0, 0, nil, nil, false");
     c.line("\t}");
     c.line("\tid = binary.LittleEndian.Uint64(rec[8:])");
     c.line("\tpathLen := binary.LittleEndian.Uint32(rec[16:])");
@@ -202,11 +207,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
-    c.line("\tif kind == occTextChanged {");
+    c.line("\tif kind == occTextChanged || kind == occToggled {");
+    c.line("\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
     c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
-    c.line("\t\ttext = string(rec[at+8 : at+8+vlen])");
+    c.line("\t\tif vtype == ValueBool {");
+    c.line("\t\t\tpayload = rec[at+8] != 0");
+    c.line("\t\t} else {");
+    c.line("\t\t\tpayload = string(rec[at+8 : at+8+vlen])");
+    c.line("\t\t}");
     c.line("\t}");
-    c.line("\treturn kind, id, keys, text, true");
+    c.line("\treturn kind, id, keys, payload, true");
     c.line("}");
     c.out
 }

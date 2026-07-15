@@ -33,10 +33,12 @@ fn main() {
     // authors (its helper functions) or a target language reserves (its
     // keywords). Checked here, at the root, so a collision is a loud
     // generation failure instead of a runtime surprise in one guest.
+    // csharp is absent: its emitter escapes keywords with @ instead
+    // (the prop "checked" is a C# keyword), so a collision there is
+    // handled, not fatal.
     validate_identifiers(&SPEC, "python", python::RESERVED);
     validate_identifiers(&SPEC, "c", c::RESERVED);
     validate_identifiers(&SPEC, "go", go::RESERVED);
-    validate_identifiers(&SPEC, "csharp", csharp::RESERVED);
     validate_identifiers(&SPEC, "ocaml", ocaml::RESERVED);
     validate_identifiers(&SPEC, "haskell", haskell::RESERVED);
     validate_identifiers(&SPEC, "java", java::RESERVED);
@@ -94,6 +96,9 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
         }
     }
     names.extend(spec.enums.iter().map(|e| e.name));
+    // Prop names become setter parameter names in every binding
+    // ("checked" broke C# before props were validated here).
+    names.extend(kaya::spec::PROPS.iter().map(|(name, _, _)| *name));
     for name in names {
         assert!(
             !reserved.contains(&name),
@@ -105,12 +110,14 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
 
 /// The property enum's variants: every emitter derives its per-prop
 /// helper trio (set/bind/bind-element) from this.
-pub(crate) fn prop_variants(spec: &ProtocolSpec) -> &'static [(&'static str, u32)] {
-    spec.enums
-        .iter()
-        .find(|e| e.name == "prop")
-        .expect("spec has a prop enum")
-        .variants
+pub(crate) use kaya::spec::PropKind;
+
+/// Properties with their value kinds, driving typed setter generation:
+/// set_text takes a string, set_checked a bool, in every language.
+/// (The spec pins PROPS to the "prop" enum, so constants and setters
+/// cannot drift.)
+pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::PROPS
 }
 
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {

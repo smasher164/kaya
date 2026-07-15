@@ -25,7 +25,8 @@ if run_javac -d "$TMP" \
     bindings/java/dev/kaya/KayaApp.java \
     bindings/java/dev/kaya/KayaWire.java \
     android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Milestone2.java \
-    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Entry.java; then
+    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Entry.java \
+    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Gallery.java; then
     echo "java-typecheck: OK"
 else
     echo "java-typecheck: FAIL"

@@ -42,7 +42,8 @@ run() {
 mkdir -p target/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml target/ocaml/
+    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml \
+    crates/kaya/examples/gallery.ml target/ocaml/
 (cd target/ocaml && ocamlfind ocamlopt \
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
@@ -51,6 +52,10 @@ cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
     -o entry-ocaml) >/dev/null
+(cd target/ocaml && ocamlfind ocamlopt \
+    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml gallery.ml \
+    -o gallery-ocaml) >/dev/null
 
 # The Haskell guest, likewise compiled once (its intermediates go to
 # target/haskell via -outputdir).
@@ -64,6 +69,12 @@ mkdir -p target/haskell-entry
 ghc -threaded -O -ibindings/haskell -outputdir target/haskell-entry \
     -o target/haskell/entry-hs \
     bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
+    -L"$ROOT/target/debug" -lkaya \
+    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
+mkdir -p target/haskell-gallery
+ghc -threaded -O -ibindings/haskell -outputdir target/haskell-gallery \
+    -o target/haskell/gallery-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/gallery.hs \
     -L"$ROOT/target/debug" -lkaya \
     -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
 
@@ -89,6 +100,17 @@ run entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dyl
     target/ocaml/entry-ocaml
 run entry-haskell env KAYA_SELFTEST=entry target/haskell/entry-hs
 
+# The gallery scene (row + checkbox; toggles arrive as occurrences the
+# app answers with the status signal), every language against AppKit.
+run gallery-rust env KAYA_SELFTEST=gallery cargo run --quiet --example gallery
+run gallery-python env KAYA_SELFTEST=gallery python3 crates/kaya/examples/gallery.py
+run gallery-go env KAYA_SELFTEST=gallery go run crates/kaya/examples/gallery.go
+run gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet run --project crates/kaya/examples/gallery.csproj
+run gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/gallery-ocaml
+run gallery-haskell env KAYA_SELFTEST=gallery target/haskell/gallery-hs
+
 # The same six guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.
 tools/swiftui/build-dylib.sh >/dev/null
@@ -110,6 +132,14 @@ run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/li
 run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/entry-ocaml
 run entry-haskell-swiftui env KAYA_SELFTEST=entry target/haskell/entry-hs
+run gallery-rust-swiftui env KAYA_SELFTEST=gallery cargo run --quiet --example gallery
+run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 crates/kaya/examples/gallery.py
+run gallery-go-swiftui env KAYA_SELFTEST=gallery go run crates/kaya/examples/gallery.go
+run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet run --project crates/kaya/examples/gallery.csproj
+run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    target/ocaml/gallery-ocaml
+run gallery-haskell-swiftui env KAYA_SELFTEST=gallery target/haskell/gallery-hs
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
 # The one-line verdict: suites accumulate failures rather than abort,

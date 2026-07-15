@@ -80,6 +80,8 @@ final class KayaApp {
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) -> Void] = [:]
+    private var widgetToggles: [UInt64: (KayaAppTx, Bool) -> Void] = [:]
+    private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -194,6 +196,21 @@ final class KayaApp {
         nodeChanges[n.id] = handler
     }
 
+    /// Register a toggle handler for a live checkbox: the box owns its
+    /// checked bit and reports each flip here; the app folds it into
+    /// its own state.
+    func onToggle(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Bool) -> Void) {
+        widgetToggles[w.id] = handler
+    }
+
+    /// Register a toggle handler for a template checkbox; it also
+    /// receives the stamped copy's keys, outermost first.
+    func onToggle(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Bool) -> Void
+    ) {
+        nodeToggles[n.id] = handler
+    }
+
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
@@ -201,7 +218,14 @@ final class KayaApp {
                 kaya_next_occurrence(p.baseAddress, 256)
             }
             if size == 0 { return } // shutdown
-            guard let (kind, id, keys, text) = kayaParseOccurrence(buf) else { continue }
+            guard let (kind, id, keys, payload) = kayaParseOccurrence(buf) else { continue }
+            var text: String?
+            var checked = false
+            switch payload {
+            case .str(let s): text = s
+            case .bool(let b): checked = b
+            default: break
+            }
             switch (kind, keys.isEmpty) {
             case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), true):
                 if let handler = widgetHandlers[id] {
@@ -218,6 +242,14 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), false):
                 if let handler = nodeChanges[id] {
                     build { tx in handler(tx, keys, text ?? "") }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TOGGLED), true):
+                if let handler = widgetToggles[id] {
+                    build { tx in handler(tx, checked) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TOGGLED), false):
+                if let handler = nodeToggles[id] {
+                    build { tx in handler(tx, keys, checked) }
                 }
             default:
                 break
@@ -273,6 +305,14 @@ final class KayaAppTx {
 
     func bindText(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindText(w.id, s.id)
+    }
+
+    func setChecked(_ w: KayaWidget, _ checked: Bool) {
+        tx.setChecked(w.id, checked)
+    }
+
+    func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindChecked(w.id, s.id)
     }
 
     func addChild(_ parent: KayaWidget, _ child: KayaWidget) {

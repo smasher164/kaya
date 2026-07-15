@@ -22,7 +22,7 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
     UIControlEvents, UIControlState, UILabel, UILayoutConstraintAxis, UIScreen, UIStackView,
-    UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
+    UISwitch, UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
 };
 
 use crate::protocol::{
@@ -32,18 +32,29 @@ use crate::scene::Scene;
 
 enum NativeWidget {
     Column(Retained<UIStackView>),
+    Row(Retained<UIStackView>),
     Button(Retained<UIButton>),
     Label(Retained<UILabel>),
     Entry(Retained<UITextField>),
+    // iOS has no checkbox control; the native presentation is a labeled
+    // UISwitch. The stack is the widget's view; the caption label and
+    // the switch are its fixed children.
+    Checkbox {
+        stack: Retained<UIStackView>,
+        toggle: Retained<UISwitch>,
+        caption: Retained<UILabel>,
+    },
 }
 
 impl NativeWidget {
     fn view(&self) -> &UIView {
         match self {
             NativeWidget::Column(v) => v,
+            NativeWidget::Row(v) => v,
             NativeWidget::Button(v) => v,
             NativeWidget::Label(v) => v,
             NativeWidget::Entry(v) => v,
+            NativeWidget::Checkbox { stack, .. } => stack,
         }
     }
 }
@@ -57,6 +68,7 @@ struct CoreState {
     selftest_last_button: Option<Retained<UIButton>>,
     selftest_label: Option<Retained<UILabel>>,
     selftest_entry: Option<Retained<UITextField>>,
+    selftest_checkbox: Option<Retained<UISwitch>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -131,6 +143,45 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     }
                     NativeWidget::Column(stack)
                 }
+                WidgetKind::Row => {
+                    let stack = UIStackView::new(mtm);
+                    unsafe {
+                        stack.setAxis(UILayoutConstraintAxis::Horizontal);
+                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
+                        stack.setSpacing(8.0);
+                    }
+                    NativeWidget::Row(stack)
+                }
+                WidgetKind::Checkbox => {
+                    // The switch owns its checked bit; ValueChanged
+                    // reports each flip with the box's identity tag.
+                    let tag = tag.expect("checkboxes carry a tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    let toggle = UISwitch::new(mtm);
+                    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
+                    unsafe {
+                        toggle.addTarget_action_forControlEvents(
+                            Some(target_obj),
+                            sel!(toggled:),
+                            UIControlEvents::ValueChanged,
+                        );
+                    }
+                    core._targets.push(target);
+                    let caption = UILabel::new(mtm);
+                    unsafe { caption.setTextColor(Some(&objc2_ui_kit::UIColor::labelColor())) };
+                    let stack = UIStackView::new(mtm);
+                    unsafe {
+                        stack.setAxis(UILayoutConstraintAxis::Horizontal);
+                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
+                        stack.setSpacing(8.0);
+                        stack.addArrangedSubview(&toggle);
+                        stack.addArrangedSubview(&caption);
+                    }
+                    if core.selftest_checkbox.is_none() {
+                        core.selftest_checkbox = Some(toggle.clone());
+                    }
+                    NativeWidget::Checkbox { stack, toggle, caption }
+                }
                 WidgetKind::Button => {
                     // The tag is the click's identity, emitted verbatim;
                     // this backend never learns what it means.
@@ -182,6 +233,12 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
                     unsafe { field.setText(Some(&NSString::from_str(&s))) };
                 }
+                (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
+                    caption.setText(Some(&NSString::from_str(&s)));
+                }
+                (NativeWidget::Checkbox { toggle, .. }, Prop::Checked, Value::Bool(b)) => {
+                    unsafe { toggle.setOn(b) };
+                }
                 (_, prop, value) => {
                     panic!("kaya: uikit cannot apply {prop:?} = {value:?} here")
                 }
@@ -197,7 +254,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     .retain()
             };
             match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(stack) => unsafe {
+                NativeWidget::Column(stack) | NativeWidget::Row(stack) => unsafe {
                     stack.addArrangedSubview(&child_view);
                 },
                 _ => panic!("kaya: add_child parent is not a container"),
@@ -235,6 +292,17 @@ define_class!(
             self.ivars()
                 .occurrences
                 .send_click_tag(&self.ivars().tag);
+        }
+
+        #[unsafe(method(toggled:))]
+        fn toggled(&self, sender: Option<&objc2::runtime::AnyObject>) {
+            let checked = sender
+                .and_then(|s| s.downcast_ref::<UISwitch>())
+                .map(|t| unsafe { t.isOn() })
+                .unwrap_or(false);
+            self.ivars()
+                .occurrences
+                .send_toggle_tag(&self.ivars().tag, checked);
         }
 
         #[unsafe(method(textChanged:))]
@@ -298,6 +366,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
 
     match std::env::var("KAYA_SELFTEST") {
         Ok(script) if script == "entry" => spawn_entry_selftest(),
+        Ok(script) if script == "gallery" => spawn_gallery_selftest(),
         Ok(_) => spawn_selftest(),
         Err(_) => {}
     }
@@ -312,6 +381,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             selftest_last_button: None,
             selftest_label: None,
             selftest_entry: None,
+            selftest_checkbox: None,
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -402,6 +472,51 @@ fn spawn_selftest() {
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The gallery scene's round trip (KAYA_SELFTEST=gallery): flip the
+/// switch and send ValueChanged through the control's own action path —
+/// what a tap produces — then read the status label.
+fn spawn_gallery_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    let toggle = core
+                        .selftest_checkbox
+                        .as_ref()
+                        .expect("the scene has a checkbox");
+                    unsafe { toggle.setOn(true) };
+                    toggle.sendActionsForControlEvents(UIControlEvents::ValueChanged);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                if text == "urgent: true" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

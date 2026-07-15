@@ -125,13 +125,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let p = camel(prop);
         let pc = pascal(prop);
         let up = prop.to_uppercase();
+        let ty = match kind {
+            crate::PropKind::Str => "String",
+            crate::PropKind::Bool => "boolean",
+        };
         c.line("");
         c.line(&format!("    /** set_property with a constant {prop} value. */"));
-        c.line(&format!("    public static byte[] txSet{pc}(long widgetId, String {p}) {{"));
+        c.line(&format!("    public static byte[] txSet{pc}(long widgetId, {ty} {p}) {{"));
         c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        encodeValue(b, {p});"));
@@ -169,19 +173,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("    /** A parsed occurrence: the kind, the id, the copy's key path");
     c.line("     * (empty when id is a widget id; otherwise id is a template");
-    c.line("     * node id), and — for TEXT_CHANGED — the entry's new text");
-    c.line("     * (null for clicks). */");
+    c.line("     * node id), and the payload — the entry's new text (String)");
+    c.line("     * for TEXT_CHANGED, the checkbox's new state (Boolean) for");
+    c.line("     * TOGGLED, null for clicks. */");
     c.line("    public static final class Occ {");
     c.line("        public final short kind;");
     c.line("        public final long id;");
     c.line("        public final List<Object> keys;");
-    c.line("        public final String text;");
+    c.line("        public final Object payload;");
     c.line("");
-    c.line("        Occ(short kind, long id, List<Object> keys, String text) {");
+    c.line("        Occ(short kind, long id, List<Object> keys, Object payload) {");
     c.line("            this.kind = kind;");
     c.line("            this.id = id;");
     c.line("            this.keys = keys;");
-    c.line("            this.text = text;");
+    c.line("            this.payload = payload;");
     c.line("        }");
     c.line("    }");
     c.line("");
@@ -190,7 +195,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    public static Occ parseOccurrence(byte[] rec) {");
     c.line("        ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);");
     c.line("        short kind = b.getShort(4);");
-    c.line("        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED) {");
+    c.line("        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED");
+    c.line("                && kind != OCC_KIND_TOGGLED) {");
     c.line("            return null;");
     c.line("        }");
     c.line("        long id = b.getLong(8);");
@@ -209,12 +215,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
-    c.line("        String text = null;");
-    c.line("        if (kind == OCC_KIND_TEXT_CHANGED) {");
-    c.line("            int vlen = b.getInt(at + 4);");
-    c.line("            text = new String(rec, at + 8, vlen, StandardCharsets.UTF_8);");
+    c.line("        Object payload = null;");
+    c.line("        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED) {");
+    c.line("            int ptype = b.getInt(at);");
+    c.line("            int plen = b.getInt(at + 4);");
+    c.line("            if (ptype == VALUE_BOOL) {");
+    c.line("                payload = rec[at + 8] != 0;");
+    c.line("            } else {");
+    c.line("                payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);");
+    c.line("            }");
     c.line("        }");
-    c.line("        return new Occ(kind, id, keys, text);");
+    c.line("        return new Occ(kind, id, keys, payload);");
     c.line("    }");
     c.line("");
     c.line("    private KayaWire() {}");

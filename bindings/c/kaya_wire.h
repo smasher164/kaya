@@ -242,6 +242,37 @@ static inline void kaya_tx_bind_text_element(KayaTx *tx, uint64_t widget_id, uin
     kaya_wire_end(tx, start);
 }
 
+/* set_property with a constant checked value. */
+static inline void kaya_tx_set_checked(KayaTx *tx, uint64_t widget_id, int checked) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CHECKED);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(checked));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound checked value. */
+static inline void kaya_tx_bind_checked(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CHECKED);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to the element of the enclosing For, `level` Fors up. */
+static inline void kaya_tx_bind_checked_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_CHECKED);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, start);
+}
+
 /* Decode one value at `at`; returns the next offset. */
 static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {
     memcpy(&out->type, buf + at, 4);
@@ -282,6 +313,24 @@ static inline int kaya_parse_click(const uint8_t *rec, uint64_t *id,
     size_t at = sizeof(KayaRecordButtonClicked);
     for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
         at = kaya_parse_value(rec, at, &keys[k]);
+    return 1;
+}
+
+/* Decode a toggled occurrence: same identity head as a click, then
+ * the checkbox's new state as one Bool value. Returns 1 and fills
+ * the outputs, or 0 for other kinds. */
+static inline int kaya_parse_toggled(const uint8_t *rec, uint64_t *id,
+                                     KayaVal *keys, uint32_t max_keys,
+                                     uint32_t *n_keys, KayaVal *checked) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TOGGLED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, checked);
     return 1;
 }
 

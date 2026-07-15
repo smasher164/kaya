@@ -14,13 +14,17 @@ let kind_column = 1
 let kind_button = 2
 let kind_label = 3
 let kind_entry = 4
+let kind_row = 5
+let kind_checkbox = 6
 let prop_text = 1
+let prop_checked = 2
 let source_const = 0
 let source_signal = 1
 let source_element = 2
 let occurrence_pad = 0
 let occurrence_button_clicked = 1
 let occurrence_text_changed = 2
+let occurrence_toggled = 3
 let tx_kind_create_signal = 1
 let tx_kind_write_signal = 2
 let tx_kind_create_widget = 3
@@ -41,6 +45,7 @@ let apply_kind_mount = 4
 let apply_kind_destroy = 5
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
+let occ_kind_toggled = 3
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -187,6 +192,32 @@ let tx_bind_text_element ?(level = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b 0l)
 
+(* set_property with a constant checked value. *)
+let tx_set_checked widget_id checked =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_checked);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool checked))
+
+(* set_property with a signal-bound checked value. *)
+let tx_bind_checked widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_checked);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to the element of the enclosing For, `level`
+   Fors up (0 = nearest). *)
+let tx_bind_checked_element ?(level = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_checked);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b 0l)
+
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)
 let u16_at byte i = byte i lor (byte (i + 1) lsl 8)
@@ -212,13 +243,14 @@ let parse_value byte at =
   (v, next)
 
 (* Decode one occurrence record (header included) through the byte
-   accessor. Some (kind, id, keys, text) — keys is [] when id is a
-   widget id, else id is a template node id and keys is the copy's
-   key path; text is Some for text_changed, None for clicks. None
-   for pad/unknown kinds. *)
+   accessor. Some (kind, id, keys, payload) — keys is [] when id is
+   a widget id, else id is a template node id and keys is the copy's
+   key path; payload is Some for text_changed/toggled (a Str or Bool
+   value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed
+     && kind <> occ_kind_toggled then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -230,10 +262,10 @@ let parse_occurrence byte =
       keys := v :: !keys;
       at := next
     done;
-    let text =
-      if kind = occ_kind_text_changed then
-        match parse_value byte !at with Str s, _ -> Some s | _ -> None
+    let payload =
+      if kind = occ_kind_text_changed || kind = occ_kind_toggled then
+        Some (fst (parse_value byte !at))
       else None
     in
-    Some (kind, Int64.of_int id, List.rev !keys, text)
+    Some (kind, Int64.of_int id, List.rev !keys, payload)
   end

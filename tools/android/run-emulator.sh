@@ -51,7 +51,7 @@ status=0
 
 run_apk() {
     # Selftest scripts double as scene selectors on Android (one APK
-    # hosts both scenes); pass the script as a string extra.
+    # hosts every scene); pass the script as a string extra.
     local name="$1" apk="$2" component="$3" script="$4"
     shift 4
     adb install -r "$apk" >/dev/null
@@ -86,6 +86,9 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     run_apk entry-rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity entry
+    run_apk gallery-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity gallery
 fi
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
@@ -103,6 +106,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity entry \
         --es KAYA_BACKEND compose
+    run_apk gallery-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity gallery \
+        --es KAYA_BACKEND compose
 fi
 
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
@@ -117,6 +124,9 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk entry-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity entry
+    run_apk gallery-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity gallery
 fi
 
 exit "$status"

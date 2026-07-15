@@ -51,8 +51,10 @@ func Submit(records ...[]byte) {
 // NextOccurrence blocks for the next occurrence; ok is false when the
 // core has shut down. keys is nil when id is a widget id, else id is a
 // template node id and keys is the stamped copy's key path, outermost
-// first. text carries the entry's new content for OccurrenceTextChanged.
-func NextOccurrence() (kind uint16, id uint64, keys []any, text string, ok bool) {
+// first. payload carries the entry's new text (string) for
+// OccurrenceTextChanged, the checkbox's new state (bool) for
+// OccurrenceToggled.
+func NextOccurrence() (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	head := (*uint32)(unsafe.Pointer(ring.head))
 	tail := (*uint32)(unsafe.Pointer(ring.tail))
 	data := uintptr(unsafe.Pointer(ring.data))
@@ -63,18 +65,18 @@ func NextOccurrence() (kind uint16, id uint64, keys []any, text string, ok bool)
 		t := atomic.LoadUint32(tail) // acquire: records below are visible
 		if h == t {
 			if !C.kaya_wait_occurrences() {
-				return 0, 0, nil, "", false // shutdown
+				return 0, 0, nil, nil, false // shutdown
 			}
 			continue
 		}
 		at := data + uintptr(h&mask)
 		size := *(*uint32)(unsafe.Pointer(at))
 		rec := unsafe.Slice((*byte)(unsafe.Pointer(at)), size)
-		kind, id, keys, text, valid := ParseOccurrence(rec)
+		kind, id, keys, payload, valid := ParseOccurrence(rec)
 		h += size
 		atomic.StoreUint32(head, h) // release: hand the space back
 		if valid {
-			return kind, id, keys, text, true
+			return kind, id, keys, payload, true
 		}
 	}
 }

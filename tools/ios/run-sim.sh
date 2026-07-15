@@ -90,11 +90,13 @@ SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
-        --example milestone2 --example entry
+        --example milestone2 --example entry --example gallery
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
     run_bundle "$UDID" "$APP" dev.kaya.milestone2 rust || status=1
     APP=$(make_bundle entry dev.kaya.entry "$TARGET_DIR/examples/entry")
     run_bundle "$UDID" "$APP" dev.kaya.entry entry-rust entry || status=1
+    APP=$(make_bundle gallery dev.kaya.gallery "$TARGET_DIR/examples/gallery")
+    run_bundle "$UDID" "$APP" dev.kaya.gallery gallery-rust gallery || status=1
 fi
 
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
@@ -125,6 +127,18 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/entryswift-bin"
     APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.entryswift entry-swift entry || status=1
+
+    cp tools/ios/gallery.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/galleryswift-bin"
+    APP=$(make_bundle galleryswift dev.kaya.galleryswift "$BUNDLES/galleryswift-bin")
+    run_bundle "$UDID" "$APP" dev.kaya.galleryswift gallery-swift gallery || status=1
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
@@ -173,6 +187,25 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         echo "entry-swiftui: PASS"
     else
         echo "entry-swiftui: FAIL"
+        status=1
+    fi
+
+    # The gallery scene against the SwiftUI backend, same embedded dylib.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example gallery
+    APP=$(make_bundle galleryrs-swiftui dev.kaya.galleryswiftui "$TARGET_DIR/examples/gallery")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    xcrun simctl install "$UDID" "$APP"
+    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.galleryswiftui app)
+    echo "== gallery-swiftui =="
+    out=$(SIMCTL_CHILD_KAYA_SELFTEST=gallery \
+        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
+        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
+        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.galleryswiftui 2>&1 | tee /dev/stderr) || true
+    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-gallery-swiftui.png" >/dev/null 2>&1 || true
+    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
+        echo "gallery-swiftui: PASS"
+    else
+        echo "gallery-swiftui: FAIL"
         status=1
     fi
 fi

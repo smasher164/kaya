@@ -76,10 +76,11 @@ static class Kaya
     /// Block for the next occurrence; false when the core has shut
     /// down. keys is empty when id is a widget id, else id is a
     /// template node id and keys is the stamped copy's key path,
-    /// outermost first. text carries the entry's new content for
-    /// OccKindTextChanged, null for clicks.
+    /// outermost first. payload carries the entry's new text (string)
+    /// for OccKindTextChanged, the checkbox's new state (bool) for
+    /// OccKindToggled, null for clicks.
     public static unsafe bool NextOccurrence(
-        out ushort kind, out ulong id, out List<object> keys, out string text)
+        out ushort kind, out ulong id, out List<object> keys, out object payload)
     {
         uint* head = (uint*)ring.Head;
         uint* tail = (uint*)ring.Tail;
@@ -97,7 +98,7 @@ static class Kaya
                     kind = 0;
                     id = 0;
                     keys = new List<object>();
-                    text = null;
+                    payload = null;
                     return false; // shutdown
                 }
                 continue;
@@ -106,7 +107,7 @@ static class Kaya
             uint size = *(uint*)at;
             byte[] rec = new byte[size];
             Marshal.Copy((IntPtr)at, rec, 0, (int)size);
-            bool valid = KayaWire.ParseOccurrence(rec, out kind, out id, out keys, out text);
+            bool valid = KayaWire.ParseOccurrence(rec, out kind, out id, out keys, out payload);
             h += size;
             Volatile.Write(ref *head, h); // release: hand the space back
             if (valid)

@@ -419,6 +419,30 @@ def button(text=None, on_click=None):
     return handle
 
 
+def row():
+    """A row container: column turned sideways; `with kaya.row():`
+    parents everything declared inside it."""
+    return _Container(_widget(wire.KIND_ROW))
+
+
+def checkbox(text=None, checked=None, on_toggle=None):
+    """A labeled on/off box. The box owns its checked bit the way an
+    entry owns its text: `on_toggle` receives the new state (a bool;
+    template copies get the stamped keys first), and the app folds it
+    into its own model. `checked` sets the state; `text` the caption."""
+    handle = _widget(wire.KIND_CHECKBOX)
+    if text is not None:
+        _records().append(wire.tx_set_text(handle.id, text))
+    if checked is not None:
+        if isinstance(checked, Signal):
+            _records().append(wire.tx_bind_checked(handle.id, checked.id))
+        else:
+            _records().append(wire.tx_set_checked(handle.id, checked))
+    if on_toggle is not None:
+        _app._register(handle, wire.OCC_TOGGLED, on_toggle)
+    return handle
+
+
 def entry(text=None, on_change=None):
     """A single-line text field. Uncontrolled, by doctrine: the widget
     owns its text and reports each edit to `on_change` (the new content
@@ -531,7 +555,7 @@ class App:
 
     def _dispatch_loop(self):
         while occurrence := kaya.next_occurrence():
-            kind, ident, keys, text = occurrence
+            kind, ident, keys, payload = occurrence
             if keys:
                 handler = self._node_handlers.get((kind, ident))
             else:
@@ -539,8 +563,8 @@ class App:
             if handler is None:
                 continue
             args = list(keys)
-            if text is not None:
-                args.append(text)
+            if payload is not None:
+                args.append(payload)
             with self.build():
                 handler(*args)
 

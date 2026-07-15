@@ -59,6 +59,11 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase".to_string(),
         "Microsoft.UI.Xaml.Style".to_string(),
         "Microsoft.UI.Xaml.Controls.StackPanel".to_string(),
+        "Microsoft.UI.Xaml.Controls.Orientation".to_string(),
+        "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
+        "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
+        "Windows.Foundation.IReference".to_string(),
+        "Windows.Foundation.PropertyValue".to_string(),
         "Windows.Foundation.EventHandler".to_string(),
         "Windows.ApplicationModel.Core.ICoreApplicationUnhandledError".to_string(),
         "Windows.ApplicationModel.Core.UnhandledErrorDetectedEventArgs".to_string(),
@@ -68,5 +73,32 @@ fn main() {
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);
+    fix_array_proxy_paths();
     println!("generated crates/kaya/src/winui/bindings.rs");
+}
+
+/// windows-bindgen 0.62 emits `windows_core::ArrayProxy::from_raw_parts
+/// (..).as_array()` in the IPropertyValue vtable shims (pulled in by the
+/// IReference filter), but windows-core 0.62.2 keeps that type at
+/// `imp::array_proxy` with a Deref-to-Array API. Rewrite to the
+/// spelling the pinned windows-core actually exports; `&mut proxy`
+/// coerces to `&mut Array<T>` and the proxy's Drop performs the
+/// write-back after the call, same semantics either way.
+fn fix_array_proxy_paths() {
+    let path = "../../crates/kaya/src/winui/bindings.rs";
+    let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
+    if !src.contains("windows_core::ArrayProxy") {
+        return;
+    }
+    let fixed = regex_lite::Regex::new(r"windows_core::ArrayProxy::from_raw_parts")
+        .unwrap()
+        .replace_all(&src, "&mut windows_core::imp::array_proxy");
+    let fixed = regex_lite::Regex::new(r"\s*\.as_array\(\)")
+        .unwrap()
+        .replace_all(&fixed, "");
+    assert!(
+        !fixed.contains("windows_core::ArrayProxy"),
+        "ArrayProxy fixup left references behind; check windows-bindgen output"
+    );
+    std::fs::write(path, fixed.as_ref()).expect("write bindings.rs");
 }

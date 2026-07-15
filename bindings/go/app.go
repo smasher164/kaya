@@ -81,6 +81,8 @@ type App struct {
 	nodeHandlers   map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
+	widgetToggles  map[uint64]func(*Tx, bool)
+	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
@@ -96,6 +98,8 @@ func NewApp() *App {
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
+		widgetToggles:  make(map[uint64]func(*Tx, bool)),
+		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
 	}
@@ -214,6 +218,14 @@ func (tx *Tx) SetText(w Widget, text string) {
 
 func (tx *Tx) BindText(w Widget, s Signal) {
 	tx.records = append(tx.records, TxBindText(w.id, s.id))
+}
+
+func (tx *Tx) SetChecked(w Widget, checked bool) {
+	tx.records = append(tx.records, TxSetChecked(w.id, checked))
+}
+
+func (tx *Tx) BindChecked(w Widget, s Signal) {
+	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }
 
 func (tx *Tx) AddChild(parent, child Widget) {
@@ -366,6 +378,19 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
+// OnToggle registers a handler for a live checkbox's toggles: the box
+// owns its checked bit and reports each flip here; the app folds it
+// into its own state.
+func (a *App) OnToggle(w Widget, fn func(*Tx, bool)) {
+	a.widgetToggles[w.id] = fn
+}
+
+// OnToggleNode registers a toggle handler for a template checkbox; the
+// handler also receives the stamped copy's keys, outermost first.
+func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
+	a.nodeToggles[n.id] = fn
+}
+
 // Run enters the core on the calling goroutine's thread (which must be
 // the process main thread; use runtime.LockOSThread in an init
 // function), dispatching occurrences on a second goroutine. Returns the
@@ -375,10 +400,12 @@ func (a *App) Run() int {
 	go func() {
 		defer close(done)
 		for {
-			kind, id, keys, text, ok := NextOccurrence()
+			kind, id, keys, payload, ok := NextOccurrence()
 			if !ok {
 				return // shutdown
 			}
+			text, _ := payload.(string)
+			checked, _ := payload.(bool)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -395,6 +422,14 @@ func (a *App) Run() int {
 			case kind == occTextChanged:
 				if fn := a.nodeChanges[id]; fn != nil {
 					a.Build(func(tx *Tx) { fn(tx, keys, text) })
+				}
+			case kind == occToggled && len(keys) == 0:
+				if fn := a.widgetToggles[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, checked) })
+				}
+			case kind == occToggled:
+				if fn := a.nodeToggles[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, keys, checked) })
 				}
 			}
 		}

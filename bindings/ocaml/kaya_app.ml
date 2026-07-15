@@ -54,6 +54,8 @@ type app = {
   node_handlers : (int64, Kaya_wire.value list -> tx -> unit) Hashtbl.t;
   widget_changes : (int64, string -> tx -> unit) Hashtbl.t;
   node_changes : (int64, Kaya_wire.value list -> string -> tx -> unit) Hashtbl.t;
+  widget_toggles : (int64, bool -> tx -> unit) Hashtbl.t;
+  node_toggles : (int64, Kaya_wire.value list -> bool -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
      (items, count) are exactly the writes. [children] records the
@@ -89,6 +91,8 @@ let create () =
     node_handlers = Hashtbl.create 8;
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
+    widget_toggles = Hashtbl.create 8;
+    node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
     open_fors = [];
@@ -187,6 +191,8 @@ let widget kind tx =
 
 let set_text (Widget id) text tx = emit tx (Kaya_wire.tx_set_text id text)
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
+let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
+let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)
 
 let add_child (Widget parent) (Widget child) tx =
   emit tx (Kaya_wire.tx_add_child parent child)
@@ -342,29 +348,54 @@ let on_change app (Widget id) (handler : string -> unit decl) =
 let on_change_node app (Node id) (handler : Kaya_wire.value list -> string -> unit decl) =
   Hashtbl.replace app.node_changes id handler
 
+(* Register a toggle handler for a live checkbox: the box owns its
+   checked bit and reports each flip here; the app folds it into its
+   own state. *)
+let on_toggle app (Widget id) (handler : bool -> unit decl) =
+  Hashtbl.replace app.widget_toggles id handler
+
+(* Register a toggle handler for a template checkbox; it also receives
+   the stamped copy's keys, outermost first. *)
+let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit decl) =
+  Hashtbl.replace app.node_toggles id handler
+
 let dispatch_loop app =
   let rec loop () =
     match Kaya_runtime.next_occurrence () with
     | None -> () (* shutdown *)
-    | Some (kind, id, keys, text) ->
-        (match (kind = Kaya_wire.occ_kind_text_changed, text, keys) with
-        | false, _, [] ->
-            (match Hashtbl.find_opt app.widget_handlers id with
-            | Some handler -> build app handler
-            | None -> ())
-        | false, _, keys ->
-            (match Hashtbl.find_opt app.node_handlers id with
-            | Some handler -> build app (handler keys)
-            | None -> ())
-        | true, Some text, [] ->
-            (match Hashtbl.find_opt app.widget_changes id with
-            | Some handler -> build app (handler text)
-            | None -> ())
-        | true, Some text, keys ->
-            (match Hashtbl.find_opt app.node_changes id with
-            | Some handler -> build app (handler keys text)
-            | None -> ())
-        | true, None, _ -> ());
+    | Some (kind, id, keys, payload) ->
+        (if kind = Kaya_wire.occ_kind_text_changed then
+           match (payload, keys) with
+           | Some (Kaya_wire.Str text), [] ->
+               (match Hashtbl.find_opt app.widget_changes id with
+               | Some handler -> build app (handler text)
+               | None -> ())
+           | Some (Kaya_wire.Str text), keys ->
+               (match Hashtbl.find_opt app.node_changes id with
+               | Some handler -> build app (handler keys text)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_toggled then
+           match (payload, keys) with
+           | Some (Kaya_wire.Bool checked), [] ->
+               (match Hashtbl.find_opt app.widget_toggles id with
+               | Some handler -> build app (handler checked)
+               | None -> ())
+           | Some (Kaya_wire.Bool checked), keys ->
+               (match Hashtbl.find_opt app.node_toggles id with
+               | Some handler -> build app (handler keys checked)
+               | None -> ())
+           | _ -> ()
+         else
+           match keys with
+           | [] ->
+               (match Hashtbl.find_opt app.widget_handlers id with
+               | Some handler -> build app handler
+               | None -> ())
+           | keys ->
+               (match Hashtbl.find_opt app.node_handlers id with
+               | Some handler -> build app (handler keys)
+               | None -> ()));
         loop ()
   in
   loop ()

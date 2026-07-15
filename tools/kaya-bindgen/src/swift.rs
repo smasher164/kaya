@@ -131,18 +131,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let p = camel(prop);
         let pc = pascal(prop);
         let up = prop.to_uppercase();
+        let (ty, ctor) = match kind {
+            crate::PropKind::Str => ("String", "str"),
+            crate::PropKind::Bool => ("Bool", "bool"),
+        };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));
-        c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, _ {p}: String) {{"));
+        c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, _ {p}: {ty}) {{"));
         c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
-        c.line(&format!("        self.value(.str({p}))"));
+        c.line(&format!("        self.value(.{ctor}({p}))"));
         c.line("        self.end(start)");
         c.line("    }");
         c.line("");
@@ -179,15 +183,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// Decode one occurrence record (header included); nil for pad or");
     c.line("/// unknown kinds. keys is [] when id is a widget id; otherwise id is");
     c.line("/// a template node id and keys is the copy's key path, outermost");
-    c.line("/// first. text is the entry's new content for TEXT_CHANGED, nil for");
-    c.line("/// clicks.");
+    c.line("/// first. payload is the entry's new text for TEXT_CHANGED, the");
+    c.line("/// checkbox's new state for TOGGLED, nil for clicks.");
     c.line("func kayaParseOccurrence(_ rec: [UInt8])");
-    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], text: String?)?");
+    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?");
     c.line("{");
     c.line("    rec.withUnsafeBytes { raw in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
     c.line("        guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED)");
     c.line("            || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)");
+    c.line("            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)");
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -211,12 +216,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7)");
     c.line("        }");
-    c.line("        var text: String? = nil");
-    c.line("        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED) {");
-    c.line("            let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
-    c.line("            text = String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)");
+    c.line("        var payload: KayaValue? = nil");
+    c.line("        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)");
+    c.line("            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)");
+    c.line("        {");
+    c.line("            let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+    c.line("            let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
+    c.line("            if ptype == UInt32(KAYA_VALUE_BOOL) {");
+    c.line("                payload = .bool(raw[at + 8] != 0)");
+    c.line("            } else {");
+    c.line("                payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))");
+    c.line("            }");
     c.line("        }");
-    c.line("        return (kind, id, keys, text)");
+    c.line("        return (kind, id, keys, payload)");
     c.line("    }");
     c.line("}");
     c.out

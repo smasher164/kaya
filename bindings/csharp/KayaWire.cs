@@ -19,13 +19,17 @@ static class KayaWire
     public const uint KindButton = 2;
     public const uint KindLabel = 3;
     public const uint KindEntry = 4;
+    public const uint KindRow = 5;
+    public const uint KindCheckbox = 6;
     public const uint PropText = 1;
+    public const uint PropChecked = 2;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
     public const uint OccurrencePad = 0;
     public const uint OccurrenceButtonClicked = 1;
     public const uint OccurrenceTextChanged = 2;
+    public const uint OccurrenceToggled = 3;
     public const ushort TxKindCreateSignal = 1;
     public const ushort TxKindWriteSignal = 2;
     public const ushort TxKindCreateWidget = 3;
@@ -46,6 +50,7 @@ static class KayaWire
     public const ushort ApplyKindDestroy = 5;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
+    public const ushort OccKindToggled = 3;
 
     static void Pad(BinaryWriter w)
     {
@@ -242,18 +247,44 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant checked value.
+    public static byte[] TxSetChecked(ulong widgetId, bool @checked)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropChecked); w.Write(SourceConst);
+        EncodeValue(w, @checked);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound checked value.
+    public static byte[] TxBindChecked(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropChecked); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to the element of the enclosing For, `level` Fors up.
+    public static byte[] TxBindCheckedElement(ulong widgetId, uint level = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropChecked); w.Write(SourceElement); w.Write(level); w.Write(0u);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
     /// template node id and keys is the copy's key path.
     public static bool ParseOccurrence(
-        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out string text)
+        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)
     {
         id = 0;
         keys = new List<object>();
-        text = null;
+        payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged
+            && kind != OccKindToggled)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         uint pathLen = BitConverter.ToUInt32(rec, 16);
@@ -271,10 +302,14 @@ static class KayaWire
             }
             at += 8 + ((vlen + 7) & ~7);
         }
-        if (kind == OccKindTextChanged)
+        if (kind == OccKindTextChanged || kind == OccKindToggled)
         {
-            int tlen = BitConverter.ToInt32(rec, at + 4);
-            text = Encoding.UTF8.GetString(rec, at + 8, tlen);
+            uint ptype = BitConverter.ToUInt32(rec, at);
+            int plen = BitConverter.ToInt32(rec, at + 4);
+            if (ptype == ValueBool)
+                payload = rec[at + 8] != 0;
+            else
+                payload = Encoding.UTF8.GetString(rec, at + 8, plen);
         }
         return true;
     }

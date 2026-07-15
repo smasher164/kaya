@@ -32,6 +32,8 @@ module KayaApp
     onClickNode,
     onChange,
     onChangeNode,
+    onToggle,
+    onToggleNode,
     signal,
     writeSignal,
     at,
@@ -42,6 +44,7 @@ module KayaApp
     count,
     mount,
     bindText,
+    bindChecked,
     bindTextElement,
   )
 where
@@ -227,6 +230,7 @@ class Monad m => Declare m where
   type El m
   widget :: Word32 -> m (El m)
   setText :: El m -> String -> m ()
+  setChecked :: El m -> Bool -> m ()
   addChild :: El m -> El m -> m ()
   collection :: m Collection
   -- | A For over a collection: the do-block declares the template;
@@ -242,6 +246,7 @@ instance Declare Build where
     emitB (W.txCreateWidget n kind)
     return (Widget n)
   setText (Widget n) text = emitB (W.txSetText n text)
+  setChecked (Widget n) checked = emitB (W.txSetChecked n checked)
   addChild (Widget p) (Widget child) = emitB (W.txAddChild p child)
   collection = Build $ \s ->
     let c = bCounters s
@@ -267,6 +272,7 @@ instance Declare Tpl where
     emitT (W.txCreateWidget n kind)
     return (Node n)
   setText (Node n) text = emitT (W.txSetText n text)
+  setChecked (Node n) checked = emitT (W.txSetChecked n checked)
   addChild (Node p) (Node child) = emitT (W.txAddChild p child)
   collection = Tpl $ \s ->
     let c = bCounters s
@@ -328,6 +334,9 @@ mount (Widget n) = emitB (W.txMount 0 n)
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
+bindChecked :: Widget -> Signal -> Build ()
+bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
+
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level)
 
@@ -340,7 +349,9 @@ data App = App
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
-    appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ()))
+    appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
+    appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
+    appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ()))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -383,6 +394,19 @@ onChangeNode :: App -> Node -> ([W.Value] -> String -> IO ()) -> IO ()
 onChangeNode app (Node n) handler =
   modifyIORef' (appNodeChanges app) (Map.insert n handler)
 
+-- | Register a toggle handler for a live checkbox: the box owns its
+-- checked bit and reports each flip here; the app folds it into its
+-- own state.
+onToggle :: App -> Widget -> (Bool -> IO ()) -> IO ()
+onToggle app (Widget n) handler =
+  modifyIORef' (appWidgetToggles app) (Map.insert n handler)
+
+-- | Register a toggle handler for a template checkbox; it also
+-- receives the stamped copy's keys, outermost first.
+onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
+onToggleNode app (Node n) handler =
+  modifyIORef' (appNodeToggles app) (Map.insert n handler)
+
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
 -- which must be the process main thread (GHC's main runs bound to it;
@@ -393,6 +417,8 @@ kayaMain setup = do
     App
       <$> newIORef (Counters 0 0 0 0)
       <*> newIORef (Map.empty, Map.empty)
+      <*> newIORef Map.empty
+      <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty
@@ -409,9 +435,9 @@ dispatchLoop app = do
   occurrence <- nextOccurrence
   case occurrence of
     Nothing -> return () -- shutdown
-    Just (kind, ident, keys, text)
+    Just (kind, ident, keys, payload)
       | kind == W.occKindTextChanged -> do
-          let content = maybe "" id text
+          let content = case payload of Just (W.VStr s) -> s; _ -> ""
           case keys of
             [] -> do
               handlers <- readIORef (appWidgetChanges app)
@@ -419,6 +445,16 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (appNodeChanges app)
               mapM_ (\h -> h keys content) (Map.lookup ident handlers)
+          dispatchLoop app
+      | kind == W.occKindToggled -> do
+          let checked = case payload of Just (W.VBool b) -> b; _ -> False
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetToggles app)
+              mapM_ ($ checked) (Map.lookup ident handlers)
+            _ -> do
+              handlers <- readIORef (appNodeToggles app)
+              mapM_ (\h -> h keys checked) (Map.lookup ident handlers)
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)

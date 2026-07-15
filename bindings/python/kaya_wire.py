@@ -16,13 +16,17 @@ KIND_COLUMN = 1
 KIND_BUTTON = 2
 KIND_LABEL = 3
 KIND_ENTRY = 4
+KIND_ROW = 5
+KIND_CHECKBOX = 6
 PROP_TEXT = 1
+PROP_CHECKED = 2
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
 OCCURRENCE_PAD = 0
 OCCURRENCE_BUTTON_CLICKED = 1
 OCCURRENCE_TEXT_CHANGED = 2
+OCCURRENCE_TOGGLED = 3
 
 TX_CREATE_SIGNAL = 1
 TX_WRITE_SIGNAL = 2
@@ -44,6 +48,7 @@ APPLY_MOUNT = 4
 APPLY_DESTROY = 5
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
+OCC_TOGGLED = 3
 
 
 def _pad(b):
@@ -128,7 +133,7 @@ def tx_template_end():
 
 
 def tx_set_text(widget_id, text):
-    """set_property with a constant text value."""
+    """set_property with a constant text value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TEXT, SOURCE_CONST) + _enc.value(text))
 
 
@@ -140,6 +145,21 @@ def tx_bind_text(widget_id, signal_id):
 def tx_bind_text_element(widget_id, level=0):
     """set_property bound to the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT, SOURCE_ELEMENT, level, 0))
+
+
+def tx_set_checked(widget_id, checked):
+    """set_property with a constant checked value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_CHECKED, SOURCE_CONST) + _enc.value(checked))
+
+
+def tx_bind_checked(widget_id, signal_id):
+    """set_property with a signal-bound checked value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CHECKED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_checked_element(widget_id, level=0):
+    """set_property bound to the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CHECKED, SOURCE_ELEMENT, level, 0))
 
 
 def parse_value(buf, at):
@@ -161,13 +181,13 @@ def parse_value(buf, at):
 def parse_occurrence(buf):
     """Decode one occurrence record (header included).
 
-    Returns (kind, id, keys, text). keys is [] when id is a
+    Returns (kind, id, keys, payload). keys is [] when id is a
     widget id, else id is a template node id and keys is the
     copy's key path. text is the entry's new content for
     OCC_TEXT_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED):
         return kind, None, [], None
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
@@ -175,7 +195,7 @@ def parse_occurrence(buf):
     for _ in range(path_len):
         key, at = parse_value(buf, at)
         keys.append(key)
-    text = None
-    if kind == OCC_TEXT_CHANGED:
-        text, at = parse_value(buf, at)
-    return kind, ident, keys, text
+    payload = None
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED):
+        payload, at = parse_value(buf, at)
+    return kind, ident, keys, payload

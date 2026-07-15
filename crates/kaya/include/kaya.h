@@ -14,6 +14,8 @@
 
 #define REC_TEXT_CHANGED 2
 
+#define REC_TOGGLED 3
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -68,7 +70,13 @@
 
 #define KIND_ENTRY 4
 
+#define KIND_ROW 5
+
+#define KIND_CHECKBOX 6
+
 #define PROP_TEXT 1
+
+#define PROP_CHECKED 2
 
 #define SOURCE_CONST 0
 
@@ -88,6 +96,8 @@
 #define KAYA_OCCURRENCE_BUTTON_CLICKED 1
 
 #define KAYA_OCCURRENCE_TEXT_CHANGED 2
+
+#define KAYA_OCCURRENCE_TOGGLED 3
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -191,10 +201,16 @@
 
 #define KAYA_KIND_ENTRY 4
 
+#define KAYA_KIND_ROW 5
+
+#define KAYA_KIND_CHECKBOX 6
+
 /**
  * Property keys.
  */
 #define KAYA_PROP_TEXT 1
+
+#define KAYA_PROP_CHECKED 2
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -255,6 +271,7 @@ typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
   uintptr_t (*next_commands)(uint8_t*, uintptr_t);
   void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
+  void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
 } KayaHostApi;
 
 
@@ -306,6 +323,14 @@ bool kaya_wait_occurrences(void);
  * kaya_run.
  */
 void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
+
+/**
+ * Presentation side: emit a checkbox toggle, exactly as a backend's
+ * change handler would — `tag` is the tag bytes delivered with the
+ * checkbox's CREATE record, `checked` the new state (0 or 1). Do not
+ * combine with kaya_run.
+ */
+void kaya_emit_toggled(const uint8_t *tag, uintptr_t tag_len, uint8_t checked);
 
 /**
  * Presentation side: emit an entry edit, exactly as a backend's

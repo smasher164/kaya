@@ -112,15 +112,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
-    for (prop, _) in prop_variants(spec) {
+    for (prop, _, kind) in prop_variants(spec) {
         let p = camel(prop);
         let pc = pascal(prop);
+        let (ty, ctor) = match kind {
+            crate::PropKind::Str => ("String", "VStr"),
+            crate::PropKind::Bool => ("Bool", "VBool"),
+        };
         c.line("");
         c.line(&format!("-- set_property with a constant {prop} value."));
-        c.line(&format!("txSet{pc} :: Word64 -> String -> Builder"));
+        c.line(&format!("txSet{pc} :: Word64 -> {ty} -> Builder"));
         c.line(&format!("txSet{pc} widgetId {p} = wireRecord txKindSetProperty"));
         c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceConst"));
-        c.line(&format!("    <> encodeValue (VStr {p}))"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
         c.line("");
         c.line(&format!("-- set_property with a signal-bound {prop} value."));
         c.line(&format!("txBind{pc} :: Word64 -> Word64 -> Builder"));
@@ -159,14 +163,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  return (v, next)");
     c.line("");
     c.line("-- Decode one occurrence record at `rec` (header included). Just");
-    c.line("-- (kind, id, keys, text) — keys is [] when id is a widget id, else");
-    c.line("-- id is a template node id and keys is the copy's key path; text is");
-    c.line("-- Just for text_changed, Nothing for clicks. Nothing for pad or");
-    c.line("-- unknown kinds.");
-    c.line("parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe String))");
+    c.line("-- (kind, id, keys, payload) — keys is [] when id is a widget id,");
+    c.line("-- else id is a template node id and keys is the copy's key path;");
+    c.line("-- payload is Just for text_changed (VStr) and toggled (VBool),");
+    c.line("-- Nothing for clicks. Nothing for pad or unknown kinds.");
+    c.line("parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))");
     c.line("parseOccurrence rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
     c.line("  if kind /= occKindButtonClicked && kind /= occKindTextChanged");
+    c.line("       && kind /= occKindToggled");
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
@@ -176,13 +181,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            (v, next) <- parseValue rec at");
     c.line("            go next (n - 1 :: Word32) (v : acc)");
     c.line("      (keys, at') <- go (24 :: Int) pathLen []");
-    c.line("      text <-");
-    c.line("        if kind == occKindTextChanged");
+    c.line("      payload <-");
+    c.line("        if kind == occKindTextChanged || kind == occKindToggled");
     c.line("          then do");
     c.line("            (v, _) <- parseValue rec at'");
-    c.line("            return (case v of VStr s -> Just s; _ -> Nothing)");
+    c.line("            return (Just v)");
     c.line("          else return Nothing");
-    c.line("      return (Just (kind, ident, keys, text))");
+    c.line("      return (Just (kind, ident, keys, payload))");
     c.out
 }
 

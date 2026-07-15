@@ -28,18 +28,22 @@ use crate::scene::Scene;
 
 enum NativeWidget {
     Column(Retained<NSStackView>),
+    Row(Retained<NSStackView>),
     Button(Retained<NSButton>),
     Label(Retained<NSTextField>),
     Entry(Retained<NSTextField>),
+    Checkbox(Retained<NSButton>),
 }
 
 impl NativeWidget {
     fn view(&self) -> &objc2_app_kit::NSView {
         match self {
             NativeWidget::Column(v) => v,
+            NativeWidget::Row(v) => v,
             NativeWidget::Button(v) => v,
             NativeWidget::Label(v) => v,
             NativeWidget::Entry(v) => v,
+            NativeWidget::Checkbox(v) => v,
         }
     }
 }
@@ -59,6 +63,7 @@ struct CoreState {
     // script sets the field's text and emits the change through the
     // same path a keystroke would.
     selftest_entry: Option<(Retained<NSTextField>, Retained<EntryDelegate>)>,
+    selftest_checkbox: Option<Retained<NSButton>>,
     // Held so targets and the delegates outlive the objects that
     // reference them weakly.
     _targets: Vec<Retained<ButtonTarget>>,
@@ -109,6 +114,13 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     stack.setSpacing(8.0);
                     NativeWidget::Column(stack)
                 }
+                WidgetKind::Row => {
+                    let stack = NSStackView::new(mtm);
+                    stack.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
+                    stack.setAlignment(NSLayoutAttribute::CenterY);
+                    stack.setSpacing(8.0);
+                    NativeWidget::Row(stack)
+                }
                 WidgetKind::Button => {
                     // The tag is the click's identity, emitted verbatim;
                     // this backend never learns what it means.
@@ -135,6 +147,27 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         core.selftest_label = Some(label.clone());
                     }
                     NativeWidget::Label(label)
+                }
+                WidgetKind::Checkbox => {
+                    // The tag is the toggle's identity, emitted with the
+                    // new state; the box owns its checked bit the way an
+                    // entry owns its text.
+                    let tag = tag.expect("checkboxes carry a tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
+                    let boxed = unsafe {
+                        NSButton::checkboxWithTitle_target_action(
+                            &NSString::from_str(""),
+                            Some(target_obj),
+                            Some(sel!(toggled:)),
+                            mtm,
+                        )
+                    };
+                    core._targets.push(target);
+                    if core.selftest_checkbox.is_none() {
+                        core.selftest_checkbox = Some(boxed.clone());
+                    }
+                    NativeWidget::Checkbox(boxed)
                 }
                 WidgetKind::Entry => {
                     // Uncontrolled: the field owns its text; the
@@ -170,6 +203,16 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
                     field.setStringValue(&NSString::from_str(&s));
                 }
+                (NativeWidget::Checkbox(boxed), Prop::Text, Value::Str(s)) => {
+                    boxed.setTitle(&NSString::from_str(&s));
+                }
+                (NativeWidget::Checkbox(boxed), Prop::Checked, Value::Bool(on)) => {
+                    boxed.setState(if on {
+                        objc2_app_kit::NSControlStateValueOn
+                    } else {
+                        objc2_app_kit::NSControlStateValueOff
+                    });
+                }
                 (_, prop, value) => {
                     panic!("kaya: appkit cannot apply {prop:?} = {value:?} here")
                 }
@@ -185,7 +228,9 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 .view()
                 .retain();
             match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(stack) => stack.addArrangedSubview(&child_view),
+                NativeWidget::Column(stack) | NativeWidget::Row(stack) => {
+                    stack.addArrangedSubview(&child_view)
+                }
                 _ => panic!("kaya: add_child parent is not a container"),
             }
         }
@@ -214,6 +259,17 @@ define_class!(
             self.ivars()
                 .occurrences
                 .send_click_tag(&self.ivars().tag);
+        }
+
+        #[unsafe(method(toggled:))]
+        fn toggled(&self, sender: Option<&AnyObject>) {
+            let checked = sender
+                .and_then(|s| s.downcast_ref::<NSButton>())
+                .map(|b| b.state() == objc2_app_kit::NSControlStateValueOn)
+                .unwrap_or(false);
+            self.ivars()
+                .occurrences
+                .send_toggle_tag(&self.ivars().tag, checked);
         }
     }
 );
@@ -314,6 +370,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 
     match std::env::var("KAYA_SELFTEST") {
         Ok(script) if script == "entry" => spawn_entry_selftest(),
+        Ok(script) if script == "gallery" => spawn_gallery_selftest(),
         Ok(_) => spawn_selftest(),
         Err(_) => {}
     }
@@ -328,6 +385,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             selftest_last_button: None,
             selftest_label: None,
             selftest_entry: None,
+            selftest_checkbox: None,
             _targets: Vec::new(),
             _entry_delegates: Vec::new(),
             _window: window,
@@ -394,6 +452,44 @@ fn spawn_selftest() {
                 let label = core.selftest_label.as_ref().expect("the scene has a label");
                 let text = label.stringValue().to_string();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The gallery scene's round trip (KAYA_SELFTEST=gallery): performClick
+/// on the checkbox — the real user path, flipping state and firing the
+/// action — then read the status label.
+fn spawn_gallery_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let boxed = core
+                    .selftest_checkbox
+                    .as_ref()
+                    .expect("the scene has a checkbox");
+                unsafe { boxed.performClick(None) };
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let label = core.selftest_label.as_ref().expect("the scene has a label");
+                let text = label.stringValue().to_string();
+                if text == "urgent: true" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

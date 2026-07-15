@@ -26,7 +26,11 @@ class MainActivity : Activity() {
         // scene selector (see the rust example's android shim).
         System.loadLibrary("kaya")
         KayaRing.attach(this)
-        val scene = if (System.getenv("KAYA_SELFTEST") == "entry") Entry::app else Milestone2::app
+        val scene = when (System.getenv("KAYA_SELFTEST")) {
+            "entry" -> Entry::app
+            "gallery" -> Gallery::app
+            else -> Milestone2::app
+        }
         Thread(scene, "kaya-app").start()
     }
 }

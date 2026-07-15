@@ -47,6 +47,7 @@ const OP_SELFTEST_CLICK: jlong = 1;
 const OP_SELFTEST_CHECK: jlong = 2;
 const OP_SELFTEST_CLICK_LAST: jlong = 3;
 const OP_SELFTEST_SET_TEXT: jlong = 4;
+const OP_SELFTEST_TOGGLE: jlong = 5;
 
 /// Shared with the app thread (doorbell) and the selftest thread.
 struct Globals {
@@ -57,6 +58,7 @@ struct Globals {
     selftest_check: GlobalRef,
     selftest_click_last: GlobalRef,
     selftest_set_text: GlobalRef,
+    selftest_toggle: GlobalRef,
 }
 
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
@@ -87,6 +89,7 @@ struct CoreState {
     selftest_entry: Option<GlobalRef>,
     selftest_last_button: Option<GlobalRef>,
     selftest_label: Option<GlobalRef>,
+    selftest_checkbox: Option<GlobalRef>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -229,6 +232,15 @@ fn setup(
             fn_ptr: native_text_changed as *mut _,
         }],
     )?;
+    let check_class = env.find_class("dev/kaya/KayaCheckListener")?;
+    env.register_native_methods(
+        &check_class,
+        &[NativeMethod {
+            name: "nativeCheckedChanged".into(),
+            sig: "(JZ)V".into(),
+            fn_ptr: native_checked_changed as *mut _,
+        }],
+    )?;
 
     // The main-thread hops posted from native threads. Instances are made
     // here, on the UI thread, where find_class sees the app class loader;
@@ -242,6 +254,7 @@ fn setup(
     let selftest_check = make_runnable(env, OP_SELFTEST_CHECK)?;
     let selftest_click_last = make_runnable(env, OP_SELFTEST_CLICK_LAST)?;
     let selftest_set_text = make_runnable(env, OP_SELFTEST_SET_TEXT)?;
+    let selftest_toggle = make_runnable(env, OP_SELFTEST_TOGGLE)?;
 
     let globals = Globals {
         vm: env.get_java_vm()?,
@@ -251,6 +264,7 @@ fn setup(
         selftest_check,
         selftest_click_last,
         selftest_set_text,
+        selftest_toggle,
     };
     let _ = GLOBALS.set(globals);
 
@@ -264,6 +278,7 @@ fn setup(
         selftest_last_button: None,
         selftest_label: None,
         selftest_entry: None,
+        selftest_checkbox: None,
     });
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {
@@ -302,9 +317,10 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
         ApplyOp::Create { id, kind, tag } => {
             let class = match kind {
                 WidgetKind::Entry => "android/widget/EditText",
-                WidgetKind::Column => "android/widget/LinearLayout",
+                WidgetKind::Column | WidgetKind::Row => "android/widget/LinearLayout",
                 WidgetKind::Button => "android/widget/Button",
                 WidgetKind::Label => "android/widget/TextView",
+                WidgetKind::Checkbox => "android/widget/CheckBox",
             };
             let view = env.new_object(
                 class,
@@ -316,6 +332,11 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 WidgetKind::Column => {
                     // LinearLayout.VERTICAL = 1, Gravity.CENTER = 17.
                     env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(1)])?;
+                    env.call_method(&view, "setGravity", "(I)V", &[JValue::Int(17)])?;
+                }
+                WidgetKind::Row => {
+                    // LinearLayout.HORIZONTAL = 0, Gravity.CENTER = 17.
+                    env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(0)])?;
                     env.call_method(&view, "setGravity", "(I)V", &[JValue::Int(17)])?;
                 }
                 WidgetKind::Button => {
@@ -360,6 +381,27 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                         &[JValue::Object(&watcher)],
                     )?;
                 }
+                WidgetKind::Checkbox => {
+                    // The box owns its checked bit; the listener reports
+                    // each flip (programmatic setChecked included, which
+                    // is what lets the selftest click like a user) with
+                    // the box's identity tag.
+                    let tag = tag.expect("checkboxes carry a tag");
+                    let key = NEXT_TAG_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    TAGS.lock().unwrap().as_mut().expect("attach ran").insert(key, tag);
+                    tag_key = Some(key);
+                    let listener = env.new_object(
+                        "dev/kaya/KayaCheckListener",
+                        "(J)V",
+                        &[JValue::Long(key as jlong)],
+                    )?;
+                    env.call_method(
+                        &view,
+                        "setOnCheckedChangeListener",
+                        "(Landroid/widget/CompoundButton$OnCheckedChangeListener;)V",
+                        &[JValue::Object(&listener)],
+                    )?;
+                }
             }
             let view = env.new_global_ref(view)?;
             let mut core = CORE.lock().unwrap();
@@ -376,6 +418,9 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 }
                 WidgetKind::Entry if core.selftest_entry.is_none() => {
                     core.selftest_entry = Some(view.clone());
+                }
+                WidgetKind::Checkbox if core.selftest_checkbox.is_none() => {
+                    core.selftest_checkbox = Some(view.clone());
                 }
                 _ => {}
             }
@@ -409,13 +454,17 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             match (prop, value) {
                 (Prop::Text, Value::Str(s)) => {
                     let text = env.new_string(s)?;
-                    // Button and TextView share setText(CharSequence).
+                    // Button, TextView, and CheckBox share
+                    // setText(CharSequence).
                     env.call_method(
                         view.as_obj(),
                         "setText",
                         "(Ljava/lang/CharSequence;)V",
                         &[JValue::Object(&text)],
                     )?;
+                }
+                (Prop::Checked, Value::Bool(b)) => {
+                    env.call_method(view.as_obj(), "setChecked", "(Z)V", &[JValue::Bool(b as u8)])?;
                 }
                 (prop, value) => {
                     panic!("kaya: android cannot apply {prop:?} = {value:?} here")
@@ -425,7 +474,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
         ApplyOp::AddChild { parent, child } => {
             let (parent_view, parent_kind) = with_widget(parent, |w| (w.view.clone(), w.kind));
             assert!(
-                parent_kind == WidgetKind::Column,
+                matches!(parent_kind, WidgetKind::Column | WidgetKind::Row),
                 "kaya: add_child parent is not a container"
             );
             let child_view = with_widget(child, |w| w.view.clone());
@@ -463,6 +512,7 @@ extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
         OP_SELFTEST_CLICK_LAST => selftest_click(&mut env, true),
         OP_SELFTEST_CHECK => selftest_check(&mut env),
         OP_SELFTEST_SET_TEXT => selftest_set_text(&mut env),
+        OP_SELFTEST_TOGGLE => selftest_toggle(&mut env),
         _ => Ok(()),
     };
     if let Err(e) = result {
@@ -492,6 +542,24 @@ extern "system" fn native_text_changed(
         .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
     if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
         sink.send_text_tag(&tag, &text);
+    }
+}
+
+/// KayaCheckListener.nativeCheckedChanged: emit the checkbox's tag plus
+/// its new state.
+extern "system" fn native_checked_changed(
+    _env: JNIEnv,
+    _this: JObject,
+    tag_key: jlong,
+    checked: jni::sys::jboolean,
+) {
+    let tag = TAGS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
+    if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
+        sink.send_toggle_tag(&tag, checked != 0);
     }
 }
 
@@ -534,6 +602,15 @@ fn spawn_selftest() {
 
     std::thread::spawn(|| {
         let Some(g) = GLOBALS.get() else { return };
+        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("gallery") {
+            // The gallery scene: setChecked fires the listener — the
+            // same path a tap takes — then the verdict.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            post(&g.selftest_toggle);
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            post(&g.selftest_check);
+            return;
+        }
         if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
             // The entry scene: setText fires the watcher — the same
             // path a keystroke takes — then add, then the verdict.
@@ -596,6 +673,20 @@ fn selftest_set_text(env: &mut JNIEnv) -> jni::errors::Result<()> {
     Ok(())
 }
 
+fn selftest_toggle(env: &mut JNIEnv) -> jni::errors::Result<()> {
+    let checkbox = {
+        let core = CORE.lock().unwrap();
+        let Some(core) = core.as_ref() else {
+            return Ok(());
+        };
+        core.selftest_checkbox.clone()
+    };
+    if let Some(checkbox) = checkbox {
+        env.call_method(checkbox.as_obj(), "setChecked", "(Z)V", &[JValue::Bool(1)])?;
+    }
+    Ok(())
+}
+
 fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let label = {
         let core = CORE.lock().unwrap();
@@ -616,10 +707,10 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
         .l()?;
     let text: String = env.get_string(&JString::from(string))?.into();
 
-    let expected = if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
-        "added milk, 1 total"
-    } else {
-        "removed g2/a, 0 left"
+    let expected = match std::env::var("KAYA_SELFTEST").as_deref() {
+        Ok("entry") => "added milk, 1 total",
+        Ok("gallery") => "urgent: true",
+        _ => "removed g2/a, 0 left",
     };
     let code = if text == expected {
         log::info!("KAYA_SELFTEST: OK ({text})");
@@ -732,6 +823,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_text as *mut _,
             },
             NativeMethod {
+                name: "emitToggled".into(),
+                sig: "([BZ)V".into(),
+                fn_ptr: present_emit_toggled as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -768,6 +864,18 @@ extern "system" fn present_emit_text(
             text.len(),
         )
     };
+}
+
+extern "system" fn present_emit_toggled(
+    mut env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    checked: jni::sys::jboolean,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the checkbox tag failed");
+    unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,

@@ -70,6 +70,19 @@ const fn f(name: &'static str, ty: FieldTy) -> Field {
     Field { name, ty }
 }
 
+/// A property's value type, driving the generated typed setters:
+/// set_text takes a string, set_checked a bool, in every language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropKind {
+    Str,
+    Bool,
+}
+
+/// Properties with their wire ids and value kinds; kept in lockstep
+/// with the "prop" enum (pinned by test).
+pub const PROPS: &[(&'static str, u32, PropKind)] =
+    &[("text", 1, PropKind::Str), ("checked", 2, PropKind::Bool)];
+
 /// The variable tail of SET_PROPERTY, after `source`: a value for
 /// SOURCE_CONST, a u64 signal id for SOURCE_SIGNAL, or u32 level + u32
 /// reserved for SOURCE_ELEMENT. The one record whose layout depends on
@@ -250,6 +263,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   one value. Identity reads as in button_clicked. The widget \
                   owns its text; the app folds these into its own model.",
         },
+        Record {
+            kind: 3,
+            name: "toggled",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            doc: "path_len key values follow, then the checkbox's new state \
+                  as one Bool value. Same shape and ownership stance as \
+                  text_changed.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -258,11 +283,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "kind",
-            variants: &[("column", 1), ("button", 2), ("label", 3), ("entry", 4)],
+            variants: &[
+                ("column", 1),
+                ("button", 2),
+                ("label", 3),
+                ("entry", 4),
+                ("row", 5),
+                ("checkbox", 6),
+            ],
         },
         EnumSpec {
             name: "prop",
-            variants: &[("text", 1)],
+            variants: &[("text", 1), ("checked", 2)],
         },
         EnumSpec {
             name: "source",
@@ -270,7 +302,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "occurrence",
-            variants: &[("pad", 0), ("button_clicked", 1), ("text_changed", 2)],
+            variants: &[
+                ("pad", 0),
+                ("button_clicked", 1),
+                ("text_changed", 2),
+                ("toggled", 3),
+            ],
         },
     ],
 };
@@ -384,6 +421,24 @@ mod tests {
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
         assert_eq!(SPEC.occurrence[1].kind, crate::ring::REC_TEXT_CHANGED);
+        assert_eq!(SPEC.occurrence[2].kind, crate::ring::REC_TOGGLED);
+    }
+
+    /// PROPS and the "prop" enum stay in lockstep: same names, same
+    /// ids, same order — the enum feeds constants, PROPS feeds the
+    /// typed setter generation.
+    #[test]
+    fn props_match_prop_enum() {
+        let prop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "prop")
+            .expect("spec has a prop enum");
+        assert_eq!(PROPS.len(), prop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in PROPS.iter().zip(prop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
     }
 
     #[test]
@@ -399,13 +454,17 @@ mod tests {
                     ("kind", "button") => wire::KIND_BUTTON,
                     ("kind", "label") => wire::KIND_LABEL,
                     ("kind", "entry") => wire::KIND_ENTRY,
+                    ("kind", "row") => wire::KIND_ROW,
+                    ("kind", "checkbox") => wire::KIND_CHECKBOX,
                     ("prop", "text") => wire::PROP_TEXT,
+                    ("prop", "checked") => wire::PROP_CHECKED,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,
                     ("occurrence", "pad") => crate::ring::REC_PAD as u32,
                     ("occurrence", "button_clicked") => crate::ring::REC_BUTTON_CLICKED as u32,
                     ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
+                    ("occurrence", "toggled") => crate::ring::REC_TOGGLED as u32,
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);

@@ -11,7 +11,7 @@ export CARGO_TARGET_DIR=/work/target-linux
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -21,6 +21,7 @@ status=0
 mkdir -p /tmp/cs
 cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj \
     crates/kaya/examples/entry.cs crates/kaya/examples/entry.csproj \
+    crates/kaya/examples/gallery.cs crates/kaya/examples/gallery.csproj \
     bindings/csharp/*.cs /tmp/cs/
 
 # Headless Weston for the Wayland leg.
@@ -63,6 +64,11 @@ clang crates/kaya/examples/entry.c \
     -o /tmp/entry-c \
     -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
     || status=1
+clang crates/kaya/examples/gallery.c \
+    -I crates/kaya/include -I bindings/c \
+    -o /tmp/gallery-c \
+    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
+    || status=1
 
 # The OCaml guest (direct ring: Bigarray data path + noalloc cursor
 # stubs). ocamlopt writes its intermediates beside the source, hence the
@@ -73,7 +79,8 @@ ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
 mkdir -p /tmp/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml /tmp/ocaml/
+    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml \
+    crates/kaya/examples/gallery.ml /tmp/ocaml/
 (cd /tmp/ocaml && ocamlfind ocamlopt \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
@@ -82,6 +89,10 @@ cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
     kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
     -o entry-ocaml) || status=1
+(cd /tmp/ocaml && ocamlfind ocamlopt \
+    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml gallery.ml \
+    -o gallery-ocaml) || status=1
 
 # The Haskell guest (direct ring: inline peeks + the same cursor stubs).
 mkdir -p /tmp/haskell
@@ -94,6 +105,12 @@ mkdir -p /tmp/haskell-entry
 ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-entry \
     -o /tmp/haskell/entry-hs \
     bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
+    -L"$CARGO_TARGET_DIR/debug" -lkaya \
+    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
+mkdir -p /tmp/haskell-gallery
+ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-gallery \
+    -o /tmp/haskell/gallery-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/gallery.hs \
     -L"$CARGO_TARGET_DIR/debug" -lkaya \
     -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
 
@@ -115,6 +132,17 @@ for proto in x11 wayland; do
         dotnet run --project /tmp/cs/entry.csproj
     run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" /tmp/ocaml/entry-ocaml
     run "$proto" entry-haskell env KAYA_SELFTEST=entry /tmp/haskell/entry-hs
+    # The gallery scene (row + checkbox): the toggle arrives as an
+    # occurrence the app answers with the status signal.
+    run "$proto" gallery-rust env KAYA_SELFTEST=gallery "$CARGO_TARGET_DIR/debug/examples/gallery"
+    run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/gallery-c
+    run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
+        python3 crates/kaya/examples/gallery.py
+    run "$proto" gallery-go env KAYA_SELFTEST=gallery go run crates/kaya/examples/gallery.go
+    run "$proto" gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
+        dotnet run --project /tmp/cs/gallery.csproj
+    run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" /tmp/ocaml/gallery-ocaml
+    run "$proto" gallery-haskell env KAYA_SELFTEST=gallery /tmp/haskell/gallery-hs
 done
 
 kill "$WESTON_PID" 2>/dev/null

@@ -211,6 +211,38 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_property with a constant checked value.
+    mutating func setChecked(_ widgetId: UInt64, _ checked: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CHECKED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(checked))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound checked value.
+    mutating func bindChecked(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CHECKED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to the element of the enclosing For,
+    /// `level` Fors up (0 = nearest).
+    mutating func bindCheckedElement(_ widgetId: UInt64, level: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_CHECKED))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(0)
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -221,15 +253,16 @@ struct KayaTx {
 /// Decode one occurrence record (header included); nil for pad or
 /// unknown kinds. keys is [] when id is a widget id; otherwise id is
 /// a template node id and keys is the copy's key path, outermost
-/// first. text is the entry's new content for TEXT_CHANGED, nil for
-/// clicks.
+/// first. payload is the entry's new text for TEXT_CHANGED, the
+/// checkbox's new state for TOGGLED, nil for clicks.
 func kayaParseOccurrence(_ rec: [UInt8])
-    -> (kind: UInt16, id: UInt64, keys: [KayaValue], text: String?)?
+    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?
 {
     rec.withUnsafeBytes { raw in
         let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
         guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED)
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
@@ -253,11 +286,18 @@ func kayaParseOccurrence(_ rec: [UInt8])
             }
             at += 8 + ((vlen + 7) & ~7)
         }
-        var text: String? = nil
-        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED) {
-            let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
-            text = String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)
+        var payload: KayaValue? = nil
+        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
+        {
+            let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+            let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+            if ptype == UInt32(KAYA_VALUE_BOOL) {
+                payload = .bool(raw[at + 8] != 0)
+            } else {
+                payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))
+            }
         }
-        return (kind, id, keys, text)
+        return (kind, id, keys, payload)
     }
 }

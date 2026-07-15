@@ -3,7 +3,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, PropKind, prop_variants, record_params};
 
 /// Names spec identifiers must avoid: this emitter's helpers, plus
 /// Python's keywords and builtins a parameter would shadow.
@@ -108,21 +108,31 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_{}, {})", r.name.to_uppercase(), body));
     }
 
-    c.line("");
-    c.line("");
-    c.line("def tx_set_text(widget_id, text):");
-    c.line("    \"\"\"set_property with a constant text value.\"\"\"");
-    c.line("    return record(TX_SET_PROPERTY, struct.pack(\"<QII\", widget_id, PROP_TEXT, SOURCE_CONST) + _enc.value(text))");
-    c.line("");
-    c.line("");
-    c.line("def tx_bind_text(widget_id, signal_id):");
-    c.line("    \"\"\"set_property with a signal-bound text value.\"\"\"");
-    c.line("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIQ\", widget_id, PROP_TEXT, SOURCE_SIGNAL, signal_id))");
-    c.line("");
-    c.line("");
-    c.line("def tx_bind_text_element(widget_id, level=0):");
-    c.line("    \"\"\"set_property bound to the element of the enclosing For, `level` Fors up.\"\"\"");
-    c.line("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_TEXT, SOURCE_ELEMENT, level, 0))");
+    // The set_property trios, one per property: spec-driven so new
+    // props reach every binding without emitter edits. Python's value
+    // encoder is type-generic, so PropKind only shapes the docstring.
+    for (prop, _, kind) in prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let ty = match kind {
+            PropKind::Str => "str",
+            PropKind::Bool => "bool",
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_{prop}(widget_id, {prop}):"));
+        c.line(&format!("    \"\"\"set_property with a constant {prop} value ({ty}).\"\"\""));
+        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QII\", widget_id, PROP_{up}, SOURCE_CONST) + _enc.value({prop}))"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_{prop}(widget_id, signal_id):"));
+        c.line(&format!("    \"\"\"set_property with a signal-bound {prop} value.\"\"\""));
+        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIQ\", widget_id, PROP_{up}, SOURCE_SIGNAL, signal_id))"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_{prop}_element(widget_id, level=0):"));
+        c.line(&format!("    \"\"\"set_property bound to the element of the enclosing For, `level` Fors up.\"\"\""));
+        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_{up}, SOURCE_ELEMENT, level, 0))"));
+    }
     c.line("");
     c.line("");
     c.line("def parse_value(buf, at):");
@@ -144,13 +154,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("def parse_occurrence(buf):");
     c.line("    \"\"\"Decode one occurrence record (header included).");
     c.line("");
-    c.line("    Returns (kind, id, keys, text). keys is [] when id is a");
+    c.line("    Returns (kind, id, keys, payload). keys is [] when id is a");
     c.line("    widget id, else id is a template node id and keys is the");
     c.line("    copy's key path. text is the entry's new content for");
     c.line("    OCC_TEXT_CHANGED, None otherwise.");
     c.line("    \"\"\"");
     c.line("    _size, kind, _flags = struct.unpack_from(\"<IHH\", buf, 0)");
-    c.line("    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED):");
+    c.line("    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED):");
     c.line("        return kind, None, [], None");
     c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
@@ -158,10 +168,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    for _ in range(path_len):");
     c.line("        key, at = parse_value(buf, at)");
     c.line("        keys.append(key)");
-    c.line("    text = None");
-    c.line("    if kind == OCC_TEXT_CHANGED:");
-    c.line("        text, at = parse_value(buf, at)");
-    c.line("    return kind, ident, keys, text");
+    c.line("    payload = None");
+    c.line("    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED):");
+    c.line("        payload, at = parse_value(buf, at)");
+    c.line("    return kind, ident, keys, payload");
 
     c.out
 }

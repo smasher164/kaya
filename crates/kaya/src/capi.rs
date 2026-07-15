@@ -45,10 +45,12 @@ use crate::wire;
 pub const KAYA_OCCURRENCE_PAD: u16 = 0;
 pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
 pub const KAYA_OCCURRENCE_TEXT_CHANGED: u16 = 2;
+pub const KAYA_OCCURRENCE_TOGGLED: u16 = 3;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
         && KAYA_OCCURRENCE_TEXT_CHANGED == ring::REC_TEXT_CHANGED
+        && KAYA_OCCURRENCE_TOGGLED == ring::REC_TOGGLED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -150,16 +152,23 @@ pub const KAYA_KIND_COLUMN: u32 = 1;
 pub const KAYA_KIND_BUTTON: u32 = 2;
 pub const KAYA_KIND_LABEL: u32 = 3;
 pub const KAYA_KIND_ENTRY: u32 = 4;
+pub const KAYA_KIND_ROW: u32 = 5;
+pub const KAYA_KIND_CHECKBOX: u32 = 6;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
         && KAYA_KIND_LABEL == wire::KIND_LABEL
         && KAYA_KIND_ENTRY == wire::KIND_ENTRY
+        && KAYA_KIND_ROW == wire::KIND_ROW
+        && KAYA_KIND_CHECKBOX == wire::KIND_CHECKBOX
 );
 
 /// Property keys.
 pub const KAYA_PROP_TEXT: u32 = 1;
-const _: () = assert!(KAYA_PROP_TEXT == wire::PROP_TEXT);
+pub const KAYA_PROP_CHECKED: u32 = 2;
+const _: () = assert!(
+    KAYA_PROP_TEXT == wire::PROP_TEXT && KAYA_PROP_CHECKED == wire::PROP_CHECKED
+);
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
 pub const KAYA_SOURCE_CONST: u32 = 0;
@@ -343,6 +352,23 @@ pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
         return;
     }
     state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
+}
+
+/// Presentation side: emit a checkbox toggle, exactly as a backend's
+/// change handler would — `tag` is the tag bytes delivered with the
+/// checkbox's CREATE record, `checked` the new state (0 or 1). Do not
+/// combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_toggled(tag: *const u8, tag_len: usize, checked: u8) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty checkbox tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_toggle_tag(tag, checked != 0);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_TOGGLED, &wire::toggled_body(tag, checked != 0));
 }
 
 /// Presentation side: emit an entry edit, exactly as a backend's

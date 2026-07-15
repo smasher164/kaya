@@ -21,6 +21,12 @@ object KayaPresent {
     @JvmStatic external fun emitTextChanged(tag: ByteArray, text: String)
 
     /**
+     * Emit a checkbox flip: [tag] is the tag bytes delivered with the
+     * box's CREATE record, [checked] its new state.
+     */
+    @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
+
+    /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —
      * 0 when the core has shut down. Use a 64 KiB buffer.

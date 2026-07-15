@@ -145,10 +145,24 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
     let ok = match prop {
         Prop::Text => matches!(
             kind,
-            WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry
+            WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry | WidgetKind::Checkbox
         ),
+        Prop::Checked => matches!(kind, WidgetKind::Checkbox),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
+}
+
+/// Every property has one value type (spec::PROPS), and the typed
+/// setters the bindings generate enforce it at compile time — but the
+/// wire itself is untyped, so an ill-typed record from a raw guest must
+/// die here, not in whichever backend applies it. The match is
+/// exhaustive: a new prop cannot ship without declaring its type.
+fn check_prop_value(prop: Prop, value: &Value) {
+    let ok = match prop {
+        Prop::Text => matches!(value, Value::Str(_)),
+        Prop::Checked => matches!(value, Value::Bool(_)),
+    };
+    assert!(ok, "kaya: {prop:?} cannot hold {value:?}");
 }
 
 fn check_type(current: &Value, incoming: &Value, what: &str) {
@@ -224,7 +238,7 @@ impl Scene {
                     // Interactive widgets carry their identity tag:
                     // buttons emit it on click, entries on edit.
                     let tag = match kind {
-                        WidgetKind::Button | WidgetKind::Entry => {
+                        WidgetKind::Button | WidgetKind::Entry | WidgetKind::Checkbox => {
                             Self::button_tag(id.0, &vec![])
                         }
                         _ => None,
@@ -242,11 +256,14 @@ impl Scene {
                         .unwrap_or_else(|| panic!("kaya: property on unknown widget {widget:?}"));
                     check_prop(kind, prop);
                     match value {
-                        PropValue::Const(v) => out.push(ApplyOp::SetProp {
-                            id: widget,
-                            prop,
-                            value: v,
-                        }),
+                        PropValue::Const(v) => {
+                            check_prop_value(prop, &v);
+                            out.push(ApplyOp::SetProp {
+                                id: widget,
+                                prop,
+                                value: v,
+                            })
+                        }
                         PropValue::Signal(id) => {
                             let current = self
                                 .signals
@@ -255,6 +272,10 @@ impl Scene {
                                     panic!("kaya: binding to unknown signal {id:?}")
                                 })
                                 .clone();
+                            // A signal's type is fixed at creation
+                            // (check_type guards every write), so the
+                            // current value speaks for the binding.
+                            check_prop_value(prop, &current);
                             self.bindings.entry(id).or_default().push((widget, prop));
                             out.push(ApplyOp::SetProp {
                                 id: widget,
@@ -426,12 +447,12 @@ impl Scene {
                 );
                 check_prop(self.template_nodes[&widget.0], prop);
                 match &value {
-                    PropValue::Const(_) => {}
+                    PropValue::Const(v) => check_prop_value(prop, v),
                     PropValue::Signal(id) => {
-                        assert!(
-                            self.signals.contains_key(id),
-                            "kaya: binding to unknown signal {id:?}"
-                        );
+                        let current = self.signals.get(id).unwrap_or_else(|| {
+                            panic!("kaya: binding to unknown signal {id:?}")
+                        });
+                        check_prop_value(prop, current);
                     }
                     PropValue::Element { level } => {
                         let depth = scopes
@@ -792,7 +813,7 @@ impl Scene {
                     node_map.insert(*node, id);
                     stamp.widgets.push(id);
                     let tag = match kind {
-                        WidgetKind::Button | WidgetKind::Entry => {
+                        WidgetKind::Button | WidgetKind::Entry | WidgetKind::Checkbox => {
                             Self::button_tag(*node, copy_path)
                         }
                         _ => None,
@@ -1359,6 +1380,50 @@ mod tests {
             op,
             ApplyOp::SetProp { value, .. } if *value == v("Home")
         )));
+    }
+
+    /// The wire is untyped; the scene is not. A raw guest sending a
+    /// string where the prop's type says bool must fail at validation,
+    /// not in a backend's SetProp match.
+    #[test]
+    #[should_panic(expected = "cannot hold")]
+    fn ill_typed_prop_value_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget {
+                id: WidgetId(1),
+                kind: WidgetKind::Checkbox,
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Checked,
+                value: PropValue::Const(v("not a bool")),
+            },
+        ]);
+    }
+
+    /// The same guard covers bindings: a signal's type is fixed at
+    /// creation, so binding a string signal to a bool prop is caught
+    /// when the binding is declared.
+    #[test]
+    #[should_panic(expected = "cannot hold")]
+    fn ill_typed_prop_binding_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal {
+                id: SignalId(1),
+                initial: v("a string"),
+            },
+            TxOp::CreateWidget {
+                id: WidgetId(1),
+                kind: WidgetKind::Checkbox,
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Checked,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
     }
 
     #[test]

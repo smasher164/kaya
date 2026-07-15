@@ -28,12 +28,13 @@ use std::ffi::c_void;
 use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
 
-use windows_core::HSTRING;
+use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, StackPanel, TextBlock, TextBox, TextChangedEventHandler,
+    Button, CheckBox, Orientation, StackPanel, TextBlock, TextBox, TextChangedEventHandler,
 };
+use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement,
     UnhandledExceptionEventHandler, Window,
@@ -46,6 +47,8 @@ use crate::scene::Scene;
 
 enum NativeWidget {
     Column(StackPanel),
+    Row(StackPanel),
+    Checkbox { check: CheckBox, caption: TextBlock },
     // The caption TextBlock is the button's text surface.
     Button { button: Button, caption: TextBlock },
     Label(TextBlock),
@@ -57,6 +60,8 @@ impl NativeWidget {
         use windows_core::Interface;
         match self {
             NativeWidget::Column(panel) => panel.cast(),
+            NativeWidget::Row(panel) => panel.cast(),
+            NativeWidget::Checkbox { check, .. } => check.cast(),
             NativeWidget::Button { button, .. } => button.cast(),
             NativeWidget::Label(label) => label.cast(),
             NativeWidget::Entry(field) => field.cast(),
@@ -77,6 +82,7 @@ struct CoreState {
     selftest_last_button: Option<Vec<u8>>,
     selftest_label: Option<TextBlock>,
     selftest_entry: Option<TextBox>,
+    selftest_checkbox: Option<CheckBox>,
     window: Window,
 }
 
@@ -351,21 +357,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // with the entry's identity tag, and the app folds
                     // it into its own model.
                     //
-                    // KNOWN LIMITATION (investigated 2026-07-15, VM
-                    // evidence): rendering any TextBox in this
-                    // unpackaged, code-only Application dies within
-                    // ~1s of mount — a stowed exception (0xC000027B)
-                    // inside Microsoft.UI.Xaml.dll 3.2.2 — regardless
-                    // of resources.pri content, this minimal template,
-                    // IsEnabled, or focus. Two real prerequisites were
-                    // found and kept (MRT init needs an exe-adjacent
-                    // resources.pri — the deploy ships
-                    // tools/guest/minimal-resources.pri — and the
-                    // default template's chrome resources cannot
-                    // resolve, hence the minimal template below), but
-                    // the remaining crash needs dump analysis or a
-                    // different WinAppSDK runtime. Entry suites stay
-                    // gated in deploy-win.sh.
+                    // Two prerequisites, both VM-proven (2026-07-15):
+                    // MRT init needs an exe-adjacent resources.pri (the
+                    // deploy ships tools/guest/minimal-resources.pri),
+                    // and the built-in template's deferred theme XAML
+                    // needs the composed Application's metadata provider
+                    // (see KayaApplication below) — without it the XAML
+                    // parser fail-fasts (0xC000027B) resolving
+                    // TextCommandBarFlyout. The minimal template keeps
+                    // the widget free of chrome resources kaya doesn't
+                    // ship.
                     let field = TextBox::new()?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
@@ -382,6 +383,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
+                WidgetKind::Row => {
+                    let panel = StackPanel::new()?;
+                    panel.SetOrientation(Orientation::Horizontal)?;
+                    NativeWidget::Row(panel)
+                }
+                WidgetKind::Checkbox => {
+                    // The box owns its checked bit; Checked/Unchecked
+                    // report each flip with the box's identity tag.
+                    // (WinUI raises them for programmatic SetIsChecked
+                    // too, which is what lets the selftest click like a
+                    // user.) The caption is the CheckBox's content, the
+                    // same shape as Button.
+                    let check = CheckBox::new()?;
+                    let caption = TextBlock::new()?;
+                    check.SetContent(&caption)?;
+                    let tag = tag.expect("checkboxes carry a tag");
+                    let on_sink = core.occurrences.clone();
+                    let on_tag = tag.clone();
+                    let checked = RoutedEventHandler::new(move |_, _| {
+                        on_sink.send_toggle_tag(&on_tag, true);
+                        Ok(())
+                    });
+                    check.Checked(&checked)?;
+                    let off_sink = core.occurrences.clone();
+                    let off_tag = tag.clone();
+                    let unchecked = RoutedEventHandler::new(move |_, _| {
+                        off_sink.send_toggle_tag(&off_tag, false);
+                        Ok(())
+                    });
+                    check.Unchecked(&unchecked)?;
+                    if core.selftest_checkbox.is_none() {
+                        core.selftest_checkbox = Some(check.clone());
+                    }
+                    NativeWidget::Checkbox { check, caption }
+                }
                 WidgetKind::Button => {
                     let button = Button::new()?;
                     let caption = TextBlock::new()?;
@@ -433,6 +469,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
                     field.SetText(&HSTRING::from(&s))?;
                 }
+                (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
+                    caption.SetText(&HSTRING::from(&s))?;
+                }
+                (NativeWidget::Checkbox { check, .. }, Prop::Checked, Value::Bool(b)) => {
+                    let boxed: IReference<bool> =
+                        PropertyValue::CreateBoolean(b)?.cast()?;
+                    check.SetIsChecked(&boxed)?;
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -440,24 +484,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         }
         ApplyOp::AddChild { parent, child } => {
             let panel = match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(panel) => panel.clone(),
+                NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
                 _ => panic!("kaya: add_child parent is not a container"),
             };
             let children = panel.Children()?;
             match core.widgets.get(&child).expect("scene validated the id") {
-                NativeWidget::Column(p) => children.Append(p)?,
+                NativeWidget::Column(p) | NativeWidget::Row(p) => children.Append(p)?,
                 NativeWidget::Button { button, .. } => children.Append(button)?,
                 NativeWidget::Label(label) => children.Append(label)?,
                 NativeWidget::Entry(field) => children.Append(field)?,
+                NativeWidget::Checkbox { check, .. } => children.Append(check)?,
             }
             core.parents.insert(child, panel);
         }
         ApplyOp::Mount { window: _, root } => {
             match core.widgets.get(&root).expect("scene validated the id") {
-                NativeWidget::Column(panel) => core.window.SetContent(panel)?,
+                NativeWidget::Column(panel) | NativeWidget::Row(panel) => {
+                    core.window.SetContent(panel)?
+                }
                 NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
                 NativeWidget::Label(label) => core.window.SetContent(label)?,
                 NativeWidget::Entry(field) => core.window.SetContent(field)?,
+                NativeWidget::Checkbox { check, .. } => core.window.SetContent(check)?,
             }
         }
     }
@@ -682,6 +730,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             eprintln!("kaya: winui selftest armed (entry)");
             spawn_entry_selftest();
         }
+        Ok(script) if script.trim() == "gallery" => {
+            eprintln!("kaya: winui selftest armed (gallery)");
+            spawn_gallery_selftest();
+        }
         Ok(script) => {
             eprintln!("kaya: winui selftest armed ({script:?})");
             spawn_selftest();
@@ -700,6 +752,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selftest_last_button: None,
             selftest_label: None,
             selftest_entry: None,
+            selftest_checkbox: None,
             window,
         });
     });
@@ -770,6 +823,54 @@ fn spawn_selftest() {
                     .Text()?
                     .to_string();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+                Ok(())
+            })
+        });
+    });
+}
+
+/// The gallery scene's round trip (KAYA_SELFTEST=gallery): SetIsChecked
+/// raises Checked — the same path a click takes — then the status label
+/// proves the toggle traveled up and the app answered.
+fn spawn_gallery_selftest() {
+    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
+        if let Some(dispatcher) = DISPATCHER.get() {
+            let handler = DispatcherQueueHandler::new(move || f());
+            let _ = dispatcher.0.TryEnqueue(&handler);
+        }
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let check = core
+                    .selftest_checkbox
+                    .as_ref()
+                    .expect("the scene has a checkbox");
+                let boxed: IReference<bool> = PropertyValue::CreateBoolean(true)?.cast()?;
+                check.SetIsChecked(&boxed)?;
+                Ok(())
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .Text()?
+                    .to_string();
+                if text == "urgent: true" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

@@ -51,6 +51,11 @@ pub enum Occurrence {
     TextChanged { id: WidgetId, text: String },
     /// The user edited a stamped copy of a template entry.
     InstanceTextChanged { node: TemplateNodeId, path: Path, text: String },
+    /// The user toggled a checkbox the guest created directly; carries
+    /// the new state. Same ownership stance as TextChanged.
+    Toggled { id: WidgetId, checked: bool },
+    /// The user toggled a stamped copy of a template checkbox.
+    InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -126,12 +131,19 @@ pub enum WidgetKind {
     /// text and reports edits as TextChanged occurrences; Prop::Text
     /// sets the initial (or programmatic) content.
     Entry,
+    /// A horizontal container: Column turned sideways.
+    Row,
+    /// A labeled on/off box. Prop::Text is the caption, Prop::Checked
+    /// the state; user toggles report as Toggled occurrences.
+    Checkbox,
 }
 
-/// Property keys. One so far; grows with widgets.
+/// Property keys; grows with widgets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Prop {
     Text,
+    /// A checkbox's state (Bool-valued).
+    Checked,
 }
 
 /// A bound property's source: a constant, a signal reference, or —
@@ -237,6 +249,16 @@ impl OccSink {
                     let body = crate::wire::text_changed_body(&tag, &text);
                     ring.push_record(crate::ring::REC_TEXT_CHANGED, &body);
                 }
+                Occurrence::Toggled { id, checked } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::toggled_body(&tag, checked);
+                    ring.push_record(crate::ring::REC_TOGGLED, &body);
+                }
+                Occurrence::InstanceToggled { node, path, checked } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::toggled_body(&tag, checked);
+                    ring.push_record(crate::ring::REC_TOGGLED, &body);
+                }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },
         }
@@ -251,6 +273,22 @@ impl OccSink {
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_BUTTON_CLICKED, tag);
+            }
+        }
+    }
+
+    /// The same fast path for a checkbox toggle: the stored tag plus
+    /// the new state.
+    pub(crate) fn send_toggle_tag(&self, tag: &[u8], checked: bool) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_toggled_tag(tag, checked));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_TOGGLED,
+                    &crate::wire::toggled_body(tag, checked),
+                );
             }
         }
     }

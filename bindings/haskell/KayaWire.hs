@@ -36,8 +36,14 @@ kindLabel :: Word32
 kindLabel = 3
 kindEntry :: Word32
 kindEntry = 4
+kindRow :: Word32
+kindRow = 5
+kindCheckbox :: Word32
+kindCheckbox = 6
 propText :: Word32
 propText = 1
+propChecked :: Word32
+propChecked = 2
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -50,6 +56,8 @@ occurrenceButtonClicked :: Word32
 occurrenceButtonClicked = 1
 occurrenceTextChanged :: Word32
 occurrenceTextChanged = 2
+occurrenceToggled :: Word32
+occurrenceToggled = 3
 txKindCreateSignal :: Word16
 txKindCreateSignal = 1
 txKindWriteSignal :: Word16
@@ -90,6 +98,8 @@ occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
 occKindTextChanged = 2
+occKindToggled :: Word16
+occKindToggled = 3
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -185,6 +195,25 @@ txBindTextElement widgetId level = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propText <> word32LE sourceElement
     <> word32LE level <> word32LE 0)
 
+-- set_property with a constant checked value.
+txSetChecked :: Word64 -> Bool -> Builder
+txSetChecked widgetId checked = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propChecked <> word32LE sourceConst
+    <> encodeValue (VBool checked))
+
+-- set_property with a signal-bound checked value.
+txBindChecked :: Word64 -> Word64 -> Builder
+txBindChecked widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propChecked <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to the element of the enclosing For, `level`
+-- Fors up (0 = nearest).
+txBindCheckedElement :: Word64 -> Word32 -> Builder
+txBindCheckedElement widgetId level = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propChecked <> word32LE sourceElement
+    <> word32LE level <> word32LE 0)
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -208,14 +237,15 @@ parseValue rec at = do
   return (v, next)
 
 -- Decode one occurrence record at `rec` (header included). Just
--- (kind, id, keys, text) — keys is [] when id is a widget id, else
--- id is a template node id and keys is the copy's key path; text is
--- Just for text_changed, Nothing for clicks. Nothing for pad or
--- unknown kinds.
-parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe String))
+-- (kind, id, keys, payload) — keys is [] when id is a widget id,
+-- else id is a template node id and keys is the copy's key path;
+-- payload is Just for text_changed (VStr) and toggled (VBool),
+-- Nothing for clicks. Nothing for pad or unknown kinds.
+parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
   if kind /= occKindButtonClicked && kind /= occKindTextChanged
+       && kind /= occKindToggled
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -225,10 +255,10 @@ parseOccurrence rec = do
             (v, next) <- parseValue rec at
             go next (n - 1 :: Word32) (v : acc)
       (keys, at') <- go (24 :: Int) pathLen []
-      text <-
-        if kind == occKindTextChanged
+      payload <-
+        if kind == occKindTextChanged || kind == occKindToggled
           then do
             (v, _) <- parseValue rec at'
-            return (case v of VStr s -> Just s; _ -> Nothing)
+            return (Just v)
           else return Nothing
-      return (Just (kind, ident, keys, text))
+      return (Just (kind, ident, keys, payload))

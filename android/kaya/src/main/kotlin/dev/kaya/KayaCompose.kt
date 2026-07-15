@@ -6,8 +6,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -41,6 +43,7 @@ import kotlin.concurrent.thread
  */
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var text by mutableStateOf("")
+    var checked by mutableStateOf(false)
     val children = mutableStateListOf<KayaNode>()
 }
 
@@ -52,6 +55,7 @@ object KayaSceneModel {
     var lastButton: KayaNode? = null
     var firstLabel: KayaNode? = null
     var firstEntry: KayaNode? = null
+    var firstCheckbox: KayaNode? = null
 }
 
 object KayaCompose {
@@ -66,6 +70,11 @@ object KayaCompose {
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
     const val KIND_ENTRY = 4
+    const val KIND_ROW = 5
+    const val KIND_CHECKBOX = 6
+    private const val PROP_TEXT = 1
+    private const val PROP_CHECKED = 2
+    private const val VALUE_BOOL = 1
     private const val VALUE_STR = 4
 
     /**
@@ -119,12 +128,19 @@ object KayaCompose {
                     if (widgetKind == KIND_ENTRY && KayaSceneModel.firstEntry == null) {
                         KayaSceneModel.firstEntry = node
                     }
+                    if (widgetKind == KIND_CHECKBOX && KayaSceneModel.firstCheckbox == null) {
+                        KayaSceneModel.firstCheckbox = node
+                    }
                 }
                 APPLY_SET_PROP -> {
                     val id = b.long
-                    b.int // prop: text is the only one so far
+                    val prop = b.int
                     b.int // pad
-                    KayaSceneModel.nodes[id]!!.text = readString(b)
+                    when (prop) {
+                        PROP_TEXT -> KayaSceneModel.nodes[id]!!.text = readString(b)
+                        PROP_CHECKED -> KayaSceneModel.nodes[id]!!.checked = readBool(b)
+                        else -> error("kaya: unknown prop $prop")
+                    }
                 }
                 APPLY_ADD_CHILD -> {
                     val parent = b.long
@@ -159,6 +175,13 @@ object KayaCompose {
         return String(bytes, Charsets.UTF_8)
     }
 
+    private fun readBool(b: ByteBuffer): Boolean {
+        val type = b.int
+        b.int // len
+        check(type == VALUE_BOOL) { "kaya: expected a bool value, got type $type" }
+        return b.get() != 0.toByte()
+    }
+
     /**
      * Drives the round trip without a human, matching every backend's
      * selftest: two clicks on the scene's driver button (stamping
@@ -170,6 +193,10 @@ object KayaCompose {
     private fun startSelftest(activity: ComponentActivity) {
         if (System.getenv("KAYA_SELFTEST") == "entry") {
             startEntrySelftest(activity)
+            return
+        }
+        if (System.getenv("KAYA_SELFTEST") == "gallery") {
+            startGallerySelftest(activity)
             return
         }
         thread(name = "kaya-selftest") {
@@ -226,6 +253,36 @@ object KayaCompose {
             }
         }
     }
+
+    /**
+     * The gallery scene's round trip (KAYA_SELFTEST=gallery): drive the
+     * same emission path a tap takes — flip the node, emit toggled —
+     * then read the status label.
+     */
+    private fun startGallerySelftest(activity: ComponentActivity) {
+        thread(name = "kaya-selftest") {
+            Thread.sleep(1500)
+            activity.runOnUiThread {
+                KayaSceneModel.firstCheckbox?.let { box ->
+                    box.checked = true
+                    KayaPresent.emitToggled(box.tag, true)
+                }
+            }
+            Thread.sleep(700)
+            activity.runOnUiThread {
+                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
+                val code = if (text == "urgent: true") {
+                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
+                    0
+                } else {
+                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
+                    1
+                }
+                activity.finishAndRemoveTask()
+                Runtime.getRuntime().halt(code)
+            }
+        }
+    }
 }
 
 /** The interpreter's render: the node tree as Compose declarations. */
@@ -243,7 +300,32 @@ fun KayaRender(node: KayaNode) {
             Button(onClick = { KayaPresent.emitClicked(node.tag) }) {
                 Text(node.text)
             }
+        KayaCompose.KIND_ROW ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                node.children.forEach { KayaRender(it) }
+            }
         KayaCompose.KIND_LABEL -> Text(node.text)
+        KayaCompose.KIND_CHECKBOX ->
+            // Uncontrolled toward the app, the entry's shape: the node
+            // mirrors the box's state (Compose needs it), and every
+            // flip is emitted with the box's identity tag. The caption
+            // rides beside the box, the labeled-checkbox idiom.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = node.checked,
+                    onCheckedChange = { newValue ->
+                        node.checked = newValue
+                        KayaPresent.emitToggled(node.tag, newValue)
+                    },
+                )
+                Text(node.text)
+            }
         KayaCompose.KIND_ENTRY ->
             // Uncontrolled toward the app: the node mirrors what the
             // user types (Compose needs the state), and every edit is

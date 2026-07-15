@@ -42,6 +42,7 @@ for arg in "$@"; do
         --provision) PROVISION=1 ;;
         rust|python|go|csharp|all) SUITE="$arg" ;;
         entry_rust|entry_python|entry_go|entry_csharp) SUITE="$arg" ;;
+        gallery_rust|gallery_python|gallery_go|gallery_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -80,7 +81,8 @@ fi
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
-    && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone2 --example entry)
+    && cargo xwin build --release --target aarch64-pc-windows-msvc \
+        --example milestone2 --example entry --example gallery)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -112,7 +114,7 @@ fi
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
 trap kill_guests EXIT
 kill_guests
@@ -121,12 +123,15 @@ echo "== deploying artifacts =="
 scp -q \
     "$TARGET/examples/milestone2.exe" \
     "$TARGET/examples/entry.exe" \
+    "$TARGET/examples/gallery.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
     "$ROOT/crates/kaya/examples/milestone2.py" \
     "$ROOT/crates/kaya/examples/milestone2.go" \
     "$ROOT/crates/kaya/examples/entry.py" \
     "$ROOT/crates/kaya/examples/entry.go" \
+    "$ROOT/crates/kaya/examples/gallery.py" \
+    "$ROOT/crates/kaya/examples/gallery.go" \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
@@ -138,6 +143,7 @@ scp -q \
 # renamed or removed example would poison the build.
 run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
 run_ssh 'cmd /c "if exist C:\kaya\cs-entry rmdir /s /q C:\kaya\cs-entry & mkdir C:\kaya\cs-entry"'
+run_ssh 'cmd /c "if exist C:\kaya\cs-gallery rmdir /s /q C:\kaya\cs-gallery & mkdir C:\kaya\cs-gallery"'
 scp -q "$ROOT"/bindings/python/*.py "$HOST:C:/kaya/bindings/python/"
 scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
 scp -q "$ROOT/crates/kaya/examples/milestone2.cs" \
@@ -148,6 +154,10 @@ scp -q "$ROOT/crates/kaya/examples/entry.cs" \
     "$ROOT/crates/kaya/examples/entry.csproj" \
     "$ROOT"/bindings/csharp/*.cs \
     "$HOST:C:/kaya/cs-entry/"
+scp -q "$ROOT/crates/kaya/examples/gallery.cs" \
+    "$ROOT/crates/kaya/examples/gallery.csproj" \
+    "$ROOT"/bindings/csharp/*.cs \
+    "$HOST:C:/kaya/cs-gallery/"
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
 # so an overwrite can fail while everything else copies fine, and the
@@ -166,6 +176,7 @@ verify_remote() {
 verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
 verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
 verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
+verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
 
 # Run a shipped one-shot guest script via schtasks and print the file
 # it writes once its done-marker appears.
@@ -240,6 +251,10 @@ case "$SUITE" in
         run_suite entry_python || status=1
         run_suite entry_go || status=1
         run_suite entry_csharp || status=1
+        run_suite gallery_rust || status=1
+        run_suite gallery_python || status=1
+        run_suite gallery_go || status=1
+        run_suite gallery_csharp || status=1
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;

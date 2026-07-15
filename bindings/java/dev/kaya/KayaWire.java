@@ -20,13 +20,17 @@ public final class KayaWire {
     public static final int KIND_BUTTON = 2;
     public static final int KIND_LABEL = 3;
     public static final int KIND_ENTRY = 4;
+    public static final int KIND_ROW = 5;
+    public static final int KIND_CHECKBOX = 6;
     public static final int PROP_TEXT = 1;
+    public static final int PROP_CHECKED = 2;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
     public static final int OCCURRENCE_PAD = 0;
     public static final int OCCURRENCE_BUTTON_CLICKED = 1;
     public static final int OCCURRENCE_TEXT_CHANGED = 2;
+    public static final int OCCURRENCE_TOGGLED = 3;
     public static final short TX_KIND_CREATE_SIGNAL = 1;
     public static final short TX_KIND_WRITE_SIGNAL = 2;
     public static final short TX_KIND_CREATE_WIDGET = 3;
@@ -47,6 +51,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_DESTROY = 5;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
+    public static final short OCC_KIND_TOGGLED = 3;
 
     private static ByteBuffer begin(short kind) {
         ByteBuffer b = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
@@ -212,6 +217,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant checked value. */
+    public static byte[] txSetChecked(long widgetId, boolean checked) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_CONST);
+        encodeValue(b, checked);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound checked value. */
+    public static byte[] txBindChecked(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to the element of the enclosing For, `level` Fors up. */
+    public static byte[] txBindCheckedElement(long widgetId, int level) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(0);
+        return finish(b);
+    }
+
     /** Concatenate packed records into one transaction. */
     public static byte[] tx(byte[]... records) {
         int len = 0;
@@ -227,19 +255,20 @@ public final class KayaWire {
 
     /** A parsed occurrence: the kind, the id, the copy's key path
      * (empty when id is a widget id; otherwise id is a template
-     * node id), and — for TEXT_CHANGED — the entry's new text
-     * (null for clicks). */
+     * node id), and the payload — the entry's new text (String)
+     * for TEXT_CHANGED, the checkbox's new state (Boolean) for
+     * TOGGLED, null for clicks. */
     public static final class Occ {
         public final short kind;
         public final long id;
         public final List<Object> keys;
-        public final String text;
+        public final Object payload;
 
-        Occ(short kind, long id, List<Object> keys, String text) {
+        Occ(short kind, long id, List<Object> keys, Object payload) {
             this.kind = kind;
             this.id = id;
             this.keys = keys;
-            this.text = text;
+            this.payload = payload;
         }
     }
 
@@ -248,7 +277,8 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED
+                && kind != OCC_KIND_TOGGLED) {
             return null;
         }
         long id = b.getLong(8);
@@ -267,12 +297,17 @@ public final class KayaWire {
             }
             at += 8 + ((vlen + 7) & ~7);
         }
-        String text = null;
-        if (kind == OCC_KIND_TEXT_CHANGED) {
-            int vlen = b.getInt(at + 4);
-            text = new String(rec, at + 8, vlen, StandardCharsets.UTF_8);
+        Object payload = null;
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED) {
+            int ptype = b.getInt(at);
+            int plen = b.getInt(at + 4);
+            if (ptype == VALUE_BOOL) {
+                payload = rec[at + 8] != 0;
+            } else {
+                payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);
+            }
         }
-        return new Occ(kind, id, keys, text);
+        return new Occ(kind, id, keys, payload);
     }
 
     private KayaWire() {}

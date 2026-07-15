@@ -26,6 +26,8 @@ enum NativeWidget {
     Button(gtk4::Button),
     Label(gtk4::Label),
     Entry(gtk4::Entry),
+    Row(gtk4::Box),
+    Checkbox(gtk4::CheckButton),
 }
 
 impl NativeWidget {
@@ -35,6 +37,8 @@ impl NativeWidget {
             NativeWidget::Button(w) => w.clone().upcast(),
             NativeWidget::Label(w) => w.clone().upcast(),
             NativeWidget::Entry(w) => w.clone().upcast(),
+            NativeWidget::Row(w) => w.clone().upcast(),
+            NativeWidget::Checkbox(w) => w.clone().upcast(),
         }
     }
 }
@@ -48,6 +52,7 @@ struct CoreState {
     selftest_last_button: Option<gtk4::Button>,
     selftest_label: Option<gtk4::Label>,
     selftest_entry: Option<gtk4::Entry>,
+    selftest_checkbox: Option<gtk4::CheckButton>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -112,6 +117,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     column.set_halign(gtk4::Align::Center);
                     NativeWidget::Column(column)
                 }
+                WidgetKind::Row => {
+                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                    row.set_valign(gtk4::Align::Center);
+                    row.set_halign(gtk4::Align::Center);
+                    NativeWidget::Row(row)
+                }
+                WidgetKind::Checkbox => {
+                    // The box owns its checked bit; each flip goes up
+                    // with the box's identity tag. (GTK fires `toggled`
+                    // for programmatic set_active too, which is what
+                    // lets the selftest click like a user.)
+                    let check = gtk4::CheckButton::new();
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("checkboxes carry a tag");
+                    check.connect_toggled(move |c| {
+                        sink.send_toggle_tag(&tag, c.is_active());
+                    });
+                    if core.selftest_checkbox.is_none() {
+                        core.selftest_checkbox = Some(check.clone());
+                    }
+                    NativeWidget::Checkbox(check)
+                }
                 WidgetKind::Button => {
                     let button = gtk4::Button::new();
                     let sink = core.occurrences.clone();
@@ -161,6 +188,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
                     entry.set_text(&s);
                 }
+                (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {
+                    check.set_label(Some(&s));
+                }
+                (NativeWidget::Checkbox(check), Prop::Checked, Value::Bool(b)) => {
+                    check.set_active(b);
+                }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }
@@ -174,6 +207,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .widget();
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(column) => column.append(&child_widget),
+                NativeWidget::Row(row) => row.append(&child_widget),
                 _ => panic!("kaya: add_child parent is not a container"),
             }
         }
@@ -222,6 +256,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 
         match std::env::var("KAYA_SELFTEST") {
             Ok(script) if script == "entry" => spawn_entry_selftest(),
+            Ok(script) if script == "gallery" => spawn_gallery_selftest(),
             Ok(_) => spawn_selftest(),
             Err(_) => {}
         }
@@ -236,6 +271,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 selftest_last_button: None,
                 selftest_label: None,
                 selftest_entry: None,
+                selftest_checkbox: None,
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -311,6 +347,51 @@ fn spawn_selftest() {
                     .expect("the scene has a label")
                     .text();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The gallery scene's round trip (KAYA_SELFTEST=gallery): set_active
+/// fires GTK's own `toggled` signal — the same path a click takes —
+/// then the status label proves the toggle traveled up and the app
+/// answered.
+fn spawn_gallery_selftest() {
+    fn on_main(f: impl Fn() + Send + 'static) {
+        glib::idle_add(move || {
+            f();
+            glib::ControlFlow::Break
+        });
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_checkbox
+                        .as_ref()
+                        .expect("the scene has a checkbox")
+                        .set_active(true);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text();
+                if text == "urgent: true" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

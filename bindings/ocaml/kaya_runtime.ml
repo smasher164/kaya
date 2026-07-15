@@ -71,9 +71,10 @@ let submit records =
   kaya_submit tx (Unsigned.Size_t.of_int (String.length tx))
 
 (* Block for the next occurrence; None when the core has shut down.
-   Some (kind, id, keys, text): keys are [] when the id is a widget id,
-   else the id is a template node id and the keys are the stamped
-   copy's key path, outermost first; text is Some for text_changed. *)
+   Some (kind, id, keys, payload): keys are [] when the id is a widget
+   id, else the id is a template node id and the keys are the stamped
+   copy's key path, outermost first; payload is Some for text_changed
+   (a Str) and toggled (a Bool). *)
 let next_occurrence =
   let state = ref None in
   fun () ->
