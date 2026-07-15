@@ -1,0 +1,74 @@
+package dev.kaya.milestone2kt;
+
+import dev.kaya.KayaApp;
+import dev.kaya.KayaWire;
+
+/**
+ * The entry scene from the JVM: the uncontrolled contract end to end.
+ * The field owns its text and reports each edit through onChange; the
+ * app folds those into a plain field (draft) — its own model, per
+ * doctrine. The add button inserts the draft and answers with the count
+ * read from the collection model.
+ */
+final class Entry {
+    /** The scene's handles, returned by the build body. */
+    private static final class Scene {
+        final KayaApp.Signal status;
+        final KayaApp.Widget field;
+        final KayaApp.Widget add;
+        final KayaApp.Collection todos;
+
+        Scene(KayaApp.Signal status, KayaApp.Widget field, KayaApp.Widget add,
+                KayaApp.Collection todos) {
+            this.status = status;
+            this.field = field;
+            this.add = add;
+            this.todos = todos;
+        }
+    }
+
+    // The fold: widget-owned state arrives as occurrences; the app's
+    // copy is this field, not a widget read.
+    private static String draft = "";
+    private static int nextKey;
+
+    static void app() {
+        KayaApp app = new KayaApp();
+
+        Scene scene = app.build(tx -> {
+            KayaApp.Signal status = tx.signal("no todos");
+
+            KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);
+            KayaApp.Widget field = tx.widget(KayaWire.KIND_ENTRY);
+            KayaApp.Widget add = tx.widget(KayaWire.KIND_BUTTON);
+            tx.setText(add, "add");
+            KayaApp.Widget statusLabel = tx.widget(KayaWire.KIND_LABEL);
+            tx.bindText(statusLabel, status);
+
+            KayaApp.Collection todos = tx.collection();
+            KayaApp.Widget todoList = tx.forEach(todos, t -> {
+                KayaApp.Node label = t.widget(KayaWire.KIND_LABEL);
+                t.bindTextElement(label, 0);
+            });
+
+            tx.addChild(column, field);
+            tx.addChild(column, add);
+            tx.addChild(column, statusLabel);
+            tx.addChild(column, todoList);
+            tx.mount(column);
+            return new Scene(status, field, add, todos);
+        });
+
+        app.onChange(scene.field, (tx, text) -> draft = text);
+        app.onClick(scene.add, tx -> {
+            nextKey++;
+            tx.insert(scene.todos, "t" + nextKey, draft);
+            int total = tx.count(scene.todos);
+            tx.write(scene.status, "added " + draft + ", " + total + " total");
+        });
+
+        app.dispatchLoop();
+    }
+
+    private Entry() {}
+}

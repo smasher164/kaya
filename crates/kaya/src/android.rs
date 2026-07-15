@@ -46,6 +46,7 @@ const OP_DRAIN: jlong = 0;
 const OP_SELFTEST_CLICK: jlong = 1;
 const OP_SELFTEST_CHECK: jlong = 2;
 const OP_SELFTEST_CLICK_LAST: jlong = 3;
+const OP_SELFTEST_SET_TEXT: jlong = 4;
 
 /// Shared with the app thread (doorbell) and the selftest thread.
 struct Globals {
@@ -55,6 +56,7 @@ struct Globals {
     selftest_click: GlobalRef,
     selftest_check: GlobalRef,
     selftest_click_last: GlobalRef,
+    selftest_set_text: GlobalRef,
 }
 
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
@@ -82,6 +84,7 @@ struct CoreState {
     scene: Scene,
     widgets: HashMap<WidgetId, NativeWidget>,
     selftest_button: Option<GlobalRef>,
+    selftest_entry: Option<GlobalRef>,
     selftest_last_button: Option<GlobalRef>,
     selftest_label: Option<GlobalRef>,
 }
@@ -217,6 +220,15 @@ fn setup(
             fn_ptr: native_click as *mut _,
         }],
     )?;
+    let watcher_class = env.find_class("dev/kaya/KayaTextWatcher")?;
+    env.register_native_methods(
+        &watcher_class,
+        &[NativeMethod {
+            name: "nativeTextChanged".into(),
+            sig: "(JLjava/lang/String;)V".into(),
+            fn_ptr: native_text_changed as *mut _,
+        }],
+    )?;
 
     // The main-thread hops posted from native threads. Instances are made
     // here, on the UI thread, where find_class sees the app class loader;
@@ -229,6 +241,7 @@ fn setup(
     let selftest_click = make_runnable(env, OP_SELFTEST_CLICK)?;
     let selftest_check = make_runnable(env, OP_SELFTEST_CHECK)?;
     let selftest_click_last = make_runnable(env, OP_SELFTEST_CLICK_LAST)?;
+    let selftest_set_text = make_runnable(env, OP_SELFTEST_SET_TEXT)?;
 
     let globals = Globals {
         vm: env.get_java_vm()?,
@@ -237,6 +250,7 @@ fn setup(
         selftest_click,
         selftest_check,
         selftest_click_last,
+        selftest_set_text,
     };
     let _ = GLOBALS.set(globals);
 
@@ -249,6 +263,7 @@ fn setup(
         selftest_button: None,
         selftest_last_button: None,
         selftest_label: None,
+        selftest_entry: None,
     });
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {
@@ -286,11 +301,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
     match op {
         ApplyOp::Create { id, kind, tag } => {
             let class = match kind {
-                WidgetKind::Entry => {
-                    // Landed on macOS first; this backend's turn comes
-                    // with the breadth pass.
-                    panic!("kaya: entry is not yet implemented on this backend")
-                }
+                WidgetKind::Entry => "android/widget/EditText",
                 WidgetKind::Column => "android/widget/LinearLayout",
                 WidgetKind::Button => "android/widget/Button",
                 WidgetKind::Label => "android/widget/TextView",
@@ -328,9 +339,26 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 }
                 WidgetKind::Label => {}
                 WidgetKind::Entry => {
-                    // Landed on macOS first; this backend's turn comes
-                    // with the breadth pass.
-                    panic!("kaya: entry is not yet implemented on this backend")
+                    // Uncontrolled: the widget owns its text; the
+                    // watcher reports each edit (programmatic setText
+                    // included, which is what lets the selftest type
+                    // like a user) with the entry's identity tag, and
+                    // the app folds it into its own model.
+                    let tag = tag.expect("entries carry a tag");
+                    let key = NEXT_TAG_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    TAGS.lock().unwrap().as_mut().expect("attach ran").insert(key, tag);
+                    tag_key = Some(key);
+                    let watcher = env.new_object(
+                        "dev/kaya/KayaTextWatcher",
+                        "(J)V",
+                        &[JValue::Long(key as jlong)],
+                    )?;
+                    env.call_method(
+                        &view,
+                        "addTextChangedListener",
+                        "(Landroid/text/TextWatcher;)V",
+                        &[JValue::Object(&watcher)],
+                    )?;
                 }
             }
             let view = env.new_global_ref(view)?;
@@ -345,6 +373,9 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 }
                 WidgetKind::Label if core.selftest_label.is_none() => {
                     core.selftest_label = Some(view.clone());
+                }
+                WidgetKind::Entry if core.selftest_entry.is_none() => {
+                    core.selftest_entry = Some(view.clone());
                 }
                 _ => {}
             }
@@ -431,10 +462,36 @@ extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
         OP_SELFTEST_CLICK => selftest_click(&mut env, false),
         OP_SELFTEST_CLICK_LAST => selftest_click(&mut env, true),
         OP_SELFTEST_CHECK => selftest_check(&mut env),
+        OP_SELFTEST_SET_TEXT => selftest_set_text(&mut env),
         _ => Ok(()),
     };
     if let Err(e) = result {
         log::error!("kaya: UI-thread hop failed: {e}");
+    }
+}
+
+/// KayaTextWatcher.nativeTextChanged: emit the entry's tag plus its new
+/// text.
+extern "system" fn native_text_changed(
+    mut env: JNIEnv,
+    _this: JObject,
+    tag_key: jlong,
+    text: JString,
+) {
+    let text: String = match env.get_string(&text) {
+        Ok(t) => t.into(),
+        Err(e) => {
+            log::error!("kaya: reading entry text failed: {e}");
+            return;
+        }
+    };
+    let tag = TAGS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
+    if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
+        sink.send_text_tag(&tag, &text);
     }
 }
 
@@ -477,6 +534,17 @@ fn spawn_selftest() {
 
     std::thread::spawn(|| {
         let Some(g) = GLOBALS.get() else { return };
+        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
+            // The entry scene: setText fires the watcher — the same
+            // path a keystroke takes — then add, then the verdict.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            post(&g.selftest_set_text);
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            post(&g.selftest_click);
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            post(&g.selftest_check);
+            return;
+        }
         std::thread::sleep(std::time::Duration::from_millis(1500));
         post(&g.selftest_click);
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -508,6 +576,26 @@ fn selftest_click(env: &mut JNIEnv, last: bool) -> jni::errors::Result<()> {
     Ok(())
 }
 
+fn selftest_set_text(env: &mut JNIEnv) -> jni::errors::Result<()> {
+    let entry = {
+        let core = CORE.lock().unwrap();
+        let Some(core) = core.as_ref() else {
+            return Ok(());
+        };
+        core.selftest_entry.clone()
+    };
+    if let Some(entry) = entry {
+        let text = env.new_string("milk")?;
+        env.call_method(
+            entry.as_obj(),
+            "setText",
+            "(Ljava/lang/CharSequence;)V",
+            &[JValue::Object(&text)],
+        )?;
+    }
+    Ok(())
+}
+
 fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let label = {
         let core = CORE.lock().unwrap();
@@ -528,7 +616,12 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
         .l()?;
     let text: String = env.get_string(&JString::from(string))?.into();
 
-    let code = if text == "removed g2/a, 0 left" {
+    let expected = if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
+        "added milk, 1 total"
+    } else {
+        "removed g2/a, 0 left"
+    };
+    let code = if text == expected {
         log::info!("KAYA_SELFTEST: OK ({text})");
         0
     } else {
@@ -634,6 +727,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit as *mut _,
             },
             NativeMethod {
+                name: "emitTextChanged".into(),
+                sig: "([BLjava/lang/String;)V".into(),
+                fn_ptr: present_emit_text as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -647,6 +745,29 @@ extern "system" fn present_emit(mut env: JNIEnv, _class: JClass, tag: JByteArray
         .convert_byte_array(&tag)
         .expect("kaya: reading the click tag failed");
     unsafe { crate::capi::kaya_emit_clicked(bytes.as_ptr(), bytes.len()) };
+}
+
+extern "system" fn present_emit_text(
+    mut env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    text: JString,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the entry tag failed");
+    let text: String = env
+        .get_string(&text)
+        .expect("kaya: reading the entry text failed")
+        .into();
+    unsafe {
+        crate::capi::kaya_emit_text_changed(
+            bytes.as_ptr(),
+            bytes.len(),
+            text.as_ptr(),
+            text.len(),
+        )
+    };
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,

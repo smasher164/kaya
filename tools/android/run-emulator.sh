@@ -50,13 +50,15 @@ adb shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
 status=0
 
 run_apk() {
-    local name="$1" apk="$2" component="$3"
-    shift 3
+    # Selftest scripts double as scene selectors on Android (one APK
+    # hosts both scenes); pass the script as a string extra.
+    local name="$1" apk="$2" component="$3" script="$4"
+    shift 4
     adb install -r "$apk" >/dev/null
     adb shell am force-stop "${component%%/*}"
     adb logcat -c
     echo "== $name =="
-    adb shell am start -W -n "$component" --ez KAYA_SELFTEST true "$@" >/dev/null
+    adb shell am start -W -n "$component" --es KAYA_SELFTEST "$script" "$@" >/dev/null
     # The selftest exits the app at ~2.5s; grab the scene while it is
     # still up. logcat then reads the verdict from the buffer even if it
     # was emitted before the watch attached.
@@ -80,7 +82,10 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     (cd android && gradle --console=plain -q :milestone2:assembleDebug)
     run_apk rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity
+        dev.kaya.milestone2/.MainActivity 1
+    run_apk entry-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity entry
 fi
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
@@ -92,7 +97,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     (cd android && gradle --console=plain -q :milestone2:assembleDebug)
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity \
+        dev.kaya.milestone2/.MainActivity 1 \
+        --es KAYA_BACKEND compose
+    run_apk entry-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity entry \
         --es KAYA_BACKEND compose
 fi
 
@@ -104,7 +113,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     (cd android && gradle --console=plain -q :milestone2kt:assembleDebug)
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity
+        dev.kaya.milestone2kt/.MainActivity 1
+    run_apk entry-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity entry
 fi
 
 exit "$status"

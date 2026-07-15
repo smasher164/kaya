@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -50,6 +51,7 @@ object KayaSceneModel {
     var firstButton: KayaNode? = null
     var lastButton: KayaNode? = null
     var firstLabel: KayaNode? = null
+    var firstEntry: KayaNode? = null
 }
 
 object KayaCompose {
@@ -63,6 +65,7 @@ object KayaCompose {
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
+    const val KIND_ENTRY = 4
     private const val VALUE_STR = 4
 
     /**
@@ -113,6 +116,9 @@ object KayaCompose {
                     if (widgetKind == KIND_LABEL && KayaSceneModel.firstLabel == null) {
                         KayaSceneModel.firstLabel = node
                     }
+                    if (widgetKind == KIND_ENTRY && KayaSceneModel.firstEntry == null) {
+                        KayaSceneModel.firstEntry = node
+                    }
                 }
                 APPLY_SET_PROP -> {
                     val id = b.long
@@ -162,6 +168,10 @@ object KayaCompose {
      * render threads.
      */
     private fun startSelftest(activity: ComponentActivity) {
+        if (System.getenv("KAYA_SELFTEST") == "entry") {
+            startEntrySelftest(activity)
+            return
+        }
         thread(name = "kaya-selftest") {
             Thread.sleep(1500)
             KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
@@ -173,6 +183,38 @@ object KayaCompose {
             activity.runOnUiThread {
                 val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
                 val code = if (text == "removed g2/a, 0 left") {
+                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
+                    0
+                } else {
+                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
+                    1
+                }
+                activity.finishAndRemoveTask()
+                Runtime.getRuntime().halt(code)
+            }
+        }
+    }
+
+    /**
+     * The entry scene's round trip (KAYA_SELFTEST=entry): drive the
+     * same emission path a keystroke takes, click add, read the status
+     * label.
+     */
+    private fun startEntrySelftest(activity: ComponentActivity) {
+        thread(name = "kaya-selftest") {
+            Thread.sleep(1500)
+            activity.runOnUiThread {
+                KayaSceneModel.firstEntry?.let { entry ->
+                    entry.text = "milk"
+                    KayaPresent.emitTextChanged(entry.tag, "milk")
+                }
+            }
+            Thread.sleep(400)
+            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
+            Thread.sleep(700)
+            activity.runOnUiThread {
+                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
+                val code = if (text == "added milk, 1 total") {
                     Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
                     0
                 } else {
@@ -202,6 +244,18 @@ fun KayaRender(node: KayaNode) {
                 Text(node.text)
             }
         KayaCompose.KIND_LABEL -> Text(node.text)
+        KayaCompose.KIND_ENTRY ->
+            // Uncontrolled toward the app: the node mirrors what the
+            // user types (Compose needs the state), and every edit is
+            // emitted with the entry's identity tag for the app to fold
+            // into its own model — nothing here is read back.
+            TextField(
+                value = node.text,
+                onValueChange = { newValue ->
+                    node.text = newValue
+                    KayaPresent.emitTextChanged(node.tag, newValue)
+                },
+            )
     }
 }
 

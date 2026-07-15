@@ -22,8 +22,11 @@ class MainActivity : Activity() {
 
         // The JVM app is the guest here: kaya attaches its scene to this
         // Activity, and this process's own thread consumes the ring.
+        // One APK hosts both scenes; the selftest script doubles as the
+        // scene selector (see the rust example's android shim).
         System.loadLibrary("kaya")
         KayaRing.attach(this)
-        Thread(Milestone2::app, "kaya-app").start()
+        val scene = if (System.getenv("KAYA_SELFTEST") == "entry") Entry::app else Milestone2::app
+        Thread(scene, "kaya-app").start()
     }
 }

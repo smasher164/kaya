@@ -15,6 +15,12 @@ object KayaPresent {
     @JvmStatic external fun emitClicked(tag: ByteArray)
 
     /**
+     * Emit an entry edit: [tag] is the tag bytes delivered with the
+     * entry's CREATE record, [text] the field's current content.
+     */
+    @JvmStatic external fun emitTextChanged(tag: ByteArray, text: String)
+
+    /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —
      * 0 when the core has shut down. Use a 64 KiB buffer.

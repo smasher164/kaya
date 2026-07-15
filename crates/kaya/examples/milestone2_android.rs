@@ -13,4 +13,20 @@
 mod milestone2;
 
 #[cfg(target_os = "android")]
-kaya::android_main!(milestone2::app);
+#[path = "entry.rs"]
+mod entry;
+
+/// One APK hosts both scenes: Android has one example app rather than
+/// one binary per scene, so the selftest script doubles as the scene
+/// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
+#[cfg(target_os = "android")]
+fn app(ctx: kaya::AppCtx) {
+    if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
+        entry::app(ctx)
+    } else {
+        milestone2::app(ctx)
+    }
+}
+
+#[cfg(target_os = "android")]
+kaya::android_main!(app);
