@@ -866,6 +866,78 @@ feature rather than reconstructed per backend afterward.
   kaya_set_text and the fixed widget-id constants leave the C surface,
   replaced by kaya_submit plus the vocabulary — and the definition of
   done is the same validation matrix, green, with the scene as data.
+- Milestone 2 is the structural operators: `When` and `For`, the scene
+  growing and shrinking as a function of data. `For` binds a collection —
+  a core-side ordered key→value table, the sibling of a signal, from its
+  own guest-allocated id space — and the guest changes it with delta
+  records (insert/update/remove), never snapshots. The rejected
+  alternative was a list-valued signal: replace semantics destroy the
+  information about what changed, forcing the core to reconstruct it by
+  diffing, which needs element identity anyway and relocates the
+  reconciler we refuse everywhere else. Deltas carry the intent, cost
+  O(change) instead of O(n), and keep "nobody diffs" true end to end; a
+  binding can still offer assign-a-list as sugar by diffing guest-side,
+  where the old list is plain program data. Signals and collections split
+  by update algebra, not reactivity: a signal's writes are replacements
+  and coalesce (keep-latest), a collection's ops are edits, ordered,
+  never coalesced. The right analogy is event sourcing or a database log
+  — single writer, FIFO, state as the fold — not CRDTs, whose machinery
+  answers a concurrent multi-writer convergence problem this protocol
+  does not have. Keys are domain identity: Value-typed, chosen by the
+  guest, unique per collection instance (a duplicate insert fails loud;
+  update stays explicit), legitimately reusable after removal. Ids answer
+  "which of the things you created," keys answer "which of your data" —
+  ids are variable names, a static population whose associations are
+  fixed when the code is written; keys are dictionary keys, a dynamic
+  population named by the data itself. That is why occurrences return
+  keys: the guest indexes its own model directly and no id-to-datum
+  table exists in any guest. Template bodies are declarations, not
+  creations: the For/When record opens a template scope, the records
+  inside describe a blueprint, and nothing renders until data arrives.
+  Template nodes take their own id space, so a widget id always names
+  exactly one live widget. An instance — the copy stamped per entry — is
+  named (template node, key path), one key per enclosing For; the
+  variable length is the address's intrinsic dimensionality (a depth-2
+  widget has two degrees of freedom), encoded once as a length-prefixed
+  sequence of values and shared by occurrences and collection ops.
+  Alternatives weighed: core-minted instance ids need a return channel
+  the protocol doesn't have and don't survive rebuilds; positional paths
+  are nth-child fragility; guest-minted flat handles work — the classic
+  retained-mode answer, DOM references and toolkit pointers — but
+  handles suit APIs that can return them, mandate runtime translation
+  tables in every guest, read as opaque integers in a record dump, and
+  name individuals where these instances are positions in a determined
+  structure. Hashing or interning paths are compatible compressions if
+  addresses ever run hot, not different semantics. A collection declared
+  inside a template is itself a blueprint: each stamp gets a fresh
+  instance, born empty, destroyed with its copy, addressed in writes by
+  the same key path (insert into C at [g], key, value) — nesting costs
+  one encoding and is handled now, not deferred. Templates bind props
+  through a third source, element (the entry's value), alongside const
+  and signal; ordinary signal bindings still work inside a template. The
+  up-only rule: key paths appear in occurrences going up and in
+  collection ops going down, and a path-addressed widget-property write
+  will never exist — an instance must remain a pure function of template
+  plus entry, so the core may destroy and re-stamp any copy at any time
+  (a When toggling above it, virtualization later) with nothing lost;
+  state that lives only in the widget tree is the bug class the rule
+  deletes. This is also where the no-reads posture pays against the DOM
+  comparison: DOM addresses are queries against a tree that other agents
+  populate, kaya addresses are names computed from the guest's own
+  writes — the tree holds no information the guest didn't put there, and
+  the one genuine source of new information, user action, arrives pushed
+  as an occurrence carrying its path. When is For over a zero-or-one
+  collection wired to a Bool signal: false to true stamps the template,
+  true to false unstamps, a rebuild each time (SwiftUI-if semantics);
+  hide-without-forgetting is a future visible prop, not a second When.
+  Scope: elements are scalars at milestone 2 — record values with field
+  projection, and sum-typed elements dispatching per-variant templates,
+  wait for milestone 3, where multi-field rows make them real; there is
+  no list value ever (a sequence as content is a collection); order is
+  insertion order, reorder ops are future vocabulary. Definition of
+  done, as always: a scene exercising both operators — a nested For with
+  per-group items and a When toggle — green on the full matrix from
+  every guest.
 - The conformance gallery is the definition of done. A widget is admitted
   when its scene passes on every platform, and the scene list grows one
   widget at a time, seeded by the layout-normalization worklist scenes.
