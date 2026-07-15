@@ -8,7 +8,11 @@ package dev.kaya
  * when [Kaya.attach] selects a guest-side backend.
  */
 object KayaPresent {
-    @JvmStatic external fun emitButtonClicked(widgetId: Long)
+    /**
+     * Emit a click: [tag] is the click-tag bytes delivered with the
+     * widget's CREATE record, handed back verbatim.
+     */
+    @JvmStatic external fun emitClicked(tag: ByteArray)
 
     /**
      * Block until the next transaction resolves, fill [buffer] with

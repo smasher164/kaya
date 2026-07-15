@@ -33,7 +33,7 @@ use windows_core::HSTRING;
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{Button, StackPanel, TextBlock};
 use bindings::Microsoft::UI::Xaml::{
-    Application, ApplicationInitializationCallback, RoutedEventHandler, Window,
+    Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement, Window,
 };
 
 use crate::protocol::{
@@ -48,12 +48,28 @@ enum NativeWidget {
     Label(TextBlock),
 }
 
+impl NativeWidget {
+    fn element(&self) -> windows_core::Result<UIElement> {
+        use windows_core::Interface;
+        match self {
+            NativeWidget::Column(panel) => panel.cast(),
+            NativeWidget::Button { button, .. } => button.cast(),
+            NativeWidget::Label(label) => label.cast(),
+        }
+    }
+}
+
 struct CoreState {
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
-    selftest_button: Option<WidgetId>,
+    // Which panel each widget sits in, for Destroy's detach.
+    parents: HashMap<WidgetId, StackPanel>,
+    // Click tags of the first and most recently created buttons, for the
+    // selftest's round trip.
+    selftest_button: Option<Vec<u8>>,
+    selftest_last_button: Option<Vec<u8>>,
     selftest_label: Option<TextBlock>,
     window: Window,
 }
@@ -115,7 +131,7 @@ fn drain_transactions() {
 
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     match op {
-        ApplyOp::Create { id, kind } => {
+        ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
                 WidgetKind::Button => {
@@ -123,14 +139,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let caption = TextBlock::new()?;
                     button.SetContent(&caption)?;
                     let click_sink = core.occurrences.clone();
+                    // The tag is the click's identity, emitted verbatim;
+                    // this backend never learns what it means.
+                    let tag = tag.expect("buttons carry a click tag");
+                    if core.selftest_button.is_none() {
+                        core.selftest_button = Some(tag.clone());
+                    }
+                    core.selftest_last_button = Some(tag.clone());
                     let handler = RoutedEventHandler::new(move |_, _| {
-                        click_sink.send(Occurrence::ButtonClicked { id });
+                        click_sink.send_click_tag(&tag);
                         Ok(())
                     });
                     button.Click(&handler)?;
-                    if core.selftest_button.is_none() {
-                        core.selftest_button = Some(id);
-                    }
                     NativeWidget::Button { button, caption }
                 }
                 WidgetKind::Label => {
@@ -142,6 +162,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             };
             core.widgets.insert(id, native);
+        }
+        ApplyOp::Destroy { id } => {
+            let widget = core.widgets.remove(&id).expect("scene validated the id");
+            if let Some(panel) = core.parents.remove(&id) {
+                let children = panel.Children()?;
+                let mut index = 0u32;
+                if children.IndexOf(&widget.element()?, &mut index)? {
+                    children.RemoveAt(index)?;
+                }
+            }
         }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -158,15 +188,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         ApplyOp::AddChild { parent, child } => {
-            let children = match core.widgets.get(&parent).expect("scene validated the id") {
-                NativeWidget::Column(panel) => panel.Children()?,
+            let panel = match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(panel) => panel.clone(),
                 _ => panic!("kaya: add_child parent is not a container"),
             };
+            let children = panel.Children()?;
             match core.widgets.get(&child).expect("scene validated the id") {
-                NativeWidget::Column(panel) => children.Append(panel)?,
+                NativeWidget::Column(p) => children.Append(p)?,
                 NativeWidget::Button { button, .. } => children.Append(button)?,
                 NativeWidget::Label(label) => children.Append(label)?,
             }
+            core.parents.insert(child, panel);
         }
         ApplyOp::Mount { window: _, root } => {
             match core.widgets.get(&root).expect("scene validated the id") {
@@ -340,7 +372,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             scene: Scene::new(),
             occurrences: occ_tx,
             widgets: HashMap::new(),
+            parents: HashMap::new(),
             selftest_button: None,
+            selftest_last_button: None,
             selftest_label: None,
             window,
         });
@@ -364,25 +398,42 @@ fn spawn_selftest() {
     }
 
     std::thread::spawn(|| {
-        let click = || {
+        // TODO(selftest): use ButtonAutomationPeer::Invoke once automation
+        // bindings are generated, to exercise the real input path instead
+        // of the handler's emission directly.
+        let click_first = || {
             on_ui(|| {
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
-                    // TODO(selftest): use ButtonAutomationPeer::Invoke once
-                    // automation bindings are generated, to exercise the
-                    // real input path instead of the handler directly.
-                    core.occurrences.send(Occurrence::ButtonClicked {
-                        id: core.selftest_button.expect("the scene has a button"),
-                    });
+                    core.occurrences.send_click_tag(
+                        core.selftest_button
+                            .as_ref()
+                            .expect("the scene has a button"),
+                    );
+                });
+                Ok(())
+            });
+        };
+        let click_last = || {
+            on_ui(|| {
+                CORE.with_borrow(|core| {
+                    let core = core.as_ref().expect("core state initialized");
+                    core.occurrences.send_click_tag(
+                        core.selftest_last_button
+                            .as_ref()
+                            .expect("the scene has stamped a button"),
+                    );
                 });
                 Ok(())
             });
         };
 
         std::thread::sleep(std::time::Duration::from_millis(800));
-        click();
+        click_first();
         std::thread::sleep(std::time::Duration::from_millis(300));
-        click();
+        click_first();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        click_last();
         std::thread::sleep(std::time::Duration::from_millis(700));
 
         on_ui(|| {
@@ -394,7 +445,7 @@ fn spawn_selftest() {
                     .expect("the scene has a label")
                     .Text()?
                     .to_string();
-                if text == "Clicked 2 times" {
+                if text == "removed g2/a" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

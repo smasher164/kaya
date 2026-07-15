@@ -1,9 +1,10 @@
-(* Milestone 1 from OCaml through the direct ring tier: OCaml reads the
-   occurrence ring with its own loads, and answers with packed
-   transaction records through kaya_submit. The scene arrives as one
-   transaction; the label's text is a signal binding this guest writes on
-   every click. The C boundary is crossed only to start the core, to wait
-   on an empty ring, and to submit.
+(* The milestone-2 scene from OCaml through the direct ring tier: OCaml
+   reads the occurrence ring with its own loads, and answers with packed
+   transaction records through kaya_submit. The scene declares a When
+   (the extras banner) and a nested For (groups holding items); clicks on
+   stamped remove buttons come back as a template node id plus key path,
+   and the app answers by removing that entry. The C boundary is crossed
+   only to start the core, to wait on an empty ring, and to submit.
 
    The data path is two-layer, the way ocaml-uring binds the real
    io_uring. A Bigarray wraps the ring's memory, so record parsing
@@ -77,24 +78,51 @@ let tx_create_widget = 3
 let tx_set_property = 4
 let tx_add_child = 5
 let tx_mount = 6
+let tx_create_collection = 7
+let tx_collection_insert = 8
+let tx_collection_update = 9
+let tx_collection_remove = 10
+let tx_create_for = 11
+let tx_create_when = 12
+let tx_template_end = 13
 let kind_column = 1l
 let kind_button = 2l
 let kind_label = 3l
 let prop_text = 1l
 let source_const = 0l
 let source_signal = 1l
+let source_element = 2l
+let value_bool = 1l
 let value_str = 4l
 
 (* Guest-allocated ids, counted from 1 per space. *)
-let sig_text = 1L
+let sig_status = 1L
+let sig_extras = 2L
 let w_column = 1L
-let w_button = 2L
-let w_label = 3L
+let w_step = 2L
+let w_status = 3L
+let w_when = 4L
+let w_groups = 5L
+let c_groups = 1L
+let c_items = 2L
+let n_banner = 1L
+let n_group_col = 2L
+let n_group_lbl = 3L
+let n_items_for = 4L
+let n_item_row = 5L
+let n_item_text = 6L
+let n_remove = 7L
 
 (* --- Transaction packing (KAYA_TX_* layouts from kaya.h) --------------
 
    Each record is {u32 size, u16 kind, u16 flags}, body, padded to 8;
-   the body is packed separately so the size is known up front. *)
+   the body is packed separately so the size is known up front. Values
+   are self-padded to 8, since they concatenate inside bodies. *)
+
+let pad8 b =
+  while Buffer.length b mod 8 <> 0 do
+    Buffer.add_char b '\000'
+  done
 
 let record tx kind body =
   let size = 8 + Buffer.length body in
@@ -113,65 +141,145 @@ let body pack =
 let str_value b text =
   Buffer.add_int32_le b value_str;
   Buffer.add_int32_le b (Int32.of_int (String.length text));
-  Buffer.add_string b text
+  Buffer.add_string b text;
+  pad8 b
+
+let bool_value b v =
+  Buffer.add_int32_le b value_bool;
+  Buffer.add_int32_le b 1l;
+  Buffer.add_char b (if v then '\001' else '\000');
+  pad8 b
+
+(* A key path: {u32 count, u32 reserved, count values}. *)
+let path b keys =
+  Buffer.add_int32_le b (Int32.of_int (List.length keys));
+  Buffer.add_int32_le b 0l;
+  List.iter (str_value b) keys
 
 let submit tx =
   let bytes = Buffer.contents tx in
   kaya_submit bytes (Unsigned.Size_t.of_int (String.length bytes))
 
-let scene_tx () =
-  let tx = Buffer.create 256 in
-  record tx tx_create_signal
-    (body (fun b ->
-         Buffer.add_int64_le b sig_text;
-         str_value b "Clicked 0 times"));
+let widget tx id kind =
   record tx tx_create_widget
     (body (fun b ->
-         Buffer.add_int64_le b w_column;
-         Buffer.add_int32_le b kind_column;
-         Buffer.add_int32_le b 0l));
-  record tx tx_create_widget
-    (body (fun b ->
-         Buffer.add_int64_le b w_button;
-         Buffer.add_int32_le b kind_button;
-         Buffer.add_int32_le b 0l));
+         Buffer.add_int64_le b id;
+         Buffer.add_int32_le b kind;
+         Buffer.add_int32_le b 0l))
+
+let text_const tx id text =
   record tx tx_set_property
     (body (fun b ->
-         Buffer.add_int64_le b w_button;
+         Buffer.add_int64_le b id;
          Buffer.add_int32_le b prop_text;
          Buffer.add_int32_le b source_const;
-         str_value b "Click me"));
-  record tx tx_create_widget
-    (body (fun b ->
-         Buffer.add_int64_le b w_label;
-         Buffer.add_int32_le b kind_label;
-         Buffer.add_int32_le b 0l));
+         str_value b text))
+
+let text_element tx id level =
   record tx tx_set_property
     (body (fun b ->
-         Buffer.add_int64_le b w_label;
+         Buffer.add_int64_le b id;
          Buffer.add_int32_le b prop_text;
-         Buffer.add_int32_le b source_signal;
-         Buffer.add_int64_le b sig_text));
-  record tx tx_add_child
-    (body (fun b ->
-         Buffer.add_int64_le b w_column;
-         Buffer.add_int64_le b w_button));
-  record tx tx_add_child
-    (body (fun b ->
-         Buffer.add_int64_le b w_column;
-         Buffer.add_int64_le b w_label));
-  record tx tx_mount
-    (body (fun b ->
-         Buffer.add_int64_le b 0L; (* window 0: the default *)
-         Buffer.add_int64_le b w_column));
-  submit tx
+         Buffer.add_int32_le b source_element;
+         Buffer.add_int32_le b level;
+         Buffer.add_int32_le b 0l))
 
-let write_tx text =
-  let tx = Buffer.create 64 in
+let two_u64 tx kind a b_ =
+  record tx kind
+    (body (fun b ->
+         Buffer.add_int64_le b a;
+         Buffer.add_int64_le b b_))
+
+let collection tx id =
+  record tx tx_create_collection (body (fun b -> Buffer.add_int64_le b id))
+
+let template_end tx = record tx tx_template_end (body (fun _ -> ()))
+
+let insert tx coll at key value =
+  record tx tx_collection_insert
+    (body (fun b ->
+         Buffer.add_int64_le b coll;
+         path b at;
+         str_value b key;
+         str_value b value))
+
+let update tx coll at key value =
+  record tx tx_collection_update
+    (body (fun b ->
+         Buffer.add_int64_le b coll;
+         path b at;
+         str_value b key;
+         str_value b value))
+
+let remove tx coll at key =
+  record tx tx_collection_remove
+    (body (fun b ->
+         Buffer.add_int64_le b coll;
+         path b at;
+         str_value b key))
+
+let write_str tx sig_ text =
   record tx tx_write_signal
     (body (fun b ->
-         Buffer.add_int64_le b sig_text;
-         str_value b text));
+         Buffer.add_int64_le b sig_;
+         str_value b text))
+
+let write_bool tx sig_ v =
+  record tx tx_write_signal
+    (body (fun b ->
+         Buffer.add_int64_le b sig_;
+         bool_value b v))
+
+let scene_tx () =
+  let tx = Buffer.create 1024 in
+  record tx tx_create_signal
+    (body (fun b ->
+         Buffer.add_int64_le b sig_status;
+         str_value b "step 0"));
+  record tx tx_create_signal
+    (body (fun b ->
+         Buffer.add_int64_le b sig_extras;
+         bool_value b false));
+  widget tx w_column kind_column;
+  widget tx w_step kind_button;
+  text_const tx w_step "step";
+  widget tx w_status kind_label;
+  record tx tx_set_property
+    (body (fun b ->
+         Buffer.add_int64_le b w_status;
+         Buffer.add_int32_le b prop_text;
+         Buffer.add_int32_le b source_signal;
+         Buffer.add_int64_le b sig_status));
+  (* When(extras): a banner label. The scope brackets the blueprint. *)
+  two_u64 tx tx_create_when w_when sig_extras;
+  widget tx n_banner kind_label;
+  text_const tx n_banner "extras on";
+  template_end tx;
+  (* For over groups, nesting a For over items. *)
+  collection tx c_groups;
+  two_u64 tx tx_create_for w_groups c_groups;
+  widget tx n_group_col kind_column;
+  widget tx n_group_lbl kind_label;
+  text_element tx n_group_lbl 0l;
+  two_u64 tx tx_add_child n_group_col n_group_lbl;
+  collection tx c_items;
+  two_u64 tx tx_create_for n_items_for c_items;
+  widget tx n_item_row kind_column;
+  widget tx n_item_text kind_label;
+  text_element tx n_item_text 0l;
+  widget tx n_remove kind_button;
+  text_const tx n_remove "remove";
+  two_u64 tx tx_add_child n_item_row n_item_text;
+  two_u64 tx tx_add_child n_item_row n_remove;
+  template_end tx;
+  two_u64 tx tx_add_child n_group_col n_items_for;
+  template_end tx;
+  two_u64 tx tx_add_child w_column w_step;
+  two_u64 tx tx_add_child w_column w_status;
+  two_u64 tx tx_add_child w_column w_when;
+  two_u64 tx tx_add_child w_column w_groups;
+  two_u64 tx tx_mount 0L w_column;
+  (* window 0: the default *)
   submit tx
 
 (* Record layout as declared in kaya.h: header { u32 size; u16 kind;
@@ -180,6 +288,21 @@ let write_tx text =
 let byte data i = Char.code (Bigarray.Array1.get data i)
 let u16 data i = byte data i lor (byte data (i + 1) lsl 8)
 let u32 data i = u16 data i lor (u16 data (i + 2) lsl 16)
+
+(* One click record: header, u64 id, u32 path_len, u32 pad, values. The
+   ids kaya hands back are guest-allocated and small; the low u32 is the
+   whole story. *)
+let parse_click data at =
+  let id = u32 data (at + 8) in
+  let path_len = u32 data (at + 16) in
+  let keys = ref [] in
+  let p = ref (at + 24) in
+  for _ = 1 to path_len do
+    let vlen = u32 data (!p + 4) in
+    keys := String.init vlen (fun i -> Bigarray.Array1.get data (!p + 8 + i)) :: !keys;
+    p := !p + 8 + ((vlen + 7) land lnot 7)
+  done;
+  (id, List.rev !keys)
 
 let app () =
   let info = make ring_info in
@@ -195,7 +318,7 @@ let app () =
 
   scene_tx ();
 
-  let count = ref 0 in
+  let steps = ref 0 in
   let running = ref true in
   let h = ref (load_acquire_u32 head_addr) in
   while !running do
@@ -208,9 +331,29 @@ let app () =
       let size = u32 data at in
       let kind = u16 data (at + 4) in
       if kind = button_clicked then begin
-        incr count;
-        let noun = if !count = 1 then "time" else "times" in
-        write_tx (Printf.sprintf "Clicked %d %s" !count noun)
+        match parse_click data at with
+        | id, [] when Int64.of_int id = w_step ->
+            incr steps;
+            let tx = Buffer.create 256 in
+            (match !steps with
+            | 1 ->
+                insert tx c_groups [] "g1" "Work";
+                insert tx c_items [ "g1" ] "a" "send report";
+                insert tx c_items [ "g1" ] "b" "buy milk"
+            | 2 ->
+                insert tx c_groups [] "g2" "Home";
+                insert tx c_items [ "g2" ] "a" "water plants";
+                update tx c_groups [] "g1" "Office"
+            | _ -> ());
+            write_bool tx sig_extras (!steps = 1);
+            write_str tx sig_status (Printf.sprintf "step %d" !steps);
+            submit tx
+        | id, [ group; item ] when Int64.of_int id = n_remove ->
+            let tx = Buffer.create 128 in
+            remove tx c_items [ group ] item;
+            write_str tx sig_status (Printf.sprintf "removed %s/%s" group item);
+            submit tx
+        | _ -> ()
       end;
       (* The cursors are u32 and wrap; OCaml ints are wider, so wrap by
          hand before handing the space back with a release store. *)

@@ -47,8 +47,11 @@ struct CoreState {
     scene: Scene,
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
-    // The first button and label, for the selftest's round trip.
+    // The first button (the scene's driver), the most recently created
+    // button (a stamped one, in the milestone-2 scene), and the first
+    // label (the status line), for the selftest's round trip.
     selftest_button: Option<Retained<NSButton>>,
+    selftest_last_button: Option<Retained<NSButton>>,
     selftest_label: Option<Retained<NSTextField>>,
     // Held so targets and the delegate outlive the objects that
     // reference them weakly.
@@ -90,7 +93,7 @@ fn drain_transactions() {
 
 fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
     match op {
-        ApplyOp::Create { id, kind } => {
+        ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Column => {
                     let stack = NSStackView::new(mtm);
@@ -100,7 +103,10 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Button => {
-                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), id);
+                    // The tag is the click's identity, emitted verbatim;
+                    // this backend never learns what it means.
+                    let tag = tag.expect("buttons carry a click tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
                     let button = unsafe {
                         NSButton::buttonWithTitle_target_action(
                             &NSString::from_str(""),
@@ -113,6 +119,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     if core.selftest_button.is_none() {
                         core.selftest_button = Some(button.clone());
                     }
+                    core.selftest_last_button = Some(button.clone());
                     NativeWidget::Button(button)
                 }
                 WidgetKind::Label => {
@@ -124,6 +131,10 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
             };
             core.widgets.insert(id, native);
+        }
+        ApplyOp::Destroy { id } => {
+            let widget = core.widgets.remove(&id).expect("scene validated the id");
+            widget.view().removeFromSuperview();
         }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -162,7 +173,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
 
 struct TargetIvars {
     occurrences: OccSink,
-    id: WidgetId,
+    tag: Vec<u8>,
 }
 
 define_class!(
@@ -175,16 +186,16 @@ define_class!(
     impl ButtonTarget {
         #[unsafe(method(clicked:))]
         fn clicked(&self, _sender: Option<&AnyObject>) {
-            self.ivars().occurrences.send(Occurrence::ButtonClicked {
-                id: self.ivars().id,
-            });
+            self.ivars()
+                .occurrences
+                .send_click_tag(&self.ivars().tag);
         }
     }
 );
 
 impl ButtonTarget {
-    fn new(mtm: MainThreadMarker, occurrences: OccSink, id: WidgetId) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, id });
+    fn new(mtm: MainThreadMarker, occurrences: OccSink, tag: Vec<u8>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, tag });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -255,6 +266,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             occurrences: occ_tx,
             widgets: HashMap::new(),
             selftest_button: None,
+            selftest_last_button: None,
             selftest_label: None,
             _targets: Vec::new(),
             _window: window,
@@ -271,15 +283,18 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 }
 
 /// Drives the full round trip without a human: performClick on the main
-/// thread emits a real occurrence, the app thread answers with a signal
-/// write, and the label text proves the resolution path worked.
+/// thread emits real occurrences — twice on the scene's driver button
+/// (stamping groups, items, and the When), once on the most recently
+/// stamped button (whose click travels as a template-node id plus key
+/// path) — and the status label proves the whole loop: stamping, tags,
+/// data-addressed removal, and the answering signal write.
 fn spawn_selftest() {
     fn on_main(f: impl FnOnce() + Send + 'static) {
         DispatchQueue::main().exec_async(f);
     }
 
     std::thread::spawn(|| {
-        let click = || {
+        let click_first = || {
             on_main(|| {
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
@@ -291,11 +306,25 @@ fn spawn_selftest() {
                 });
             });
         };
+        let click_last = || {
+            on_main(|| {
+                CORE.with_borrow(|core| {
+                    let core = core.as_ref().expect("core state initialized");
+                    let button = core
+                        .selftest_last_button
+                        .as_ref()
+                        .expect("the scene has stamped a button");
+                    unsafe { button.performClick(None) };
+                });
+            });
+        };
 
         std::thread::sleep(std::time::Duration::from_millis(500));
-        click();
+        click_first();
         std::thread::sleep(std::time::Duration::from_millis(200));
-        click();
+        click_first();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        click_last();
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         on_main(|| {
@@ -303,7 +332,7 @@ fn spawn_selftest() {
                 let core = core.as_ref().expect("core state initialized");
                 let label = core.selftest_label.as_ref().expect("the scene has a label");
                 let text = label.stringValue().to_string();
-                if text == "Clicked 2 times" {
+                if text == "removed g2/a" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

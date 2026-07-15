@@ -1,10 +1,12 @@
-//! The C ABI, milestone-1 shape.
+//! The C ABI, milestone-2 shape.
 //!
 //! The boundary is two-tier. Functions are the portable floor: any
 //! language can call `kaya_next_occurrence` and never think about memory
-//! order. Languages with real atomics (Go, JVM, C#) may instead read the
-//! occurrence ring directly: `kaya_occurrence_ring` hands out the layout
-//! once (io_uring-offsets style), the data path is lock-free loads and
+//! order — it hands out one complete occurrence record (the same bytes
+//! the ring carries; one vocabulary, two transports). Languages with
+//! real atomics (Go, JVM, C#) may instead read the occurrence ring
+//! directly: `kaya_occurrence_ring` hands out the layout once
+//! (io_uring-offsets style), the data path is lock-free loads and
 //! stores, and `kaya_wait_occurrences` is the blocking call for the empty
 //! case only, like io_uring_enter. Both tiers drain the same ring; there
 //! is one consumer, whichever style it uses.
@@ -27,7 +29,7 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::protocol::{OccSink, Occurrence, Transaction, WidgetId};
+use crate::protocol::{OccSink, Transaction};
 use crate::ring::{self, OccRing};
 use crate::scene::Scene;
 use crate::wire;
@@ -35,7 +37,11 @@ use crate::wire;
 // Literal values: cbindgen drops constants defined by path references.
 // The asserts below keep them locked to the wire module's values.
 
-/// Occurrence record kinds (the ring, core -> guest).
+/// Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
+/// body: u64 id, u32 path_len, u32 reserved, then path_len key values.
+/// path_len 0 means id is a widget id (a click on a guest-created
+/// widget); otherwise id is a template node id and the values are the
+/// stamped copy's key path, outermost first.
 pub const KAYA_OCCURRENCE_PAD: u16 = 0;
 pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
 const _: () = assert!(
@@ -45,20 +51,45 @@ const _: () = assert!(
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
 /// after the common 8-byte header, little-endian, 8-aligned:
-///   CREATE_SIGNAL: u64 signal_id, value
-///   WRITE_SIGNAL:  u64 signal_id, value
-///   CREATE_WIDGET: u64 widget_id, u32 kind, u32 pad
-///   SET_PROPERTY:  u64 widget_id, u32 prop, u32 source,
-///                  then value (SOURCE_CONST) or u64 signal_id (SOURCE_SIGNAL)
-///   ADD_CHILD:     u64 parent, u64 child
-///   MOUNT:         u64 window (0 = the default window), u64 root
-/// where value is { u32 type, u32 len, payload padded to 8 }.
+///   CREATE_SIGNAL:     u64 signal_id, value
+///   WRITE_SIGNAL:      u64 signal_id, value
+///   CREATE_WIDGET:     u64 widget_id, u32 kind, u32 pad
+///   SET_PROPERTY:      u64 widget_id, u32 prop, u32 source, then
+///                      value (SOURCE_CONST) | u64 signal_id
+///                      (SOURCE_SIGNAL) | u32 level, u32 pad
+///                      (SOURCE_ELEMENT: the entry value of the
+///                      enclosing For, level Fors up, 0 = nearest)
+///   ADD_CHILD:         u64 parent, u64 child
+///   MOUNT:             u64 window (0 = the default window), u64 root
+///   CREATE_COLLECTION: u64 collection_id
+///   COLLECTION_INSERT: u64 collection_id, path, key value, value
+///   COLLECTION_UPDATE: u64 collection_id, path, key value, value
+///   COLLECTION_REMOVE: u64 collection_id, path, key value
+///   CREATE_FOR:        u64 id, u64 collection_id — opens a template
+///                      scope; records until the matching TEMPLATE_END
+///                      declare the blueprint (their ids are template
+///                      node ids), and nothing renders until data
+///                      arrives. The For itself is a live widget at top
+///                      level, a template node when nested.
+///   CREATE_WHEN:       u64 id, u64 signal_id — same scoping; stamps on
+///                      true, unstamps on false. The signal must be Bool.
+///   TEMPLATE_END:      no body
+/// where value is { u32 type, u32 len, payload padded to 8 } and path
+/// is { u32 count, u32 reserved, count values } — the key path
+/// addressing a collection instance (empty for a top-level collection).
 pub const KAYA_TX_CREATE_SIGNAL: u16 = 1;
 pub const KAYA_TX_WRITE_SIGNAL: u16 = 2;
 pub const KAYA_TX_CREATE_WIDGET: u16 = 3;
 pub const KAYA_TX_SET_PROPERTY: u16 = 4;
 pub const KAYA_TX_ADD_CHILD: u16 = 5;
 pub const KAYA_TX_MOUNT: u16 = 6;
+pub const KAYA_TX_CREATE_COLLECTION: u16 = 7;
+pub const KAYA_TX_COLLECTION_INSERT: u16 = 8;
+pub const KAYA_TX_COLLECTION_UPDATE: u16 = 9;
+pub const KAYA_TX_COLLECTION_REMOVE: u16 = 10;
+pub const KAYA_TX_CREATE_FOR: u16 = 11;
+pub const KAYA_TX_CREATE_WHEN: u16 = 12;
+pub const KAYA_TX_TEMPLATE_END: u16 = 13;
 const _: () = assert!(
     KAYA_TX_CREATE_SIGNAL == wire::TX_CREATE_SIGNAL
         && KAYA_TX_WRITE_SIGNAL == wire::TX_WRITE_SIGNAL
@@ -66,23 +97,38 @@ const _: () = assert!(
         && KAYA_TX_SET_PROPERTY == wire::TX_SET_PROPERTY
         && KAYA_TX_ADD_CHILD == wire::TX_ADD_CHILD
         && KAYA_TX_MOUNT == wire::TX_MOUNT
+        && KAYA_TX_CREATE_COLLECTION == wire::TX_CREATE_COLLECTION
+        && KAYA_TX_COLLECTION_INSERT == wire::TX_COLLECTION_INSERT
+        && KAYA_TX_COLLECTION_UPDATE == wire::TX_COLLECTION_UPDATE
+        && KAYA_TX_COLLECTION_REMOVE == wire::TX_COLLECTION_REMOVE
+        && KAYA_TX_CREATE_FOR == wire::TX_CREATE_FOR
+        && KAYA_TX_CREATE_WHEN == wire::TX_CREATE_WHEN
+        && KAYA_TX_TEMPLATE_END == wire::TX_TEMPLATE_END
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
 /// Layouts after the header:
-///   CREATE:    u64 widget_id, u32 kind, u32 pad
+///   CREATE:    u64 widget_id, u32 kind, u32 tag_len, then tag_len bytes
+///              (padded to 8): the click tag an interactive widget must
+///              emit verbatim through kaya_emit_clicked on activation.
+///              tag_len 0 means no tag. The tag bytes are exactly a
+///              BUTTON_CLICKED occurrence body.
 ///   SET_PROP:  u64 widget_id, u32 prop, u32 pad, value (always resolved)
 ///   ADD_CHILD: u64 parent, u64 child
 ///   MOUNT:     u64 window, u64 root
+///   DESTROY:   u64 widget_id — remove from its parent and forget it.
+///              Teardown arrives children-first; never walk anything.
 pub const KAYA_APPLY_CREATE: u16 = 1;
 pub const KAYA_APPLY_SET_PROP: u16 = 2;
 pub const KAYA_APPLY_ADD_CHILD: u16 = 3;
 pub const KAYA_APPLY_MOUNT: u16 = 4;
+pub const KAYA_APPLY_DESTROY: u16 = 5;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
         && KAYA_APPLY_ADD_CHILD == wire::APPLY_ADD_CHILD
         && KAYA_APPLY_MOUNT == wire::APPLY_MOUNT
+        && KAYA_APPLY_DESTROY == wire::APPLY_DESTROY
 );
 
 /// Value types.
@@ -111,18 +157,15 @@ const _: () = assert!(
 pub const KAYA_PROP_TEXT: u32 = 1;
 const _: () = assert!(KAYA_PROP_TEXT == wire::PROP_TEXT);
 
-/// set_property sources.
+/// set_property sources. SOURCE_ELEMENT is valid only inside a template.
 pub const KAYA_SOURCE_CONST: u32 = 0;
 pub const KAYA_SOURCE_SIGNAL: u32 = 1;
+pub const KAYA_SOURCE_ELEMENT: u32 = 2;
 const _: () = assert!(
-    KAYA_SOURCE_CONST == wire::SOURCE_CONST && KAYA_SOURCE_SIGNAL == wire::SOURCE_SIGNAL
+    KAYA_SOURCE_CONST == wire::SOURCE_CONST
+        && KAYA_SOURCE_SIGNAL == wire::SOURCE_SIGNAL
+        && KAYA_SOURCE_ELEMENT == wire::SOURCE_ELEMENT
 );
-
-#[repr(C)]
-pub struct KayaOccurrence {
-    pub kind: u16,
-    pub widget_id: u64,
-}
 
 /// The occurrence ring's layout, for direct consumers.
 #[repr(C)]
@@ -201,19 +244,32 @@ pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
 }
 
 /// Function-floor consumption: block until the next occurrence and write
-/// it to `out`. Returns false when the core has shut down. Call from a
-/// single app thread, and do not mix with direct ring access.
+/// one complete record — header included, exactly the ring's bytes — to
+/// `buf`. Returns the record size, or 0 when the core has shut down.
+/// 256 bytes of capacity covers any occurrence with a reasonable key
+/// path; an overflowing record fails loudly. Call from a single app
+/// thread, and do not mix with direct ring access.
 #[unsafe(no_mangle)]
-pub extern "C" fn kaya_next_occurrence(out: *mut KayaOccurrence) -> bool {
-    if out.is_null() {
-        return false;
+pub unsafe extern "C" fn kaya_next_occurrence(buf: *mut u8, cap: usize) -> usize {
+    if buf.is_null() {
+        return 0;
     }
     match state().ring.wait_pop() {
-        Some((kind, widget_id)) => {
-            unsafe { *out = KayaOccurrence { kind, widget_id } };
-            true
+        Some((kind, body)) => {
+            let size = wire::HEADER_SIZE + body.len();
+            assert!(
+                size <= cap,
+                "kaya: occurrence record of {size} bytes exceeds the buffer of {cap}"
+            );
+            let mut record = Vec::with_capacity(size);
+            record.extend_from_slice(&(size as u32).to_le_bytes());
+            record.extend_from_slice(&kind.to_le_bytes());
+            record.extend_from_slice(&0u16.to_le_bytes());
+            record.extend_from_slice(&body);
+            unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), buf, size) };
+            size
         }
-        None => false,
+        None => 0,
     }
 }
 
@@ -270,17 +326,19 @@ pub(crate) fn presentation_tx_sender() -> mpsc::Sender<Transaction> {
     state().tx_tx.clone()
 }
 
-/// Presentation side: emit a button-clicked occurrence, exactly as a
-/// backend's action handler would. Do not combine with kaya_run.
+/// Presentation side: emit a click, exactly as a backend's action
+/// handler would — `tag` is the click tag bytes delivered with the
+/// widget's CREATE record, handed back verbatim. Do not combine with
+/// kaya_run.
 #[unsafe(no_mangle)]
-pub extern "C" fn kaya_emit_button_clicked(widget_id: u64) {
+pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
+    assert!(!tag.is_null() && len != 0, "kaya: empty click tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, len) };
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
-        sink.send(Occurrence::ButtonClicked {
-            id: WidgetId(widget_id),
-        });
+        sink.send_click_tag(tag);
         return;
     }
-    state().ring.push(ring::REC_BUTTON_CLICKED, widget_id);
+    state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
 }
 
 /// Presentation side: block until the next transaction, resolve it

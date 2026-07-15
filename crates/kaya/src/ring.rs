@@ -33,14 +33,20 @@ pub struct KayaRecordHeader {
     pub flags: u16,
 }
 
-/// The button-clicked record as it appears on the wire. Constructed by
+/// The button-clicked record as it appears on the wire. `id` is a widget
+/// id when `path_len` is 0 (a click on a guest-created widget) and a
+/// template node id otherwise, with `path_len` key values — the copy's
+/// key path, outermost first, each encoded as { u32 type; u32 len;
+/// payload padded to 8 } — following the fixed part. Constructed by
 /// direct consumers casting into the ring, not by Rust code.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct KayaRecordButtonClicked {
     pub header: KayaRecordHeader,
-    pub widget_id: u64,
+    pub id: u64,
+    pub path_len: u32,
+    pub reserved: u32,
 }
 
 const HEADER_SIZE: u32 = 8;
@@ -106,17 +112,23 @@ impl OccRing {
         unsafe { *self.slot_ptr(byte_offset) }
     }
 
-    /// Producer side. Single producer only. Panics when full; the design
+    /// Producer side. Single producer only. `body` must be 8-aligned in
+    /// length (record bodies always are). Panics when full; the design
     /// says never block and never drop, and growth is not built yet.
-    pub fn push(&self, kind: u16, payload: u64) {
-        if !self.try_push(kind, payload) {
+    pub fn push_record(&self, kind: u16, body: &[u8]) {
+        if !self.try_push_record(kind, body) {
             panic!("kaya occurrence ring full: segment growth is not implemented yet");
         }
     }
 
     /// Producer side. Single producer only. Returns false when full.
-    pub fn try_push(&self, kind: u16, payload: u64) -> bool {
-        let size = HEADER_SIZE + 8;
+    pub fn try_push_record(&self, kind: u16, body: &[u8]) -> bool {
+        assert!(body.len() % 8 == 0, "kaya: record body not 8-aligned");
+        let size = HEADER_SIZE + body.len() as u32;
+        assert!(
+            size <= self.capacity() / 2,
+            "kaya: occurrence record larger than half the ring"
+        );
         let mut tail = self.tail.0.load(Ordering::Relaxed);
         let head = self.head.0.load(Ordering::Acquire);
 
@@ -139,7 +151,12 @@ impl OccRing {
             tail = tail.wrapping_add(pad);
         }
         self.write_header(tail, KayaRecordHeader { size, kind, flags: 0 });
-        self.write_qword(tail.wrapping_add(8), payload);
+        for (i, chunk) in body.chunks_exact(8).enumerate() {
+            self.write_qword(
+                tail.wrapping_add(8 + 8 * i as u32),
+                u64::from_le_bytes(chunk.try_into().unwrap()),
+            );
+        }
         self.tail
             .0
             .store(tail.wrapping_add(size), Ordering::Release);
@@ -154,7 +171,7 @@ impl OccRing {
     /// Consumer side, for in-process consumers (the C function floor).
     /// Foreign consumers with atomics read the ring directly instead.
     /// Single consumer only. Returns None after shutdown drains the ring.
-    pub fn wait_pop(&self) -> Option<(u16, u64)> {
+    pub fn wait_pop(&self) -> Option<(u16, Vec<u8>)> {
         loop {
             let head = self.head.0.load(Ordering::Relaxed);
             let tail = self.tail.0.load(Ordering::Acquire);
@@ -166,11 +183,17 @@ impl OccRing {
                         .store(head.wrapping_add(header.size), Ordering::Release);
                     continue;
                 }
-                let payload = self.read_qword(head.wrapping_add(8));
+                let body_len = (header.size - HEADER_SIZE) as usize;
+                let mut body = Vec::with_capacity(body_len);
+                for i in 0..(body_len / 8) as u32 {
+                    body.extend_from_slice(
+                        &self.read_qword(head.wrapping_add(8 + 8 * i)).to_le_bytes(),
+                    );
+                }
                 self.head
                     .0
                     .store(head.wrapping_add(header.size), Ordering::Release);
-                return Some((header.kind, payload));
+                return Some((header.kind, body));
             }
             if self.shutdown.load(Ordering::Acquire) {
                 return None;
@@ -235,11 +258,23 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    fn body(v: u64) -> Vec<u8> {
+        v.to_le_bytes().to_vec()
+    }
+
     #[test]
     fn round_trip_one_record() {
         let ring = OccRing::new(64);
-        ring.push(REC_BUTTON_CLICKED, 7);
-        assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, 7)));
+        ring.push_record(REC_BUTTON_CLICKED, &body(7));
+        assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(7))));
+    }
+
+    #[test]
+    fn round_trip_multi_qword_body() {
+        let ring = OccRing::new(128);
+        let long: Vec<u8> = (0..32).collect();
+        ring.push_record(REC_BUTTON_CLICKED, &long);
+        assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, long)));
     }
 
     #[test]
@@ -248,13 +283,13 @@ mod tests {
         // forces wraparound and pad insertion at every misfit boundary.
         let ring = OccRing::new(64);
         for i in 0..1000u64 {
-            ring.push(REC_BUTTON_CLICKED, i);
+            ring.push_record(REC_BUTTON_CLICKED, &body(i));
             if i % 2 == 0 {
-                ring.push(REC_BUTTON_CLICKED, i + 1000);
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, i)));
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, i + 1000)));
+                ring.push_record(REC_BUTTON_CLICKED, &body(i + 1000));
+                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i))));
+                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i + 1000))));
             } else {
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, i)));
+                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i))));
             }
         }
     }
@@ -266,7 +301,7 @@ mod tests {
             let ring = ring.clone();
             std::thread::spawn(move || {
                 for i in 0..50_000u64 {
-                    while !ring.try_push(REC_BUTTON_CLICKED, i) {
+                    while !ring.try_push_record(REC_BUTTON_CLICKED, &body(i)) {
                         std::thread::yield_now();
                     }
                 }
@@ -276,7 +311,7 @@ mod tests {
         let mut expected = 0u64;
         while let Some((kind, payload)) = ring.wait_pop() {
             assert_eq!(kind, REC_BUTTON_CLICKED);
-            assert_eq!(payload, expected);
+            assert_eq!(payload, body(expected));
             expected += 1;
         }
         assert_eq!(expected, 50_000);
@@ -300,7 +335,7 @@ mod tests {
     fn full_ring_fails_loudly() {
         let ring = OccRing::new(64);
         for i in 0..5 {
-            ring.push(REC_BUTTON_CLICKED, i);
+            ring.push_record(REC_BUTTON_CLICKED, &body(i));
         }
     }
 }

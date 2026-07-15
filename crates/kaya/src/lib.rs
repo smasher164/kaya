@@ -38,9 +38,10 @@ mod swiftui_host;
 ))]
 pub mod capi;
 
-pub use app::{AppCtx, Tx};
+pub use app::{AppCtx, Tpl, Tx};
 pub use protocol::{
-    DEFAULT_WINDOW, Occurrence, Prop, SignalId, Value, WidgetId, WidgetKind, WindowId,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, WidgetId,
+    WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "macos")]

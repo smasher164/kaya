@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
-    DEFAULT_WINDOW, Occurrence, Prop, PropValue, SignalId, Transaction, TxOp, Value, WidgetId,
-    WidgetKind,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, PropValue, SignalId, TemplateNodeId,
+    Transaction, TxOp, Value, WidgetId, WidgetKind,
 };
 
 pub struct AppCtx {
@@ -13,6 +13,8 @@ pub struct AppCtx {
     pub(crate) transactions: Sender<Transaction>,
     next_signal: Cell<u64>,
     next_widget: Cell<u64>,
+    next_collection: Cell<u64>,
+    next_node: Cell<u64>,
 }
 
 impl AppCtx {
@@ -22,6 +24,8 @@ impl AppCtx {
             transactions,
             next_signal: Cell::new(1),
             next_widget: Cell::new(1),
+            next_collection: Cell::new(1),
+            next_node: Cell::new(1),
         }
     }
 
@@ -52,6 +56,18 @@ impl AppCtx {
         let id = self.next_widget.get();
         self.next_widget.set(id + 1);
         WidgetId(id)
+    }
+
+    fn alloc_collection(&self) -> CollectionId {
+        let id = self.next_collection.get();
+        self.next_collection.set(id + 1);
+        CollectionId(id)
+    }
+
+    fn alloc_node(&self) -> TemplateNodeId {
+        let id = self.next_node.get();
+        self.next_node.set(id + 1);
+        TemplateNodeId(id)
     }
 }
 
@@ -105,6 +121,107 @@ impl Tx<'_> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
+    /// Declare a collection: a core-side keyed table a For renders.
+    pub fn collection(&mut self) -> CollectionId {
+        let id = self.ctx.alloc_collection();
+        self.ops.push(TxOp::CreateCollection { id });
+        id
+    }
+
+    /// Insert an entry into a top-level collection. For instances of a
+    /// template-declared collection, use `insert_at` with the key path.
+    pub fn insert(
+        &mut self,
+        collection: CollectionId,
+        key: impl Into<Value>,
+        value: impl Into<Value>,
+    ) {
+        self.insert_at(collection, &[], key, value);
+    }
+
+    pub fn insert_at(
+        &mut self,
+        collection: CollectionId,
+        path: &[Value],
+        key: impl Into<Value>,
+        value: impl Into<Value>,
+    ) {
+        self.ops.push(TxOp::CollectionInsert {
+            id: collection,
+            path: path.to_vec(),
+            key: key.into(),
+            value: value.into(),
+        });
+    }
+
+    pub fn update(
+        &mut self,
+        collection: CollectionId,
+        key: impl Into<Value>,
+        value: impl Into<Value>,
+    ) {
+        self.update_at(collection, &[], key, value);
+    }
+
+    pub fn update_at(
+        &mut self,
+        collection: CollectionId,
+        path: &[Value],
+        key: impl Into<Value>,
+        value: impl Into<Value>,
+    ) {
+        self.ops.push(TxOp::CollectionUpdate {
+            id: collection,
+            path: path.to_vec(),
+            key: key.into(),
+            value: value.into(),
+        });
+    }
+
+    pub fn remove(&mut self, collection: CollectionId, key: impl Into<Value>) {
+        self.remove_at(collection, &[], key);
+    }
+
+    pub fn remove_at(&mut self, collection: CollectionId, path: &[Value], key: impl Into<Value>) {
+        self.ops.push(TxOp::CollectionRemove {
+            id: collection,
+            path: path.to_vec(),
+            key: key.into(),
+        });
+    }
+
+    /// A For over `collection`: the closure declares the template — a
+    /// blueprint stamped once per entry, rendering nothing by itself.
+    /// Returns the For's widget id (a container in the live tree).
+    pub fn for_each(
+        &mut self,
+        collection: CollectionId,
+        body: impl FnOnce(&mut Tpl<'_, '_>),
+    ) -> WidgetId {
+        let id = self.ctx.alloc_widget();
+        self.ops.push(TxOp::CreateFor {
+            id: id.0,
+            collection,
+        });
+        body(&mut Tpl { tx: self });
+        self.ops.push(TxOp::TemplateEnd);
+        id
+    }
+
+    /// A When over a Bool signal: stamps its template on true, unstamps
+    /// on false.
+    pub fn when(
+        &mut self,
+        signal: SignalId,
+        body: impl FnOnce(&mut Tpl<'_, '_>),
+    ) -> WidgetId {
+        let id = self.ctx.alloc_widget();
+        self.ops.push(TxOp::CreateWhen { id: id.0, signal });
+        body(&mut Tpl { tx: self });
+        self.ops.push(TxOp::TemplateEnd);
+        id
+    }
+
     /// Mount into the default window; per-window targets arrive with the
     /// window vocabulary.
     pub fn mount(&mut self, root: WidgetId) {
@@ -126,6 +243,94 @@ impl Tx<'_> {
             ))]
             crate::backend::ring_doorbell();
         }
+    }
+}
+
+/// A template body under declaration: the same creation vocabulary, but
+/// ids come from the template-node space and nothing renders until data
+/// stamps the blueprint. Occurrences from stamped copies name these node
+/// ids plus the copy's key path.
+pub struct Tpl<'a, 'b> {
+    tx: &'a mut Tx<'b>,
+}
+
+impl Tpl<'_, '_> {
+    pub fn widget(&mut self, kind: WidgetKind) -> TemplateNodeId {
+        let id = self.tx.ctx.alloc_node();
+        self.tx.ops.push(TxOp::CreateWidget {
+            id: WidgetId(id.0),
+            kind,
+        });
+        id
+    }
+
+    pub fn set(&mut self, node: TemplateNodeId, prop: Prop, value: impl Into<Value>) {
+        self.tx.ops.push(TxOp::SetProperty {
+            widget: WidgetId(node.0),
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
+    pub fn bind(&mut self, node: TemplateNodeId, prop: Prop, signal: SignalId) {
+        self.tx.ops.push(TxOp::SetProperty {
+            widget: WidgetId(node.0),
+            prop,
+            value: PropValue::Signal(signal),
+        });
+    }
+
+    /// Bind a property to the element — the entry's value — of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    pub fn bind_element(&mut self, node: TemplateNodeId, prop: Prop, level: u32) {
+        self.tx.ops.push(TxOp::SetProperty {
+            widget: WidgetId(node.0),
+            prop,
+            value: PropValue::Element { level },
+        });
+    }
+
+    pub fn add_child(&mut self, parent: TemplateNodeId, child: TemplateNodeId) {
+        self.tx.ops.push(TxOp::AddChild {
+            parent: WidgetId(parent.0),
+            child: WidgetId(child.0),
+        });
+    }
+
+    /// Declare a collection inside the template: each stamped copy gets
+    /// its own instance, addressed by the copy's key path.
+    pub fn collection(&mut self) -> CollectionId {
+        let id = self.tx.ctx.alloc_collection();
+        self.tx.ops.push(TxOp::CreateCollection { id });
+        id
+    }
+
+    /// A nested For; its collection must be declared in this template.
+    pub fn for_each(
+        &mut self,
+        collection: CollectionId,
+        body: impl FnOnce(&mut Tpl<'_, '_>),
+    ) -> TemplateNodeId {
+        let id = self.tx.ctx.alloc_node();
+        self.tx.ops.push(TxOp::CreateFor {
+            id: id.0,
+            collection,
+        });
+        body(&mut Tpl { tx: self.tx });
+        self.tx.ops.push(TxOp::TemplateEnd);
+        id
+    }
+
+    pub fn when(
+        &mut self,
+        signal: SignalId,
+        body: impl FnOnce(&mut Tpl<'_, '_>),
+    ) -> TemplateNodeId {
+        let id = self.tx.ctx.alloc_node();
+        self.tx.ops.push(TxOp::CreateWhen { id: id.0, signal });
+        body(&mut Tpl { tx: self.tx });
+        self.tx.ops.push(TxOp::TemplateEnd);
+        id
     }
 }
 
@@ -168,6 +373,7 @@ mod tests {
                         tx.write(text, format!("Clicked {count} times"));
                         tx.commit();
                     }
+                    Occurrence::InstanceButtonClicked { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

@@ -52,6 +52,7 @@ struct CoreState {
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
     selftest_button: Option<Retained<UIButton>>,
+    selftest_last_button: Option<Retained<UIButton>>,
     selftest_label: Option<Retained<UILabel>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
@@ -94,7 +95,7 @@ fn drain_transactions() {
 
 fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
     match op {
-        ApplyOp::Create { id, kind } => {
+        ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
                 WidgetKind::Column => {
                     let stack = UIStackView::new(mtm);
@@ -106,7 +107,10 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Button => {
-                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), id);
+                    // The tag is the click's identity, emitted verbatim;
+                    // this backend never learns what it means.
+                    let tag = tag.expect("buttons carry a click tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
                     let button = UIButton::buttonWithType(UIButtonType::System, mtm);
                     let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
                     unsafe {
@@ -120,6 +124,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     if core.selftest_button.is_none() {
                         core.selftest_button = Some(button.clone());
                     }
+                    core.selftest_last_button = Some(button.clone());
                     NativeWidget::Button(button)
                 }
                 WidgetKind::Label => {
@@ -132,6 +137,10 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
             };
             core.widgets.insert(id, native);
+        }
+        ApplyOp::Destroy { id } => {
+            let widget = core.widgets.remove(&id).expect("scene validated the id");
+            widget.view().removeFromSuperview();
         }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -182,7 +191,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
 
 struct TargetIvars {
     occurrences: OccSink,
-    id: WidgetId,
+    tag: Vec<u8>,
 }
 
 define_class!(
@@ -195,16 +204,16 @@ define_class!(
     impl ButtonTarget {
         #[unsafe(method(clicked:))]
         fn clicked(&self, _sender: Option<&objc2::runtime::AnyObject>) {
-            self.ivars().occurrences.send(Occurrence::ButtonClicked {
-                id: self.ivars().id,
-            });
+            self.ivars()
+                .occurrences
+                .send_click_tag(&self.ivars().tag);
         }
     }
 );
 
 impl ButtonTarget {
-    fn new(mtm: MainThreadMarker, occurrences: OccSink, id: WidgetId) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, id });
+    fn new(mtm: MainThreadMarker, occurrences: OccSink, tag: Vec<u8>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, tag });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -258,6 +267,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             occurrences: occ_tx,
             widgets: HashMap::new(),
             selftest_button: None,
+            selftest_last_button: None,
             selftest_label: None,
             content: view,
             _targets: Vec::new(),
@@ -305,7 +315,7 @@ fn spawn_selftest() {
     }
 
     std::thread::spawn(|| {
-        let click = || {
+        let click_first = || {
             on_main(|| {
                 CORE.with_borrow(|core| {
                     if let Some(core) = core.as_ref() {
@@ -317,11 +327,25 @@ fn spawn_selftest() {
                 });
             });
         };
+        let click_last = || {
+            on_main(|| {
+                CORE.with_borrow(|core| {
+                    if let Some(core) = core.as_ref() {
+                        core.selftest_last_button
+                            .as_ref()
+                            .expect("the scene has stamped a button")
+                            .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
+                    }
+                });
+            });
+        };
 
         std::thread::sleep(std::time::Duration::from_millis(800));
-        click();
+        click_first();
         std::thread::sleep(std::time::Duration::from_millis(300));
-        click();
+        click_first();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        click_last();
         std::thread::sleep(std::time::Duration::from_millis(700));
 
         on_main(|| {
@@ -334,7 +358,7 @@ fn spawn_selftest() {
                     .text()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
-                if text == "Clicked 2 times" {
+                if text == "removed g2/a" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

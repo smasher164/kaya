@@ -14,7 +14,8 @@
 //! runtime condition.
 
 use crate::protocol::{
-    ApplyOp, Prop, PropValue, SignalId, Transaction, TxOp, Value, WidgetId, WidgetKind, WindowId,
+    ApplyOp, CollectionId, Occurrence, Path, Prop, PropValue, SignalId, TemplateNodeId,
+    Transaction, TxOp, Value, WidgetId, WidgetKind, WindowId,
 };
 
 pub const HEADER_SIZE: usize = 8;
@@ -26,12 +27,20 @@ pub const TX_CREATE_WIDGET: u16 = 3;
 pub const TX_SET_PROPERTY: u16 = 4;
 pub const TX_ADD_CHILD: u16 = 5;
 pub const TX_MOUNT: u16 = 6;
+pub const TX_CREATE_COLLECTION: u16 = 7;
+pub const TX_COLLECTION_INSERT: u16 = 8;
+pub const TX_COLLECTION_UPDATE: u16 = 9;
+pub const TX_COLLECTION_REMOVE: u16 = 10;
+pub const TX_CREATE_FOR: u16 = 11;
+pub const TX_CREATE_WHEN: u16 = 12;
+pub const TX_TEMPLATE_END: u16 = 13;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
 pub const APPLY_SET_PROP: u16 = 2;
 pub const APPLY_ADD_CHILD: u16 = 3;
 pub const APPLY_MOUNT: u16 = 4;
+pub const APPLY_DESTROY: u16 = 5;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -50,6 +59,7 @@ pub const PROP_TEXT: u32 = 1;
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
 pub const SOURCE_SIGNAL: u32 = 1;
+pub const SOURCE_ELEMENT: u32 = 2;
 
 fn pad8(n: usize) -> usize {
     (n + 7) & !7
@@ -97,6 +107,13 @@ impl<'a> Reader<'a> {
         };
         self.at = pad8(self.at);
         value
+    }
+
+    /// A key path: { u32 count; u32 reserved; count values }.
+    fn path(&mut self) -> Path {
+        let count = self.u32() as usize;
+        let _reserved = self.u32();
+        (0..count).map(|_| self.value()).collect()
     }
 }
 
@@ -151,6 +168,11 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                 let value = match source {
                     SOURCE_CONST => PropValue::Const(r.value()),
                     SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        let level = r.u32();
+                        let _pad = r.u32();
+                        PropValue::Element { level }
+                    }
                     other => panic!("kaya: unknown property source {other}"),
                 };
                 TxOp::SetProperty {
@@ -167,11 +189,73 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                 window: WindowId(r.u64()),
                 root: WidgetId(r.u64()),
             },
+            TX_CREATE_COLLECTION => TxOp::CreateCollection {
+                id: CollectionId(r.u64()),
+            },
+            TX_COLLECTION_INSERT => TxOp::CollectionInsert {
+                id: CollectionId(r.u64()),
+                path: r.path(),
+                key: r.value(),
+                value: r.value(),
+            },
+            TX_COLLECTION_UPDATE => TxOp::CollectionUpdate {
+                id: CollectionId(r.u64()),
+                path: r.path(),
+                key: r.value(),
+                value: r.value(),
+            },
+            TX_COLLECTION_REMOVE => TxOp::CollectionRemove {
+                id: CollectionId(r.u64()),
+                path: r.path(),
+                key: r.value(),
+            },
+            TX_CREATE_FOR => TxOp::CreateFor {
+                id: r.u64(),
+                collection: CollectionId(r.u64()),
+            },
+            TX_CREATE_WHEN => TxOp::CreateWhen {
+                id: r.u64(),
+                signal: SignalId(r.u64()),
+            },
+            TX_TEMPLATE_END => TxOp::TemplateEnd,
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
     }
     ops
+}
+
+// --- Click tags ------------------------------------------------------------
+//
+// The occurrence body for a click, also handed to backends inside
+// ApplyOp::Create so they can emit it verbatim: { u64 id; u32 path_len;
+// u32 reserved; path_len values }. path_len 0 means id is a widget id;
+// otherwise id is a template node id and the values are the copy's key
+// path, outermost first.
+
+pub fn click_tag(id: u64, path: &[Value]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(16);
+    b.extend_from_slice(&id.to_le_bytes());
+    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for key in path {
+        write_value(&mut b, key);
+    }
+    b
+}
+
+pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0 };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::ButtonClicked { id: WidgetId(id) }
+    } else {
+        Occurrence::InstanceButtonClicked {
+            node: TemplateNodeId(id),
+            path,
+        }
+    }
 }
 
 // --- Writing -------------------------------------------------------------
@@ -203,10 +287,14 @@ impl Writer {
 
     pub fn apply_op(&mut self, op: &ApplyOp) {
         match op {
-            ApplyOp::Create { id, kind } => self.record(APPLY_CREATE, |b| {
+            // Create: { u64 id; u32 kind; u32 tag_len; tag bytes padded }.
+            // tag_len 0 means no tag (non-interactive widget).
+            ApplyOp::Create { id, kind, tag } => self.record(APPLY_CREATE, |b| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&kind_raw(*kind).to_le_bytes());
-                b.extend_from_slice(&0u32.to_le_bytes());
+                let tag = tag.as_deref().unwrap_or(&[]);
+                b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+                b.extend_from_slice(tag);
             }),
             ApplyOp::SetProp { id, prop, value } => self.record(APPLY_SET_PROP, |b| {
                 b.extend_from_slice(&id.0.to_le_bytes());
@@ -221,6 +309,9 @@ impl Writer {
             ApplyOp::Mount { window, root } => self.record(APPLY_MOUNT, |b| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
+            }),
+            ApplyOp::Destroy { id } => self.record(APPLY_DESTROY, |b| {
+                b.extend_from_slice(&id.0.to_le_bytes());
             }),
         }
     }
@@ -259,6 +350,11 @@ impl Writer {
                         b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
                         b.extend_from_slice(&id.0.to_le_bytes());
                     }
+                    PropValue::Element { level } => {
+                        b.extend_from_slice(&SOURCE_ELEMENT.to_le_bytes());
+                        b.extend_from_slice(&level.to_le_bytes());
+                        b.extend_from_slice(&0u32.to_le_bytes());
+                    }
                 }
             }),
             TxOp::AddChild { parent, child } => self.record(TX_ADD_CHILD, |b| {
@@ -269,7 +365,51 @@ impl Writer {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
+            TxOp::CreateCollection { id } => self.record(TX_CREATE_COLLECTION, |b| {
+                b.extend_from_slice(&id.0.to_le_bytes());
+            }),
+            TxOp::CollectionInsert { id, path, key, value } => {
+                self.record(TX_COLLECTION_INSERT, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path);
+                    write_value(b, key);
+                    write_value(b, value);
+                })
+            }
+            TxOp::CollectionUpdate { id, path, key, value } => {
+                self.record(TX_COLLECTION_UPDATE, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path);
+                    write_value(b, key);
+                    write_value(b, value);
+                })
+            }
+            TxOp::CollectionRemove { id, path, key } => {
+                self.record(TX_COLLECTION_REMOVE, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path);
+                    write_value(b, key);
+                })
+            }
+            TxOp::CreateFor { id, collection } => self.record(TX_CREATE_FOR, |b| {
+                b.extend_from_slice(&id.to_le_bytes());
+                b.extend_from_slice(&collection.0.to_le_bytes());
+            }),
+            TxOp::CreateWhen { id, signal } => self.record(TX_CREATE_WHEN, |b| {
+                b.extend_from_slice(&id.to_le_bytes());
+                b.extend_from_slice(&signal.0.to_le_bytes());
+            }),
+            TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_| {}),
         }
+    }
+}
+
+#[cfg(test)]
+fn write_path(b: &mut Vec<u8>, path: &Path) {
+    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for key in path {
+        write_value(b, key);
     }
 }
 
@@ -388,6 +528,69 @@ mod tests {
         buf.extend_from_slice(&999u16.to_le_bytes());
         buf.extend_from_slice(&0u16.to_le_bytes());
         decode_transaction(&buf);
+    }
+
+    #[test]
+    fn structural_ops_round_trip() {
+        use crate::protocol::CollectionId;
+        let ops = vec![
+            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::CreateWhen { id: 4, signal: SignalId(9) },
+            TxOp::TemplateEnd,
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: Value::from("g1"),
+                value: Value::from("Work"),
+            },
+            TxOp::CollectionUpdate {
+                id: CollectionId(7),
+                path: vec![Value::from("g1"), Value::I64(4)],
+                key: Value::I64(4),
+                value: Value::Bool(true),
+            },
+            TxOp::CollectionRemove {
+                id: CollectionId(7),
+                path: vec![Value::from("g1")],
+                key: Value::from("a"),
+            },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let decoded = decode_transaction(&w.into_bytes());
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    #[test]
+    fn click_tags_round_trip() {
+        let plain = click_tag(5, &[]);
+        assert_eq!(
+            decode_click_tag(&plain),
+            Occurrence::ButtonClicked { id: WidgetId(5) }
+        );
+        let path = vec![Value::from("g2"), Value::I64(4)];
+        let tagged = click_tag(8, &path);
+        assert_eq!(
+            decode_click_tag(&tagged),
+            Occurrence::InstanceButtonClicked {
+                node: TemplateNodeId(8),
+                path,
+            }
+        );
+        assert!(tagged.len() % 8 == 0, "tags must stay 8-aligned for the ring");
     }
 
     #[test]

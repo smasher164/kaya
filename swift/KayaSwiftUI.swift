@@ -1,14 +1,17 @@
 // KayaSwiftUI: the Swift half of the SwiftUI backend — an interpreter of
 // resolved apply-op records over the presentation-side C ABI:
 //
-//   create/add_child/mount -> an @Observable node tree (invalidation renders)
-//   set_prop               -> observable writes on the nodes
-//   occurrence             <- SwiftUI action closure -> emit_button_clicked
+//   create/add_child/mount/destroy -> an @Observable node tree
+//   set_prop                       -> observable writes on the nodes
+//   occurrence                     <- Button action -> emit_clicked(tag)
 //
 // The pump blocks in next_commands on its own thread and hops to the
 // main actor to apply — the doorbell equivalent, no polling, no
-// callbacks across the ABI. Signals never reach this layer; the core
-// resolves them before the records leave kaya_next_commands.
+// callbacks across the ABI. Signals, collections, and templates never
+// reach this layer; the core resolves them before the records leave
+// kaya_next_commands. A button's create record carries a click tag —
+// opaque bytes this layer stores and emits verbatim; identity stays a
+// core concern.
 
 import SwiftUI
 
@@ -19,6 +22,7 @@ private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
 private let applyAddChild: UInt16 = 3
 private let applyMount: UInt16 = 4
+private let applyDestroy: UInt16 = 5
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
@@ -28,12 +32,14 @@ private let valueStr: UInt32 = 4
 final class KayaNode: Identifiable {
     let id: UInt64
     let kind: UInt32
+    let tag: [UInt8]
     var text = ""
     var children: [KayaNode] = []
 
-    init(id: UInt64, kind: UInt32) {
+    init(id: UInt64, kind: UInt32, tag: [UInt8]) {
         self.id = id
         self.kind = kind
+        self.tag = tag
     }
 }
 
@@ -41,7 +47,9 @@ final class KayaNode: Identifiable {
 final class KayaSceneModel {
     var root: KayaNode?
     var nodes: [UInt64: KayaNode] = [:]  // main actor only
+    var parents: [UInt64: UInt64] = [:]
     var firstButton: KayaNode?
+    var lastButton: KayaNode?
     var firstLabel: KayaNode?
 }
 
@@ -54,8 +62,10 @@ let kayaScene = KayaSceneModel()
 enum KayaHost {
     nonisolated(unsafe) static var api: KayaHostApi!
 
-    static func emit(_ widgetId: UInt64) {
-        api.emit_button_clicked(widgetId)
+    static func emit(_ tag: [UInt8]) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_clicked(buffer.baseAddress, UInt(buffer.count))
+        }
     }
 
     static func nextCommands(_ buffer: UnsafeMutablePointer<UInt8>, _ cap: Int) -> Int {
@@ -91,18 +101,21 @@ private func kayaApply(_ batch: Data) {
             case applyCreate:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let widgetKind = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
-                let node = KayaNode(id: id, kind: widgetKind)
+                let tagLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                let tag = [UInt8](raw[(body + 16)..<(body + 16 + tagLen)])
+                let node = KayaNode(id: id, kind: widgetKind, tag: tag)
                 kayaScene.nodes[id] = node
-                if widgetKind == kindButton && kayaScene.firstButton == nil {
-                    kayaScene.firstButton = node
+                if widgetKind == kindButton {
+                    if kayaScene.firstButton == nil { kayaScene.firstButton = node }
+                    kayaScene.lastButton = node
                 }
                 if widgetKind == kindLabel && kayaScene.firstLabel == nil {
                     kayaScene.firstLabel = node
                 }
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
-                // prop (u32) is text — the only property at milestone 1 —
-                // then u32 pad, then the value.
+                // prop (u32) is text — the only property so far — then
+                // u32 pad, then the value.
                 let valueType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
                 let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
                 precondition(valueType == valueStr, "kaya: expected a string value")
@@ -112,10 +125,19 @@ private func kayaApply(_ batch: Data) {
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
+                kayaScene.parents[child] = parent
             case applyMount:
                 // window (u64) is the default until the window vocabulary.
                 let root = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.root = kayaScene.nodes[root]
+            case applyDestroy:
+                let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                if let parent = kayaScene.parents.removeValue(forKey: id),
+                    let parentNode = kayaScene.nodes[parent]
+                {
+                    parentNode.children.removeAll { $0.id == id }
+                }
+                kayaScene.nodes.removeValue(forKey: id)
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
             }
@@ -125,19 +147,23 @@ private func kayaApply(_ batch: Data) {
 }
 
 /// Drives the round trip without a human, matching the Rust backends'
-/// spawn_selftest: emits the occurrence the Button action emits and
-/// verifies the rendered model state.
+/// spawn_selftest: two clicks on the scene's driver button (stamping
+/// groups, items, and the When), one on the most recently stamped
+/// button, and the status label proves the whole loop.
 func kayaStartSelftest() {
     guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.id) }
+        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.id) }
+        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
+        if let button = kayaScene.lastButton { KayaHost.emit(button.tag) }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
         let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "Clicked 2 times" {
+        if text == "removed g2/a" {
             print("KAYA_SELFTEST: OK (\(text))")
             exit(0)
         } else {
@@ -162,7 +188,7 @@ struct KayaRender: View {
             }
         case kindButton:
             Button(node.text) {
-                KayaHost.emit(node.id)
+                KayaHost.emit(node.tag)
             }
         case kindLabel:
             Text(node.text)

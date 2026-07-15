@@ -26,6 +26,20 @@
 
 #define TX_MOUNT 6
 
+#define TX_CREATE_COLLECTION 7
+
+#define TX_COLLECTION_INSERT 8
+
+#define TX_COLLECTION_UPDATE 9
+
+#define TX_COLLECTION_REMOVE 10
+
+#define TX_CREATE_FOR 11
+
+#define TX_CREATE_WHEN 12
+
+#define TX_TEMPLATE_END 13
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -33,6 +47,8 @@
 #define APPLY_ADD_CHILD 3
 
 #define APPLY_MOUNT 4
+
+#define APPLY_DESTROY 5
 
 #define VALUE_BOOL 1
 
@@ -54,8 +70,14 @@
 
 #define SOURCE_SIGNAL 1
 
+#define SOURCE_ELEMENT 2
+
 /**
- * Occurrence record kinds (the ring, core -> guest).
+ * Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
+ * body: u64 id, u32 path_len, u32 reserved, then path_len key values.
+ * path_len 0 means id is a widget id (a click on a guest-created
+ * widget); otherwise id is a template node id and the values are the
+ * stamped copy's key path, outermost first.
  */
 #define KAYA_OCCURRENCE_PAD 0
 
@@ -64,14 +86,32 @@
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
- *   CREATE_SIGNAL: u64 signal_id, value
- *   WRITE_SIGNAL:  u64 signal_id, value
- *   CREATE_WIDGET: u64 widget_id, u32 kind, u32 pad
- *   SET_PROPERTY:  u64 widget_id, u32 prop, u32 source,
- *                  then value (SOURCE_CONST) or u64 signal_id (SOURCE_SIGNAL)
- *   ADD_CHILD:     u64 parent, u64 child
- *   MOUNT:         u64 window (0 = the default window), u64 root
- * where value is { u32 type, u32 len, payload padded to 8 }.
+ *   CREATE_SIGNAL:     u64 signal_id, value
+ *   WRITE_SIGNAL:      u64 signal_id, value
+ *   CREATE_WIDGET:     u64 widget_id, u32 kind, u32 pad
+ *   SET_PROPERTY:      u64 widget_id, u32 prop, u32 source, then
+ *                      value (SOURCE_CONST) | u64 signal_id
+ *                      (SOURCE_SIGNAL) | u32 level, u32 pad
+ *                      (SOURCE_ELEMENT: the entry value of the
+ *                      enclosing For, level Fors up, 0 = nearest)
+ *   ADD_CHILD:         u64 parent, u64 child
+ *   MOUNT:             u64 window (0 = the default window), u64 root
+ *   CREATE_COLLECTION: u64 collection_id
+ *   COLLECTION_INSERT: u64 collection_id, path, key value, value
+ *   COLLECTION_UPDATE: u64 collection_id, path, key value, value
+ *   COLLECTION_REMOVE: u64 collection_id, path, key value
+ *   CREATE_FOR:        u64 id, u64 collection_id — opens a template
+ *                      scope; records until the matching TEMPLATE_END
+ *                      declare the blueprint (their ids are template
+ *                      node ids), and nothing renders until data
+ *                      arrives. The For itself is a live widget at top
+ *                      level, a template node when nested.
+ *   CREATE_WHEN:       u64 id, u64 signal_id — same scoping; stamps on
+ *                      true, unstamps on false. The signal must be Bool.
+ *   TEMPLATE_END:      no body
+ * where value is { u32 type, u32 len, payload padded to 8 } and path
+ * is { u32 count, u32 reserved, count values } — the key path
+ * addressing a collection instance (empty for a top-level collection).
  */
 #define KAYA_TX_CREATE_SIGNAL 1
 
@@ -85,13 +125,33 @@
 
 #define KAYA_TX_MOUNT 6
 
+#define KAYA_TX_CREATE_COLLECTION 7
+
+#define KAYA_TX_COLLECTION_INSERT 8
+
+#define KAYA_TX_COLLECTION_UPDATE 9
+
+#define KAYA_TX_COLLECTION_REMOVE 10
+
+#define KAYA_TX_CREATE_FOR 11
+
+#define KAYA_TX_CREATE_WHEN 12
+
+#define KAYA_TX_TEMPLATE_END 13
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
- *   CREATE:    u64 widget_id, u32 kind, u32 pad
+ *   CREATE:    u64 widget_id, u32 kind, u32 tag_len, then tag_len bytes
+ *              (padded to 8): the click tag an interactive widget must
+ *              emit verbatim through kaya_emit_clicked on activation.
+ *              tag_len 0 means no tag. The tag bytes are exactly a
+ *              BUTTON_CLICKED occurrence body.
  *   SET_PROP:  u64 widget_id, u32 prop, u32 pad, value (always resolved)
  *   ADD_CHILD: u64 parent, u64 child
  *   MOUNT:     u64 window, u64 root
+ *   DESTROY:   u64 widget_id — remove from its parent and forget it.
+ *              Teardown arrives children-first; never walk anything.
  */
 #define KAYA_APPLY_CREATE 1
 
@@ -100,6 +160,8 @@
 #define KAYA_APPLY_ADD_CHILD 3
 
 #define KAYA_APPLY_MOUNT 4
+
+#define KAYA_APPLY_DESTROY 5
 
 /**
  * Value types.
@@ -127,18 +189,15 @@
 #define KAYA_PROP_TEXT 1
 
 /**
- * set_property sources.
+ * set_property sources. SOURCE_ELEMENT is valid only inside a template.
  */
 #define KAYA_SOURCE_CONST 0
 
 #define KAYA_SOURCE_SIGNAL 1
 
-typedef struct WindowId WindowId;
+#define KAYA_SOURCE_ELEMENT 2
 
-typedef struct KayaOccurrence {
-  uint16_t kind;
-  uint64_t widget_id;
-} KayaOccurrence;
+typedef struct WindowId WindowId;
 
 /**
  * The occurrence ring's layout, for direct consumers.
@@ -163,22 +222,29 @@ typedef struct KayaRecordHeader {
 } KayaRecordHeader;
 
 /**
- * The button-clicked record as it appears on the wire. Constructed by
+ * The button-clicked record as it appears on the wire. `id` is a widget
+ * id when `path_len` is 0 (a click on a guest-created widget) and a
+ * template node id otherwise, with `path_len` key values — the copy's
+ * key path, outermost first, each encoded as { u32 type; u32 len;
+ * payload padded to 8 } — following the fixed part. Constructed by
  * direct consumers casting into the ring, not by Rust code.
  */
 typedef struct KayaRecordButtonClicked {
   struct KayaRecordHeader header;
-  uint64_t widget_id;
+  uint64_t id;
+  uint32_t path_len;
+  uint32_t reserved;
 } KayaRecordButtonClicked;
 
 /**
  * The presentation-side functions handed to a guest-language backend.
- * next_commands blocks until a transaction is resolved and fills the
- * buffer with apply-op records (KAYA_APPLY_*); returns the byte length,
- * 0 on shutdown.
+ * emit_clicked takes the click-tag bytes delivered with a widget's
+ * CREATE record, verbatim. next_commands blocks until a transaction is
+ * resolved and fills the buffer with apply-op records (KAYA_APPLY_*);
+ * returns the byte length, 0 on shutdown.
  */
 typedef struct KayaHostApi {
-  void (*emit_button_clicked)(uint64_t);
+  void (*emit_clicked)(const uint8_t*, uintptr_t);
   uintptr_t (*next_commands)(uint8_t*, uintptr_t);
 } KayaHostApi;
 
@@ -204,10 +270,13 @@ void kaya_submit(const uint8_t *records, uintptr_t len);
 
 /**
  * Function-floor consumption: block until the next occurrence and write
- * it to `out`. Returns false when the core has shut down. Call from a
- * single app thread, and do not mix with direct ring access.
+ * one complete record — header included, exactly the ring's bytes — to
+ * `buf`. Returns the record size, or 0 when the core has shut down.
+ * 256 bytes of capacity covers any occurrence with a reasonable key
+ * path; an overflowing record fails loudly. Call from a single app
+ * thread, and do not mix with direct ring access.
  */
-bool kaya_next_occurrence(struct KayaOccurrence *out);
+uintptr_t kaya_next_occurrence(uint8_t *buf, uintptr_t cap);
 
 /**
  * Direct-access setup: the occurrence ring's memory layout. Pointers
@@ -222,10 +291,12 @@ void kaya_occurrence_ring(struct KayaRingInfo *out);
 bool kaya_wait_occurrences(void);
 
 /**
- * Presentation side: emit a button-clicked occurrence, exactly as a
- * backend's action handler would. Do not combine with kaya_run.
+ * Presentation side: emit a click, exactly as a backend's action
+ * handler would — `tag` is the click tag bytes delivered with the
+ * widget's CREATE record, handed back verbatim. Do not combine with
+ * kaya_run.
  */
-void kaya_emit_button_clicked(uint64_t widget_id);
+void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
 
 /**
  * Presentation side: block until the next transaction, resolve it

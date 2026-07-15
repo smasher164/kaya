@@ -39,6 +39,29 @@ BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-
 
 run_ssh() { ssh -n -o BatchMode=yes "$HOST" "$@"; }
 
+# The VM must be up before anything else: check reachability, and if the
+# guest is down, boot it through UTM and wait for sshd. The trailing
+# grace period lets the console session finish logging in — the suites
+# run as scheduled tasks with /it, which need it.
+VM_NAME="${KAYA_WIN_VM:-Windows}"
+utmctl_bin() {
+    command -v utmctl 2>/dev/null || echo /Applications/UTM.app/Contents/MacOS/utmctl
+}
+if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
+    echo "== $HOST unreachable; starting VM \"$VM_NAME\" =="
+    "$(utmctl_bin)" start "$VM_NAME"
+    tries=0
+    until ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 60 ]; then
+            echo "VM \"$VM_NAME\" did not become reachable" >&2
+            exit 1
+        fi
+        sleep 5
+    done
+    sleep 30
+fi
+
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone0)

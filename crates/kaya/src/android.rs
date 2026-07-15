@@ -25,7 +25,7 @@ use jni::{JavaVM, NativeMethod};
 
 use crate::app::AppCtx;
 use crate::protocol::{
-    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, OccSink, Prop, Transaction, Value, WidgetId, WidgetKind,
 };
 use crate::scene::Scene;
 
@@ -45,6 +45,7 @@ const PRESENT_GUEST: i32 = 1;
 const OP_DRAIN: jlong = 0;
 const OP_SELFTEST_CLICK: jlong = 1;
 const OP_SELFTEST_CHECK: jlong = 2;
+const OP_SELFTEST_CLICK_LAST: jlong = 3;
 
 /// Shared with the app thread (doorbell) and the selftest thread.
 struct Globals {
@@ -53,6 +54,7 @@ struct Globals {
     drain: GlobalRef,
     selftest_click: GlobalRef,
     selftest_check: GlobalRef,
+    selftest_click_last: GlobalRef,
 }
 
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
@@ -60,7 +62,16 @@ static GLOBALS: OnceLock<Globals> = OnceLock::new();
 struct NativeWidget {
     view: GlobalRef,
     kind: WidgetKind,
+    /// Key into TAGS for a button's click identity.
+    tag_key: Option<u64>,
 }
+
+/// Click tags by registry key. The Kotlin listener carries an opaque
+/// long — this key — and nativeClick emits the tag it finds here. Its
+/// own lock (never CORE's): clicks dispatch synchronously on the UI
+/// thread from under performClick.
+static TAGS: Mutex<Option<HashMap<u64, Vec<u8>>>> = Mutex::new(None);
+static NEXT_TAG_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Touched only from the UI thread, but a Mutex keeps the types honest
 /// (Receiver is Send, not Sync). Never hold this lock across a JNI call
@@ -71,6 +82,7 @@ struct CoreState {
     scene: Scene,
     widgets: HashMap<WidgetId, NativeWidget>,
     selftest_button: Option<GlobalRef>,
+    selftest_last_button: Option<GlobalRef>,
     selftest_label: Option<GlobalRef>,
 }
 
@@ -216,6 +228,7 @@ fn setup(
     let drain = make_runnable(env, OP_DRAIN)?;
     let selftest_click = make_runnable(env, OP_SELFTEST_CLICK)?;
     let selftest_check = make_runnable(env, OP_SELFTEST_CHECK)?;
+    let selftest_click_last = make_runnable(env, OP_SELFTEST_CLICK_LAST)?;
 
     let globals = Globals {
         vm: env.get_java_vm()?,
@@ -223,15 +236,18 @@ fn setup(
         drain,
         selftest_click,
         selftest_check,
+        selftest_click_last,
     };
     let _ = GLOBALS.set(globals);
 
     let _ = OCC_SINK.set(occ_tx);
+    *TAGS.lock().unwrap() = Some(HashMap::new());
     *CORE.lock().unwrap() = Some(CoreState {
         transactions: tx_rx,
         scene: Scene::new(),
         widgets: HashMap::new(),
         selftest_button: None,
+        selftest_last_button: None,
         selftest_label: None,
     });
 
@@ -268,7 +284,7 @@ fn drain_transactions(env: &mut JNIEnv) -> jni::errors::Result<()> {
 fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
     let activity = GLOBALS.get().expect("attach ran").activity.clone();
     match op {
-        ApplyOp::Create { id, kind } => {
+        ApplyOp::Create { id, kind, tag } => {
             let class = match kind {
                 WidgetKind::Column => "android/widget/LinearLayout",
                 WidgetKind::Button => "android/widget/Button",
@@ -279,6 +295,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 "(Landroid/content/Context;)V",
                 &[JValue::Object(activity.as_obj())],
             )?;
+            let mut tag_key = None;
             match kind {
                 WidgetKind::Column => {
                     // LinearLayout.VERTICAL = 1, Gravity.CENTER = 17.
@@ -286,10 +303,16 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     env.call_method(&view, "setGravity", "(I)V", &[JValue::Int(17)])?;
                 }
                 WidgetKind::Button => {
+                    // The tag is the click's identity, emitted verbatim;
+                    // the listener carries only a registry key.
+                    let tag = tag.expect("buttons carry a click tag");
+                    let key = NEXT_TAG_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    TAGS.lock().unwrap().as_mut().expect("attach ran").insert(key, tag);
+                    tag_key = Some(key);
                     let listener = env.new_object(
                         "dev/kaya/KayaClickListener",
                         "(J)V",
-                        &[JValue::Long(id.0 as jlong)],
+                        &[JValue::Long(key as jlong)],
                     )?;
                     env.call_method(
                         &view,
@@ -304,15 +327,41 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             let mut core = CORE.lock().unwrap();
             let core = core.as_mut().expect("core set up");
             match kind {
-                WidgetKind::Button if core.selftest_button.is_none() => {
-                    core.selftest_button = Some(view.clone());
+                WidgetKind::Button => {
+                    if core.selftest_button.is_none() {
+                        core.selftest_button = Some(view.clone());
+                    }
+                    core.selftest_last_button = Some(view.clone());
                 }
                 WidgetKind::Label if core.selftest_label.is_none() => {
                     core.selftest_label = Some(view.clone());
                 }
                 _ => {}
             }
-            core.widgets.insert(id, NativeWidget { view, kind });
+            core.widgets.insert(id, NativeWidget { view, kind, tag_key });
+        }
+        ApplyOp::Destroy { id } => {
+            let widget = {
+                let mut core = CORE.lock().unwrap();
+                let core = core.as_mut().expect("core set up");
+                core.widgets.remove(&id).expect("scene validated the id")
+            };
+            if let Some(key) = widget.tag_key {
+                if let Some(tags) = TAGS.lock().unwrap().as_mut() {
+                    tags.remove(&key);
+                }
+            }
+            let parent = env
+                .call_method(widget.view.as_obj(), "getParent", "()Landroid/view/ViewParent;", &[])?
+                .l()?;
+            if !parent.is_null() {
+                env.call_method(
+                    &parent,
+                    "removeView",
+                    "(Landroid/view/View;)V",
+                    &[JValue::Object(widget.view.as_obj())],
+                )?;
+            }
         }
         ApplyOp::SetProp { id, prop, value } => {
             let view = with_widget(id, |w| w.view.clone());
@@ -369,7 +418,8 @@ fn with_widget<T>(id: WidgetId, f: impl FnOnce(&NativeWidget) -> T) -> T {
 extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
     let result = match op {
         OP_DRAIN => drain_transactions(&mut env),
-        OP_SELFTEST_CLICK => selftest_click(&mut env),
+        OP_SELFTEST_CLICK => selftest_click(&mut env, false),
+        OP_SELFTEST_CLICK_LAST => selftest_click(&mut env, true),
         OP_SELFTEST_CHECK => selftest_check(&mut env),
         _ => Ok(()),
     };
@@ -378,12 +428,16 @@ extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
     }
 }
 
-/// KayaClickListener.nativeClick: translate the click into an occurrence.
-extern "system" fn native_click(_env: JNIEnv, _this: JObject, widget_id: jlong) {
-    if let Some(sink) = OCC_SINK.get() {
-        sink.send(Occurrence::ButtonClicked {
-            id: WidgetId(widget_id as u64),
-        });
+/// KayaClickListener.nativeClick: emit the click tag the listener's
+/// registry key names.
+extern "system" fn native_click(_env: JNIEnv, _this: JObject, tag_key: jlong) {
+    let tag = TAGS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
+    if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
+        sink.send_click_tag(&tag);
     }
 }
 
@@ -417,12 +471,14 @@ fn spawn_selftest() {
         post(&g.selftest_click);
         std::thread::sleep(std::time::Duration::from_millis(300));
         post(&g.selftest_click);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        post(&g.selftest_click_last);
         std::thread::sleep(std::time::Duration::from_millis(700));
         post(&g.selftest_check);
     });
 }
 
-fn selftest_click(env: &mut JNIEnv) -> jni::errors::Result<()> {
+fn selftest_click(env: &mut JNIEnv, last: bool) -> jni::errors::Result<()> {
     // Clone the ref and release the lock first: performClick dispatches
     // onClick -> native_click on this same thread.
     let button = {
@@ -430,7 +486,11 @@ fn selftest_click(env: &mut JNIEnv) -> jni::errors::Result<()> {
         let Some(core) = core.as_ref() else {
             return Ok(());
         };
-        core.selftest_button.clone()
+        if last {
+            core.selftest_last_button.clone()
+        } else {
+            core.selftest_button.clone()
+        }
     };
     if let Some(button) = button {
         env.call_method(button.as_obj(), "performClick", "()Z", &[])?;
@@ -458,7 +518,7 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
         .l()?;
     let text: String = env.get_string(&JString::from(string))?.into();
 
-    let code = if text == "Clicked 2 times" {
+    let code = if text == "removed g2/a" {
         log::info!("KAYA_SELFTEST: OK ({text})");
         0
     } else {
@@ -559,8 +619,8 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
         &class,
         &[
             NativeMethod {
-                name: "emitButtonClicked".into(),
-                sig: "(J)V".into(),
+                name: "emitClicked".into(),
+                sig: "([B)V".into(),
                 fn_ptr: present_emit as *mut _,
             },
             NativeMethod {
@@ -572,8 +632,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     )
 }
 
-extern "system" fn present_emit(_env: JNIEnv, _class: JClass, widget_id: jlong) {
-    crate::capi::kaya_emit_button_clicked(widget_id as u64);
+extern "system" fn present_emit(mut env: JNIEnv, _class: JClass, tag: JByteArray) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the click tag failed");
+    unsafe { crate::capi::kaya_emit_clicked(bytes.as_ptr(), bytes.len()) };
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,

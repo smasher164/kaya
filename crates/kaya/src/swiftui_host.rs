@@ -12,15 +12,16 @@
 
 use std::ffi::{CString, c_char, c_int, c_void};
 
-use crate::capi::{kaya_emit_button_clicked, kaya_next_commands};
+use crate::capi::{kaya_emit_clicked, kaya_next_commands};
 
 /// The presentation-side functions handed to a guest-language backend.
-/// next_commands blocks until a transaction is resolved and fills the
-/// buffer with apply-op records (KAYA_APPLY_*); returns the byte length,
-/// 0 on shutdown.
+/// emit_clicked takes the click-tag bytes delivered with a widget's
+/// CREATE record, verbatim. next_commands blocks until a transaction is
+/// resolved and fills the buffer with apply-op records (KAYA_APPLY_*);
+/// returns the byte length, 0 on shutdown.
 #[repr(C)]
 pub struct KayaHostApi {
-    pub emit_button_clicked: extern "C" fn(u64),
+    pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
     pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
 }
 
@@ -49,7 +50,7 @@ pub(crate) fn run() -> i32 {
         "kaya_swiftui_run not exported by {path:?}"
     );
     let api = KayaHostApi {
-        emit_button_clicked: kaya_emit_button_clicked,
+        emit_clicked: kaya_emit_clicked,
         next_commands: kaya_next_commands,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =

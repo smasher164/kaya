@@ -26,16 +26,19 @@ import kotlin.concurrent.thread
  * sibling of KayaSwiftUI.swift — an interpreter of resolved apply-op
  * records:
  *
- *   create/add_child/mount -> a snapshot-state node tree (recomposition renders)
- *   set_prop               -> observable writes on the nodes
- *   occurrence             <- Compose onClick -> KayaPresent.emitButtonClicked
+ *   create/add_child/mount/destroy -> a snapshot-state node tree
+ *   set_prop                       -> observable writes on the nodes
+ *   occurrence                     <- Compose onClick -> KayaPresent.emitClicked
  *
  * The pump blocks in nextCommands on its own thread and hops to the UI
  * thread to apply — the doorbell equivalent, no polling, no callbacks
- * across the ABI. Signals never reach this layer; the core resolves them
- * before the records leave kaya_next_commands.
+ * across the ABI. Signals, collections, and templates never reach this
+ * layer; the core resolves them before the records leave
+ * kaya_next_commands. A button's create record carries a click tag —
+ * opaque bytes this layer stores and emits verbatim; identity stays a
+ * core concern.
  */
-class KayaNode(val id: Long, val kind: Int) {
+class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var text by mutableStateOf("")
     val children = mutableStateListOf<KayaNode>()
 }
@@ -43,7 +46,9 @@ class KayaNode(val id: Long, val kind: Int) {
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     val nodes = HashMap<Long, KayaNode>() // UI thread only
+    val parents = HashMap<Long, Long>()
     var firstButton: KayaNode? = null
+    var lastButton: KayaNode? = null
     var firstLabel: KayaNode? = null
 }
 
@@ -54,6 +59,7 @@ object KayaCompose {
     private const val APPLY_SET_PROP = 2
     private const val APPLY_ADD_CHILD = 3
     private const val APPLY_MOUNT = 4
+    private const val APPLY_DESTROY = 5
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -93,10 +99,16 @@ object KayaCompose {
                 APPLY_CREATE -> {
                     val id = b.long
                     val widgetKind = b.int
-                    val node = KayaNode(id, widgetKind)
+                    val tagLen = b.int
+                    val tag = ByteArray(tagLen)
+                    b.get(tag)
+                    val node = KayaNode(id, widgetKind, tag)
                     KayaSceneModel.nodes[id] = node
-                    if (widgetKind == KIND_BUTTON && KayaSceneModel.firstButton == null) {
-                        KayaSceneModel.firstButton = node
+                    if (widgetKind == KIND_BUTTON) {
+                        if (KayaSceneModel.firstButton == null) {
+                            KayaSceneModel.firstButton = node
+                        }
+                        KayaSceneModel.lastButton = node
                     }
                     if (widgetKind == KIND_LABEL && KayaSceneModel.firstLabel == null) {
                         KayaSceneModel.firstLabel = node
@@ -104,7 +116,7 @@ object KayaCompose {
                 }
                 APPLY_SET_PROP -> {
                     val id = b.long
-                    b.int // prop: text is the only one at milestone 1
+                    b.int // prop: text is the only one so far
                     b.int // pad
                     KayaSceneModel.nodes[id]!!.text = readString(b)
                 }
@@ -113,11 +125,19 @@ object KayaCompose {
                     val child = b.long
                     KayaSceneModel.nodes[parent]!!.children
                         .add(KayaSceneModel.nodes[child]!!)
+                    KayaSceneModel.parents[child] = parent
                 }
                 APPLY_MOUNT -> {
                     b.long // window: the default until the window vocabulary
                     val root = b.long
                     KayaSceneModel.root = KayaSceneModel.nodes[root]
+                }
+                APPLY_DESTROY -> {
+                    val id = b.long
+                    KayaSceneModel.parents.remove(id)?.let { parent ->
+                        KayaSceneModel.nodes[parent]?.children?.removeAll { it.id == id }
+                    }
+                    KayaSceneModel.nodes.remove(id)
                 }
             }
             b.position(start + size)
@@ -135,20 +155,24 @@ object KayaCompose {
 
     /**
      * Drives the round trip without a human, matching every backend's
-     * selftest: emits the occurrence the Button onClick emits and
-     * verifies the rendered model state. Results go to logcat; halt
-     * rather than exit so no teardown hook races the render threads.
+     * selftest: two clicks on the scene's driver button (stamping
+     * groups, items, and the When), one on the most recently stamped
+     * button, and the status label proves the whole loop. Results go to
+     * logcat; halt rather than exit so no teardown hook races the
+     * render threads.
      */
     private fun startSelftest(activity: ComponentActivity) {
         thread(name = "kaya-selftest") {
             Thread.sleep(1500)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitButtonClicked(it.id) }
+            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
             Thread.sleep(300)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitButtonClicked(it.id) }
+            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
+            Thread.sleep(400)
+            KayaSceneModel.lastButton?.let { KayaPresent.emitClicked(it.tag) }
             Thread.sleep(700)
             activity.runOnUiThread {
                 val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "Clicked 2 times") {
+                val code = if (text == "removed g2/a") {
                     Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
                     0
                 } else {
@@ -174,7 +198,7 @@ fun KayaRender(node: KayaNode) {
                 node.children.forEach { KayaRender(it) }
             }
         KayaCompose.KIND_BUTTON ->
-            Button(onClick = { KayaPresent.emitButtonClicked(node.id) }) {
+            Button(onClick = { KayaPresent.emitClicked(node.tag) }) {
                 Text(node.text)
             }
         KayaCompose.KIND_LABEL -> Text(node.text)
