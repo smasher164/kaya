@@ -33,10 +33,11 @@ run() {
 # (ocamlopt writes its intermediates beside the source, hence the copy.)
 mkdir -p target/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
-    bindings/ocaml/kaya_runtime.ml crates/kaya/examples/milestone2.ml target/ocaml/
+    bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
+    crates/kaya/examples/milestone2.ml target/ocaml/
 (cd target/ocaml && ocamlfind ocamlopt \
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml milestone2.ml \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
     -o milestone2-ocaml) >/dev/null
 
 # The Haskell guest, likewise compiled once (its intermediates go to

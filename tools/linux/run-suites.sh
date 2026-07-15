@@ -66,10 +66,11 @@ FOREIGN=ctypes-foreign
 ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
 mkdir -p /tmp/ocaml
 cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
-    bindings/ocaml/kaya_runtime.ml crates/kaya/examples/milestone2.ml /tmp/ocaml/
+    bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
+    crates/kaya/examples/milestone2.ml /tmp/ocaml/
 (cd /tmp/ocaml && ocamlfind ocamlopt \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml milestone2.ml \
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
     -o milestone2-ocaml) || status=1
 
 # The Haskell guest (direct ring: inline peeks + the same cursor stubs).

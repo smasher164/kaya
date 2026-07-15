@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "dev.kaya.milestone2"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.0"

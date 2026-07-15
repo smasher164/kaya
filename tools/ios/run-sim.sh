@@ -97,7 +97,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \

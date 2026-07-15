@@ -12,7 +12,11 @@ android {
     buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        minSdk = 24
+        // The JVM surface's ring recipe binds Unsafe through
+        // MethodHandles.invokeExact, which ART supports from API 26.
+        // (It would be 33 if ART's VarHandle worked on foreign memory;
+        // see KayaApp's ring loop.)
+        minSdk = 26
     }
 
     buildFeatures {
