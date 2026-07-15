@@ -38,8 +38,29 @@ struct KayaNodeHandle {
     let id: UInt64
 }
 
+/// A collection instance handle: the collection plus the key path
+/// selecting one stamped copy's table. tx.collection() returns the
+/// root (empty-path, live-zone) handle; at(_:) steps into a copy, one
+/// key per enclosing For. Mutations and reads take the handle, so the
+/// target is spelled once.
 struct KayaCollection {
     let id: UInt64
+    let path: [KayaValue]
+
+    /// The instance of this collection inside the copy keyed by `key`
+    /// of the next enclosing For; chain for deeper nesting.
+    func at(_ key: KayaValue) -> KayaCollection {
+        KayaCollection(id: id, path: path + [key])
+    }
+
+    /// A For binds the collection itself — its template stamps per
+    /// entry of every instance — so handing it an at(...) handle is a
+    /// bug.
+    fileprivate func assertRoot() {
+        precondition(
+            path.isEmpty,
+            "kaya: forEach binds the collection itself, not an instance — drop the at(...)")
+    }
 }
 
 /// One instance of a collection: the table inside the stamped copy
@@ -132,14 +153,17 @@ final class KayaApp {
 
     func nextCollection() -> KayaCollection {
         collections += 1
-        return KayaCollection(id: collections)
+        return KayaCollection(id: collections, path: [])
     }
 
     /// Run `build` with a fresh transaction and submit it atomically.
-    func build(_ build: (KayaAppTx) -> Void) {
+    /// The body's result comes back out — the way a scene's handles
+    /// reach the handlers.
+    func build<R>(_ build: (KayaAppTx) -> R) -> R {
         let tx = KayaAppTx(app: self)
-        build(tx)
+        let out = build(tx)
         tx.submitIfAny()
+        return out
     }
 
     /// Register a click handler for a live widget.
@@ -233,49 +257,52 @@ final class KayaAppTx {
     }
 
     /// A For over `c`: the closure declares the template; the For
-    /// itself (a live container) is returned.
-    func forEach(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaWidget {
+    /// itself (a live container) comes back alongside the body's
+    /// result — the way handles declared inside the template (nested
+    /// collections, buttons) reach the handlers.
+    func forEach<R>(_ c: KayaCollection, _ body: (KayaTpl) -> R) -> (KayaWidget, R) {
+        c.assertRoot()
         let w = app.nextWidget()
         tx.createFor(w.id, c.id)
         app.openFors.append(c.id)
-        body(KayaTpl(tx: self))
+        let out = body(KayaTpl(tx: self))
         app.openFors.removeLast()
         tx.templateEnd()
-        return w
+        return (w, out)
     }
 
     /// A When over a Bool signal: stamps on true, unstamps on false.
-    func when(_ s: KayaSignal, _ body: (KayaTpl) -> Void) -> KayaWidget {
+    func when<R>(_ s: KayaSignal, _ body: (KayaTpl) -> R) -> (KayaWidget, R) {
         let w = app.nextWidget()
         tx.createWhen(w.id, s.id)
-        body(KayaTpl(tx: self))
+        let out = body(KayaTpl(tx: self))
         tx.templateEnd()
-        return w
+        return (w, out)
     }
 
-    func insert(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
-        app.modelSet(c.id, path, key, value)
-        tx.collectionInsert(c.id, path, key, value)
+    func insert(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
+        app.modelSet(c.id, c.path, key, value)
+        tx.collectionInsert(c.id, c.path, key, value)
     }
 
-    func update(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
-        app.modelSet(c.id, path, key, value)
-        tx.collectionUpdate(c.id, path, key, value)
+    func update(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
+        app.modelSet(c.id, c.path, key, value)
+        tx.collectionUpdate(c.id, c.path, key, value)
     }
 
-    func remove(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue) {
-        app.modelRemove(c.id, path, key)
-        tx.collectionRemove(c.id, path, key)
+    func remove(_ c: KayaCollection, _ key: KayaValue) {
+        app.modelRemove(c.id, c.path, key)
+        tx.collectionRemove(c.id, c.path, key)
     }
 
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
-    func items(_ c: KayaCollection, _ path: [KayaValue]) -> [(key: KayaValue, value: KayaValue)] {
-        app.instanceEntries(c.id, path)
+    func items(_ c: KayaCollection) -> [(key: KayaValue, value: KayaValue)] {
+        app.instanceEntries(c.id, c.path)
     }
 
-    func count(_ c: KayaCollection, _ path: [KayaValue]) -> Int {
-        app.instanceEntries(c.id, path).count
+    func count(_ c: KayaCollection) -> Int {
+        app.instanceEntries(c.id, c.path).count
     }
 
     /// Mount into the default window; per-window targets arrive with
@@ -318,21 +345,22 @@ final class KayaTpl {
         tx.collection()
     }
 
-    func forEach(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
+    func forEach<R>(_ c: KayaCollection, _ body: (KayaTpl) -> R) -> (KayaNodeHandle, R) {
+        c.assertRoot()
         let n = tx.app.nextNode()
         tx.tx.createFor(n.id, c.id)
         tx.app.openFors.append(c.id)
-        body(KayaTpl(tx: tx))
+        let out = body(KayaTpl(tx: tx))
         tx.app.openFors.removeLast()
         tx.tx.templateEnd()
-        return n
+        return (n, out)
     }
 
-    func when(_ s: KayaSignal, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
+    func when<R>(_ s: KayaSignal, _ body: (KayaTpl) -> R) -> (KayaNodeHandle, R) {
         let n = tx.app.nextNode()
         tx.tx.createWhen(n.id, s.id)
-        body(KayaTpl(tx: tx))
+        let out = body(KayaTpl(tx: tx))
         tx.tx.templateEnd()
-        return n
+        return (n, out)
     }
 }

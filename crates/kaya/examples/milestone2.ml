@@ -1,8 +1,11 @@
 (* The milestone-2 scene from OCaml, on the idiomatic surface
-   (Kaya_app): typed handles instead of hand-numbered ids, closures
-   instead of template_end bookkeeping, and click handlers instead of a
-   hand-rolled dispatch loop. The wire vocabulary underneath (Kaya_wire)
-   is generated from kaya::spec by kaya-bindgen.
+   (Kaya_app, opened at the top so the scene's own names shadow the
+   module's): declarations are values ('a decl), composed with the
+   let* / let+ binding operators — the reader spelling of Haskell's
+   Build monad — so no call threads the transaction by hand, and a
+   dropped declaration is a type error. A local open (Tpl.( ... ))
+   switches into the template zone, operators and vocabulary together.
+   Handles declared inside a template escape as the body's result.
 
    Build the library first (cargo build), then, from a scratch dir
    holding this file plus the contents of bindings/ocaml:
@@ -11,83 +14,92 @@
            kaya_app.ml milestone2.ml -o milestone2-ocaml *)
 
 open Kaya_wire
+open Kaya_app
 
 let () =
   let app = Kaya_app.create () in
 
   let status, extras, step, groups, items, remove_button =
-    Kaya_app.build app (fun tx ->
-        let status = Kaya_app.signal tx (Str "step 0") in
-        let extras = Kaya_app.signal tx (Bool false) in
+    build app
+      (let* status = signal (Str "step 0") in
+       let* extras = signal (Bool false) in
 
-        let column = Kaya_app.widget tx kind_column in
-        let step = Kaya_app.widget tx kind_button in
-        Kaya_app.set_text tx step "step";
-        let status_label = Kaya_app.widget tx kind_label in
-        Kaya_app.bind_text tx status_label status;
+       let* column = widget kind_column in
+       let* step = widget kind_button in
+       let* () = set_text step "step" in
+       let* status_label = widget kind_label in
+       let* () = bind_text status_label status in
 
-        let banner, () =
-          Kaya_app.when_ tx extras (fun t ->
-              let banner_label = Kaya_app.Tpl.widget t kind_label in
-              Kaya_app.Tpl.set_text t banner_label "extras on")
-        in
+       let* banner, () =
+         when_ extras
+           Tpl.(
+             let* banner_label = widget kind_label in
+             set_text banner_label "extras on")
+       in
 
-        let groups = Kaya_app.collection tx in
-        let group_list, (items, remove_button) =
-          Kaya_app.for_each tx groups (fun t ->
-              let group_column = Kaya_app.Tpl.widget t kind_column in
-              let name = Kaya_app.Tpl.widget t kind_label in
-              Kaya_app.Tpl.bind_text_element t name;
-              Kaya_app.Tpl.add_child t group_column name;
+       let* groups = collection in
+       let* group_list, (items, remove_button) =
+         for_each groups
+           Tpl.(
+             let* group_column = widget kind_column in
+             let* name = widget kind_label in
+             let* () = bind_text_element name in
+             let* () = add_child group_column name in
 
-              let items = Kaya_app.Tpl.collection t in
-              let item_list, remove_button =
-                Kaya_app.Tpl.for_each t items (fun item ->
-                    let row = Kaya_app.Tpl.widget item kind_column in
-                    let text = Kaya_app.Tpl.widget item kind_label in
-                    Kaya_app.Tpl.bind_text_element item text;
-                    let remove_button = Kaya_app.Tpl.widget item kind_button in
-                    Kaya_app.Tpl.set_text item remove_button "remove";
-                    Kaya_app.Tpl.add_child item row text;
-                    Kaya_app.Tpl.add_child item row remove_button;
-                    remove_button)
-              in
-              Kaya_app.Tpl.add_child t group_column item_list;
-              (items, remove_button))
-        in
+             let* items = collection in
+             let* item_list, remove_button =
+               for_each items
+                 (let* row = widget kind_column in
+                  let* text = widget kind_label in
+                  let* () = bind_text_element text in
+                  let* remove_button = widget kind_button in
+                  let* () = set_text remove_button "remove" in
+                  let* () = add_child row text in
+                  let+ () = add_child row remove_button in
+                  remove_button)
+             in
+             let+ () = add_child group_column item_list in
+             (items, remove_button))
+       in
 
-        Kaya_app.add_child tx column step;
-        Kaya_app.add_child tx column status_label;
-        Kaya_app.add_child tx column banner;
-        Kaya_app.add_child tx column group_list;
-        Kaya_app.mount tx column;
-        (status, extras, step, groups, items, remove_button))
+       let* () = add_child column step in
+       let* () = add_child column status_label in
+       let* () = add_child column banner in
+       let* () = add_child column group_list in
+       let+ () = mount column in
+       (status, extras, step, groups, items, remove_button))
   in
 
   let steps = ref 0 in
-  Kaya_app.on_click app step (fun tx ->
-      incr steps;
-      (match !steps with
-      | 1 ->
-          Kaya_app.insert tx groups [] (Str "g1") (Str "Work");
-          Kaya_app.insert tx items [ Str "g1" ] (Str "a") (Str "send report");
-          Kaya_app.insert tx items [ Str "g1" ] (Str "b") (Str "buy milk")
-      | 2 ->
-          Kaya_app.insert tx groups [] (Str "g2") (Str "Home");
-          Kaya_app.insert tx items [ Str "g2" ] (Str "a") (Str "water plants");
-          Kaya_app.update tx groups [] (Str "g1") (Str "Office")
-      | _ -> ());
-      Kaya_app.write tx extras (Bool (!steps = 1));
-      Kaya_app.write tx status (Str (Printf.sprintf "step %d" !steps)));
+  on_click app step
+    (let* n = io (fun () -> incr steps; !steps) in
+     let* () =
+       match n with
+       | 1 ->
+           let* () = insert groups (Str "g1") (Str "Work") in
+           let todos = at items (Str "g1") in
+           let* () = insert todos (Str "a") (Str "send report") in
+           insert todos (Str "b") (Str "buy milk")
+       | 2 ->
+           let* () = insert groups (Str "g2") (Str "Home") in
+           let* () = insert (at items (Str "g2")) (Str "a") (Str "water plants") in
+           update groups (Str "g1") (Str "Office")
+       | _ -> return ()
+     in
+     let* () = write extras (Bool (n = 1)) in
+     write status (Str (Printf.sprintf "step %d" n)));
 
-  Kaya_app.on_click_node app remove_button (fun tx keys ->
+  on_click_node app remove_button (fun keys ->
       match keys with
       | [ Str group; Str item ] ->
-          Kaya_app.remove tx items [ Str group ] (Str item);
-          (* The collection is the model: the count read here is the
-             fold of the patches, this one included. *)
-          let left = Kaya_app.count tx items [ Str group ] in
-          Kaya_app.write tx status (Str (Printf.sprintf "removed %s/%s, %d left" group item left))
-      | _ -> ());
+          (* The instance handle names the target once; mutation and
+             read hang off the same value. The collection is the model:
+             the count read is the fold of the patches, this one
+             included. *)
+          let todos = at items (Str group) in
+          let* () = remove todos (Str item) in
+          let* left = count todos in
+          write status (Str (Printf.sprintf "removed %s/%s, %d left" group item left))
+      | _ -> return ());
 
-  exit (Kaya_app.run app)
+  exit (run app)

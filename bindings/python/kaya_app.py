@@ -435,6 +435,13 @@ def label(text=None, bind=None):
 def for_each(coll):
     """A For over `coll`: the with-block declares the template, and the
     target yields the element — `with kaya.for_each(c) as element:`."""
+    # A For binds the collection itself — its template stamps per entry
+    # of every instance — so handing it an at(...) handle is a bug.
+    if not isinstance(coll, Collection):
+        raise TypeError(
+            "kaya: for_each binds the collection itself, not an instance "
+            "— drop the .at(...)"
+        )
     return _Template(wire.tx_create_for, coll._id, is_for=True, coll=coll)
 
 

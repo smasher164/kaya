@@ -45,11 +45,42 @@ readonly struct Node
     internal Node(ulong id) => Id = id;
 }
 
+/// A collection instance handle: the collection plus the key path
+/// selecting one stamped copy's table. Tx.Collection() returns the
+/// root (empty-path, live-zone) handle; At steps into a copy, one key
+/// per enclosing For. Mutations and reads take the handle, so the
+/// target is spelled once.
 readonly struct Collection
 {
     internal readonly ulong Id;
+    internal readonly object[] Path;
 
-    internal Collection(ulong id) => Id = id;
+    internal Collection(ulong id, object[] path)
+    {
+        Id = id;
+        Path = path;
+    }
+
+    /// The instance of this collection inside the copy keyed by
+    /// `key` of the next enclosing For; chain for deeper nesting.
+    public Collection At(object key)
+    {
+        var path = new object[Path.Length + 1];
+        Path.CopyTo(path, 0);
+        path[Path.Length] = key;
+        return new Collection(Id, path);
+    }
+
+    /// A For binds the collection itself — its template stamps per
+    /// entry of every instance — so handing it an At(...) handle is a
+    /// bug. (A default-constructed handle has a null Path; both are
+    /// rejected here.)
+    internal void AssertRoot()
+    {
+        if (Path == null || Path.Length > 0)
+            throw new InvalidOperationException(
+                "kaya: ForEach binds the collection itself, not an instance — drop the At(...)");
+    }
 }
 
 /// One instance of a collection: the table inside the stamped copy
@@ -89,7 +120,7 @@ sealed class KayaApp
 
     internal Node NextNode() => new(++nodes);
 
-    internal Collection NextCollection() => new(++collections);
+    internal Collection NextCollection() => new(++collections, Array.Empty<object>());
 
     /// A collection declared inside a For's template is torn down with
     /// its copies: record the edge so the model purges along it.
@@ -294,6 +325,7 @@ sealed class Tx
     /// (a live container) is returned.
     public Widget ForEach(Collection c, Action<Tpl> body)
     {
+        c.AssertRoot();
         var w = App.NextWidget();
         Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
         App.OpenFors.Add(c.Id);
@@ -313,40 +345,35 @@ sealed class Tx
         return w;
     }
 
-    // A null path means the live-zone instance, matching the wire
-    // packers' convention.
-    static object[] NoPath(object[] path) => path ?? Array.Empty<object>();
-
-    public void Insert(Collection c, object[] path, object key, object value)
+    public void Insert(Collection c, object key, object value)
     {
-        ModelSet(c.Id, NoPath(path), key, value);
-        Records.Add(KayaWire.TxCollectionInsert(c.Id, path, key, value));
+        ModelSet(c.Id, c.Path, key, value);
+        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, value));
     }
 
-    public void Update(Collection c, object[] path, object key, object value)
+    public void Update(Collection c, object key, object value)
     {
-        ModelSet(c.Id, NoPath(path), key, value);
-        Records.Add(KayaWire.TxCollectionUpdate(c.Id, path, key, value));
+        ModelSet(c.Id, c.Path, key, value);
+        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, value));
     }
 
-    public void Remove(Collection c, object[] path, object key)
+    public void Remove(Collection c, object key)
     {
-        ModelRemove(c.Id, NoPath(path), key);
-        Records.Add(KayaWire.TxCollectionRemove(c.Id, path, key));
+        ModelRemove(c.Id, c.Path, key);
+        Records.Add(KayaWire.TxCollectionRemove(c.Id, c.Path, key));
     }
 
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
-    public List<KeyValuePair<object, object>> Items(Collection c, object[] path)
+    public List<KeyValuePair<object, object>> Items(Collection c)
     {
-        var instance = App.InstanceOf(c.Id, NoPath(path));
+        var instance = App.InstanceOf(c.Id, c.Path);
         return instance == null
             ? new List<KeyValuePair<object, object>>()
             : new List<KeyValuePair<object, object>>(instance.Entries);
     }
 
-    public int Count(Collection c, object[] path) =>
-        App.InstanceOf(c.Id, NoPath(path))?.Entries.Count ?? 0;
+    public int Count(Collection c) => App.InstanceOf(c.Id, c.Path)?.Entries.Count ?? 0;
 
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
@@ -382,6 +409,7 @@ sealed class Tpl
 
     public Node ForEach(Collection c, Action<Tpl> body)
     {
+        c.AssertRoot();
         var n = tx.App.NextNode();
         tx.Records.Add(KayaWire.TxCreateFor(n.Id, c.Id));
         tx.App.OpenFors.Add(c.Id);

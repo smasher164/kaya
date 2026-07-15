@@ -29,7 +29,30 @@ type Widget struct{ id uint64 }
 // the copy's key path.
 type Node struct{ id uint64 }
 
-type Collection struct{ id uint64 }
+// Collection is a collection instance handle: the collection plus the
+// key path selecting one stamped copy's table. Tx.Collection returns
+// the root (empty-path, live-zone) handle; At steps into a copy, one
+// key per enclosing For. Mutations and reads take the handle, so the
+// target is spelled once.
+type Collection struct {
+	id   uint64
+	path []any
+}
+
+// At is the instance of this collection inside the copy keyed by key
+// of the next enclosing For; chain for deeper nesting.
+func (c Collection) At(key any) Collection {
+	path := append(append([]any(nil), c.path...), key)
+	return Collection{c.id, path}
+}
+
+// A For binds the collection itself — its template stamps per entry of
+// every instance — so handing it an At(...) handle is a bug.
+func assertRoot(c Collection) {
+	if len(c.path) > 0 {
+		panic("kaya: ForEach binds the collection itself, not an instance — drop the At(...)")
+	}
+}
 
 type counters struct {
 	signal, widget, collection, node uint64
@@ -195,7 +218,7 @@ func (tx *Tx) AddChild(parent, child Widget) {
 
 func (tx *Tx) Collection() Collection {
 	tx.app.c.collection++
-	c := Collection{tx.app.c.collection}
+	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
 	tx.records = append(tx.records, TxCreateCollection(c.id))
 	return c
@@ -204,6 +227,7 @@ func (tx *Tx) Collection() Collection {
 // ForEach declares a For over c: fn's body declares the template, and
 // the For itself (a live container) is returned.
 func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
+	assertRoot(c)
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
@@ -225,32 +249,32 @@ func (tx *Tx) When(s Signal, fn func(*Tpl)) Widget {
 	return w
 }
 
-func (tx *Tx) Insert(c Collection, path []any, key, value any) {
-	tx.app.modelSet(c.id, path, key, value)
-	tx.records = append(tx.records, TxCollectionInsert(c.id, path, key, value))
+func (tx *Tx) Insert(c Collection, key, value any) {
+	tx.app.modelSet(c.id, c.path, key, value)
+	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, value))
 }
 
-func (tx *Tx) Update(c Collection, path []any, key, value any) {
-	tx.app.modelSet(c.id, path, key, value)
-	tx.records = append(tx.records, TxCollectionUpdate(c.id, path, key, value))
+func (tx *Tx) Update(c Collection, key, value any) {
+	tx.app.modelSet(c.id, c.path, key, value)
+	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, value))
 }
 
-func (tx *Tx) Remove(c Collection, path []any, key any) {
-	tx.app.modelRemove(c.id, path, key)
-	tx.records = append(tx.records, TxCollectionRemove(c.id, path, key))
+func (tx *Tx) Remove(c Collection, key any) {
+	tx.app.modelRemove(c.id, c.path, key)
+	tx.records = append(tx.records, TxCollectionRemove(c.id, c.path, key))
 }
 
 // Items is the model: what this guest wrote, exactly — the fold of
 // every patch so far (this transaction's included), in insertion order.
-func (tx *Tx) Items(c Collection, path []any) []Entry {
-	if in := tx.app.instanceOf(c.id, path); in != nil {
+func (tx *Tx) Items(c Collection) []Entry {
+	if in := tx.app.instanceOf(c.id, c.path); in != nil {
 		return append([]Entry(nil), in.entries...)
 	}
 	return nil
 }
 
-func (tx *Tx) Len(c Collection, path []any) int {
-	if in := tx.app.instanceOf(c.id, path); in != nil {
+func (tx *Tx) Len(c Collection) int {
+	if in := tx.app.instanceOf(c.id, c.path); in != nil {
 		return len(in.entries)
 	}
 	return 0
@@ -294,6 +318,7 @@ func (t *Tpl) Collection() Collection {
 }
 
 func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
+	assertRoot(c)
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	t.tx.records = append(t.tx.records, TxCreateFor(n.id, c.id))

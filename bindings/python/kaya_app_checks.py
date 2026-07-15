@@ -31,6 +31,11 @@ with app.window():
         check("signals expose no read", True)
 
     c = kaya.collection()
+    try:
+        kaya.for_each(c.at("g1"))
+        check("for_each rejects instance handles", False)
+    except TypeError:
+        check("for_each rejects instance handles", True)
     child = None
     with kaya.column():
         with kaya.for_each(c) as el:

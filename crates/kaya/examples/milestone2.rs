@@ -26,22 +26,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let status_label = tx.widget(WidgetKind::Label);
     tx.bind(status_label, Prop::Text, status);
 
-    let banner = tx.when(extras, |t| {
+    let (banner, ()) = tx.when(extras, |t| {
         let label = t.widget(WidgetKind::Label);
         t.set(label, Prop::Text, "extras on");
     });
 
+    // Handles declared inside a template escape as the body's return
+    // value — no side-channel slots.
     let groups = tx.collection();
-    let mut items_slot = None;
-    let mut remove_slot = None;
-    let group_list = tx.for_each(groups, |t| {
+    let (group_list, (items, remove_button)) = tx.for_each(&groups, |t| {
         let group_column = t.widget(WidgetKind::Column);
         let name = t.widget(WidgetKind::Label);
         t.bind_element(name, Prop::Text, 0);
         t.add_child(group_column, name);
 
         let items = t.collection();
-        let item_list = t.for_each(items, |t| {
+        let (item_list, remove) = t.for_each(&items, |t| {
             let row = t.widget(WidgetKind::Column);
             let text = t.widget(WidgetKind::Label);
             t.bind_element(text, Prop::Text, 0);
@@ -49,10 +49,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             t.set(remove, Prop::Text, "remove");
             t.add_child(row, text);
             t.add_child(row, remove);
-            remove_slot = Some(remove);
+            remove
         });
         t.add_child(group_column, item_list);
-        items_slot = Some(items);
+        (items, remove)
     });
 
     tx.add_child(column, step);
@@ -61,9 +61,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     tx.add_child(column, group_list);
     tx.mount(column);
     tx.commit();
-
-    let items = items_slot.unwrap();
-    let remove_button = remove_slot.unwrap();
 
     let mut steps = 0u32;
     let mut extras_on = false;
@@ -74,15 +71,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let mut tx = ctx.begin();
                 match steps {
                     1 => {
-                        tx.insert(groups, "g1", "Work");
-                        tx.insert_at(items, &["g1".into()], "a", "send report");
-                        tx.insert_at(items, &["g1".into()], "b", "buy milk");
+                        tx.insert(&groups, "g1", "Work");
+                        let todos = items.at("g1");
+                        tx.insert(&todos, "a", "send report");
+                        tx.insert(&todos, "b", "buy milk");
                         extras_on = true;
                     }
                     2 => {
-                        tx.insert(groups, "g2", "Home");
-                        tx.insert_at(items, &["g2".into()], "a", "water plants");
-                        tx.update(groups, "g1", "Office");
+                        tx.insert(&groups, "g2", "Home");
+                        tx.insert(&items.at("g2"), "a", "water plants");
+                        tx.update(&groups, "g1", "Office");
                         extras_on = false;
                     }
                     _ => {}
@@ -95,11 +93,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let [Value::Str(group), Value::Str(item)] = &path[..] else {
                     panic!("remove click carries [group, item], got {path:?}");
                 };
+                // The instance handle names the target once; mutation
+                // and read hang off the same value. The collection is
+                // the model: the count read is the fold of the
+                // patches, this one included.
+                let todos = items.at(path[0].clone());
                 let mut tx = ctx.begin();
-                tx.remove_at(items, &[path[0].clone()], path[1].clone());
-                // The collection is the model: the count read here is
-                // the fold of the patches, this one included.
-                let left = tx.len_at(items, &[path[0].clone()]);
+                tx.remove(&todos, path[1].clone());
+                let left = tx.len(&todos);
                 tx.write(status, format!("removed {group}/{item}, {left} left"));
                 tx.commit();
             }

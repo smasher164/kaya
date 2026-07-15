@@ -12,6 +12,15 @@
      overloading, so the template vocabulary lives in the Tpl submodule
      — the module path spells the zone the way the type family does in
      the Haskell binding;
+   - declaration programs: a declaration is a value of type 'a decl
+     (= tx -> 'a), composed with the let* / let+ / and+ binding
+     operators — the reader spelling of Haskell's Build monad. No call
+     threads tx by hand, [build] is the only way to run a program (so
+     "declared outside a transaction" stays a type error), and a
+     dropped declaration in statement position is a type error too
+     (unit expected, tx -> unit found) — dropped patches are loud. The
+     Tpl submodule carries its own operators over tpl, so a local open
+     (Tpl.( ... )) switches zone and operators together;
    - occurrence dispatch: handlers register per button; the app loop
      routes each click, handing template-node handlers the stamped
      copy's key path. Handlers receive their transaction explicitly;
@@ -20,7 +29,13 @@
 type signal = Signal of int64
 type widget = Widget of int64
 type node = Node of int64
-type collection = Collection of int64
+
+(* A collection instance handle: the collection plus the key path
+   selecting one stamped copy's table. [collection] returns the root
+   (empty-path, live-zone) handle; [at] steps into a copy, one key per
+   enclosing For. Mutations and reads take the handle, so the target is
+   spelled once. *)
+type collection = { cid : int64; cpath : Kaya_wire.value list }
 
 (* One instance of a collection: the table inside the stamped copy
    selected by [path] (the empty path for a live-zone collection).
@@ -36,7 +51,7 @@ type app = {
   mutable c_collection : int64;
   mutable c_node : int64;
   widget_handlers : (int64, tx -> unit) Hashtbl.t;
-  node_handlers : (int64, tx -> Kaya_wire.value list -> unit) Hashtbl.t;
+  node_handlers : (int64, Kaya_wire.value list -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
      (items, count) are exactly the writes. [children] records the
@@ -56,6 +71,11 @@ and tx = {
   mutable records : string list;
   mutable journal : (int64 * instance list) list;
 }
+
+(* A declaration program: what [build] runs against one transaction.
+   Every declaration below is one of these (tx comes last), so partial
+   application is composition. *)
+type 'a decl = tx -> 'a
 
 let create () =
   {
@@ -117,12 +137,12 @@ let model_remove tx cid path key =
      instances with it; the model follows. *)
   purge_children tx cid (path @ [ key ])
 
-(* Run [f] with a fresh transaction and submit it atomically. A handler
-   that raises abandons its records, and the model abandons the same
-   writes before the exception continues. *)
-let build app f =
+(* Run a declaration program with a fresh transaction and submit it
+   atomically. A handler that raises abandons its records, and the
+   model abandons the same writes before the exception continues. *)
+let build app (program : 'a decl) =
   let tx = { app; records = []; journal = [] } in
-  match f tx with
+  match program tx with
   | result ->
       if tx.records <> [] then Kaya_runtime.submit (List.rev tx.records);
       result
@@ -130,24 +150,41 @@ let build app f =
       List.iter (fun (cid, saved) -> Hashtbl.replace app.model cid saved) tx.journal;
       raise e
 
-let signal tx initial =
+(* The binding operators over declaration programs. *)
+let ( let* ) (m : 'a decl) (f : 'a -> 'b decl) : 'b decl = fun tx -> f (m tx) tx
+let ( let+ ) (m : 'a decl) (f : 'a -> 'b) : 'b decl = fun tx -> f (m tx)
+
+let ( and+ ) (ma : 'a decl) (mb : 'b decl) : ('a * 'b) decl =
+ fun tx ->
+  let a = ma tx in
+  let b = mb tx in
+  (a, b)
+
+let return x : 'a decl = fun _tx -> x
+
+(* Lift host code (counters, app-state reads) into a program: it runs
+   when the program does — per transaction, in order — not when the
+   program is built. *)
+let io f : 'a decl = fun _tx -> f ()
+
+let signal initial tx =
   tx.app.c_signal <- Int64.add tx.app.c_signal 1L;
   let id = tx.app.c_signal in
   emit tx (Kaya_wire.tx_create_signal id initial);
   Signal id
 
-let write tx (Signal id) value = emit tx (Kaya_wire.tx_write_signal id value)
+let write (Signal id) value tx = emit tx (Kaya_wire.tx_write_signal id value)
 
-let widget tx kind =
+let widget kind tx =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_widget id kind);
   Widget id
 
-let set_text tx (Widget id) text = emit tx (Kaya_wire.tx_set_text id text)
-let bind_text tx (Widget id) (Signal s) = emit tx (Kaya_wire.tx_bind_text id s)
+let set_text (Widget id) text tx = emit tx (Kaya_wire.tx_set_text id text)
+let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 
-let add_child tx (Widget parent) (Widget child) =
+let add_child (Widget parent) (Widget child) tx =
   emit tx (Kaya_wire.tx_add_child parent child)
 
 let collection tx =
@@ -161,32 +198,42 @@ let collection tx =
         (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
   | [] -> ());
   emit tx (Kaya_wire.tx_create_collection id);
-  Collection id
+  { cid = id; cpath = [] }
 
-let insert tx (Collection id) path key value =
-  model_set tx id path key value;
-  emit tx (Kaya_wire.tx_collection_insert id path key value)
+(* The instance of this collection inside the copy keyed by [key] of
+   the next enclosing For; chain for deeper nesting. *)
+let at c key = { c with cpath = c.cpath @ [ key ] }
 
-let update tx (Collection id) path key value =
-  model_set tx id path key value;
-  emit tx (Kaya_wire.tx_collection_update id path key value)
+(* A For binds the collection itself — its template stamps per entry of
+   every instance — so handing it an [at] handle is a bug. *)
+let assert_root c =
+  if c.cpath <> [] then
+    invalid_arg "kaya: for_each binds the collection itself, not an instance — drop the at"
 
-let remove tx (Collection id) path key =
-  model_remove tx id path key;
-  emit tx (Kaya_wire.tx_collection_remove id path key)
+let insert c key value tx =
+  model_set tx c.cid c.cpath key value;
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key value)
+
+let update c key value tx =
+  model_set tx c.cid c.cpath key value;
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key value)
+
+let remove c key tx =
+  model_remove tx c.cid c.cpath key;
+  emit tx (Kaya_wire.tx_collection_remove c.cid c.cpath key)
 
 (* The model: what this guest wrote, exactly — the fold of every patch
    so far (this transaction's included), in insertion order. *)
-let items tx (Collection id) path =
-  match List.find_opt (fun i -> i.path = path) (instances_of tx.app id) with
+let items c tx =
+  match List.find_opt (fun i -> i.path = c.cpath) (instances_of tx.app c.cid) with
   | Some i -> i.entries
   | None -> []
 
-let count tx c path = List.length (items tx c path)
+let count c tx = List.length (items c tx)
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)
-let mount tx (Widget root) = emit tx (Kaya_wire.tx_mount 0L root)
+let mount (Widget root) tx = emit tx (Kaya_wire.tx_mount 0L root)
 
 (* A template body: the same declaration vocabulary with template-node
    ids, plus element bindings. *)
@@ -197,19 +244,20 @@ let alloc_node tx =
   tx.app.c_node
 
 (* A For over a collection: [body] declares the template; the For
-   itself (a live container) is returned. *)
-let for_each tx (Collection cid) body =
+   itself (a live container) is returned alongside the body's result. *)
+let for_each c body tx =
+  assert_root c;
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
-  emit tx (Kaya_wire.tx_create_for id cid);
-  tx.app.open_fors <- cid :: tx.app.open_fors;
+  emit tx (Kaya_wire.tx_create_for id c.cid);
+  tx.app.open_fors <- c.cid :: tx.app.open_fors;
   let result = body { tpl_tx = tx } in
   tx.app.open_fors <- List.tl tx.app.open_fors;
   emit tx (Kaya_wire.tx_template_end ());
   (Widget id, result)
 
 (* A When over a Bool signal: stamps on true, unstamps on false. *)
-let when_ tx (Signal sid) body =
+let when_ (Signal sid) body tx =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_when id sid);
@@ -218,33 +266,50 @@ let when_ tx (Signal sid) body =
   (Widget id, result)
 
 module Tpl = struct
-  let widget t kind =
+  (* The same program shape over the template zone: 'a Tpl.decl
+     (= tpl -> 'a), with its own binding operators — a local open
+     (Tpl.( ... )) switches zone and operators together. *)
+  type 'a decl = tpl -> 'a
+
+  let ( let* ) (m : 'a decl) (f : 'a -> 'b decl) : 'b decl = fun t -> f (m t) t
+  let ( let+ ) (m : 'a decl) (f : 'a -> 'b) : 'b decl = fun t -> f (m t)
+
+  let ( and+ ) (ma : 'a decl) (mb : 'b decl) : ('a * 'b) decl =
+   fun t ->
+    let a = ma t in
+    let b = mb t in
+    (a, b)
+
+  let return x : 'a decl = fun _t -> x
+
+  let widget kind t =
     let id = alloc_node t.tpl_tx in
     emit t.tpl_tx (Kaya_wire.tx_create_widget id kind);
     Node id
 
-  let set_text t (Node id) text = emit t.tpl_tx (Kaya_wire.tx_set_text id text)
+  let set_text (Node id) text t = emit t.tpl_tx (Kaya_wire.tx_set_text id text)
 
   (* Bind text to the element of the enclosing For, [level] Fors up
      (0 = nearest). *)
-  let bind_text_element ?(level = 0) t (Node id) =
+  let bind_text_element ?(level = 0) (Node id) t =
     emit t.tpl_tx (Kaya_wire.tx_bind_text_element ~level id)
 
-  let add_child t (Node parent) (Node child) =
+  let add_child (Node parent) (Node child) t =
     emit t.tpl_tx (Kaya_wire.tx_add_child parent child)
 
   let collection t = collection t.tpl_tx
 
-  let for_each t (Collection cid) body =
+  let for_each c body t =
+    assert_root c;
     let id = alloc_node t.tpl_tx in
-    emit t.tpl_tx (Kaya_wire.tx_create_for id cid);
-    t.tpl_tx.app.open_fors <- cid :: t.tpl_tx.app.open_fors;
+    emit t.tpl_tx (Kaya_wire.tx_create_for id c.cid);
+    t.tpl_tx.app.open_fors <- c.cid :: t.tpl_tx.app.open_fors;
     let result = body { tpl_tx = t.tpl_tx } in
     t.tpl_tx.app.open_fors <- List.tl t.tpl_tx.app.open_fors;
     emit t.tpl_tx (Kaya_wire.tx_template_end ());
     (Node id, result)
 
-  let when_ t (Signal sid) body =
+  let when_ (Signal sid) body t =
     let id = alloc_node t.tpl_tx in
     emit t.tpl_tx (Kaya_wire.tx_create_when id sid);
     let result = body { tpl_tx = t.tpl_tx } in
@@ -252,12 +317,15 @@ module Tpl = struct
     (Node id, result)
 end
 
-(* Register a click handler for a live widget. *)
-let on_click app (Widget id) handler = Hashtbl.replace app.widget_handlers id handler
+(* Register a click handler for a live widget: a unit decl, run as one
+   transaction per click. *)
+let on_click app (Widget id) (handler : unit decl) =
+  Hashtbl.replace app.widget_handlers id handler
 
 (* Register a click handler for a template node; it also receives the
    stamped copy's keys, outermost first. *)
-let on_click_node app (Node id) handler = Hashtbl.replace app.node_handlers id handler
+let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit decl) =
+  Hashtbl.replace app.node_handlers id handler
 
 let dispatch_loop app =
   let rec loop () =
@@ -270,7 +338,7 @@ let dispatch_loop app =
         loop ()
     | Some (id, keys) ->
         (match Hashtbl.find_opt app.node_handlers id with
-        | Some handler -> build app (fun tx -> handler tx keys)
+        | Some handler -> build app (handler keys)
         | None -> ());
         loop ()
   in

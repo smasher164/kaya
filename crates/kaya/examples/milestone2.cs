@@ -72,15 +72,16 @@ static class Program
             steps++;
             if (steps == 1)
             {
-                tx.Insert(groups, null, "g1", "Work");
-                tx.Insert(items, new object[] { "g1" }, "a", "send report");
-                tx.Insert(items, new object[] { "g1" }, "b", "buy milk");
+                tx.Insert(groups, "g1", "Work");
+                var todos = items.At("g1");
+                tx.Insert(todos, "a", "send report");
+                tx.Insert(todos, "b", "buy milk");
             }
             else if (steps == 2)
             {
-                tx.Insert(groups, null, "g2", "Home");
-                tx.Insert(items, new object[] { "g2" }, "a", "water plants");
-                tx.Update(groups, null, "g1", "Office");
+                tx.Insert(groups, "g2", "Home");
+                tx.Insert(items.At("g2"), "a", "water plants");
+                tx.Update(groups, "g1", "Office");
             }
             tx.Write(extras, steps == 1);
             tx.Write(status, $"step {steps}");
@@ -90,10 +91,13 @@ static class Program
         {
             string group = (string)keys[0];
             string item = (string)keys[1];
-            tx.Remove(items, new object[] { group }, item);
-            // The collection is the model: the count read here is the
-            // fold of the patches, this one included.
-            int left = tx.Count(items, new object[] { group });
+            // The instance handle names the target once; mutation and
+            // read hang off the same value. The collection is the
+            // model: the count read is the fold of the patches, this
+            // one included.
+            var todos = items.At(group);
+            tx.Remove(todos, item);
+            int left = tx.Count(todos);
             tx.Write(status, $"removed {group}/{item}, {left} left");
         });
 

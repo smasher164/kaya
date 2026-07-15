@@ -65,13 +65,14 @@ main = kayaMain $ \app -> do
     submitTx app $ do
       case n of
         1 -> do
-          insert groups [] (VStr "g1") (VStr "Work")
-          insert items [VStr "g1"] (VStr "a") (VStr "send report")
-          insert items [VStr "g1"] (VStr "b") (VStr "buy milk")
+          insert groups (VStr "g1") (VStr "Work")
+          let todos = items `at` VStr "g1"
+          insert todos (VStr "a") (VStr "send report")
+          insert todos (VStr "b") (VStr "buy milk")
         2 -> do
-          insert groups [] (VStr "g2") (VStr "Home")
-          insert items [VStr "g2"] (VStr "a") (VStr "water plants")
-          update groups [] (VStr "g1") (VStr "Office")
+          insert groups (VStr "g2") (VStr "Home")
+          insert (items `at` VStr "g2") (VStr "a") (VStr "water plants")
+          update groups (VStr "g1") (VStr "Office")
         _ -> return ()
       writeSignal extras (VBool (n == 1))
       writeSignal status (VStr ("step " ++ show n))
@@ -79,9 +80,11 @@ main = kayaMain $ \app -> do
   onClickNode app removeButton $ \keys -> case keys of
     [VStr group, VStr item] ->
       submitTx app $ do
-        remove items [VStr group] (VStr item)
-        -- The collection is the model: the count read here is the fold
-        -- of the patches, this one included.
-        left <- count items [VStr group]
+        -- The instance handle names the target once; mutation and read
+        -- hang off the same value. The collection is the model: the
+        -- count read is the fold of the patches, this one included.
+        let todos = items `at` VStr group
+        remove todos (VStr item)
+        left <- count todos
         writeSignal status (VStr ("removed " ++ group ++ "/" ++ item ++ ", " ++ show left ++ " left"))
     _ -> return ()

@@ -12,23 +12,46 @@ import dev.kaya.KayaWire;
  * vocabulary (KayaWire) is generated from kaya::spec by kaya-bindgen.
  */
 final class Milestone2 {
-    private static KayaApp.Signal status;
-    private static KayaApp.Signal extras;
-    private static KayaApp.Widget step;
-    private static KayaApp.Collection groups;
-    private static KayaApp.Collection items;
-    private static KayaApp.Node removeButton;
+    /**
+     * The scene's handles, returned by the build body — templates and
+     * build hand their declarations back out (KayaApp.Stamped), so
+     * nothing escapes through static fields.
+     */
+    private static final class Scene {
+        final KayaApp.Signal status;
+        final KayaApp.Signal extras;
+        final KayaApp.Widget step;
+        final KayaApp.Collection groups;
+        final KayaApp.Collection items;
+        final KayaApp.Node removeButton;
+
+        Scene(
+                KayaApp.Signal status,
+                KayaApp.Signal extras,
+                KayaApp.Widget step,
+                KayaApp.Collection groups,
+                KayaApp.Collection items,
+                KayaApp.Node removeButton) {
+            this.status = status;
+            this.extras = extras;
+            this.step = step;
+            this.groups = groups;
+            this.items = items;
+            this.removeButton = removeButton;
+        }
+    }
+
     private static int steps;
 
     static void app() {
         KayaApp app = new KayaApp();
 
-        app.build(tx -> {
-            status = tx.signal("step 0");
-            extras = tx.signal(false);
+        Scene scene = app.build(tx -> {
+            KayaApp.Signal status = tx.signal("step 0");
+            KayaApp.Signal extras = tx.signal(false);
 
             KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);
-            step = tx.widget(KayaWire.KIND_BUTTON);
+            KayaApp.Widget step = tx.widget(KayaWire.KIND_BUTTON);
             tx.setText(step, "step");
             KayaApp.Widget statusLabel = tx.widget(KayaWire.KIND_LABEL);
             tx.bindText(statusLabel, status);
@@ -38,56 +61,63 @@ final class Milestone2 {
                 t.setText(bannerLabel, "extras on");
             });
 
-            groups = tx.collection();
-            KayaApp.Widget groupList = tx.forEach(groups, t -> {
+            KayaApp.Collection groups = tx.collection();
+            KayaApp.Stamped<KayaApp.Widget, Scene> groupList = tx.forEach(groups, t -> {
                 KayaApp.Node groupColumn = t.widget(KayaWire.KIND_COLUMN);
                 KayaApp.Node name = t.widget(KayaWire.KIND_LABEL);
                 t.bindTextElement(name, 0);
                 t.addChild(groupColumn, name);
 
-                items = t.collection();
-                KayaApp.Node itemList = t.forEach(items, item -> {
+                KayaApp.Collection items = t.collection();
+                KayaApp.Stamped<KayaApp.Node, KayaApp.Node> itemList = t.forEach(items, item -> {
                     KayaApp.Node row = item.widget(KayaWire.KIND_COLUMN);
                     KayaApp.Node text = item.widget(KayaWire.KIND_LABEL);
                     item.bindTextElement(text, 0);
-                    removeButton = item.widget(KayaWire.KIND_BUTTON);
-                    item.setText(removeButton, "remove");
+                    KayaApp.Node remove = item.widget(KayaWire.KIND_BUTTON);
+                    item.setText(remove, "remove");
                     item.addChild(row, text);
-                    item.addChild(row, removeButton);
+                    item.addChild(row, remove);
+                    return remove;
                 });
-                t.addChild(groupColumn, itemList);
+                t.addChild(groupColumn, itemList.handle);
+                return new Scene(status, extras, step, groups, items, itemList.out);
             });
 
             tx.addChild(column, step);
             tx.addChild(column, statusLabel);
             tx.addChild(column, banner);
-            tx.addChild(column, groupList);
+            tx.addChild(column, groupList.handle);
             tx.mount(column);
+            return groupList.out;
         });
 
-        app.onClick(step, tx -> {
+        app.onClick(scene.step, tx -> {
             steps++;
             if (steps == 1) {
-                tx.insert(groups, null, "g1", "Work");
-                tx.insert(items, new Object[] {"g1"}, "a", "send report");
-                tx.insert(items, new Object[] {"g1"}, "b", "buy milk");
+                tx.insert(scene.groups, "g1", "Work");
+                KayaApp.Collection todos = scene.items.at("g1");
+                tx.insert(todos, "a", "send report");
+                tx.insert(todos, "b", "buy milk");
             } else if (steps == 2) {
-                tx.insert(groups, null, "g2", "Home");
-                tx.insert(items, new Object[] {"g2"}, "a", "water plants");
-                tx.update(groups, null, "g1", "Office");
+                tx.insert(scene.groups, "g2", "Home");
+                tx.insert(scene.items.at("g2"), "a", "water plants");
+                tx.update(scene.groups, "g1", "Office");
             }
-            tx.write(extras, steps == 1);
-            tx.write(status, "step " + steps);
+            tx.write(scene.extras, steps == 1);
+            tx.write(scene.status, "step " + steps);
         });
 
-        app.onClick(removeButton, (tx, keys) -> {
+        app.onClick(scene.removeButton, (tx, keys) -> {
             String group = (String) keys.get(0);
             String item = (String) keys.get(1);
-            tx.remove(items, new Object[] {group}, item);
-            // The collection is the model: the count read here is the
-            // fold of the patches, this one included.
-            int left = tx.count(items, new Object[] {group});
-            tx.write(status, "removed " + group + "/" + item + ", " + left + " left");
+            // The instance handle names the target once; mutation and
+            // read hang off the same value. The collection is the
+            // model: the count read is the fold of the patches, this
+            // one included.
+            KayaApp.Collection todos = scene.items.at(group);
+            tx.remove(todos, item);
+            int left = tx.count(todos);
+            tx.write(scene.status, "removed " + group + "/" + item + ", " + left + " left");
         });
 
         app.dispatchLoop();

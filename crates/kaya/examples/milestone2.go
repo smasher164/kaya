@@ -79,13 +79,14 @@ func main() {
 		steps++
 		switch steps {
 		case 1:
-			tx.Insert(groups, nil, "g1", "Work")
-			tx.Insert(items, []any{"g1"}, "a", "send report")
-			tx.Insert(items, []any{"g1"}, "b", "buy milk")
+			tx.Insert(groups, "g1", "Work")
+			todos := items.At("g1")
+			tx.Insert(todos, "a", "send report")
+			tx.Insert(todos, "b", "buy milk")
 		case 2:
-			tx.Insert(groups, nil, "g2", "Home")
-			tx.Insert(items, []any{"g2"}, "a", "water plants")
-			tx.Update(groups, nil, "g1", "Office")
+			tx.Insert(groups, "g2", "Home")
+			tx.Insert(items.At("g2"), "a", "water plants")
+			tx.Update(groups, "g1", "Office")
 		}
 		tx.Write(extras, steps == 1)
 		tx.Write(status, fmt.Sprintf("step %d", steps))
@@ -93,10 +94,12 @@ func main() {
 
 	app.OnClickNode(removeButton, func(tx *kaya.Tx, keys []any) {
 		group, item := keys[0].(string), keys[1].(string)
-		tx.Remove(items, []any{group}, item)
-		// The collection is the model: the count read here is the fold
-		// of the patches, this one included.
-		left := tx.Len(items, []any{group})
+		// The instance handle names the target once; mutation and read
+		// hang off the same value. The collection is the model: the
+		// count read is the fold of the patches, this one included.
+		todos := items.At(group)
+		tx.Remove(todos, item)
+		left := tx.Len(todos)
 		tx.Write(status, fmt.Sprintf("removed %s/%s, %d left", group, item, left))
 	})
 

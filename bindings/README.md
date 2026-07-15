@@ -77,13 +77,35 @@ promises):
   (entry.text, later) should arrive as occurrences the app folds into
   its model, not as readable widget mirrors — keeping the model the
   single source and keeping eventual data out of the read path.
+- The collection handle is an instance handle: the root handle
+  (what `collection()` returns) is the live-zone table, and `at(key)`
+  steps into a stamped copy's instance, one key per enclosing For —
+  chain for deeper nesting. Mutations and reads take the same handle,
+  so a handler binds the target once (`todos = items.at(group)`) and
+  uses it throughout; no call spells a key path inline. `for_each`
+  binds the collection itself, never an instance — every binding
+  rejects an `at(...)` handle there at record time.
+- Template bodies hand their declarations back out: whatever the body
+  returns comes back alongside the For/When handle (Rust's generic
+  closures, OCaml/Haskell's `(handle, result)` pairs, Java's
+  `Stamped<H, R>` — its lambdas cannot assign captured locals; Java's
+  `build` is generic for the same reason). Go, C#, Swift, and Python
+  may also just capture lexically. Either way, nothing escapes a
+  template through mutable slots or static fields.
 - `When` takes a signal, never a raw bool — enforced by types where
   the language can (Haskell's `Declare` class makes cross-zone
   `addChild` unrepresentable; the others get it from the handle types).
 - The zone split is spelled by the language's own idiom: a type family
   (Haskell), distinct handle types plus a Tpl builder (Go, C#, Swift,
   Java, Python), or a submodule path (OCaml's `Kaya_app.Tpl`, since
-  OCaml has no overloading).
+  OCaml has no overloading — and its binding operators live per zone,
+  so `Tpl.( ... )` switches vocabulary and `let*` together).
+- Where the language has monadic sugar, the declaration program is a
+  value and the transaction never appears in app code: Haskell's
+  do-blocks over Build/Tpl, OCaml's `let*`/`let+`/`and+` over
+  `'a decl = tx -> 'a`. Both make a dropped declaration a type error
+  (a non-unit value in statement position), the same loudness Rust
+  will get from #[must_use] delta values.
 
 Per-language status:
 
@@ -93,7 +115,7 @@ Per-language status:
 | Haskell | KayaWire.hs | KayaRuntime.hs (peeks + stubs) | KayaApp.hs (Build/Tpl monads) | the monad-sugar experiment, realized |
 | Go      | kaya_wire.go | runtime.go (atomics ring) | app.go | handlers take *Tx per convention |
 | C#      | KayaWire.cs | Kaya.cs (Volatile ring) | KayaApp.cs | |
-| OCaml   | kaya_wire.ml | kaya_runtime.ml (Bigarray + stubs) | kaya_app.ml | Tpl as submodule |
+| OCaml   | kaya_wire.ml | kaya_runtime.ml (Bigarray + stubs) | kaya_app.ml | let*/let+ over 'a decl (= tx -> 'a) — the reader spelling of Haskell's Build; Tpl as submodule with its own operators, so a local open switches zone and operators together; io lifts host code; effect handlers are the flagged follow-up |
 | Swift   | KayaWire.swift | function floor via kaya.h | KayaApp.swift | Kaya-prefixed handles (hosts link UI frameworks with bare Widget/Node names) |
 | Java    | KayaWire.java | (ring recipe lives in KayaApp) | KayaApp.java | needs API 26 (invokeExact); Android's kaya module minSdk says so |
 | C       | kaya_wire.h | kaya.h is the runtime | — none, by decision | flat functions over a caller-owned buffer *are* C's idiomatic surface; a C app that wants handles is a C app about to become a binding |

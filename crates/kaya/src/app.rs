@@ -2,10 +2,16 @@
 //!
 //! Collections here follow the patch-producing doctrine: the collection
 //! is the model — the only copy. Every mutation op edits the model and
-//! queues the wire delta in the same call, so reads (`tx.items_at`,
-//! `tx.len_at`) are exactly the writes, never a second bookkeeping copy.
+//! queues the wire delta in the same call, so reads (`tx.items`,
+//! `tx.len`) are exactly the writes, never a second bookkeeping copy.
 //! A transaction dropped without commit abandons its records, and the
 //! model abandons the same writes.
+//!
+//! A [`Collection`] handle names one instance: the root handle (what
+//! `tx.collection()` returns) is the live-zone table, and `at(key)`
+//! selects the instance inside a stamped copy, one key per enclosing
+//! For. Mutations and reads take the same handle, so a handler binds
+//! the instance once and uses it throughout.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,6 +29,36 @@ use crate::protocol::{
 struct Instance {
     path: Vec<Value>,
     entries: Vec<(Value, Value)>,
+}
+
+/// A collection instance handle: the collection plus the key path
+/// selecting one stamped copy's table. `tx.collection()` returns the
+/// root (empty-path, live-zone) handle; `at(key)` steps into a copy,
+/// one key per enclosing For. Mutations and reads take the handle, so
+/// the target is spelled once.
+#[derive(Clone, Debug)]
+pub struct Collection {
+    id: CollectionId,
+    path: Vec<Value>,
+}
+
+impl Collection {
+    /// The instance of this collection inside the copy keyed by `key`
+    /// of the next enclosing For; chain for deeper nesting.
+    pub fn at(&self, key: impl Into<Value>) -> Collection {
+        let mut path = self.path.clone();
+        path.push(key.into());
+        Collection { id: self.id, path }
+    }
+}
+
+/// A For binds the collection itself — its template stamps per entry
+/// of every instance — so handing it an `at(...)` handle is a bug.
+fn assert_root(collection: &Collection) {
+    assert!(
+        collection.path.is_empty(),
+        "kaya: for_each binds the collection itself, not an instance — drop the at(...)"
+    );
 }
 
 pub struct AppCtx {
@@ -204,32 +240,24 @@ impl Tx<'_> {
 
     /// The model: what this guest wrote, exactly — the fold of every
     /// committed patch plus this transaction's own, in insertion order.
-    pub fn items_at(&self, collection: CollectionId, path: &[Value]) -> Vec<(Value, Value)> {
+    pub fn items(&self, instance: &Collection) -> Vec<(Value, Value)> {
         self.ctx
             .model
             .borrow()
-            .get(&collection)
-            .and_then(|instances| instances.iter().find(|i| i.path == path))
+            .get(&instance.id)
+            .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
             .map(|i| i.entries.clone())
             .unwrap_or_default()
     }
 
-    pub fn items(&self, collection: CollectionId) -> Vec<(Value, Value)> {
-        self.items_at(collection, &[])
-    }
-
-    pub fn len_at(&self, collection: CollectionId, path: &[Value]) -> usize {
+    pub fn len(&self, instance: &Collection) -> usize {
         self.ctx
             .model
             .borrow()
-            .get(&collection)
-            .and_then(|instances| instances.iter().find(|i| i.path == path))
+            .get(&instance.id)
+            .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
             .map(|i| i.entries.len())
             .unwrap_or(0)
-    }
-
-    pub fn len(&self, collection: CollectionId) -> usize {
-        self.len_at(collection, &[])
     }
 
     pub fn signal(&mut self, initial: impl Into<Value>) -> SignalId {
@@ -275,36 +303,28 @@ impl Tx<'_> {
     }
 
     /// Declare a collection: a core-side keyed table a For renders.
-    pub fn collection(&mut self) -> CollectionId {
+    /// Returns the root instance handle (the live-zone table).
+    pub fn collection(&mut self) -> Collection {
         let id = self.ctx.alloc_collection();
         self.ctx.register_collection(id);
         self.ops.push(TxOp::CreateCollection { id });
-        id
+        Collection {
+            id,
+            path: Vec::new(),
+        }
     }
 
-    /// Insert an entry into a top-level collection. For instances of a
-    /// template-declared collection, use `insert_at` with the key path.
     pub fn insert(
         &mut self,
-        collection: CollectionId,
-        key: impl Into<Value>,
-        value: impl Into<Value>,
-    ) {
-        self.insert_at(collection, &[], key, value);
-    }
-
-    pub fn insert_at(
-        &mut self,
-        collection: CollectionId,
-        path: &[Value],
+        instance: &Collection,
         key: impl Into<Value>,
         value: impl Into<Value>,
     ) {
         let (key, value) = (key.into(), value.into());
-        self.model_set(collection, path, &key, &value);
+        self.model_set(instance.id, &instance.path, &key, &value);
         self.ops.push(TxOp::CollectionInsert {
-            id: collection,
-            path: path.to_vec(),
+            id: instance.id,
+            path: instance.path.clone(),
             key,
             value,
         });
@@ -312,76 +332,66 @@ impl Tx<'_> {
 
     pub fn update(
         &mut self,
-        collection: CollectionId,
-        key: impl Into<Value>,
-        value: impl Into<Value>,
-    ) {
-        self.update_at(collection, &[], key, value);
-    }
-
-    pub fn update_at(
-        &mut self,
-        collection: CollectionId,
-        path: &[Value],
+        instance: &Collection,
         key: impl Into<Value>,
         value: impl Into<Value>,
     ) {
         let (key, value) = (key.into(), value.into());
-        self.model_set(collection, path, &key, &value);
+        self.model_set(instance.id, &instance.path, &key, &value);
         self.ops.push(TxOp::CollectionUpdate {
-            id: collection,
-            path: path.to_vec(),
+            id: instance.id,
+            path: instance.path.clone(),
             key,
             value,
         });
     }
 
-    pub fn remove(&mut self, collection: CollectionId, key: impl Into<Value>) {
-        self.remove_at(collection, &[], key);
-    }
-
-    pub fn remove_at(&mut self, collection: CollectionId, path: &[Value], key: impl Into<Value>) {
+    pub fn remove(&mut self, instance: &Collection, key: impl Into<Value>) {
         let key = key.into();
-        self.model_remove(collection, path, &key);
+        self.model_remove(instance.id, &instance.path, &key);
         self.ops.push(TxOp::CollectionRemove {
-            id: collection,
-            path: path.to_vec(),
+            id: instance.id,
+            path: instance.path.clone(),
             key,
         });
     }
 
     /// A For over `collection`: the closure declares the template — a
     /// blueprint stamped once per entry, rendering nothing by itself.
-    /// Returns the For's widget id (a container in the live tree).
-    pub fn for_each(
+    /// Returns the For's widget id (a container in the live tree)
+    /// alongside the body's result — the way handles declared inside
+    /// the template (nested collections, buttons) reach the handlers.
+    pub fn for_each<R>(
         &mut self,
-        collection: CollectionId,
-        body: impl FnOnce(&mut Tpl<'_, '_>),
-    ) -> WidgetId {
+        collection: &Collection,
+        body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
+    ) -> (WidgetId, R) {
+        assert_root(collection);
         let id = self.ctx.alloc_widget();
         self.ops.push(TxOp::CreateFor {
             id: id.0,
-            collection,
+            collection: collection.id,
         });
-        self.ctx.open_fors.borrow_mut().push(collection);
-        body(&mut Tpl { tx: self });
+        self.ctx.open_fors.borrow_mut().push(collection.id);
+        let out = body(&mut Tpl { tx: self });
         self.ctx.open_fors.borrow_mut().pop();
         self.ops.push(TxOp::TemplateEnd);
-        id
+        (id, out)
     }
 
     /// A When over a Bool signal: stamps its template on true, unstamps
-    /// on false.
-    pub fn when(
+    /// on false. Returns the When's widget id alongside the body's
+    /// result.
+    pub fn when<R>(
         &mut self,
         signal: SignalId,
-        body: impl FnOnce(&mut Tpl<'_, '_>),
-    ) -> WidgetId {
+        body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
+    ) -> (WidgetId, R) {
         let id = self.ctx.alloc_widget();
         self.ops.push(TxOp::CreateWhen { id: id.0, signal });
-        body(&mut Tpl { tx: self });
+        let out = body(&mut Tpl { tx: self });
         self.ops.push(TxOp::TemplateEnd);
-        id
+        (id, out)
     }
 
     /// Mount into the default window; per-window targets arrive with the
@@ -463,42 +473,49 @@ impl Tpl<'_, '_> {
     }
 
     /// Declare a collection inside the template: each stamped copy gets
-    /// its own instance, addressed by the copy's key path.
-    pub fn collection(&mut self) -> CollectionId {
+    /// its own instance, addressed via `at(key)` on the returned root
+    /// handle. Return it from the template body so handlers can reach
+    /// it — for_each hands the body's result back out.
+    pub fn collection(&mut self) -> Collection {
         let id = self.tx.ctx.alloc_collection();
         self.tx.ctx.register_collection(id);
         self.tx.ops.push(TxOp::CreateCollection { id });
-        id
+        Collection {
+            id,
+            path: Vec::new(),
+        }
     }
 
     /// A nested For; its collection must be declared in this template.
-    pub fn for_each(
+    /// Returns the For's node alongside the body's result.
+    pub fn for_each<R>(
         &mut self,
-        collection: CollectionId,
-        body: impl FnOnce(&mut Tpl<'_, '_>),
-    ) -> TemplateNodeId {
+        collection: &Collection,
+        body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
+    ) -> (TemplateNodeId, R) {
+        assert_root(collection);
         let id = self.tx.ctx.alloc_node();
         self.tx.ops.push(TxOp::CreateFor {
             id: id.0,
-            collection,
+            collection: collection.id,
         });
-        self.tx.ctx.open_fors.borrow_mut().push(collection);
-        body(&mut Tpl { tx: self.tx });
+        self.tx.ctx.open_fors.borrow_mut().push(collection.id);
+        let out = body(&mut Tpl { tx: self.tx });
         self.tx.ctx.open_fors.borrow_mut().pop();
         self.tx.ops.push(TxOp::TemplateEnd);
-        id
+        (id, out)
     }
 
-    pub fn when(
+    pub fn when<R>(
         &mut self,
         signal: SignalId,
-        body: impl FnOnce(&mut Tpl<'_, '_>),
-    ) -> TemplateNodeId {
+        body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
+    ) -> (TemplateNodeId, R) {
         let id = self.tx.ctx.alloc_node();
         self.tx.ops.push(TxOp::CreateWhen { id: id.0, signal });
-        body(&mut Tpl { tx: self.tx });
+        let out = body(&mut Tpl { tx: self.tx });
         self.tx.ops.push(TxOp::TemplateEnd);
-        id
+        (id, out)
     }
 }
 
@@ -573,7 +590,8 @@ mod tests {
     /// The patch-producing contract: reads are the fold of the patches
     /// (this transaction's included), a removed parent entry purges
     /// descendant instances, and a dropped (uncommitted) transaction
-    /// rolls its model edits back.
+    /// rolls its model edits back. Template-declared handles escape as
+    /// the template body's return value.
     #[test]
     fn collection_model_folds_purges_and_rolls_back() {
         let (_occ_tx, occ_rx) = mpsc::channel();
@@ -582,37 +600,44 @@ mod tests {
 
         let mut tx = ctx.begin();
         let groups = tx.collection();
-        let mut items_slot = None;
-        tx.for_each(groups, |t| {
-            items_slot = Some(t.collection());
-        });
-        let items = items_slot.unwrap();
+        let (_list, items) = tx.for_each(&groups, |t| t.collection());
 
-        tx.insert(groups, "g1", "Work");
-        tx.insert_at(items, &["g1".into()], "a", "send report");
-        tx.insert_at(items, &["g1".into()], "b", "buy milk");
-        assert_eq!(tx.len(groups), 1);
-        assert_eq!(tx.len_at(items, &["g1".into()]), 2);
-        tx.update_at(items, &["g1".into()], "a", "file report");
-        assert_eq!(
-            tx.items_at(items, &["g1".into()])[0],
-            ("a".into(), "file report".into())
-        );
+        let g1_items = items.at("g1");
+        tx.insert(&groups, "g1", "Work");
+        tx.insert(&g1_items, "a", "send report");
+        tx.insert(&g1_items, "b", "buy milk");
+        assert_eq!(tx.len(&groups), 1);
+        assert_eq!(tx.len(&g1_items), 2);
+        tx.update(&g1_items, "a", "file report");
+        assert_eq!(tx.items(&g1_items)[0], ("a".into(), "file report".into()));
 
         // Removing the group tears down its copy; the items instance
         // inside it purges along the declared-parent edge.
-        tx.remove(groups, "g1");
-        assert_eq!(tx.len(groups), 0);
-        assert_eq!(tx.len_at(items, &["g1".into()]), 0);
+        tx.remove(&groups, "g1");
+        assert_eq!(tx.len(&groups), 0);
+        assert_eq!(tx.len(&g1_items), 0);
         tx.commit();
         let _ = tx_rx.recv().unwrap();
 
         // An abandoned transaction abandons its model edits too.
         {
             let mut tx = ctx.begin();
-            tx.insert(groups, "g2", "Home");
-            assert_eq!(tx.len(groups), 1);
+            tx.insert(&groups, "g2", "Home");
+            assert_eq!(tx.len(&groups), 1);
         }
-        assert_eq!(ctx.begin().len(groups), 0);
+        assert_eq!(ctx.begin().len(&groups), 0);
+    }
+
+    /// The root-handle guard: a For binds the collection, never an
+    /// `at(...)` instance.
+    #[test]
+    #[should_panic(expected = "not an instance")]
+    fn for_each_rejects_instance_handles() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let mut tx = ctx.begin();
+        let c = tx.collection();
+        let _ = tx.for_each(&c.at("g1"), |_| ());
     }
 }

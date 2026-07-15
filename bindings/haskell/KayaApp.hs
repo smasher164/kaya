@@ -32,6 +32,7 @@ module KayaApp
     onClickNode,
     signal,
     writeSignal,
+    at,
     insert,
     update,
     remove,
@@ -59,7 +60,23 @@ newtype Widget = Widget Word64
 
 newtype Node = Node Word64
 
-newtype Collection = Collection Word64
+-- | A collection instance handle: the collection plus the key path
+-- selecting one stamped copy's table. 'collection' returns the root
+-- (empty-path, live-zone) handle; 'at' steps into a copy, one key per
+-- enclosing For. Mutations and reads take the handle, so the target is
+-- spelled once.
+data Collection = Collection Word64 [W.Value]
+
+-- | The instance of this collection inside the copy keyed by @key@ of
+-- the next enclosing For; chain for deeper nesting.
+at :: Collection -> W.Value -> Collection
+at (Collection cid path) key = Collection cid (path ++ [key])
+
+-- A For binds the collection itself — its template stamps per entry of
+-- every instance — so handing it an 'at' handle is a bug.
+assertRoot :: Collection -> Word64
+assertRoot (Collection cid []) = cid
+assertRoot _ = error "kaya: forEach binds the collection itself, not an instance — drop the at"
 
 data Counters = Counters
   { cSignal :: !Word64,
@@ -228,10 +245,11 @@ instance Declare Build where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n, s' {bRecords = bRecords s' <> W.txCreateCollection n})
-  forEach (Collection cid) body =
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n})
+  forEach coll body =
     Build $ \s ->
-      let ((self, a), s') =
+      let cid = assertRoot coll
+          ((self, a), s') =
             bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
        in ((Widget self, a), s')
   when_ (Signal sid) body =
@@ -252,10 +270,11 @@ instance Declare Tpl where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n, s' {bRecords = bRecords s' <> W.txCreateCollection n})
-  forEach (Collection cid) body =
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n})
+  forEach coll body =
     Tpl $ \s ->
-      let ((self, a), s') =
+      let cid = assertRoot coll
+          ((self, a), s') =
             bracketTpl (unTpl allocN) (`W.txCreateFor` cid) (Just cid) body s
        in ((Node self, a), s')
   when_ (Signal sid) body =
@@ -276,28 +295,28 @@ signal initial = Build $ \s ->
 writeSignal :: Signal -> W.Value -> Build ()
 writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 
-insert :: Collection -> [W.Value] -> W.Value -> W.Value -> Build ()
-insert (Collection n) path key value = Build $ \s ->
+insert :: Collection -> W.Value -> W.Value -> Build ()
+insert (Collection n path) key value = Build $ \s ->
   ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key value,
           bModel = modelSet n path key value (bModel s)})
 
-update :: Collection -> [W.Value] -> W.Value -> W.Value -> Build ()
-update (Collection n) path key value = Build $ \s ->
+update :: Collection -> W.Value -> W.Value -> Build ()
+update (Collection n path) key value = Build $ \s ->
   ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key value,
           bModel = modelSet n path key value (bModel s)})
 
-remove :: Collection -> [W.Value] -> W.Value -> Build ()
-remove (Collection n) path key = Build $ \s ->
+remove :: Collection -> W.Value -> Build ()
+remove (Collection n path) key = Build $ \s ->
   ((), s {bRecords = bRecords s <> W.txCollectionRemove n path key,
           bModel = modelRemove (bChildren s) n path key (bModel s)})
 
 -- | The model: what this guest wrote, exactly — the fold of every
 -- patch so far (this transaction's included), in insertion order.
-items :: Collection -> [W.Value] -> Build [(W.Value, W.Value)]
-items (Collection n) path = Build $ \s -> (lookupEntries n path (bModel s), s)
+items :: Collection -> Build [(W.Value, W.Value)]
+items (Collection n path) = Build $ \s -> (lookupEntries n path (bModel s), s)
 
-count :: Collection -> [W.Value] -> Build Int
-count c path = length <$> items c path
+count :: Collection -> Build Int
+count c = length <$> items c
 
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.

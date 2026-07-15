@@ -76,10 +76,6 @@ public final class KayaApp {
         }
     }
 
-    private static List<Object> asPath(Object[] path) {
-        return path == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(path);
-    }
-
     private Instance instanceOf(long coll, List<Object> path) {
         for (Instance instance : model.getOrDefault(coll, java.util.Collections.emptyList())) {
             if (instance.path.equals(path)) {
@@ -131,11 +127,58 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * A collection instance handle: the collection plus the key path
+     * selecting one stamped copy's table. Tx.collection() returns the
+     * root (empty-path, live-zone) handle; at() steps into a copy, one
+     * key per enclosing For. Mutations and reads take the handle, so
+     * the target is spelled once.
+     */
     public static final class Collection {
         final long id;
+        final List<Object> path;
 
-        Collection(long id) {
+        Collection(long id, List<Object> path) {
             this.id = id;
+            this.path = path;
+        }
+
+        /**
+         * The instance of this collection inside the copy keyed by
+         * {@code key} of the next enclosing For; chain for deeper
+         * nesting.
+         */
+        public Collection at(Object key) {
+            List<Object> deeper = new ArrayList<>(path);
+            deeper.add(key);
+            return new Collection(id, deeper);
+        }
+
+        // A For binds the collection itself — its template stamps per
+        // entry of every instance — so handing it an at(...) handle is
+        // a bug.
+        void assertRoot() {
+            if (!path.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "kaya: forEach binds the collection itself, not an instance"
+                                + " — drop the at(...)");
+            }
+        }
+    }
+
+    /**
+     * A stamped template: the For/When handle in the enclosing zone
+     * plus whatever the body chose to return — the way handles declared
+     * inside the template (nested collections, buttons) reach the
+     * handlers, since Java lambdas cannot assign captured locals.
+     */
+    public static final class Stamped<H, R> {
+        public final H handle;
+        public final R out;
+
+        Stamped(H handle, R out) {
+            this.handle = handle;
+            this.out = out;
         }
     }
 
@@ -241,7 +284,7 @@ public final class KayaApp {
         }
 
         public Collection collection() {
-            Collection c = new Collection(++collections);
+            Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
             records.add(KayaWire.txCreateCollection(c.id));
             return c;
@@ -252,37 +295,57 @@ public final class KayaApp {
          * itself (a live container) is returned.
          */
         public Widget forEach(Collection c, Consumer<Tpl> body) {
+            return forEach(c, t -> {
+                body.accept(t);
+                return null;
+            }).handle;
+        }
+
+        /**
+         * A For whose body returns the handles it declared — they come
+         * back alongside the For itself.
+         */
+        public <R> Stamped<Widget, R> forEach(
+                Collection c, java.util.function.Function<Tpl, R> body) {
+            c.assertRoot();
             Widget w = new Widget(++widgets);
             records.add(KayaWire.txCreateFor(w.id, c.id));
             openFors.add(c.id);
-            body.accept(new Tpl(this));
+            R out = body.apply(new Tpl(this));
             openFors.remove(openFors.size() - 1);
             records.add(KayaWire.txTemplateEnd());
-            return w;
+            return new Stamped<>(w, out);
         }
 
         /** A When over a Bool signal: stamps on true, unstamps on false. */
         public Widget when(Signal s, Consumer<Tpl> body) {
+            return when(s, t -> {
+                body.accept(t);
+                return null;
+            }).handle;
+        }
+
+        public <R> Stamped<Widget, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Widget w = new Widget(++widgets);
             records.add(KayaWire.txCreateWhen(w.id, s.id));
-            body.accept(new Tpl(this));
+            R out = body.apply(new Tpl(this));
             records.add(KayaWire.txTemplateEnd());
-            return w;
+            return new Stamped<>(w, out);
         }
 
-        public void insert(Collection c, Object[] path, Object key, Object value) {
-            modelSet(c.id, asPath(path), key, value);
-            records.add(KayaWire.txCollectionInsert(c.id, path, key, value));
+        public void insert(Collection c, Object key, Object value) {
+            modelSet(c.id, c.path, key, value);
+            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, value));
         }
 
-        public void update(Collection c, Object[] path, Object key, Object value) {
-            modelSet(c.id, asPath(path), key, value);
-            records.add(KayaWire.txCollectionUpdate(c.id, path, key, value));
+        public void update(Collection c, Object key, Object value) {
+            modelSet(c.id, c.path, key, value);
+            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, value));
         }
 
-        public void remove(Collection c, Object[] path, Object key) {
-            modelRemove(c.id, asPath(path), key);
-            records.add(KayaWire.txCollectionRemove(c.id, path, key));
+        public void remove(Collection c, Object key) {
+            modelRemove(c.id, c.path, key);
+            records.add(KayaWire.txCollectionRemove(c.id, c.path.toArray(), key));
         }
 
         /**
@@ -290,13 +353,15 @@ public final class KayaApp {
          * patch so far (this transaction's included), in insertion
          * order.
          */
-        public List<Entry> items(Collection c, Object[] path) {
-            Instance instance = instanceOf(c.id, asPath(path));
-            return instance == null ? java.util.Collections.emptyList() : new ArrayList<>(instance.entries);
+        public List<Entry> items(Collection c) {
+            Instance instance = instanceOf(c.id, c.path);
+            return instance == null
+                    ? java.util.Collections.emptyList()
+                    : new ArrayList<>(instance.entries);
         }
 
-        public int count(Collection c, Object[] path) {
-            Instance instance = instanceOf(c.id, asPath(path));
+        public int count(Collection c) {
+            Instance instance = instanceOf(c.id, c.path);
             return instance == null ? 0 : instance.entries.size();
         }
 
@@ -347,21 +412,37 @@ public final class KayaApp {
         }
 
         public Node forEach(Collection c, Consumer<Tpl> body) {
+            return forEach(c, t -> {
+                body.accept(t);
+                return null;
+            }).handle;
+        }
+
+        public <R> Stamped<Node, R> forEach(
+                Collection c, java.util.function.Function<Tpl, R> body) {
+            c.assertRoot();
             Node n = new Node(++nodes);
             tx.records.add(KayaWire.txCreateFor(n.id, c.id));
             openFors.add(c.id);
-            body.accept(new Tpl(tx));
+            R out = body.apply(new Tpl(tx));
             openFors.remove(openFors.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
-            return n;
+            return new Stamped<>(n, out);
         }
 
         public Node when(Signal s, Consumer<Tpl> body) {
+            return when(s, t -> {
+                body.accept(t);
+                return null;
+            }).handle;
+        }
+
+        public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Node n = new Node(++nodes);
             tx.records.add(KayaWire.txCreateWhen(n.id, s.id));
-            body.accept(new Tpl(tx));
+            R out = body.apply(new Tpl(tx));
             tx.records.add(KayaWire.txTemplateEnd());
-            return n;
+            return new Stamped<>(n, out);
         }
     }
 
@@ -371,14 +452,28 @@ public final class KayaApp {
      * model abandons the same writes before the exception continues.
      */
     public void build(Consumer<Tx> build) {
-        Tx tx = new Tx();
-        try {
+        build(tx -> {
             build.accept(tx);
+            return null;
+        });
+    }
+
+    /**
+     * build whose body returns the handles it declared — the way a
+     * scene's signals, collections, and buttons reach the handlers
+     * without static fields.
+     */
+    public <R> R build(java.util.function.Function<Tx, R> build) {
+        Tx tx = new Tx();
+        R out;
+        try {
+            out = build.apply(tx);
         } catch (RuntimeException | Error e) {
             tx.rollback();
             throw e;
         }
         tx.submitIfAny();
+        return out;
     }
 
     /** Register a click handler for a live widget. */
@@ -477,7 +572,9 @@ public final class KayaApp {
             } else {
                 BiConsumer<Tx, List<Object>> handler = nodeHandlers.get(click.id);
                 if (handler != null) {
-                    build(tx -> handler.accept(tx, click.keys));
+                    build(tx -> {
+                        handler.accept(tx, click.keys);
+                    });
                 }
             }
         }
