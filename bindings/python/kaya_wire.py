@@ -15,12 +15,14 @@ VALUE_STR = 4
 KIND_COLUMN = 1
 KIND_BUTTON = 2
 KIND_LABEL = 3
+KIND_ENTRY = 4
 PROP_TEXT = 1
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
 OCCURRENCE_PAD = 0
 OCCURRENCE_BUTTON_CLICKED = 1
+OCCURRENCE_TEXT_CHANGED = 2
 
 TX_CREATE_SIGNAL = 1
 TX_WRITE_SIGNAL = 2
@@ -41,6 +43,7 @@ APPLY_ADD_CHILD = 3
 APPLY_MOUNT = 4
 APPLY_DESTROY = 5
 OCC_BUTTON_CLICKED = 1
+OCC_TEXT_CHANGED = 2
 
 
 def _pad(b):
@@ -158,17 +161,21 @@ def parse_value(buf, at):
 def parse_occurrence(buf):
     """Decode one occurrence record (header included).
 
-    Returns (kind, id, keys): keys is [] for a click on a
-    guest-created widget (id is a widget id), else id is a
-    template node id and keys is the copy's key path.
+    Returns (kind, id, keys, text). keys is [] when id is a
+    widget id, else id is a template node id and keys is the
+    copy's key path. text is the entry's new content for
+    OCC_TEXT_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind != OCC_BUTTON_CLICKED:
-        return kind, None, []
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED):
+        return kind, None, [], None
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
     at = 24
     for _ in range(path_len):
         key, at = parse_value(buf, at)
         keys.append(key)
-    return kind, ident, keys
+    text = None
+    if kind == OCC_TEXT_CHANGED:
+        text, at = parse_value(buf, at)
+    return kind, ident, keys, text

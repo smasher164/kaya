@@ -18,10 +18,10 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSButton, NSLayoutAttribute, NSStackView, NSTextField, NSUserInterfaceLayoutOrientation,
-    NSWindow, NSWindowStyleMask,
+    NSButton, NSControlTextEditingDelegate, NSLayoutAttribute, NSStackView, NSTextField,
+    NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use crate::protocol::{ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind};
 use crate::scene::Scene;
@@ -30,6 +30,7 @@ enum NativeWidget {
     Column(Retained<NSStackView>),
     Button(Retained<NSButton>),
     Label(Retained<NSTextField>),
+    Entry(Retained<NSTextField>),
 }
 
 impl NativeWidget {
@@ -38,6 +39,7 @@ impl NativeWidget {
             NativeWidget::Column(v) => v,
             NativeWidget::Button(v) => v,
             NativeWidget::Label(v) => v,
+            NativeWidget::Entry(v) => v,
         }
     }
 }
@@ -53,9 +55,14 @@ struct CoreState {
     selftest_button: Option<Retained<NSButton>>,
     selftest_last_button: Option<Retained<NSButton>>,
     selftest_label: Option<Retained<NSTextField>>,
-    // Held so targets and the delegate outlive the objects that
+    // The first entry plus its delegate, for the entry selftest: the
+    // script sets the field's text and emits the change through the
+    // same path a keystroke would.
+    selftest_entry: Option<(Retained<NSTextField>, Retained<EntryDelegate>)>,
+    // Held so targets and the delegates outlive the objects that
     // reference them weakly.
     _targets: Vec<Retained<ButtonTarget>>,
+    _entry_delegates: Vec<Retained<EntryDelegate>>,
     _window: Retained<NSWindow>,
     _delegate: Retained<AppDelegate>,
 }
@@ -129,6 +136,21 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     }
                     NativeWidget::Label(label)
                 }
+                WidgetKind::Entry => {
+                    // Uncontrolled: the field owns its text; the
+                    // delegate reports each edit with the entry's tag,
+                    // and the app folds the occurrences into its own
+                    // model. The tag is identity, emitted verbatim.
+                    let tag = tag.expect("entries carry a tag");
+                    let field = NSTextField::textFieldWithString(&NSString::from_str(""), mtm);
+                    let delegate = EntryDelegate::new(mtm, core.occurrences.clone(), tag);
+                    unsafe { field.setDelegate(Some(ProtocolObject::from_ref(&*delegate))) };
+                    if core.selftest_entry.is_none() {
+                        core.selftest_entry = Some((field.clone(), delegate.clone()));
+                    }
+                    core._entry_delegates.push(delegate);
+                    NativeWidget::Entry(field)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -144,6 +166,9 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.setStringValue(&NSString::from_str(&s));
+                }
+                (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
+                    field.setStringValue(&NSString::from_str(&s));
                 }
                 (_, prop, value) => {
                     panic!("kaya: appkit cannot apply {prop:?} = {value:?} here")
@@ -203,6 +228,38 @@ impl ButtonTarget {
 define_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
+    #[name = "KayaEntryDelegate"]
+    #[ivars = TargetIvars]
+    struct EntryDelegate;
+
+    unsafe impl NSObjectProtocol for EntryDelegate {}
+
+    unsafe impl NSControlTextEditingDelegate for EntryDelegate {
+        #[unsafe(method(controlTextDidChange:))]
+        fn control_text_did_change(&self, notification: &NSNotification) {
+            let Some(object) = notification.object() else { return };
+            let Ok(field) = object.downcast::<NSTextField>() else { return };
+            self.emit(&field.stringValue().to_string());
+        }
+    }
+
+    unsafe impl NSTextFieldDelegate for EntryDelegate {}
+);
+
+impl EntryDelegate {
+    fn new(mtm: MainThreadMarker, occurrences: OccSink, tag: Vec<u8>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(TargetIvars { occurrences, tag });
+        unsafe { msg_send![super(this), init] }
+    }
+
+    fn emit(&self, text: &str) {
+        self.ivars().occurrences.send_text_tag(&self.ivars().tag, text);
+    }
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
     #[name = "KayaAppDelegate"]
     struct AppDelegate;
 
@@ -255,8 +312,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     window.setTitle(&NSString::from_str("kaya milestone 2"));
     window.makeKeyAndOrderFront(None);
 
-    if std::env::var_os("KAYA_SELFTEST").is_some() {
-        spawn_selftest();
+    match std::env::var("KAYA_SELFTEST") {
+        Ok(script) if script == "entry" => spawn_entry_selftest(),
+        Ok(_) => spawn_selftest(),
+        Err(_) => {}
     }
 
     CORE.with_borrow_mut(|core| {
@@ -268,7 +327,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             selftest_button: None,
             selftest_last_button: None,
             selftest_label: None,
+            selftest_entry: None,
             _targets: Vec::new(),
+            _entry_delegates: Vec::new(),
             _window: window,
             _delegate: delegate,
         });
@@ -333,6 +394,57 @@ fn spawn_selftest() {
                 let label = core.selftest_label.as_ref().expect("the scene has a label");
                 let text = label.stringValue().to_string();
                 if text == "removed g2/a, 0 left" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The entry scene's round trip (KAYA_SELFTEST=entry): set the field's
+/// text and emit the change through the delegate's own path — exactly
+/// what a keystroke produces — then click the add button and read the
+/// status label. Proves the uncontrolled-entry contract: text travels
+/// up as occurrences, the app folds it into its model, and nothing is
+/// ever read back from the widget.
+fn spawn_entry_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let (field, delegate) =
+                    core.selftest_entry.as_ref().expect("the scene has an entry");
+                field.setStringValue(&NSString::from_str("milk"));
+                delegate.emit("milk");
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let button = core
+                    .selftest_button
+                    .as_ref()
+                    .expect("the scene has a button");
+                unsafe { button.performClick(None) };
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let label = core.selftest_label.as_ref().expect("the scene has a label");
+                let text = label.stringValue().to_string();
+                if text == "added milk, 1 total" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

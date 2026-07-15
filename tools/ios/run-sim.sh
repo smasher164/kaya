@@ -13,6 +13,12 @@
 # the C ABI's function floor, importing kaya.h directly.
 set -euo pipefail
 
+ROOT_FOR_CHECK="$(cd "$(dirname "$0")/../.." && pwd)"
+# Compile the ios target and typecheck the Swift guest before the
+# simulator is involved.
+"$ROOT_FOR_CHECK/tools/check-targets.sh" ios || exit 1
+"$ROOT_FOR_CHECK/tools/swift-typecheck.sh" || exit 1
+
 SUITE="${1:-all}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 

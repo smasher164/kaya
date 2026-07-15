@@ -12,6 +12,8 @@
 
 #define REC_BUTTON_CLICKED 1
 
+#define REC_TEXT_CHANGED 2
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -64,6 +66,8 @@
 
 #define KIND_LABEL 3
 
+#define KIND_ENTRY 4
+
 #define PROP_TEXT 1
 
 #define SOURCE_CONST 0
@@ -82,6 +86,8 @@
 #define KAYA_OCCURRENCE_PAD 0
 
 #define KAYA_OCCURRENCE_BUTTON_CLICKED 1
+
+#define KAYA_OCCURRENCE_TEXT_CHANGED 2
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -182,6 +188,8 @@
 #define KAYA_KIND_BUTTON 2
 
 #define KAYA_KIND_LABEL 3
+
+#define KAYA_KIND_ENTRY 4
 
 /**
  * Property keys.
@@ -297,6 +305,17 @@ bool kaya_wait_occurrences(void);
  * kaya_run.
  */
 void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
+
+/**
+ * Presentation side: emit an entry edit, exactly as a backend's
+ * change handler would — `tag` is the tag bytes delivered with the
+ * entry's CREATE record, `text`/`text_len` the field's current UTF-8
+ * content. Do not combine with kaya_run.
+ */
+void kaya_emit_text_changed(const uint8_t *tag,
+                            uintptr_t tag_len,
+                            const uint8_t *text,
+                            uintptr_t text_len);
 
 /**
  * Presentation side: block until the next transaction, resolve it

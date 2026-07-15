@@ -13,12 +13,14 @@ let value_str = 4
 let kind_column = 1
 let kind_button = 2
 let kind_label = 3
+let kind_entry = 4
 let prop_text = 1
 let source_const = 0
 let source_signal = 1
 let source_element = 2
 let occurrence_pad = 0
 let occurrence_button_clicked = 1
+let occurrence_text_changed = 2
 let tx_kind_create_signal = 1
 let tx_kind_write_signal = 2
 let tx_kind_create_widget = 3
@@ -38,6 +40,7 @@ let apply_kind_add_child = 3
 let apply_kind_mount = 4
 let apply_kind_destroy = 5
 let occ_kind_button_clicked = 1
+let occ_kind_text_changed = 2
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do

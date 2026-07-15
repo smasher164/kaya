@@ -14,6 +14,11 @@
 # Android app process, so selftest results are read from logcat.
 set -euo pipefail
 
+ROOT_FOR_CHECK="$(cd "$(dirname "$0")/../.." && pwd)"
+# Compile the android target before anything heavy: a missing match arm
+# should fail here, not after the emulator boots.
+"$ROOT_FOR_CHECK/tools/check-targets.sh" android || exit 1
+
 SUITE="${1:-all}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

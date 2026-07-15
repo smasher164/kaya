@@ -133,6 +133,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     match op {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
+                WidgetKind::Entry => {
+                    // Landed on macOS first; this backend's turn comes
+                    // with the breadth pass.
+                    panic!("kaya: entry is not yet implemented on this backend")
+                }
                 WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
                 WidgetKind::Button => {
                     let button = Button::new()?;

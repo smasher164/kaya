@@ -19,12 +19,14 @@ public final class KayaWire {
     public static final int KIND_COLUMN = 1;
     public static final int KIND_BUTTON = 2;
     public static final int KIND_LABEL = 3;
+    public static final int KIND_ENTRY = 4;
     public static final int PROP_TEXT = 1;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
     public static final int OCCURRENCE_PAD = 0;
     public static final int OCCURRENCE_BUTTON_CLICKED = 1;
+    public static final int OCCURRENCE_TEXT_CHANGED = 2;
     public static final short TX_KIND_CREATE_SIGNAL = 1;
     public static final short TX_KIND_WRITE_SIGNAL = 2;
     public static final short TX_KIND_CREATE_WIDGET = 3;
@@ -44,6 +46,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_MOUNT = 4;
     public static final short APPLY_KIND_DESTROY = 5;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
+    public static final short OCC_KIND_TEXT_CHANGED = 2;
 
     private static ByteBuffer begin(short kind) {
         ByteBuffer b = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);

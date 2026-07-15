@@ -143,7 +143,10 @@ pub(crate) struct Scene {
 
 fn check_prop(kind: WidgetKind, prop: Prop) {
     let ok = match prop {
-        Prop::Text => matches!(kind, WidgetKind::Button | WidgetKind::Label),
+        Prop::Text => matches!(
+            kind,
+            WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry
+        ),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -218,8 +221,12 @@ impl Scene {
                     );
                     let clash = self.widgets.insert(id, kind).is_some();
                     assert!(!clash, "kaya: widget id {id:?} already exists");
+                    // Interactive widgets carry their identity tag:
+                    // buttons emit it on click, entries on edit.
                     let tag = match kind {
-                        WidgetKind::Button => Self::button_tag(id.0, &vec![]),
+                        WidgetKind::Button | WidgetKind::Entry => {
+                            Self::button_tag(id.0, &vec![])
+                        }
                         _ => None,
                     };
                     out.push(ApplyOp::Create { id, kind, tag });
@@ -785,7 +792,9 @@ impl Scene {
                     node_map.insert(*node, id);
                     stamp.widgets.push(id);
                     let tag = match kind {
-                        WidgetKind::Button => Self::button_tag(*node, copy_path),
+                        WidgetKind::Button | WidgetKind::Entry => {
+                            Self::button_tag(*node, copy_path)
+                        }
                         _ => None,
                     };
                     out.push(ApplyOp::Create {

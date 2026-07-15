@@ -18,12 +18,14 @@ static class KayaWire
     public const uint KindColumn = 1;
     public const uint KindButton = 2;
     public const uint KindLabel = 3;
+    public const uint KindEntry = 4;
     public const uint PropText = 1;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
     public const uint OccurrencePad = 0;
     public const uint OccurrenceButtonClicked = 1;
+    public const uint OccurrenceTextChanged = 2;
     public const ushort TxKindCreateSignal = 1;
     public const ushort TxKindWriteSignal = 2;
     public const ushort TxKindCreateWidget = 3;
@@ -43,6 +45,7 @@ static class KayaWire
     public const ushort ApplyKindMount = 4;
     public const ushort ApplyKindDestroy = 5;
     public const ushort OccKindButtonClicked = 1;
+    public const ushort OccKindTextChanged = 2;
 
     static void Pad(BinaryWriter w)
     {

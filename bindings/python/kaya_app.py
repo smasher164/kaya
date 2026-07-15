@@ -415,7 +415,20 @@ def button(text=None, on_click=None):
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, text))
     if on_click is not None:
-        _app._register(handle, on_click)
+        _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
+    return handle
+
+
+def entry(text=None, on_change=None):
+    """A single-line text field. Uncontrolled, by doctrine: the widget
+    owns its text and reports each edit to `on_change` (the new content
+    as a str; template copies get the stamped keys first) — the app
+    folds those into its own state. There is no read-back."""
+    handle = _widget(wire.KIND_ENTRY)
+    if text is not None:
+        _records().append(wire.tx_set_text(handle.id, text))
+    if on_change is not None:
+        _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     return handle
 
 
@@ -489,6 +502,8 @@ class App:
     def __init__(self):
         global _app
         self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0}
+        # Dispatch tables: (occurrence kind, id) per space — widget ids
+        # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
         self._node_handlers = {}
         _app = self
@@ -497,11 +512,11 @@ class App:
         self._counters[space] += 1
         return self._counters[space]
 
-    def _register(self, handle, fn):
+    def _register(self, handle, kind, fn):
         if isinstance(handle, Node):
-            self._node_handlers[handle.id] = fn
+            self._node_handlers[(kind, handle.id)] = fn
         else:
-            self._widget_handlers[handle.id] = fn
+            self._widget_handlers[(kind, handle.id)] = fn
 
     def window(self):
         """The scene scope: an ambient transaction whose single
@@ -516,15 +531,18 @@ class App:
 
     def _dispatch_loop(self):
         while occurrence := kaya.next_occurrence():
-            ident, keys = occurrence
+            kind, ident, keys, text = occurrence
             if keys:
-                handler = self._node_handlers.get(ident)
+                handler = self._node_handlers.get((kind, ident))
             else:
-                handler = self._widget_handlers.get(ident)
+                handler = self._widget_handlers.get((kind, ident))
             if handler is None:
                 continue
+            args = list(keys)
+            if text is not None:
+                args.append(text)
             with self.build():
-                handler(*keys)
+                handler(*args)
 
     def run(self):
         """Enter the core on the calling thread (must be the process

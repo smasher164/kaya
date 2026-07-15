@@ -52,6 +52,7 @@ pub const VALUE_STR: u32 = 4;
 pub const KIND_COLUMN: u32 = 1;
 pub const KIND_BUTTON: u32 = 2;
 pub const KIND_LABEL: u32 = 3;
+pub const KIND_ENTRY: u32 = 4;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -122,6 +123,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_COLUMN => WidgetKind::Column,
         KIND_BUTTON => WidgetKind::Button,
         KIND_LABEL => WidgetKind::Label,
+        KIND_ENTRY => WidgetKind::Entry,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -254,6 +256,35 @@ pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
         Occurrence::InstanceButtonClicked {
             node: TemplateNodeId(id),
             path,
+        }
+    }
+}
+
+// A text-changed occurrence body: the widget's stored tag (identity,
+// same layout as a click) followed by the new text as a value. The
+// backend never learns what the tag means; it appends what the user
+// typed.
+pub fn text_changed_body(tag: &[u8], text: &str) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 8 + text.len());
+    b.extend_from_slice(tag);
+    write_value(&mut b, &Value::Str(text.to_owned()));
+    b
+}
+
+pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0 };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::TextChanged {
+            id: WidgetId(id),
+            text: text.to_owned(),
+        }
+    } else {
+        Occurrence::InstanceTextChanged {
+            node: TemplateNodeId(id),
+            path,
+            text: text.to_owned(),
         }
     }
 }
@@ -418,6 +449,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Column => KIND_COLUMN,
         WidgetKind::Button => KIND_BUTTON,
         WidgetKind::Label => KIND_LABEL,
+        WidgetKind::Entry => KIND_ENTRY,
     }
 }
 
@@ -591,6 +623,36 @@ mod tests {
             }
         );
         assert!(tagged.len() % 8 == 0, "tags must stay 8-aligned for the ring");
+    }
+
+    /// The same identity tags carry entry edits: tag + text value out,
+    /// TextChanged occurrences back.
+    #[test]
+    fn text_changed_round_trips() {
+        assert_eq!(
+            decode_text_changed_tag(&click_tag(5, &[]), "milk"),
+            Occurrence::TextChanged {
+                id: WidgetId(5),
+                text: "milk".into(),
+            }
+        );
+        let path = vec![Value::from("g1")];
+        assert_eq!(
+            decode_text_changed_tag(&click_tag(8, &path), "eggs"),
+            Occurrence::InstanceTextChanged {
+                node: TemplateNodeId(8),
+                path,
+                text: "eggs".into(),
+            }
+        );
+        // The wire body is tag bytes then one value: the parser side of
+        // this (generated per language) reads keys, then the text.
+        let body = text_changed_body(&click_tag(5, &[]), "milk");
+        let mut r = Reader { buf: &body, at: 0 };
+        assert_eq!(r.u64(), 5);
+        assert!(r.path().is_empty());
+        assert_eq!(r.value(), Value::from("milk"));
+        assert!(body.len() % 8 == 0, "bodies must stay 8-aligned for the ring");
     }
 
     #[test]

@@ -105,6 +105,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.commit();
             }
             Occurrence::ButtonClicked { .. } | Occurrence::InstanceButtonClicked { .. } => {}
+            Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

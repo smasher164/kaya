@@ -13,7 +13,7 @@ import os
 import pathlib
 import sys
 
-from kaya_wire import parse_occurrence
+from kaya_wire import OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, parse_occurrence
 
 
 def _find_library():
@@ -48,19 +48,20 @@ def submit(*records):
 
 
 def next_occurrence():
-    """Block for the next click; None when the core has shut down.
+    """Block for the next occurrence; None when the core has shut down.
 
-    Returns (id, keys): keys is [] for a click on a guest-created widget
-    (id is a widget id), else id is a template node id and keys is the
-    stamped copy's key path, outermost first.
+    Returns (kind, id, keys, text): keys is [] when id is a widget id,
+    else id is a template node id and keys is the stamped copy's key
+    path, outermost first. text is the entry's new content for
+    OCC_TEXT_CHANGED, None for clicks.
     """
     while True:
         size = _lib.kaya_next_occurrence(_occ_buf, 256)
         if size == 0:
             return None
-        kind, ident, keys = parse_occurrence(_occ_buf.raw)
+        kind, ident, keys, text = parse_occurrence(_occ_buf.raw)
         if ident is not None:
-            return ident, keys
+            return kind, ident, keys, text
 
 
 def run():

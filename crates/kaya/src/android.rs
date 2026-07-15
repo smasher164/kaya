@@ -286,6 +286,11 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
     match op {
         ApplyOp::Create { id, kind, tag } => {
             let class = match kind {
+                WidgetKind::Entry => {
+                    // Landed on macOS first; this backend's turn comes
+                    // with the breadth pass.
+                    panic!("kaya: entry is not yet implemented on this backend")
+                }
                 WidgetKind::Column => "android/widget/LinearLayout",
                 WidgetKind::Button => "android/widget/Button",
                 WidgetKind::Label => "android/widget/TextView",
@@ -322,6 +327,11 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     )?;
                 }
                 WidgetKind::Label => {}
+                WidgetKind::Entry => {
+                    // Landed on macOS first; this backend's turn comes
+                    // with the breadth pass.
+                    panic!("kaya: entry is not yet implemented on this backend")
+                }
             }
             let view = env.new_global_ref(view)?;
             let mut core = CORE.lock().unwrap();

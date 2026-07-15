@@ -44,9 +44,11 @@ use crate::wire;
 /// stamped copy's key path, outermost first.
 pub const KAYA_OCCURRENCE_PAD: u16 = 0;
 pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
+pub const KAYA_OCCURRENCE_TEXT_CHANGED: u16 = 2;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
+        && KAYA_OCCURRENCE_TEXT_CHANGED == ring::REC_TEXT_CHANGED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -147,10 +149,12 @@ const _: () = assert!(
 pub const KAYA_KIND_COLUMN: u32 = 1;
 pub const KAYA_KIND_BUTTON: u32 = 2;
 pub const KAYA_KIND_LABEL: u32 = 3;
+pub const KAYA_KIND_ENTRY: u32 = 4;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
         && KAYA_KIND_LABEL == wire::KIND_LABEL
+        && KAYA_KIND_ENTRY == wire::KIND_ENTRY
 );
 
 /// Property keys.
@@ -339,6 +343,35 @@ pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
         return;
     }
     state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
+}
+
+/// Presentation side: emit an entry edit, exactly as a backend's
+/// change handler would — `tag` is the tag bytes delivered with the
+/// entry's CREATE record, `text`/`text_len` the field's current UTF-8
+/// content. Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_text_changed(
+    tag: *const u8,
+    tag_len: usize,
+    text: *const u8,
+    text_len: usize,
+) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty entry tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    let text = if text_len == 0 {
+        ""
+    } else {
+        assert!(!text.is_null(), "kaya: null text with nonzero length");
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) })
+            .expect("kaya: entry text must be UTF-8")
+    };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_text_tag(tag, text);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
 }
 
 /// Presentation side: block until the next transaction, resolve it

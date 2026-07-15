@@ -18,6 +18,11 @@ tools/gen-bindings.sh --check || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
 # (records queue; the core is never entered).
 python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks: FAIL"; exit 1; }
+# Fast cross-language/-platform gates: catch cfg'd-backend and guest
+# breakage here, in seconds, not on an emulator or VM.
+tools/check-targets.sh || exit 1
+tools/swift-typecheck.sh || exit 1
+tools/java-typecheck.sh || exit 1
 
 status=0
 run() {
@@ -61,6 +66,11 @@ run csharp env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/milestone2-ocaml
 run haskell target/haskell/milestone2-hs
+
+# The entry scene (uncontrolled text field; text arrives as occurrences
+# the app folds into its own state), AppKit only until the breadth pass.
+# The inner env overrides run()'s KAYA_SELFTEST=1 with the entry script.
+run entry env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
 
 # The same six guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.

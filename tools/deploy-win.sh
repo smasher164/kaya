@@ -20,6 +20,10 @@
 # flake).
 set -euo pipefail
 
+ROOT_FOR_CHECK="$(cd "$(dirname "$0")/.." && pwd)"
+# Compile the windows target before touching the VM.
+"$ROOT_FOR_CHECK/tools/check-targets.sh" windows || exit 1
+
 HOST="${1:?usage: deploy-win.sh user@host [--provision] [rust|python|go|all]}"
 shift
 PROVISION=0

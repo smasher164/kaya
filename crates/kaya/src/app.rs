@@ -559,6 +559,8 @@ mod tests {
                         tx.commit();
                     }
                     Occurrence::InstanceButtonClicked { .. } => {}
+                    Occurrence::TextChanged { .. }
+                    | Occurrence::InstanceTextChanged { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

@@ -238,6 +238,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   Otherwise: id is a template node id and the values are the \
                   copy's key path, outermost first.",
         },
+        Record {
+            kind: 2,
+            name: "text_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            doc: "path_len key values follow, then the entry's new text as \
+                  one value. Identity reads as in button_clicked. The widget \
+                  owns its text; the app folds these into its own model.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -246,7 +258,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "kind",
-            variants: &[("column", 1), ("button", 2), ("label", 3)],
+            variants: &[("column", 1), ("button", 2), ("label", 3), ("entry", 4)],
         },
         EnumSpec {
             name: "prop",
@@ -258,7 +270,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "occurrence",
-            variants: &[("pad", 0), ("button_clicked", 1)],
+            variants: &[("pad", 0), ("button_clicked", 1), ("text_changed", 2)],
         },
     ],
 };
@@ -371,6 +383,7 @@ mod tests {
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
+        assert_eq!(SPEC.occurrence[1].kind, crate::ring::REC_TEXT_CHANGED);
     }
 
     #[test]
@@ -385,12 +398,14 @@ mod tests {
                     ("kind", "column") => wire::KIND_COLUMN,
                     ("kind", "button") => wire::KIND_BUTTON,
                     ("kind", "label") => wire::KIND_LABEL,
+                    ("kind", "entry") => wire::KIND_ENTRY,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,
                     ("occurrence", "pad") => crate::ring::REC_PAD as u32,
                     ("occurrence", "button_clicked") => crate::ring::REC_BUTTON_CLICKED as u32,
+                    ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);

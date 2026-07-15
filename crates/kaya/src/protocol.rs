@@ -45,6 +45,12 @@ pub enum Occurrence {
     /// A click on a stamped copy of a template button: which blueprint
     /// node, and the key path naming the copy.
     InstanceButtonClicked { node: TemplateNodeId, path: Path },
+    /// The user edited an entry the guest created directly. The widget
+    /// owns its text; the app folds these into its own model — there is
+    /// no read-back, by doctrine.
+    TextChanged { id: WidgetId, text: String },
+    /// The user edited a stamped copy of a template entry.
+    InstanceTextChanged { node: TemplateNodeId, path: Path, text: String },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -109,12 +115,17 @@ impl Key {
     }
 }
 
-/// Widget kinds of the milestone-1 vocabulary.
+/// The widget vocabulary, growing one conformance-gallery widget at a
+/// time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidgetKind {
     Column,
     Button,
     Label,
+    /// A single-line text field. Uncontrolled: the widget owns its
+    /// text and reports edits as TextChanged occurrences; Prop::Text
+    /// sets the initial (or programmatic) content.
+    Entry,
 }
 
 /// Property keys. One so far; grows with widgets.
@@ -216,6 +227,16 @@ impl OccSink {
                     let tag = crate::wire::click_tag(node.0, &path);
                     ring.push_record(crate::ring::REC_BUTTON_CLICKED, &tag);
                 }
+                Occurrence::TextChanged { id, text } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::text_changed_body(&tag, &text);
+                    ring.push_record(crate::ring::REC_TEXT_CHANGED, &body);
+                }
+                Occurrence::InstanceTextChanged { node, path, text } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::text_changed_body(&tag, &text);
+                    ring.push_record(crate::ring::REC_TEXT_CHANGED, &body);
+                }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },
         }
@@ -230,6 +251,22 @@ impl OccSink {
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_BUTTON_CLICKED, tag);
+            }
+        }
+    }
+
+    /// The same fast path for an entry edit: the stored tag plus the
+    /// field's current text.
+    pub(crate) fn send_text_tag(&self, tag: &[u8], text: &str) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_text_changed_tag(tag, text));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_TEXT_CHANGED,
+                    &crate::wire::text_changed_body(tag, text),
+                );
             }
         }
     }

@@ -144,20 +144,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("def parse_occurrence(buf):");
     c.line("    \"\"\"Decode one occurrence record (header included).");
     c.line("");
-    c.line("    Returns (kind, id, keys): keys is [] for a click on a");
-    c.line("    guest-created widget (id is a widget id), else id is a");
-    c.line("    template node id and keys is the copy's key path.");
+    c.line("    Returns (kind, id, keys, text). keys is [] when id is a");
+    c.line("    widget id, else id is a template node id and keys is the");
+    c.line("    copy's key path. text is the entry's new content for");
+    c.line("    OCC_TEXT_CHANGED, None otherwise.");
     c.line("    \"\"\"");
     c.line("    _size, kind, _flags = struct.unpack_from(\"<IHH\", buf, 0)");
-    c.line("    if kind != OCC_BUTTON_CLICKED:");
-    c.line("        return kind, None, []");
+    c.line("    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED):");
+    c.line("        return kind, None, [], None");
     c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
     c.line("    at = 24");
     c.line("    for _ in range(path_len):");
     c.line("        key, at = parse_value(buf, at)");
     c.line("        keys.append(key)");
-    c.line("    return kind, ident, keys");
+    c.line("    text = None");
+    c.line("    if kind == OCC_TEXT_CHANGED:");
+    c.line("        text, at = parse_value(buf, at)");
+    c.line("    return kind, ident, keys, text");
 
     c.out
 }

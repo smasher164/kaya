@@ -18,12 +18,14 @@ const (
 	KindColumn = 1
 	KindButton = 2
 	KindLabel = 3
+	KindEntry = 4
 	PropText = 1
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
 	OccurrencePad = 0
 	OccurrenceButtonClicked = 1
+	OccurrenceTextChanged = 2
 	txCreateSignal = 1
 	txWriteSignal = 2
 	txCreateWidget = 3
@@ -43,6 +45,7 @@ const (
 	applyMount = 4
 	applyDestroy = 5
 	occButtonClicked = 1
+	occTextChanged = 2
 )
 
 func pad8(b []byte) []byte {

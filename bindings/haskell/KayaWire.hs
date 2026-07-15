@@ -34,6 +34,8 @@ kindButton :: Word32
 kindButton = 2
 kindLabel :: Word32
 kindLabel = 3
+kindEntry :: Word32
+kindEntry = 4
 propText :: Word32
 propText = 1
 sourceConst :: Word32
@@ -46,6 +48,8 @@ occurrencePad :: Word32
 occurrencePad = 0
 occurrenceButtonClicked :: Word32
 occurrenceButtonClicked = 1
+occurrenceTextChanged :: Word32
+occurrenceTextChanged = 2
 txKindCreateSignal :: Word16
 txKindCreateSignal = 1
 txKindWriteSignal :: Word16
@@ -84,6 +88,8 @@ applyKindDestroy :: Word16
 applyKindDestroy = 5
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
+occKindTextChanged :: Word16
+occKindTextChanged = 2
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder

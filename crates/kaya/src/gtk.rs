@@ -86,6 +86,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
     match op {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
+                WidgetKind::Entry => {
+                    // Landed on macOS first; this backend's turn comes
+                    // with the breadth pass.
+                    panic!("kaya: entry is not yet implemented on this backend")
+                }
                 WidgetKind::Column => {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                     column.set_valign(gtk4::Align::Center);
