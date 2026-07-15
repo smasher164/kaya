@@ -518,7 +518,7 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
         .l()?;
     let text: String = env.get_string(&JString::from(string))?.into();
 
-    let code = if text == "removed g2/a" {
+    let code = if text == "removed g2/a, 0 left" {
         log::info!("KAYA_SELFTEST: OK ({text})");
         0
     } else {

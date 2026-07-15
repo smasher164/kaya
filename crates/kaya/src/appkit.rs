@@ -332,7 +332,7 @@ fn spawn_selftest() {
                 let core = core.as_ref().expect("core state initialized");
                 let label = core.selftest_label.as_ref().expect("the scene has a label");
                 let text = label.stringValue().to_string();
-                if text == "removed g2/a" {
+                if text == "removed g2/a, 0 left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

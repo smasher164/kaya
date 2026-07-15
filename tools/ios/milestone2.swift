@@ -78,7 +78,10 @@ app.onClick(step) { tx in
 app.onClick(removeButton) { tx, keys in
     guard case .str(let group) = keys[0], case .str(let item) = keys[1] else { return }
     tx.remove(items, [.str(group)], .str(item))
-    tx.write(status, .str("removed \(group)/\(item)"))
+    // The collection is the model: the count read here is the fold of
+    // the patches, this one included.
+    let left = tx.count(items, [.str(group)])
+    tx.write(status, .str("removed \(group)/\(item), \(left) left"))
 }
 
 // Takes over the main thread; on iOS this never returns (the self-test

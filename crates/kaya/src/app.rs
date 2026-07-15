@@ -1,12 +1,29 @@
 //! The app thread's view of the world: occurrences in, transactions out.
+//!
+//! Collections here follow the patch-producing doctrine: the collection
+//! is the model — the only copy. Every mutation op edits the model and
+//! queues the wire delta in the same call, so reads (`tx.items_at`,
+//! `tx.len_at`) are exactly the writes, never a second bookkeeping copy.
+//! A transaction dropped without commit abandons its records, and the
+//! model abandons the same writes.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
     CollectionId, DEFAULT_WINDOW, Occurrence, Prop, PropValue, SignalId, TemplateNodeId,
     Transaction, TxOp, Value, WidgetId, WidgetKind,
 };
+
+/// One instance of a collection: the table inside the stamped copy
+/// selected by `path` (the empty path for a live-zone collection).
+/// Entries keep insertion order, matching the core's rendering.
+#[derive(Clone, Debug)]
+struct Instance {
+    path: Vec<Value>,
+    entries: Vec<(Value, Value)>,
+}
 
 pub struct AppCtx {
     pub(crate) occurrences: Receiver<Occurrence>,
@@ -15,6 +32,12 @@ pub struct AppCtx {
     next_widget: Cell<u64>,
     next_collection: Cell<u64>,
     next_node: Cell<u64>,
+    model: RefCell<HashMap<CollectionId, Vec<Instance>>>,
+    // Collections declared inside a For's template: removing a parent
+    // entry tears down the copy and every instance inside it, so the
+    // model needs the same edge to purge along.
+    children: RefCell<HashMap<CollectionId, Vec<CollectionId>>>,
+    open_fors: RefCell<Vec<CollectionId>>,
 }
 
 impl AppCtx {
@@ -26,6 +49,9 @@ impl AppCtx {
             next_widget: Cell::new(1),
             next_collection: Cell::new(1),
             next_node: Cell::new(1),
+            model: RefCell::new(HashMap::new()),
+            children: RefCell::new(HashMap::new()),
+            open_fors: RefCell::new(Vec::new()),
         }
     }
 
@@ -43,6 +69,8 @@ impl AppCtx {
         Tx {
             ctx: self,
             ops: Vec::new(),
+            journal: Vec::new(),
+            committed: false,
         }
     }
 
@@ -69,16 +97,141 @@ impl AppCtx {
         self.next_node.set(id + 1);
         TemplateNodeId(id)
     }
+
+    /// A collection declared inside a For's template is torn down with
+    /// its copies: record the edge so the model purges along it.
+    fn register_collection(&self, id: CollectionId) {
+        if let Some(&parent) = self.open_fors.borrow().last() {
+            self.children.borrow_mut().entry(parent).or_default().push(id);
+        }
+    }
 }
 
 /// A transaction under construction. Everything queues locally; commit
-/// sends the batch and rings the doorbell once.
+/// sends the batch and rings the doorbell once. Dropping a Tx without
+/// committing abandons its records — and rolls the model back with
+/// them, so reads never show writes that were never sent.
 pub struct Tx<'a> {
     ctx: &'a AppCtx,
     ops: Vec<TxOp>,
+    // How to undo this transaction's model edits: a snapshot per
+    // touched collection, taken on first touch.
+    journal: Vec<(CollectionId, Vec<Instance>)>,
+    committed: bool,
+}
+
+impl Drop for Tx<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let mut model = self.ctx.model.borrow_mut();
+            for (id, snapshot) in self.journal.drain(..).rev() {
+                model.insert(id, snapshot);
+            }
+        }
+    }
 }
 
 impl Tx<'_> {
+    fn touch(&mut self, collection: CollectionId) {
+        if !self.journal.iter().any(|(c, _)| *c == collection) {
+            let snapshot = self
+                .ctx
+                .model
+                .borrow()
+                .get(&collection)
+                .cloned()
+                .unwrap_or_default();
+            self.journal.push((collection, snapshot));
+        }
+    }
+
+    fn model_set(&mut self, collection: CollectionId, path: &[Value], key: &Value, value: &Value) {
+        self.touch(collection);
+        let mut model = self.ctx.model.borrow_mut();
+        let instances = model.entry(collection).or_default();
+        let instance = match instances.iter_mut().position(|i| i.path == path) {
+            Some(at) => &mut instances[at],
+            None => {
+                instances.push(Instance {
+                    path: path.to_vec(),
+                    entries: Vec::new(),
+                });
+                instances.last_mut().expect("just pushed")
+            }
+        };
+        match instance.entries.iter_mut().find(|(k, _)| k == key) {
+            Some((_, v)) => *v = value.clone(),
+            None => instance.entries.push((key.clone(), value.clone())),
+        }
+    }
+
+    fn model_remove(&mut self, collection: CollectionId, path: &[Value], key: &Value) {
+        self.touch(collection);
+        if let Some(instance) = self
+            .ctx
+            .model
+            .borrow_mut()
+            .get_mut(&collection)
+            .and_then(|instances| instances.iter_mut().find(|i| i.path == path))
+        {
+            instance.entries.retain(|(k, _)| k != key);
+        }
+        // The core tears down the copy, taking descendant collection
+        // instances with it; the model follows.
+        let mut prefix = path.to_vec();
+        prefix.push(key.clone());
+        self.purge_children(collection, &prefix);
+    }
+
+    fn purge_children(&mut self, collection: CollectionId, prefix: &[Value]) {
+        let kids = self
+            .ctx
+            .children
+            .borrow()
+            .get(&collection)
+            .cloned()
+            .unwrap_or_default();
+        for kid in kids {
+            self.touch(kid);
+            if let Some(instances) = self.ctx.model.borrow_mut().get_mut(&kid) {
+                instances.retain(|i| {
+                    i.path.len() < prefix.len() || i.path[..prefix.len()] != *prefix
+                });
+            }
+            self.purge_children(kid, prefix);
+        }
+    }
+
+    /// The model: what this guest wrote, exactly — the fold of every
+    /// committed patch plus this transaction's own, in insertion order.
+    pub fn items_at(&self, collection: CollectionId, path: &[Value]) -> Vec<(Value, Value)> {
+        self.ctx
+            .model
+            .borrow()
+            .get(&collection)
+            .and_then(|instances| instances.iter().find(|i| i.path == path))
+            .map(|i| i.entries.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn items(&self, collection: CollectionId) -> Vec<(Value, Value)> {
+        self.items_at(collection, &[])
+    }
+
+    pub fn len_at(&self, collection: CollectionId, path: &[Value]) -> usize {
+        self.ctx
+            .model
+            .borrow()
+            .get(&collection)
+            .and_then(|instances| instances.iter().find(|i| i.path == path))
+            .map(|i| i.entries.len())
+            .unwrap_or(0)
+    }
+
+    pub fn len(&self, collection: CollectionId) -> usize {
+        self.len_at(collection, &[])
+    }
+
     pub fn signal(&mut self, initial: impl Into<Value>) -> SignalId {
         let id = self.ctx.alloc_signal();
         self.ops.push(TxOp::CreateSignal {
@@ -124,6 +277,7 @@ impl Tx<'_> {
     /// Declare a collection: a core-side keyed table a For renders.
     pub fn collection(&mut self) -> CollectionId {
         let id = self.ctx.alloc_collection();
+        self.ctx.register_collection(id);
         self.ops.push(TxOp::CreateCollection { id });
         id
     }
@@ -146,11 +300,13 @@ impl Tx<'_> {
         key: impl Into<Value>,
         value: impl Into<Value>,
     ) {
+        let (key, value) = (key.into(), value.into());
+        self.model_set(collection, path, &key, &value);
         self.ops.push(TxOp::CollectionInsert {
             id: collection,
             path: path.to_vec(),
-            key: key.into(),
-            value: value.into(),
+            key,
+            value,
         });
     }
 
@@ -170,11 +326,13 @@ impl Tx<'_> {
         key: impl Into<Value>,
         value: impl Into<Value>,
     ) {
+        let (key, value) = (key.into(), value.into());
+        self.model_set(collection, path, &key, &value);
         self.ops.push(TxOp::CollectionUpdate {
             id: collection,
             path: path.to_vec(),
-            key: key.into(),
-            value: value.into(),
+            key,
+            value,
         });
     }
 
@@ -183,10 +341,12 @@ impl Tx<'_> {
     }
 
     pub fn remove_at(&mut self, collection: CollectionId, path: &[Value], key: impl Into<Value>) {
+        let key = key.into();
+        self.model_remove(collection, path, &key);
         self.ops.push(TxOp::CollectionRemove {
             id: collection,
             path: path.to_vec(),
-            key: key.into(),
+            key,
         });
     }
 
@@ -203,7 +363,9 @@ impl Tx<'_> {
             id: id.0,
             collection,
         });
+        self.ctx.open_fors.borrow_mut().push(collection);
         body(&mut Tpl { tx: self });
+        self.ctx.open_fors.borrow_mut().pop();
         self.ops.push(TxOp::TemplateEnd);
         id
     }
@@ -231,9 +393,12 @@ impl Tx<'_> {
         });
     }
 
-    /// Send the batch and wake the main loop to apply it.
-    pub fn commit(self) {
-        if self.ctx.transactions.send(self.ops).is_ok() {
+    /// Send the batch and wake the main loop to apply it. The model
+    /// edits stand: they are exactly what was sent.
+    pub fn commit(mut self) {
+        self.committed = true;
+        let ops = std::mem::take(&mut self.ops);
+        if self.ctx.transactions.send(ops).is_ok() {
             #[cfg(any(
                 target_os = "macos",
                 target_os = "windows",
@@ -301,6 +466,7 @@ impl Tpl<'_, '_> {
     /// its own instance, addressed by the copy's key path.
     pub fn collection(&mut self) -> CollectionId {
         let id = self.tx.ctx.alloc_collection();
+        self.tx.ctx.register_collection(id);
         self.tx.ops.push(TxOp::CreateCollection { id });
         id
     }
@@ -316,7 +482,9 @@ impl Tpl<'_, '_> {
             id: id.0,
             collection,
         });
+        self.tx.ctx.open_fors.borrow_mut().push(collection);
         body(&mut Tpl { tx: self.tx });
+        self.tx.ctx.open_fors.borrow_mut().pop();
         self.tx.ops.push(TxOp::TemplateEnd);
         id
     }
@@ -400,5 +568,51 @@ mod tests {
 
         drop(occ_tx);
         app.join().unwrap();
+    }
+
+    /// The patch-producing contract: reads are the fold of the patches
+    /// (this transaction's included), a removed parent entry purges
+    /// descendant instances, and a dropped (uncommitted) transaction
+    /// rolls its model edits back.
+    #[test]
+    fn collection_model_folds_purges_and_rolls_back() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let groups = tx.collection();
+        let mut items_slot = None;
+        tx.for_each(groups, |t| {
+            items_slot = Some(t.collection());
+        });
+        let items = items_slot.unwrap();
+
+        tx.insert(groups, "g1", "Work");
+        tx.insert_at(items, &["g1".into()], "a", "send report");
+        tx.insert_at(items, &["g1".into()], "b", "buy milk");
+        assert_eq!(tx.len(groups), 1);
+        assert_eq!(tx.len_at(items, &["g1".into()]), 2);
+        tx.update_at(items, &["g1".into()], "a", "file report");
+        assert_eq!(
+            tx.items_at(items, &["g1".into()])[0],
+            ("a".into(), "file report".into())
+        );
+
+        // Removing the group tears down its copy; the items instance
+        // inside it purges along the declared-parent edge.
+        tx.remove(groups, "g1");
+        assert_eq!(tx.len(groups), 0);
+        assert_eq!(tx.len_at(items, &["g1".into()]), 0);
+        tx.commit();
+        let _ = tx_rx.recv().unwrap();
+
+        // An abandoned transaction abandons its model edits too.
+        {
+            let mut tx = ctx.begin();
+            tx.insert(groups, "g2", "Home");
+            assert_eq!(tx.len(groups), 1);
+        }
+        assert_eq!(ctx.begin().len(groups), 0);
     }
 }

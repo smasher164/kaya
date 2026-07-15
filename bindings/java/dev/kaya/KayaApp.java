@@ -37,6 +37,70 @@ public final class KayaApp {
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
 
+    // The collection is the model — the only copy: every mutation op
+    // edits it and queues the wire delta in the same call, so reads
+    // (items, count) are exactly the writes. childCollections records
+    // the declared-inside-a-For edges the model purges along when a
+    // parent entry's copy is torn down.
+    private final Map<Long, List<Instance>> model = new HashMap<>();
+    private final Map<Long, List<Long>> childCollections = new HashMap<>();
+    private final List<Long> openFors = new ArrayList<>();
+
+    /** One key/value pair of a collection instance, in insertion order. */
+    public static final class Entry {
+        public final Object key;
+        public final Object value;
+
+        Entry(Object key, Object value) {
+            this.key = key;
+            this.value = value;
+        }
+    }
+
+    /**
+     * One instance of a collection: the table inside the stamped copy
+     * selected by path (the empty path for a live-zone collection).
+     */
+    private static final class Instance {
+        final List<Object> path;
+        final List<Entry> entries = new ArrayList<>();
+
+        Instance(List<Object> path) {
+            this.path = path;
+        }
+
+        Instance copy() {
+            Instance c = new Instance(path);
+            c.entries.addAll(entries);
+            return c;
+        }
+    }
+
+    private static List<Object> asPath(Object[] path) {
+        return path == null ? java.util.Collections.emptyList() : java.util.Arrays.asList(path);
+    }
+
+    private Instance instanceOf(long coll, List<Object> path) {
+        for (Instance instance : model.getOrDefault(coll, java.util.Collections.emptyList())) {
+            if (instance.path.equals(path)) {
+                return instance;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A collection declared inside a For's template is torn down with
+     * its copies: record the edge so the model purges along it.
+     */
+    private void registerCollection(long id) {
+        if (!openFors.isEmpty()) {
+            childCollections
+                    .computeIfAbsent(openFors.get(openFors.size() - 1), k -> new ArrayList<>())
+                    .add(id);
+        }
+    }
+
     public static final class Signal {
         final long id;
 
@@ -82,9 +146,69 @@ public final class KayaApp {
     public final class Tx {
         private final List<byte[]> records = new ArrayList<>();
 
+        // How to undo this transaction's model edits: a snapshot per
+        // touched collection, taken on first touch.
+        private final Map<Long, List<Instance>> journal = new HashMap<>();
+
         void submitIfAny() {
             if (!records.isEmpty()) {
                 KayaRing.submit(KayaWire.tx(records.toArray(new byte[0][])));
+            }
+        }
+
+        void rollback() {
+            model.putAll(journal);
+        }
+
+        private void touch(long coll) {
+            if (journal.containsKey(coll)) {
+                return;
+            }
+            List<Instance> snapshot = new ArrayList<>();
+            for (Instance instance : model.getOrDefault(coll, java.util.Collections.emptyList())) {
+                snapshot.add(instance.copy());
+            }
+            journal.put(coll, snapshot);
+        }
+
+        private void modelSet(long coll, List<Object> path, Object key, Object value) {
+            touch(coll);
+            Instance instance = instanceOf(coll, path);
+            if (instance == null) {
+                instance = new Instance(path);
+                model.computeIfAbsent(coll, k -> new ArrayList<>()).add(instance);
+            }
+            for (int i = 0; i < instance.entries.size(); i++) {
+                if (java.util.Objects.equals(instance.entries.get(i).key, key)) {
+                    instance.entries.set(i, new Entry(key, value));
+                    return;
+                }
+            }
+            instance.entries.add(new Entry(key, value));
+        }
+
+        private void modelRemove(long coll, List<Object> path, Object key) {
+            touch(coll);
+            Instance instance = instanceOf(coll, path);
+            if (instance != null) {
+                instance.entries.removeIf(e -> java.util.Objects.equals(e.key, key));
+            }
+            // The core tears down the copy, taking descendant collection
+            // instances with it; the model follows.
+            List<Object> prefix = new ArrayList<>(path);
+            prefix.add(key);
+            purgeChildren(coll, prefix);
+        }
+
+        private void purgeChildren(long coll, List<Object> prefix) {
+            for (long kid : childCollections.getOrDefault(coll, java.util.Collections.emptyList())) {
+                touch(kid);
+                List<Instance> instances = model.get(kid);
+                if (instances != null) {
+                    instances.removeIf(i -> i.path.size() >= prefix.size()
+                            && i.path.subList(0, prefix.size()).equals(prefix));
+                }
+                purgeChildren(kid, prefix);
             }
         }
 
@@ -118,6 +242,7 @@ public final class KayaApp {
 
         public Collection collection() {
             Collection c = new Collection(++collections);
+            registerCollection(c.id);
             records.add(KayaWire.txCreateCollection(c.id));
             return c;
         }
@@ -129,7 +254,9 @@ public final class KayaApp {
         public Widget forEach(Collection c, Consumer<Tpl> body) {
             Widget w = new Widget(++widgets);
             records.add(KayaWire.txCreateFor(w.id, c.id));
+            openFors.add(c.id);
             body.accept(new Tpl(this));
+            openFors.remove(openFors.size() - 1);
             records.add(KayaWire.txTemplateEnd());
             return w;
         }
@@ -144,15 +271,33 @@ public final class KayaApp {
         }
 
         public void insert(Collection c, Object[] path, Object key, Object value) {
+            modelSet(c.id, asPath(path), key, value);
             records.add(KayaWire.txCollectionInsert(c.id, path, key, value));
         }
 
         public void update(Collection c, Object[] path, Object key, Object value) {
+            modelSet(c.id, asPath(path), key, value);
             records.add(KayaWire.txCollectionUpdate(c.id, path, key, value));
         }
 
         public void remove(Collection c, Object[] path, Object key) {
+            modelRemove(c.id, asPath(path), key);
             records.add(KayaWire.txCollectionRemove(c.id, path, key));
+        }
+
+        /**
+         * The model: what this guest wrote, exactly — the fold of every
+         * patch so far (this transaction's included), in insertion
+         * order.
+         */
+        public List<Entry> items(Collection c, Object[] path) {
+            Instance instance = instanceOf(c.id, asPath(path));
+            return instance == null ? java.util.Collections.emptyList() : new ArrayList<>(instance.entries);
+        }
+
+        public int count(Collection c, Object[] path) {
+            Instance instance = instanceOf(c.id, asPath(path));
+            return instance == null ? 0 : instance.entries.size();
         }
 
         /**
@@ -204,7 +349,9 @@ public final class KayaApp {
         public Node forEach(Collection c, Consumer<Tpl> body) {
             Node n = new Node(++nodes);
             tx.records.add(KayaWire.txCreateFor(n.id, c.id));
+            openFors.add(c.id);
             body.accept(new Tpl(tx));
+            openFors.remove(openFors.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
             return n;
         }
@@ -218,10 +365,19 @@ public final class KayaApp {
         }
     }
 
-    /** Run {@code build} with a fresh transaction and submit it atomically. */
+    /**
+     * Run {@code build} with a fresh transaction and submit it
+     * atomically. A handler that throws abandons its records, and the
+     * model abandons the same writes before the exception continues.
+     */
     public void build(Consumer<Tx> build) {
         Tx tx = new Tx();
-        build.accept(tx);
+        try {
+            build.accept(tx);
+        } catch (RuntimeException | Error e) {
+            tx.rollback();
+            throw e;
+        }
         tx.submitIfAny();
     }
 

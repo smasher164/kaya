@@ -52,11 +52,34 @@ readonly struct Collection
     internal Collection(ulong id) => Id = id;
 }
 
+/// One instance of a collection: the table inside the stamped copy
+/// selected by Path (the empty path for a live-zone collection).
+/// Entries keep insertion order, matching the core's rendering.
+sealed class KayaInstance
+{
+    internal readonly List<object> Path;
+    internal List<KeyValuePair<object, object>> Entries = new();
+
+    internal KayaInstance(IEnumerable<object> path) => Path = new List<object>(path);
+
+    internal KayaInstance Clone() =>
+        new(Path) { Entries = new List<KeyValuePair<object, object>>(Entries) };
+}
+
 sealed class KayaApp
 {
     ulong signals, widgets, collections, nodes;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
+
+    // The collection is the model — the only copy: every mutation op
+    // edits it and queues the wire delta in the same call, so reads
+    // (Items, Count) are exactly the writes. Children records the
+    // declared-inside-a-For edges the model purges along when a parent
+    // entry's copy is torn down.
+    internal readonly Dictionary<ulong, List<KayaInstance>> Model = new();
+    internal readonly Dictionary<ulong, List<ulong>> Children = new();
+    internal readonly List<ulong> OpenFors = new();
 
     public KayaApp() => Kaya.Init();
 
@@ -68,11 +91,53 @@ sealed class KayaApp
 
     internal Collection NextCollection() => new(++collections);
 
-    /// Run `build` with a fresh transaction and submit it atomically.
+    /// A collection declared inside a For's template is torn down with
+    /// its copies: record the edge so the model purges along it.
+    internal void RegisterCollection(ulong id)
+    {
+        if (OpenFors.Count == 0)
+            return;
+        ulong parent = OpenFors[^1];
+        if (!Children.TryGetValue(parent, out var kids))
+            Children[parent] = kids = new List<ulong>();
+        kids.Add(id);
+    }
+
+    internal static bool PathEq(IReadOnlyList<object> a, IReadOnlyList<object> b, int len)
+    {
+        if (a.Count < len || b.Count < len)
+            return false;
+        for (int i = 0; i < len; i++)
+            if (!Equals(a[i], b[i]))
+                return false;
+        return true;
+    }
+
+    internal KayaInstance InstanceOf(ulong coll, IReadOnlyList<object> path)
+    {
+        if (!Model.TryGetValue(coll, out var instances))
+            return null;
+        foreach (var instance in instances)
+            if (instance.Path.Count == path.Count && PathEq(instance.Path, path, path.Count))
+                return instance;
+        return null;
+    }
+
+    /// Run `build` with a fresh transaction and submit it atomically. A
+    /// handler that throws abandons its records, and the model abandons
+    /// the same writes before the exception continues.
     public void Build(Action<Tx> build)
     {
         var tx = new Tx(this);
-        build(tx);
+        try
+        {
+            build(tx);
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
         tx.SubmitIfAny();
     }
 
@@ -119,12 +184,79 @@ sealed class Tx
     internal readonly KayaApp App;
     internal readonly List<byte[]> Records = new();
 
+    // How to undo this transaction's model edits: a snapshot per
+    // touched collection, taken on first touch.
+    readonly Dictionary<ulong, List<KayaInstance>> journal = new();
+
     internal Tx(KayaApp app) => App = app;
 
     internal void SubmitIfAny()
     {
         if (Records.Count > 0)
             Kaya.Submit(Records.ToArray());
+    }
+
+    internal void Rollback()
+    {
+        foreach (var (id, snapshot) in journal)
+            App.Model[id] = snapshot;
+    }
+
+    void Touch(ulong coll)
+    {
+        if (journal.ContainsKey(coll))
+            return;
+        var snapshot = new List<KayaInstance>();
+        if (App.Model.TryGetValue(coll, out var instances))
+            foreach (var instance in instances)
+                snapshot.Add(instance.Clone());
+        journal[coll] = snapshot;
+    }
+
+    void ModelSet(ulong coll, IReadOnlyList<object> path, object key, object value)
+    {
+        Touch(coll);
+        var instance = App.InstanceOf(coll, path);
+        if (instance == null)
+        {
+            instance = new KayaInstance(path);
+            if (!App.Model.TryGetValue(coll, out var instances))
+                App.Model[coll] = instances = new List<KayaInstance>();
+            instances.Add(instance);
+        }
+        for (int i = 0; i < instance.Entries.Count; i++)
+        {
+            if (Equals(instance.Entries[i].Key, key))
+            {
+                instance.Entries[i] = new KeyValuePair<object, object>(key, value);
+                return;
+            }
+        }
+        instance.Entries.Add(new KeyValuePair<object, object>(key, value));
+    }
+
+    void ModelRemove(ulong coll, IReadOnlyList<object> path, object key)
+    {
+        Touch(coll);
+        var instance = App.InstanceOf(coll, path);
+        instance?.Entries.RemoveAll(e => Equals(e.Key, key));
+        // The core tears down the copy, taking descendant collection
+        // instances with it; the model follows.
+        var prefix = new List<object>(path) { key };
+        PurgeChildren(coll, prefix);
+    }
+
+    void PurgeChildren(ulong coll, IReadOnlyList<object> prefix)
+    {
+        if (!App.Children.TryGetValue(coll, out var kids))
+            return;
+        foreach (ulong kid in kids)
+        {
+            Touch(kid);
+            if (App.Model.TryGetValue(kid, out var instances))
+                instances.RemoveAll(i => KayaApp.PathEq(i.Path, prefix, prefix.Count));
+            PurgeChildren(kid, prefix);
+        }
     }
 
     public Signal Signal(object initial)
@@ -153,6 +285,7 @@ sealed class Tx
     public Collection Collection()
     {
         var c = App.NextCollection();
+        App.RegisterCollection(c.Id);
         Records.Add(KayaWire.TxCreateCollection(c.Id));
         return c;
     }
@@ -163,7 +296,9 @@ sealed class Tx
     {
         var w = App.NextWidget();
         Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
+        App.OpenFors.Add(c.Id);
         body(new Tpl(this));
+        App.OpenFors.RemoveAt(App.OpenFors.Count - 1);
         Records.Add(KayaWire.TxTemplateEnd());
         return w;
     }
@@ -178,14 +313,40 @@ sealed class Tx
         return w;
     }
 
-    public void Insert(Collection c, object[] path, object key, object value) =>
+    // A null path means the live-zone instance, matching the wire
+    // packers' convention.
+    static object[] NoPath(object[] path) => path ?? Array.Empty<object>();
+
+    public void Insert(Collection c, object[] path, object key, object value)
+    {
+        ModelSet(c.Id, NoPath(path), key, value);
         Records.Add(KayaWire.TxCollectionInsert(c.Id, path, key, value));
+    }
 
-    public void Update(Collection c, object[] path, object key, object value) =>
+    public void Update(Collection c, object[] path, object key, object value)
+    {
+        ModelSet(c.Id, NoPath(path), key, value);
         Records.Add(KayaWire.TxCollectionUpdate(c.Id, path, key, value));
+    }
 
-    public void Remove(Collection c, object[] path, object key) =>
+    public void Remove(Collection c, object[] path, object key)
+    {
+        ModelRemove(c.Id, NoPath(path), key);
         Records.Add(KayaWire.TxCollectionRemove(c.Id, path, key));
+    }
+
+    /// The model: what this guest wrote, exactly — the fold of every
+    /// patch so far (this transaction's included), in insertion order.
+    public List<KeyValuePair<object, object>> Items(Collection c, object[] path)
+    {
+        var instance = App.InstanceOf(c.Id, NoPath(path));
+        return instance == null
+            ? new List<KeyValuePair<object, object>>()
+            : new List<KeyValuePair<object, object>>(instance.Entries);
+    }
+
+    public int Count(Collection c, object[] path) =>
+        App.InstanceOf(c.Id, NoPath(path))?.Entries.Count ?? 0;
 
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
@@ -223,7 +384,9 @@ sealed class Tpl
     {
         var n = tx.App.NextNode();
         tx.Records.Add(KayaWire.TxCreateFor(n.Id, c.Id));
+        tx.App.OpenFors.Add(c.Id);
         body(new Tpl(tx));
+        tx.App.OpenFors.RemoveAt(tx.App.OpenFors.Count - 1);
         tx.Records.Add(KayaWire.TxTemplateEnd());
         return n;
     }

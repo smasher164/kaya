@@ -94,7 +94,10 @@ func main() {
 	app.OnClickNode(removeButton, func(tx *kaya.Tx, keys []any) {
 		group, item := keys[0].(string), keys[1].(string)
 		tx.Remove(items, []any{group}, item)
-		tx.Write(status, fmt.Sprintf("removed %s/%s", group, item))
+		// The collection is the model: the count read here is the fold
+		// of the patches, this one included.
+		left := tx.Len(items, []any{group})
+		tx.Write(status, fmt.Sprintf("removed %s/%s, %d left", group, item, left))
 	})
 
 	os.Exit(app.Run())

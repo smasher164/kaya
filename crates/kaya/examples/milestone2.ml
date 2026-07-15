@@ -84,7 +84,10 @@ let () =
       match keys with
       | [ Str group; Str item ] ->
           Kaya_app.remove tx items [ Str group ] (Str item);
-          Kaya_app.write tx status (Str (Printf.sprintf "removed %s/%s" group item))
+          (* The collection is the model: the count read here is the
+             fold of the patches, this one included. *)
+          let left = Kaya_app.count tx items [ Str group ] in
+          Kaya_app.write tx status (Str (Printf.sprintf "removed %s/%s, %d left" group item left))
       | _ -> ());
 
   exit (Kaya_app.run app)

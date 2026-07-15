@@ -91,7 +91,10 @@ static class Program
             string group = (string)keys[0];
             string item = (string)keys[1];
             tx.Remove(items, new object[] { group }, item);
-            tx.Write(status, $"removed {group}/{item}");
+            // The collection is the model: the count read here is the
+            // fold of the patches, this one included.
+            int left = tx.Count(items, new object[] { group });
+            tx.Write(status, $"removed {group}/{item}, {left} left");
         });
 
         System.Environment.Exit(app.Run());

@@ -15,6 +15,9 @@ cd "$ROOT"
 cargo build --lib --example milestone2 || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
+# The Python surface's guard and mirror semantics, checked headlessly
+# (records queue; the core is never entered).
+python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks: FAIL"; exit 1; }
 
 status=0
 run() {
@@ -74,4 +77,7 @@ run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run haskell-swiftui target/haskell/milestone2-hs
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
+# The one-line verdict: suites accumulate failures rather than abort,
+# so a truncated log must still end with the answer.
+if [ "$status" = 0 ]; then echo "validate-mac: ALL PASS"; else echo "validate-mac: FAILURES ABOVE"; fi
 exit "$status"

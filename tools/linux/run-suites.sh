@@ -102,4 +102,7 @@ xvfb-run -a bash -c "
     kill %1
 " 2>/dev/null || true
 
+# The one-line verdict: suites accumulate failures rather than abort,
+# so a truncated log must still end with the answer.
+if [ "$status" = 0 ]; then echo "run-suites: ALL PASS"; else echo "run-suites: FAILURES ABOVE"; fi
 exit "$status"

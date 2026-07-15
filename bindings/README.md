@@ -42,10 +42,41 @@ Settled conventions (seeding the versioned style guide the design
 promises):
 
 - Handlers receive their transaction — explicitly (`func(*Tx)`,
-  `Action<Tx>`, `tx ->`) everywhere so far; Python moves to ambient
-  transactions when its tier-1 sugar lands. Either way the semantics
-  are the protocol's: a handler is a transaction, submitted when it
-  returns.
+  `Action<Tx>`, `tx ->`) or ambiently (Python). Either way the
+  semantics are the protocol's: a handler is a transaction, submitted
+  when it returns; a handler that raises abandons its records, and the
+  binding's mirrors roll back with them.
+- The collection is the model — the only copy; mutations are patches.
+  Every mutation op edits the model and becomes the wire delta in one
+  recorded operation (patch-producing mutations, the Immer /
+  event-sourcing shape), in order, inside the transaction, rolling back
+  together if the transaction is abandoned. So reads of the model are
+  exactly the committed writes — never stale — and no dual bookkeeping
+  exists to diverge. Per-language frontends over the same wire deltas:
+  method ops everywhere; draft scopes for dynamic languages
+  (`with c.change() as d: d[k] = v` — insert-or-update resolved from
+  the model); #[must_use] delta values where ownership makes dropped
+  deltas loud (Rust, later); snapshot assign() with guest-side diffing
+  as sugar (planned). Model reads are part of the layer-3 contract in
+  every language (items/count, spelled per idiom), with
+  read-your-writes inside the transaction and cascade purge along the
+  declared-inside-a-For edges — and the milestone-2 selftest proves the
+  fold end-to-end: the remove handler answers with the count read back
+  from the model ("removed g2/a, 0 left"), so a binding with a broken
+  fold, purge, or read path fails its selftest on every platform.
+  Rollback on abandonment is per-language honest: a journal where
+  handler exceptions are catchable (Python, C#, Java, OCaml), commit-
+  time model store-back where the Build is pure (Haskell) or the
+  transaction is droppable (Rust), and nothing where a handler failure
+  is a crash anyway (Go panics, Swift's non-throwing closures).
+  Signals expose no read: they are a render pipe,
+  not a state bus; computations live in derived signals (`steps.eq(1)`,
+  `sig.fmt(...)`) — binding-maintained, recomputed at write time,
+  batched into the same transaction. Model reads in template position
+  raise at record time (the frozen-branch guard). Widget-owned state
+  (entry.text, later) should arrive as occurrences the app folds into
+  its model, not as readable widget mirrors — keeping the model the
+  single source and keeping eventual data out of the read path.
 - `When` takes a signal, never a raw bool — enforced by types where
   the language can (Haskell's `Declare` class makes cross-zone
   `addChild` unrepresentable; the others get it from the handle types).

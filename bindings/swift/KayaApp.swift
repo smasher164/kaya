@@ -42,6 +42,14 @@ struct KayaCollection {
     let id: UInt64
 }
 
+/// One instance of a collection: the table inside the stamped copy
+/// selected by `path` (the empty path for a live-zone collection).
+/// Entries keep insertion order, matching the core's rendering.
+private struct KayaInstance {
+    let path: [KayaValue]
+    var entries: [(key: KayaValue, value: KayaValue)]
+}
+
 final class KayaApp {
     private var signals: UInt64 = 0
     private var widgets: UInt64 = 0
@@ -49,6 +57,63 @@ final class KayaApp {
     private var nodes: UInt64 = 0
     private var widgetHandlers: [UInt64: (KayaAppTx) -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) -> Void] = [:]
+
+    // The collection is the model — the only copy: every mutation op
+    // edits it and queues the wire delta in the same call, so reads
+    // (items, count) are exactly the writes. childCollections records
+    // the declared-inside-a-For edges the model purges along when a
+    // parent entry's copy is torn down.
+    private var model: [UInt64: [KayaInstance]] = [:]
+    private var childCollections: [UInt64: [UInt64]] = [:]
+    fileprivate var openFors: [UInt64] = []
+
+    /// A collection declared inside a For's template is torn down with
+    /// its copies: record the edge so the model purges along it.
+    fileprivate func registerCollection(_ id: UInt64) {
+        if let parent = openFors.last {
+            childCollections[parent, default: []].append(id)
+        }
+    }
+
+    fileprivate func modelSet(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+        var instances = model[coll, default: []]
+        let at = instances.firstIndex { $0.path == path } ?? {
+            instances.append(KayaInstance(path: path, entries: []))
+            return instances.count - 1
+        }()
+        if let slot = instances[at].entries.firstIndex(where: { $0.key == key }) {
+            instances[at].entries[slot].value = value
+        } else {
+            instances[at].entries.append((key: key, value: value))
+        }
+        model[coll] = instances
+    }
+
+    fileprivate func modelRemove(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue) {
+        if var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }) {
+            instances[at].entries.removeAll { $0.key == key }
+            model[coll] = instances
+        }
+        // The core tears down the copy, taking descendant collection
+        // instances with it; the model follows.
+        purgeChildren(coll, prefix: path + [key])
+    }
+
+    private func purgeChildren(_ coll: UInt64, prefix: [KayaValue]) {
+        for kid in childCollections[coll, default: []] {
+            model[kid]?.removeAll { instance in
+                instance.path.count >= prefix.count
+                    && Array(instance.path[0..<prefix.count]) == prefix
+            }
+            purgeChildren(kid, prefix: prefix)
+        }
+    }
+
+    fileprivate func instanceEntries(_ coll: UInt64, _ path: [KayaValue])
+        -> [(key: KayaValue, value: KayaValue)]
+    {
+        model[coll]?.first { $0.path == path }?.entries ?? []
+    }
 
     func nextSignal() -> KayaSignal {
         signals += 1
@@ -162,6 +227,7 @@ final class KayaAppTx {
 
     func collection() -> KayaCollection {
         let c = app.nextCollection()
+        app.registerCollection(c.id)
         tx.createCollection(c.id)
         return c
     }
@@ -171,7 +237,9 @@ final class KayaAppTx {
     func forEach(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaWidget {
         let w = app.nextWidget()
         tx.createFor(w.id, c.id)
+        app.openFors.append(c.id)
         body(KayaTpl(tx: self))
+        app.openFors.removeLast()
         tx.templateEnd()
         return w
     }
@@ -186,15 +254,28 @@ final class KayaAppTx {
     }
 
     func insert(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+        app.modelSet(c.id, path, key, value)
         tx.collectionInsert(c.id, path, key, value)
     }
 
     func update(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+        app.modelSet(c.id, path, key, value)
         tx.collectionUpdate(c.id, path, key, value)
     }
 
     func remove(_ c: KayaCollection, _ path: [KayaValue], _ key: KayaValue) {
+        app.modelRemove(c.id, path, key)
         tx.collectionRemove(c.id, path, key)
+    }
+
+    /// The model: what this guest wrote, exactly — the fold of every
+    /// patch so far (this transaction's included), in insertion order.
+    func items(_ c: KayaCollection, _ path: [KayaValue]) -> [(key: KayaValue, value: KayaValue)] {
+        app.instanceEntries(c.id, path)
+    }
+
+    func count(_ c: KayaCollection, _ path: [KayaValue]) -> Int {
+        app.instanceEntries(c.id, path).count
     }
 
     /// Mount into the default window; per-window targets arrive with
@@ -240,7 +321,9 @@ final class KayaTpl {
     func forEach(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
         let n = tx.app.nextNode()
         tx.tx.createFor(n.id, c.id)
+        tx.app.openFors.append(c.id)
         body(KayaTpl(tx: tx))
+        tx.app.openFors.removeLast()
         tx.tx.templateEnd()
         return n
     }

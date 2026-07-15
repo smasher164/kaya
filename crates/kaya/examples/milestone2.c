@@ -83,6 +83,10 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
     unsigned steps = 0;
+    /* C takes the function floor by decision: no binding-owned model,
+     * so the app keeps its own item counts alongside the deltas it
+     * sends — hand-rolled bookkeeping is C's idiom. */
+    unsigned items_in[2] = {0, 0}; /* [0]: g1, [1]: g2 */
     uint8_t rec[256];
     for (;;) {
         size_t size = kaya_next_occurrence(rec, sizeof rec);
@@ -106,6 +110,7 @@ static void *app(void *arg) {
                                           kaya_str("send report"));
                 kaya_tx_collection_insert(&tx, C_ITEMS, &g1, 1, kaya_str("b"),
                                           kaya_str("buy milk"));
+                items_in[0] = 2;
             } else if (steps == 2) {
                 kaya_tx_collection_insert(&tx, C_GROUPS, 0, 0, kaya_str("g2"),
                                           kaya_str("Home"));
@@ -113,6 +118,7 @@ static void *app(void *arg) {
                                           kaya_str("water plants"));
                 kaya_tx_collection_update(&tx, C_GROUPS, 0, 0, kaya_str("g1"),
                                           kaya_str("Office"));
+                items_in[1] = 1;
             }
             char status[32];
             snprintf(status, sizeof status, "step %u", steps);
@@ -123,9 +129,11 @@ static void *app(void *arg) {
             uint8_t buf[512];
             KayaTx tx = {buf, 0};
             kaya_tx_collection_remove(&tx, C_ITEMS, &keys[0], 1, keys[1]);
+            unsigned *left = &items_in[keys[0].s_len == 2 && keys[0].s[1] == '2'];
+            *left -= 1;
             char status[160];
-            snprintf(status, sizeof status, "removed %.*s/%.*s", keys[0].s_len,
-                     keys[0].s, keys[1].s_len, keys[1].s);
+            snprintf(status, sizeof status, "removed %.*s/%.*s, %u left",
+                     keys[0].s_len, keys[0].s, keys[1].s_len, keys[1].s, *left);
             kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
             kaya_submit(tx.buf, tx.len);
         }

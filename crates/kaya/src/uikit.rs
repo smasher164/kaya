@@ -358,7 +358,7 @@ fn spawn_selftest() {
                     .text()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
-                if text == "removed g2/a" {
+                if text == "removed g2/a, 0 left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

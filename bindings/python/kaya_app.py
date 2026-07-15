@@ -23,7 +23,23 @@ scoped templates, occurrence dispatch), this layer adds:
   never written by hand);
 - handles with methods: `signal.set`, `collection.insert/update/remove`
   and `collection.at(*path)` for instances of template-declared
-  collections.
+  collections;
+- the collection is the model — the only copy. Every mutation is a
+  patch: it edits the model and becomes the wire delta in one recorded
+  operation, in order, inside the transaction, and an abandoned
+  transaction rolls both back together — so reads (`for key, value in
+  groups.items():`) are exactly the committed model, never stale, and
+  no second bookkeeping copy exists anywhere. Bulk mutations read
+  naturally as draft scopes (`with items.at("g1").change() as d:`
+  `d[k] = v`, `del d[k]` — insert-or-update resolved from the model),
+  Immer-style; single ops keep the method spelling. Signals have no
+  read method, deliberately: they are a render pipe, not a state bus.
+  Model reads in template position are a frozen-branch bug and raise
+  at record time (values in handlers, signals in templates);
+- derived signals: `steps.eq(1)`, `steps.fmt("step {}")` — maintained
+  by the binding, recomputed at write time, batched into the same
+  transaction; the core never knows. Derived signals are signals:
+  bind them, hand them to `when`.
 
 Dispatch still runs on the app thread after it pulls from the ring; the
 core never calls into the guest. The wire vocabulary underneath
@@ -39,8 +55,11 @@ _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
 _parents = []  # the container stack; None marks a template body's floor
 _for_stack = []  # depth indices of enclosing Fors, for element levels
+_for_collections = []  # the enclosing Fors' collections, for mirror parentage
 _tpl_depth = 0  # 0 = live zone; >0 = declaring a blueprint
 _pending_root = None  # the top-level container window() will mount
+_recording = False  # inside window(): mirror reads would freeze branches
+_journal = None  # per-transaction mirror undo, run if the tx is abandoned
 
 
 def _records():
@@ -52,17 +71,95 @@ def _records():
     return _tx
 
 
+def _journal_once(obj, restore):
+    """Record how to undo obj's mirror state, once per transaction: a
+    handler that raises abandons its records, and the mirrors must
+    abandon the same writes — `.value()` means "what I wrote", never
+    "what I almost wrote"."""
+    if _journal is not None and obj not in _journal:
+        _journal[obj] = restore
+
+
 def _auto_parent(child_id):
     if _parents and _parents[-1] is not None:
         _records().append(wire.tx_add_child(_parents[-1], child_id))
 
 
+def _guard_mirror_read(what):
+    if _recording or _tpl_depth > 0:
+        raise RuntimeError(
+            f"kaya: {what} reads a mirror snapshot, which would freeze this "
+            "branch at record time — bind the signal (or use kaya.when / "
+            "kaya.for_each) in templates; read mirrors in handlers"
+        )
+
+
 class Signal:
-    def __init__(self, id):
+    def __init__(self, id, initial=None):
         self.id = id
+        self._mirror = initial
+        self._dependents = []
 
     def set(self, value):
+        old = self._mirror
+        _journal_once(self, lambda: setattr(self, "_mirror", old))
         _records().append(wire.tx_write_signal(self.id, value))
+        self._mirror = value
+        for derived in self._dependents:
+            derived._recompute()
+
+    # No read method, deliberately: signals are a render pipe, not a
+    # state bus. The value you wrote lives in your own variables or in
+    # a collection mirror; computations belong in derived signals. (The
+    # internal mirror below exists to feed derivations and to skip
+    # no-op derived writes.)
+
+    def _derive(self, compute):
+        derived = _Derived(_app._next("signal"), self, compute)
+        _records().append(wire.tx_create_signal(derived.id, derived._mirror))
+        self._dependents.append(derived)
+        return derived
+
+    def eq(self, other):
+        """A derived Bool signal: this value == other."""
+        return self._derive(lambda v: v == other)
+
+    def ne(self, other):
+        return self._derive(lambda v: v != other)
+
+    def lt(self, other):
+        return self._derive(lambda v: v < other)
+
+    def gt(self, other):
+        return self._derive(lambda v: v > other)
+
+    def fmt(self, template):
+        """A derived Str signal: template.format(value)."""
+        return self._derive(lambda v: template.format(v))
+
+
+class _Derived(Signal):
+    """Binding-maintained: recomputed when the source is written, the
+    write batched into the same transaction. The core sees an ordinary
+    signal."""
+
+    def __init__(self, id, source, compute):
+        super().__init__(id, compute(source._mirror))
+        self._compute = compute
+        self._source = source
+
+    def set(self, value):
+        raise RuntimeError("kaya: derived signals are written by their source")
+
+    def _recompute(self):
+        new = self._compute(self._source._mirror)
+        if new != self._mirror:
+            old = self._mirror
+            _journal_once(self, lambda: setattr(self, "_mirror", old))
+            _records().append(wire.tx_write_signal(self.id, new))
+            self._mirror = new
+            for derived in self._dependents:
+                derived._recompute()
 
 
 class Widget:
@@ -93,28 +190,126 @@ class Element:
 
 
 class _BoundCollection:
-    def __init__(self, id, path):
-        self._id = id
+    """One instance of a collection: the table inside the copy selected
+    by `path` (the empty path for a live-zone collection)."""
+
+    def __init__(self, owner, path):
+        self._owner = owner
         self._path = path
 
+    def _mirror(self):
+        owner = self._owner
+        old = {path: dict(entries) for path, entries in owner._instances.items()}
+
+        def restore():
+            owner._instances.clear()
+            owner._instances.update(old)
+
+        _journal_once(owner, restore)
+        return owner._instances.setdefault(tuple(self._path), {})
+
     def insert(self, key, value):
-        _records().append(wire.tx_collection_insert(self._id, self._path, key, value))
+        _records().append(
+            wire.tx_collection_insert(self._owner._id, self._path, key, value)
+        )
+        self._mirror()[key] = value
 
     def update(self, key, value):
-        _records().append(wire.tx_collection_update(self._id, self._path, key, value))
+        _records().append(
+            wire.tx_collection_update(self._owner._id, self._path, key, value)
+        )
+        self._mirror()[key] = value
 
     def remove(self, key):
-        _records().append(wire.tx_collection_remove(self._id, self._path, key))
+        _records().append(wire.tx_collection_remove(self._owner._id, self._path, key))
+        self._mirror().pop(key, None)
+        # The core tears down the copy, taking descendant collection
+        # instances with it; the mirrors follow.
+        prefix = tuple(self._path) + (key,)
+        for child in self._owner._children:
+            child._purge(prefix)
+
+    def change(self):
+        """A draft scope for bulk mutation: `with c.change() as d:` —
+        `d[key] = value` inserts or updates (resolved from the model),
+        `del d[key]` removes, reads see the draft's own writes. Each
+        operation records its patch immediately, in order, into the
+        ambient transaction; the scope is syntax, not a barrier."""
+        return _Draft(self)
+
+    def items(self):
+        """The model: what this guest wrote, in insertion order.
+        Transition code only; template position raises."""
+        _guard_mirror_read("items()")
+        return list(self._mirror().items())
+
+    def keys(self):
+        _guard_mirror_read("keys()")
+        return list(self._mirror().keys())
+
+    def __len__(self):
+        _guard_mirror_read("len()")
+        return len(self._mirror())
+
+    def __contains__(self, key):
+        _guard_mirror_read("membership")
+        return key in self._mirror()
+
+
+class _Draft:
+    """Records natural mutations as patches; see change()."""
+
+    def __init__(self, bound):
+        self._bound = bound
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def __setitem__(self, key, value):
+        if key in self._bound._mirror():
+            self._bound.update(key, value)
+        else:
+            self._bound.insert(key, value)
+
+    def __delitem__(self, key):
+        self._bound.remove(key)
+
+    def __getitem__(self, key):
+        _guard_mirror_read("draft reads")
+        return self._bound._mirror()[key]
+
+    def __contains__(self, key):
+        _guard_mirror_read("draft membership")
+        return key in self._bound._mirror()
 
 
 class Collection(_BoundCollection):
     def __init__(self, id):
-        super().__init__(id, [])
+        self._id = id
+        self._instances = {}
+        self._children = []  # collections declared inside our template
+        super().__init__(self, [])
 
     def at(self, *path):
         """The instance of this (template-declared) collection inside
         the copy selected by `path` — one key per enclosing For."""
-        return _BoundCollection(self._id, list(path))
+        return _BoundCollection(self, list(path))
+
+    def _purge(self, prefix):
+        old = {path: dict(entries) for path, entries in self._instances.items()}
+
+        def restore():
+            self._instances.clear()
+            self._instances.update(old)
+
+        _journal_once(self, restore)
+        for path in [p for p in self._instances if p[: len(prefix)] == prefix]:
+            del self._instances[path]
+        for child in self._children:
+            child._purge(prefix)
 
 
 class _Scope:
@@ -146,10 +341,11 @@ class _Container(_Scope):
 
 
 class _Template(_Scope):
-    def __init__(self, opener, target_id, is_for):
+    def __init__(self, opener, target_id, is_for, coll=None):
         self._opener = opener
         self._target_id = target_id
         self._is_for = is_for
+        self._coll = coll
 
     def _enter(self):
         global _tpl_depth
@@ -163,6 +359,7 @@ class _Template(_Scope):
         _parents.append(None)  # template bodies root themselves
         if self._is_for:
             _for_stack.append(len(_for_stack))
+            _for_collections.append(self._coll)
             return Element(_for_stack[-1])
         return None
 
@@ -170,6 +367,7 @@ class _Template(_Scope):
         global _tpl_depth
         if self._is_for:
             _for_stack.pop()
+            _for_collections.pop()
         _parents.pop()
         _tpl_depth -= 1
         _records().append(wire.tx_template_end())
@@ -191,7 +389,7 @@ def _widget(kind):
 
 
 def signal(initial):
-    handle = Signal(_app._next("signal"))
+    handle = Signal(_app._next("signal"), initial)
     _records().append(wire.tx_create_signal(handle.id, initial))
     return handle
 
@@ -199,6 +397,10 @@ def signal(initial):
 def collection():
     handle = Collection(_app._next("collection"))
     _records().append(wire.tx_create_collection(handle._id))
+    # Declared inside a For's template: entries removed from the parent
+    # tear down our instances, so the mirror bookkeeping needs the edge.
+    if _for_collections:
+        _for_collections[-1]._children.append(handle)
     return handle
 
 
@@ -233,7 +435,7 @@ def label(text=None, bind=None):
 def for_each(coll):
     """A For over `coll`: the with-block declares the template, and the
     target yields the element — `with kaya.for_each(c) as element:`."""
-    return _Template(wire.tx_create_for, coll._id, is_for=True)
+    return _Template(wire.tx_create_for, coll._id, is_for=True, coll=coll)
 
 
 def when(sig):
@@ -248,17 +450,24 @@ class _TxScope:
         self._mount = mount_on_exit
 
     def __enter__(self):
-        global _tx, _pending_root
+        global _tx, _pending_root, _recording, _journal
         if _tx is not None:
             raise RuntimeError("kaya: transactions do not nest")
         _tx = []
+        _journal = {}
         _pending_root = None
+        _recording = self._mount
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        global _tx
+        global _tx, _recording, _journal
+        _recording = False
         records, _tx = _tx, None
+        journal, _journal = _journal, None
         if exc_type is not None:
+            # The records are abandoned; the mirrors abandon them too.
+            for restore in journal.values():
+                restore()
             return False
         if self._mount:
             if _pending_root is None:

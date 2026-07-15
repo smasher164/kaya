@@ -80,5 +80,8 @@ main = kayaMain $ \app -> do
     [VStr group, VStr item] ->
       submitTx app $ do
         remove items [VStr group] (VStr item)
-        writeSignal status (VStr ("removed " ++ group ++ "/" ++ item))
+        -- The collection is the model: the count read here is the fold
+        -- of the patches, this one included.
+        left <- count items [VStr group]
+        writeSignal status (VStr ("removed " ++ group ++ "/" ++ item ++ ", " ++ show left ++ " left"))
     _ -> return ()

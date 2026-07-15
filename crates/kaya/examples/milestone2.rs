@@ -9,7 +9,9 @@
 //!
 //! The selftest (in each backend) clicks the driver twice, then the most
 //! recently stamped remove button, and expects the status label to read
-//! "removed g2/a".
+//! "removed g2/a, 0 left" — the count read back from the collection
+//! model right after the remove, proving the patch-producing fold: the
+//! collection is the model, and reads are exactly the writes.
 
 use kaya::{Occurrence, Prop, Value, WidgetKind};
 
@@ -93,10 +95,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let [Value::Str(group), Value::Str(item)] = &path[..] else {
                     panic!("remove click carries [group, item], got {path:?}");
                 };
-                let text = format!("removed {group}/{item}");
                 let mut tx = ctx.begin();
                 tx.remove_at(items, &[path[0].clone()], path[1].clone());
-                tx.write(status, text);
+                // The collection is the model: the count read here is
+                // the fold of the patches, this one included.
+                let left = tx.len_at(items, &[path[0].clone()]);
+                tx.write(status, format!("removed {group}/{item}, {left} left"));
                 tx.commit();
             }
             Occurrence::ButtonClicked { .. } | Occurrence::InstanceButtonClicked { .. } => {}

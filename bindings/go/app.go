@@ -35,12 +35,33 @@ type counters struct {
 	signal, widget, collection, node uint64
 }
 
-// App owns the id counters (which outlive any one transaction) and the
-// dispatch tables.
+// Entry is one key/value pair of a collection instance, in insertion
+// order — what Items returns.
+type Entry struct {
+	Key, Value any
+}
+
+// instance is one collection instance: the table inside the stamped
+// copy selected by path (the empty path for a live-zone collection).
+type instance struct {
+	path    []any
+	entries []Entry
+}
+
+// App owns the id counters (which outlive any one transaction), the
+// dispatch tables, and the collection model. The collection is the
+// model — the only copy: every mutation op edits it and queues the wire
+// delta in the same call, so reads (Items, Len) are exactly the writes.
 type App struct {
 	c              counters
 	widgetHandlers map[uint64]func(*Tx)
 	nodeHandlers   map[uint64]func(*Tx, []any)
+	model          map[uint64][]*instance
+	// Collections declared inside a For's template: removing a parent
+	// entry tears down the copy and every instance inside it, so the
+	// model needs the same edge to purge along.
+	children map[uint64][]uint64
+	openFors []uint64
 }
 
 func NewApp() *App {
@@ -48,6 +69,81 @@ func NewApp() *App {
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
+		model:          make(map[uint64][]*instance),
+		children:       make(map[uint64][]uint64),
+	}
+}
+
+func pathEq(a, b []any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *App) instanceOf(coll uint64, path []any) *instance {
+	for _, in := range a.model[coll] {
+		if pathEq(in.path, path) {
+			return in
+		}
+	}
+	return nil
+}
+
+func (a *App) modelSet(coll uint64, path []any, key, value any) {
+	in := a.instanceOf(coll, path)
+	if in == nil {
+		in = &instance{path: append([]any(nil), path...)}
+		a.model[coll] = append(a.model[coll], in)
+	}
+	for i := range in.entries {
+		if in.entries[i].Key == key {
+			in.entries[i].Value = value
+			return
+		}
+	}
+	in.entries = append(in.entries, Entry{key, value})
+}
+
+func (a *App) modelRemove(coll uint64, path []any, key any) {
+	if in := a.instanceOf(coll, path); in != nil {
+		kept := in.entries[:0]
+		for _, e := range in.entries {
+			if e.Key != key {
+				kept = append(kept, e)
+			}
+		}
+		in.entries = kept
+	}
+	// The core tears down the copy, taking descendant collection
+	// instances with it; the model follows.
+	a.purgeChildren(coll, append(append([]any(nil), path...), key))
+}
+
+func (a *App) purgeChildren(coll uint64, prefix []any) {
+	for _, kid := range a.children[coll] {
+		kept := a.model[kid][:0]
+		for _, in := range a.model[kid] {
+			if len(in.path) < len(prefix) || !pathEq(in.path[:len(prefix)], prefix) {
+				kept = append(kept, in)
+			}
+		}
+		a.model[kid] = kept
+		a.purgeChildren(kid, prefix)
+	}
+}
+
+// A collection declared inside a For's template is torn down with its
+// copies: record the edge so the model purges along it.
+func (a *App) registerCollection(id uint64) {
+	if len(a.openFors) > 0 {
+		parent := a.openFors[len(a.openFors)-1]
+		a.children[parent] = append(a.children[parent], id)
 	}
 }
 
@@ -100,6 +196,7 @@ func (tx *Tx) AddChild(parent, child Widget) {
 func (tx *Tx) Collection() Collection {
 	tx.app.c.collection++
 	c := Collection{tx.app.c.collection}
+	tx.app.registerCollection(c.id)
 	tx.records = append(tx.records, TxCreateCollection(c.id))
 	return c
 }
@@ -110,7 +207,9 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
+	tx.app.openFors = append(tx.app.openFors, c.id)
 	fn(&Tpl{tx: tx})
+	tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 	tx.records = append(tx.records, TxTemplateEnd())
 	return w
 }
@@ -127,15 +226,34 @@ func (tx *Tx) When(s Signal, fn func(*Tpl)) Widget {
 }
 
 func (tx *Tx) Insert(c Collection, path []any, key, value any) {
+	tx.app.modelSet(c.id, path, key, value)
 	tx.records = append(tx.records, TxCollectionInsert(c.id, path, key, value))
 }
 
 func (tx *Tx) Update(c Collection, path []any, key, value any) {
+	tx.app.modelSet(c.id, path, key, value)
 	tx.records = append(tx.records, TxCollectionUpdate(c.id, path, key, value))
 }
 
 func (tx *Tx) Remove(c Collection, path []any, key any) {
+	tx.app.modelRemove(c.id, path, key)
 	tx.records = append(tx.records, TxCollectionRemove(c.id, path, key))
+}
+
+// Items is the model: what this guest wrote, exactly — the fold of
+// every patch so far (this transaction's included), in insertion order.
+func (tx *Tx) Items(c Collection, path []any) []Entry {
+	if in := tx.app.instanceOf(c.id, path); in != nil {
+		return append([]Entry(nil), in.entries...)
+	}
+	return nil
+}
+
+func (tx *Tx) Len(c Collection, path []any) int {
+	if in := tx.app.instanceOf(c.id, path); in != nil {
+		return len(in.entries)
+	}
+	return 0
 }
 
 // Mount mounts into the default window; per-window targets arrive with
@@ -179,7 +297,9 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	t.tx.records = append(t.tx.records, TxCreateFor(n.id, c.id))
+	t.tx.app.openFors = append(t.tx.app.openFors, c.id)
 	fn(&Tpl{tx: t.tx})
+	t.tx.app.openFors = t.tx.app.openFors[:len(t.tx.app.openFors)-1]
 	t.tx.records = append(t.tx.records, TxTemplateEnd())
 	return n
 }

@@ -193,12 +193,16 @@ slot schema is the function signature: parameter names and types, validated
 at record time. A declared schema also lets the row window store rows in a
 fixed layout in the arena rather than in generic maps. Nodes may carry a
 ref marker, in which case instantiation reports a per-instance handle for
-mirror reads and one-shot commands.
+one-shot commands. There are no widget mirror reads: widget-owned state
+(an entry's text) reaches the app as occurrences it folds into its own
+model, so the model stays the single source and nothing eventual sits on
+a read path.
 
 There is one trap: closures invite the Flutter intuition that the function
 re-runs on every state change. As a guardrail, the recorder flags any
-mirror read (`.value()`) inside a recording scope with an error telling the
-author to bind the signal or take it as a parameter.
+model read (a collection iterated, a draft consulted) inside a recording
+scope with an error telling the author to bind a signal or take a slot as
+a parameter.
 
 The encoding at the C ABI is a builder API (`begin_node`, `set_prop`,
 `bind_slot`, `end_node`). Templates are small and built rarely, so the
@@ -271,11 +275,19 @@ rules so far:
   familiar SQLAlchemy and pandas trade-off. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them.
-- Values in handlers, signals in templates. `.value()` reads a mirror
-  snapshot, which is correct in transition code and a frozen-branch bug in
-  template position. Statically typed bindings enforce this at compile
-  time, since `When` takes a `Signal[bool]` and not a `bool`; dynamic
-  bindings check at record time.
+- Values in handlers, signals in templates. Collection mirrors read a
+  binding-maintained snapshot of what the guest wrote, which is correct
+  in transition code and a frozen-branch bug in template position;
+  statically typed bindings enforce the template half at compile time,
+  since `When` takes a `Signal[bool]` and not a `bool`, and dynamic
+  bindings check at record time. Signals expose no read at all —
+  collections are the model, signals are the render pipe, and reading
+  back a written signal invites round-tripping app state through the
+  UI. Widget-owned state never grows a
+  read: an entry's text arrives as change occurrences the app folds
+  into its own model (the uncontrolled widget stays the authority;
+  the app keeps its draft), so nothing eventual ever sits on a read
+  path and the model stays the single source.
 - Handlers receive their transaction, explicitly as in Go
   (`func(tx *Tx)`) or ambiently as in Python. The surface varies per
   language; the semantics are fixed by the protocol's rule that a handler
@@ -989,17 +1001,26 @@ def todo_row(row):                      # component function; runs once, at reco
 
 with app.window(title="Todos"):
     with kaya.vbox(spacing=12):
-        entry = kaya.entry()                        # uncontrolled; core owns its text
+        # Uncontrolled: the widget owns its text and reports edits as
+        # occurrences; the app folds them into its own state. No read-back.
+        entry = kaya.entry(on_change=set_draft)
         kaya.button("Add", on_click=lambda: add(entry))
         kaya.for_each(todos, todo_row)              # For(collection, component fn)
         kaya.label(text=items_left)                 # bound (signal ref)
         kaya.label(text="Todos")                    # constant
 
+draft = ""                                          # plain app state, fed by occurrences
+
+def set_draft(text):
+    global draft
+    draft = text
+
 def add(entry):
     with app.transaction():                         # atomic multi-signal write
-        todos.append({"id": kaya.key(), "title": entry.text.get(),  # mirror read: local
+        todos.append({"id": kaya.key(), "title": draft,  # the app's own state
                       "done": False, "toggle": toggle})
         entry.clear()                               # one-shot command
+        set_draft("")
         n = sum(1 for t in todos if not t["done"])
         items_left.set(f"{n} item left" if n == 1 else f"{n} items left")
 

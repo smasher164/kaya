@@ -163,7 +163,7 @@ func kayaStartSelftest() {
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
         let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "removed g2/a" {
+        if text == "removed g2/a, 0 left" {
             print("KAYA_SELFTEST: OK (\(text))")
             exit(0)
         } else {

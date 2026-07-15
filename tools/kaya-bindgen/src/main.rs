@@ -13,7 +13,7 @@
 
 use std::fmt::Write as _;
 
-use kaya::spec::{Field, FieldTy, ProtocolSpec, Record, SPEC};
+use kaya::spec::{Field, ProtocolSpec, Record, SPEC};
 
 mod c;
 mod csharp;
@@ -120,6 +120,3 @@ pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
         .collect()
 }
 
-pub(crate) fn is_fixed(f: &Field) -> bool {
-    matches!(f.ty, FieldTy::U32 | FieldTy::U64)
-}

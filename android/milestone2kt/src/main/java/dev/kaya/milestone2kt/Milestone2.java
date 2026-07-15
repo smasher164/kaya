@@ -84,7 +84,10 @@ final class Milestone2 {
             String group = (String) keys.get(0);
             String item = (String) keys.get(1);
             tx.remove(items, new Object[] {group}, item);
-            tx.write(status, "removed " + group + "/" + item);
+            // The collection is the model: the count read here is the
+            // fold of the patches, this one included.
+            int left = tx.count(items, new Object[] {group});
+            tx.write(status, "removed " + group + "/" + item + ", " + left + " left");
         });
 
         app.dispatchLoop();

@@ -172,7 +172,7 @@ object KayaCompose {
             Thread.sleep(700)
             activity.runOnUiThread {
                 val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "removed g2/a") {
+                val code = if (text == "removed g2/a, 0 left") {
                     Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
                     0
                 } else {

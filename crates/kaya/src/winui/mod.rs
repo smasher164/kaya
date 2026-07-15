@@ -445,7 +445,7 @@ fn spawn_selftest() {
                     .expect("the scene has a label")
                     .Text()?
                     .to_string();
-                if text == "removed g2/a" {
+                if text == "removed g2/a, 0 left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {
