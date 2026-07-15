@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import",
@@ -129,38 +129,45 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("    /// set_property with a constant text value.");
-    c.line("    mutating func setText(_ widgetId: UInt64, _ text: String) {");
-    c.line("        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))");
-    c.line("        u64(widgetId)");
-    c.line("        u32(UInt32(KAYA_PROP_TEXT))");
-    c.line("        u32(UInt32(KAYA_SOURCE_CONST))");
-    c.line("        value(.str(text))");
-    c.line("        end(start)");
-    c.line("    }");
-    c.line("");
-    c.line("    /// set_property with a signal-bound text value.");
-    c.line("    mutating func bindText(_ widgetId: UInt64, _ signalId: UInt64) {");
-    c.line("        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))");
-    c.line("        u64(widgetId)");
-    c.line("        u32(UInt32(KAYA_PROP_TEXT))");
-    c.line("        u32(UInt32(KAYA_SOURCE_SIGNAL))");
-    c.line("        u64(signalId)");
-    c.line("        end(start)");
-    c.line("    }");
-    c.line("");
-    c.line("    /// set_property bound to the element of the enclosing For,");
-    c.line("    /// `level` Fors up (0 = nearest).");
-    c.line("    mutating func bindTextElement(_ widgetId: UInt64, level: UInt32 = 0) {");
-    c.line("        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))");
-    c.line("        u64(widgetId)");
-    c.line("        u32(UInt32(KAYA_PROP_TEXT))");
-    c.line("        u32(UInt32(KAYA_SOURCE_ELEMENT))");
-    c.line("        u32(level)");
-    c.line("        u32(0)");
-    c.line("        end(start)");
-    c.line("    }");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        let p = camel(prop);
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        c.line("");
+        c.line(&format!("    /// set_property with a constant {prop} value."));
+        c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, _ {p}: String) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        self.u64(widgetId)");
+        c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value(.str({p}))"));
+        c.line("        self.end(start)");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_property with a signal-bound {prop} value."));
+        c.line(&format!("    mutating func bind{pc}(_ widgetId: UInt64, _ signalId: UInt64) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        self.u64(widgetId)");
+        c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+        c.line("        self.u64(signalId)");
+        c.line("        self.end(start)");
+        c.line("    }");
+        c.line("");
+        c.line("    /// set_property bound to the element of the enclosing For,");
+        c.line("    /// `level` Fors up (0 = nearest).");
+        c.line(&format!("    mutating func bind{pc}Element(_ widgetId: UInt64, level: UInt32 = 0) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        self.u64(widgetId)");
+        c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_ELEMENT))");
+        c.line("        self.u32(level)");
+        c.line("        self.u32(0)");
+        c.line("        self.end(start)");
+        c.line("    }");
+    }
     c.line("");
     c.line("    func submit() {");
     c.line("        bytes.withUnsafeBytes { raw in");

@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodePath", "beginRecord", "endRecord", "ParseOccurrence",
@@ -134,38 +134,44 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("// TxSetText: set_property with a constant text value.");
-    c.line("func TxSetText(widgetID uint64, text string) []byte {");
-    c.line("\tb := beginRecord(txSetProperty)");
-    c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, PropText)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
-    c.line("\tb = encodeValue(b, text)");
-    c.line("\treturn endRecord(b)");
-    c.line("}");
-    c.line("");
-    c.line("// TxBindText: set_property with a signal-bound text value.");
-    c.line("func TxBindText(widgetID uint64, signalID uint64) []byte {");
-    c.line("\tb := beginRecord(txSetProperty)");
-    c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, PropText)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
-    c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
-    c.line("\treturn endRecord(b)");
-    c.line("}");
-    c.line("");
-    c.line("// TxBindTextElement: set_property bound to the element of the");
-    c.line("// enclosing For, `level` Fors up (0 = nearest).");
-    c.line("func TxBindTextElement(widgetID uint64, level uint32) []byte {");
-    c.line("\tb := beginRecord(txSetProperty)");
-    c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, PropText)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceElement)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, level)");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
-    c.line("\treturn endRecord(b)");
-    c.line("}");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        let p = param(prop);
+        let pc = camel(prop);
+        c.line("");
+        c.line(&format!("// TxSet{pc}: set_property with a constant {prop} value."));
+        c.line(&format!("func TxSet{pc}(widgetID uint64, {p} string) []byte {{"));
+        c.line("\tb := beginRecord(txSetProperty)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Prop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = encodeValue(b, {p})"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBind{pc}: set_property with a signal-bound {prop} value."));
+        c.line(&format!("func TxBind{pc}(widgetID uint64, signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetProperty)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Prop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBind{pc}Element: set_property bound to the element of the"));
+        c.line("// enclosing For, `level` Fors up (0 = nearest).");
+        c.line(&format!("func TxBind{pc}Element(widgetID uint64, level uint32) []byte {{"));
+        c.line("\tb := beginRecord(txSetProperty)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Prop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceElement)");
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, level)");
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil for a click on a guest-created widget (id is a widget");

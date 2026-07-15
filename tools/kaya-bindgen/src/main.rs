@@ -103,6 +103,16 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
     }
 }
 
+/// The property enum's variants: every emitter derives its per-prop
+/// helper trio (set/bind/bind-element) from this.
+pub(crate) fn prop_variants(spec: &ProtocolSpec) -> &'static [(&'static str, u32)] {
+    spec.enums
+        .iter()
+        .find(|e| e.name == "prop")
+        .expect("spec has a prop enum")
+        .variants
+}
+
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
     rec.fields
         .iter()

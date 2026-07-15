@@ -66,6 +66,7 @@ echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc --example milestone2)
 "$ROOT/tools/gen-header.sh" --check
+"$ROOT/tools/gen-bindings.sh" --check
 
 # Every kaya_* function declared in kaya.h must be exported by the DLL;
 # a missing export would otherwise surface as a remote link or load

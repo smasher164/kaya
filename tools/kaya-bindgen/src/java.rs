@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
@@ -123,29 +123,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("    /** set_property with a constant text value. */");
-    c.line("    public static byte[] txSetText(long widgetId, String text) {");
-    c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
-    c.line("        b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_CONST);");
-    c.line("        encodeValue(b, text);");
-    c.line("        return finish(b);");
-    c.line("    }");
-    c.line("");
-    c.line("    /** set_property with a signal-bound text value. */");
-    c.line("    public static byte[] txBindText(long widgetId, long signalId) {");
-    c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
-    c.line("        b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_SIGNAL).putLong(signalId);");
-    c.line("        return finish(b);");
-    c.line("    }");
-    c.line("");
-    c.line("    /** set_property bound to the element of the enclosing For, `level` Fors up. */");
-    c.line("    public static byte[] txBindTextElement(long widgetId, int level) {");
-    c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
-    c.line("        b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_ELEMENT)");
-    c.line("                .putInt(level).putInt(0);");
-    c.line("        return finish(b);");
-    c.line("    }");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        let p = camel(prop);
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        c.line("");
+        c.line(&format!("    /** set_property with a constant {prop} value. */"));
+        c.line(&format!("    public static byte[] txSet{pc}(long widgetId, String {p}) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        encodeValue(b, {p});"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_property with a signal-bound {prop} value. */"));
+        c.line(&format!("    public static byte[] txBind{pc}(long widgetId, long signalId) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line("    /** set_property bound to the element of the enclosing For, `level` Fors up. */");
+        c.line(&format!("    public static byte[] txBind{pc}Element(long widgetId, int level) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
+        c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_ELEMENT)"));
+        c.line("                .putInt(level).putInt(0);");
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
     c.line("");
     c.line("    /** Concatenate packed records into one transaction. */");
     c.line("    public static byte[] tx(byte[]... records) {");

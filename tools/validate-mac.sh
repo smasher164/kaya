@@ -14,7 +14,7 @@ cd "$ROOT"
 # behind.
 cargo build --lib --example milestone2 || exit 1
 tools/gen-header.sh --check || exit 1
-(cd tools/kaya-bindgen && cargo run --quiet -- "$ROOT" --check) || exit 1
+tools/gen-bindings.sh --check || exit 1
 
 status=0
 run() {

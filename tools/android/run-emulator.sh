@@ -18,6 +18,11 @@ SUITE="${1:-all}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+# The suites compile the generated Java binding (and the Rust core
+# against kaya.h); fail loudly if either has drifted from the source.
+tools/gen-header.sh --check
+tools/gen-bindings.sh --check
+
 # AVDs live under target/ so nothing leaks into $HOME.
 export ANDROID_AVD_HOME="$ROOT/target/avd"
 mkdir -p "$ANDROID_AVD_HOME"

@@ -181,34 +181,34 @@ struct KayaTx {
 
     /// set_property with a constant text value.
     mutating func setText(_ widgetId: UInt64, _ text: String) {
-        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))
-        u64(widgetId)
-        u32(UInt32(KAYA_PROP_TEXT))
-        u32(UInt32(KAYA_SOURCE_CONST))
-        value(.str(text))
-        end(start)
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(text))
+        self.end(start)
     }
 
     /// set_property with a signal-bound text value.
     mutating func bindText(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))
-        u64(widgetId)
-        u32(UInt32(KAYA_PROP_TEXT))
-        u32(UInt32(KAYA_SOURCE_SIGNAL))
-        u64(signalId)
-        end(start)
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
     }
 
     /// set_property bound to the element of the enclosing For,
     /// `level` Fors up (0 = nearest).
     mutating func bindTextElement(_ widgetId: UInt64, level: UInt32 = 0) {
-        let start = begin(UInt16(KAYA_TX_SET_PROPERTY))
-        u64(widgetId)
-        u32(UInt32(KAYA_PROP_TEXT))
-        u32(UInt32(KAYA_SOURCE_ELEMENT))
-        u32(level)
-        u32(0)
-        end(start)
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(0)
+        self.end(start)
     }
 
     func submit() {

@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 /// C keywords plus this header's own identifiers.
 pub const RESERVED: &[&str] = &[
@@ -173,37 +173,43 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    c.line("");
-    c.line("/* set_property with a constant text value. */");
-    c.line("static inline void kaya_tx_set_text(KayaTx *tx, uint64_t widget_id, const char *text) {");
-    c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
-    c.line("    kaya_wire_u64(tx, widget_id);");
-    c.line("    kaya_wire_u32(tx, KAYA_PROP_TEXT);");
-    c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
-    c.line("    kaya_wire_value(tx, kaya_str(text));");
-    c.line("    kaya_wire_end(tx, start);");
-    c.line("}");
-    c.line("");
-    c.line("/* set_property with a signal-bound text value. */");
-    c.line("static inline void kaya_tx_bind_text(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {");
-    c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
-    c.line("    kaya_wire_u64(tx, widget_id);");
-    c.line("    kaya_wire_u32(tx, KAYA_PROP_TEXT);");
-    c.line("    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);");
-    c.line("    kaya_wire_u64(tx, signal_id);");
-    c.line("    kaya_wire_end(tx, start);");
-    c.line("}");
-    c.line("");
-    c.line("/* set_property bound to the element of the enclosing For, `level` Fors up. */");
-    c.line("static inline void kaya_tx_bind_text_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {");
-    c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
-    c.line("    kaya_wire_u64(tx, widget_id);");
-    c.line("    kaya_wire_u32(tx, KAYA_PROP_TEXT);");
-    c.line("    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);");
-    c.line("    kaya_wire_u32(tx, level);");
-    c.line("    kaya_wire_u32(tx, 0);");
-    c.line("    kaya_wire_end(tx, start);");
-    c.line("}");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits. The constant arm
+    // takes a KayaVal; strings stay the common case via kaya_str.
+    for (prop, _) in prop_variants(spec) {
+        let up = prop.to_uppercase();
+        c.line("");
+        c.line(&format!("/* set_property with a constant {prop} value. */"));
+        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, const char *{prop}) {{"));
+        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    kaya_wire_u64(tx, widget_id);");
+        c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
+        c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
+        c.line(&format!("    kaya_wire_value(tx, kaya_str({prop}));"));
+        c.line("    kaya_wire_end(tx, start);");
+        c.line("}");
+        c.line("");
+        c.line(&format!("/* set_property with a signal-bound {prop} value. */"));
+        c.line(&format!("static inline void kaya_tx_bind_{prop}(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {{"));
+        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    kaya_wire_u64(tx, widget_id);");
+        c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
+        c.line("    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);");
+        c.line("    kaya_wire_u64(tx, signal_id);");
+        c.line("    kaya_wire_end(tx, start);");
+        c.line("}");
+        c.line("");
+        c.line("/* set_property bound to the element of the enclosing For, `level` Fors up. */");
+        c.line(&format!("static inline void kaya_tx_bind_{prop}_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {{"));
+        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    kaya_wire_u64(tx, widget_id);");
+        c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
+        c.line("    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);");
+        c.line("    kaya_wire_u32(tx, level);");
+        c.line("    kaya_wire_u32(tx, 0);");
+        c.line("    kaya_wire_end(tx, start);");
+        c.line("}");
+    }
     c.line("");
     c.line("/* Decode one value at `at`; returns the next offset. */");
     c.line("static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {");

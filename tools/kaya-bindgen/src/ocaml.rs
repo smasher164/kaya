@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_path", "finish", "parse_value", "parse_click",
@@ -89,32 +89,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("(* set_property with a constant text value. *)");
-    c.line("let tx_set_text widget_id text =");
-    c.line("  finish tx_kind_set_property (fun b ->");
-    c.line("      Buffer.add_int64_le b widget_id;");
-    c.line("      Buffer.add_int32_le b (Int32.of_int prop_text);");
-    c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
-    c.line("      encode_value b (Str text))");
-    c.line("");
-    c.line("(* set_property with a signal-bound text value. *)");
-    c.line("let tx_bind_text widget_id signal_id =");
-    c.line("  finish tx_kind_set_property (fun b ->");
-    c.line("      Buffer.add_int64_le b widget_id;");
-    c.line("      Buffer.add_int32_le b (Int32.of_int prop_text);");
-    c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
-    c.line("      Buffer.add_int64_le b signal_id)");
-    c.line("");
-    c.line("(* set_property bound to the element of the enclosing For, `level`");
-    c.line("   Fors up (0 = nearest). *)");
-    c.line("let tx_bind_text_element ?(level = 0) widget_id =");
-    c.line("  finish tx_kind_set_property (fun b ->");
-    c.line("      Buffer.add_int64_le b widget_id;");
-    c.line("      Buffer.add_int32_le b (Int32.of_int prop_text);");
-    c.line("      Buffer.add_int32_le b (Int32.of_int source_element);");
-    c.line("      Buffer.add_int32_le b (Int32.of_int level);");
-    c.line("      Buffer.add_int32_le b 0l)");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        c.line("");
+        c.line(&format!("(* set_property with a constant {prop} value. *)"));
+        c.line(&format!("let tx_set_{prop} widget_id {prop} ="));
+        c.line("  finish tx_kind_set_property (fun b ->");
+        c.line("      Buffer.add_int64_le b widget_id;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b (Str {prop}))"));
+        c.line("");
+        c.line(&format!("(* set_property with a signal-bound {prop} value. *)"));
+        c.line(&format!("let tx_bind_{prop} widget_id signal_id ="));
+        c.line("  finish tx_kind_set_property (fun b ->");
+        c.line("      Buffer.add_int64_le b widget_id;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
+        c.line("");
+        c.line("(* set_property bound to the element of the enclosing For, `level`");
+        c.line("   Fors up (0 = nearest). *)");
+        c.line(&format!("let tx_bind_{prop}_element ?(level = 0) widget_id ="));
+        c.line("  finish tx_kind_set_property (fun b ->");
+        c.line("      Buffer.add_int64_le b widget_id;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_element);");
+        c.line("      Buffer.add_int32_le b (Int32.of_int level);");
+        c.line("      Buffer.add_int32_le b 0l)");
+    }
     c.line("");
     c.line("(* Reads assembled from a byte accessor (absolute offset -> byte);");
     c.line("   kaya v1 targets are all little-endian. *)");

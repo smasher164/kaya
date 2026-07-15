@@ -5,7 +5,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
@@ -141,31 +141,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("    /// set_property with a constant text value.");
-    c.line("    public static byte[] TxSetText(ulong widgetId, string text)");
-    c.line("    {");
-    c.line("        var w = Begin(out var stream);");
-    c.line("        w.Write(widgetId); w.Write(PropText); w.Write(SourceConst);");
-    c.line("        EncodeValue(w, text);");
-    c.line("        return Finish(stream, w, TxKindSetProperty);");
-    c.line("    }");
-    c.line("");
-    c.line("    /// set_property with a signal-bound text value.");
-    c.line("    public static byte[] TxBindText(ulong widgetId, ulong signalId)");
-    c.line("    {");
-    c.line("        var w = Begin(out var stream);");
-    c.line("        w.Write(widgetId); w.Write(PropText); w.Write(SourceSignal); w.Write(signalId);");
-    c.line("        return Finish(stream, w, TxKindSetProperty);");
-    c.line("    }");
-    c.line("");
-    c.line("    /// set_property bound to the element of the enclosing For, `level` Fors up.");
-    c.line("    public static byte[] TxBindTextElement(ulong widgetId, uint level = 0)");
-    c.line("    {");
-    c.line("        var w = Begin(out var stream);");
-    c.line("        w.Write(widgetId); w.Write(PropText); w.Write(SourceElement); w.Write(level); w.Write(0u);");
-    c.line("        return Finish(stream, w, TxKindSetProperty);");
-    c.line("    }");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        let p = camel(prop);
+        let pc = pascal(prop);
+        c.line("");
+        c.line(&format!("    /// set_property with a constant {prop} value."));
+        c.line(&format!("    public static byte[] TxSet{pc}(ulong widgetId, string {p})"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceConst);"));
+        c.line(&format!("        EncodeValue(w, {p});"));
+        c.line("        return Finish(stream, w, TxKindSetProperty);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_property with a signal-bound {prop} value."));
+        c.line(&format!("    public static byte[] TxBind{pc}(ulong widgetId, ulong signalId)"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
+        c.line("        return Finish(stream, w, TxKindSetProperty);");
+        c.line("    }");
+        c.line("");
+        c.line("    /// set_property bound to the element of the enclosing For, `level` Fors up.");
+        c.line(&format!("    public static byte[] TxBind{pc}Element(ulong widgetId, uint level = 0)"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceElement); w.Write(level); w.Write(0u);"));
+        c.line("        return Finish(stream, w, TxKindSetProperty);");
+        c.line("    }");
+    }
     c.line("");
     c.line("    /// Decode one occurrence record (header included). Returns false");
     c.line("    /// for non-click records. keys is empty for a click on a");

@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, record_params};
+use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodePath", "wireRecord", "parseValue", "parseClick",
@@ -110,25 +110,31 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    c.line("");
-    c.line("-- set_property with a constant text value.");
-    c.line("txSetText :: Word64 -> String -> Builder");
-    c.line("txSetText widgetId text = wireRecord txKindSetProperty");
-    c.line("  (word64LE widgetId <> word32LE propText <> word32LE sourceConst");
-    c.line("    <> encodeValue (VStr text))");
-    c.line("");
-    c.line("-- set_property with a signal-bound text value.");
-    c.line("txBindText :: Word64 -> Word64 -> Builder");
-    c.line("txBindText widgetId signalId = wireRecord txKindSetProperty");
-    c.line("  (word64LE widgetId <> word32LE propText <> word32LE sourceSignal");
-    c.line("    <> word64LE signalId)");
-    c.line("");
-    c.line("-- set_property bound to the element of the enclosing For, `level`");
-    c.line("-- Fors up (0 = nearest).");
-    c.line("txBindTextElement :: Word64 -> Word32 -> Builder");
-    c.line("txBindTextElement widgetId level = wireRecord txKindSetProperty");
-    c.line("  (word64LE widgetId <> word32LE propText <> word32LE sourceElement");
-    c.line("    <> word32LE level <> word32LE 0)");
+    // The set_property arms, one trio per property: spec-driven so new
+    // props reach every binding without emitter edits.
+    for (prop, _) in prop_variants(spec) {
+        let p = camel(prop);
+        let pc = pascal(prop);
+        c.line("");
+        c.line(&format!("-- set_property with a constant {prop} value."));
+        c.line(&format!("txSet{pc} :: Word64 -> String -> Builder"));
+        c.line(&format!("txSet{pc} widgetId {p} = wireRecord txKindSetProperty"));
+        c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue (VStr {p}))"));
+        c.line("");
+        c.line(&format!("-- set_property with a signal-bound {prop} value."));
+        c.line(&format!("txBind{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBind{pc} widgetId signalId = wireRecord txKindSetProperty"));
+        c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
+        c.line("");
+        c.line("-- set_property bound to the element of the enclosing For, `level`");
+        c.line("-- Fors up (0 = nearest).");
+        c.line(&format!("txBind{pc}Element :: Word64 -> Word32 -> Builder"));
+        c.line(&format!("txBind{pc}Element widgetId level = wireRecord txKindSetProperty"));
+        c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceElement"));
+        c.line("    <> word32LE level <> word32LE 0)");
+    }
     c.line("");
     c.line("-- Decode one value at offset `at` from the record base; returns the");
     c.line("-- value and the next offset.");
