@@ -35,7 +35,8 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     Button, StackPanel, TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{
-    Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement, Window,
+    Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement,
+    UnhandledExceptionEventHandler, Window,
 };
 
 use crate::protocol::{
@@ -104,11 +105,25 @@ static DISPATCHER: OnceLock<SharedDispatcher> = OnceLock::new();
 /// an access violation in XAML rundown).
 static EXIT_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
+// The composed Application, kept from CreateInstance: the composition
+// outer (KayaApplication) answers only its own interfaces and does not
+// delegate QI to the inner, so Application::Current() — whose identity
+// is the outer — cannot be cast back to Application. Everything the
+// backend needs goes through this handle instead. UI thread only.
+thread_local! {
+    static APP: RefCell<Option<Application>> = const { RefCell::new(None) };
+}
+
 fn request_exit(code: i32) {
     EXIT_CODE.store(code, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(app) = Application::Current() {
-        let _ = app.Exit();
-    }
+    APP.with_borrow(|app| match app.as_ref() {
+        Some(app) => {
+            if let Err(e) = app.Exit() {
+                eprintln!("kaya: winui Application.Exit failed: {}", e.message());
+            }
+        }
+        None => eprintln!("kaya: winui request_exit before the app existed"),
+    });
 }
 
 /// Wake the UI thread so it drains pending transactions. Safe to call
@@ -134,7 +149,198 @@ fn drain_transactions() {
     });
 }
 
+/// The minimal TextBox template: text editing needs only the
+/// ScrollViewer named ContentElement; everything else of the default
+/// chrome is styling this unpackaged app cannot resource-resolve.
+const ENTRY_STYLE_XAML: &str = r#"<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="TextBox">
+  <Setter Property="MinWidth" Value="160"/>
+  <Setter Property="Padding" Value="6,4,6,4"/>
+  <Setter Property="Template">
+    <Setter.Value>
+      <ControlTemplate TargetType="TextBox">
+        <Border Background="{TemplateBinding Background}" BorderBrush="Gray" BorderThickness="1" CornerRadius="4">
+          <ScrollViewer x:Name="ContentElement" Padding="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+        </Border>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
+</Style>"#;
+
+/// Implement-scaffolding for the Application overrides interface: the
+/// generator emits it caller-side only (it is exclusive-to
+/// Application), so the trait, thunk, and vtable constructor the
+/// #[implement] macro expects live here, mirroring the generator's own
+/// pattern for IXamlMetadataProvider. The re-exports make the _Vtbl
+/// and _Impl names resolvable as siblings of the interface path the
+/// macro is given.
+mod app_overrides {
+    pub use super::bindings::Microsoft::UI::Xaml::IApplicationOverrides;
+    pub use super::bindings::Microsoft::UI::Xaml::IApplicationOverrides_Vtbl;
+    use super::bindings::Microsoft::UI::Xaml::LaunchActivatedEventArgs;
+
+    // The generator emits RuntimeName only for public interfaces; the
+    // implement macro needs it for IInspectable::GetRuntimeClassName.
+    impl windows_core::RuntimeName for IApplicationOverrides {
+        const NAME: &'static str = "Microsoft.UI.Xaml.IApplicationOverrides";
+    }
+
+    pub trait IApplicationOverrides_Impl: windows_core::IUnknownImpl {
+        fn OnLaunched(
+            &self,
+            args: windows_core::Ref<'_, LaunchActivatedEventArgs>,
+        ) -> windows_core::Result<()>;
+    }
+
+    impl IApplicationOverrides_Vtbl {
+        pub const fn new<Identity: IApplicationOverrides_Impl, const OFFSET: isize>() -> Self {
+            unsafe extern "system" fn OnLaunched<
+                Identity: IApplicationOverrides_Impl,
+                const OFFSET: isize,
+            >(
+                this: *mut core::ffi::c_void,
+                args: *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT {
+                unsafe {
+                    let this: &Identity =
+                        &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                    IApplicationOverrides_Impl::OnLaunched(this, core::mem::transmute(&args))
+                        .into()
+                }
+            }
+            Self {
+                base__: windows_core::IInspectable_Vtbl::new::<
+                    Identity,
+                    IApplicationOverrides,
+                    OFFSET,
+                >(),
+                OnLaunched: OnLaunched::<Identity, OFFSET>,
+            }
+        }
+
+        pub fn matches(iid: &windows_core::GUID) -> bool {
+            iid == &<IApplicationOverrides as windows_core::Interface>::IID
+        }
+    }
+}
+
+/// The load-bearing piece of code-only WinUI: the XAML parser resolves
+/// non-core types (TextCommandBarFlyout inside TextBox's built-in
+/// style, everything in XamlControlsResources) through an
+/// IXamlMetadataProvider it obtains by QIing the Application object —
+/// normally the subclass the XAML compiler generates. Without one,
+/// deferred theme XAML fail-fasts the process
+/// (STOWED_EXCEPTION_80004005 ... XamlSchemaContext::
+/// GetTypeInfoProvider — microsoft-ui-xaml discussions #7357/#8151).
+/// This is that subclass, done the official way: the Application is
+/// composed via COM aggregation with this object as the outer, which
+/// answers IXamlMetadataProvider by delegating to the framework's own
+/// XamlControlsXamlMetaDataProvider (prior art: windows-rs reactor,
+/// compio-rs/winio).
+#[windows_core::implement(
+    app_overrides::IApplicationOverrides,
+    bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider
+)]
+struct KayaApplication {
+    // Lazily created: the provider activates WinUI machinery that is
+    // not ready until the application object exists.
+    provider: RefCell<Option<bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider>>,
+}
+
+impl KayaApplication_Impl {
+    fn provider(
+        &self,
+    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider>
+    {
+        let mut slot = self.provider.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(
+                bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider::new()?,
+            );
+        }
+        Ok(slot.as_ref().expect("just filled").clone())
+    }
+}
+
+impl app_overrides::IApplicationOverrides_Impl for KayaApplication_Impl {
+    fn OnLaunched(
+        &self,
+        _args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::LaunchActivatedEventArgs>,
+    ) -> windows_core::Result<()> {
+        // Scene setup runs via the dispatcher from run_core's
+        // initialization callback; nothing to do at launch.
+        Ok(())
+    }
+}
+
+impl bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Impl for KayaApplication_Impl {
+    fn GetXamlType(
+        &self,
+        r#type: &bindings::Windows::UI::Xaml::Interop::TypeName,
+    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::Markup::IXamlType> {
+        self.provider()?.GetXamlType(r#type)
+    }
+
+    fn GetXamlTypeByFullName(
+        &self,
+        full_name: &windows_core::HSTRING,
+    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::Markup::IXamlType> {
+        self.provider()?.GetXamlTypeByFullName(full_name)
+    }
+
+    fn GetXmlnsDefinitions(
+        &self,
+    ) -> windows_core::Result<
+        windows_core::Array<bindings::Microsoft::UI::Xaml::Markup::XmlnsDefinition>,
+    > {
+        self.provider()?.GetXmlnsDefinitions()
+    }
+}
+
+/// Construct the Application composed with KayaApplication as the COM
+/// aggregation outer: the returned instance is the framework object,
+/// but identity QIs route to the outer, so the XAML parser finds
+/// IXamlMetadataProvider. The outer and the returned inner reference
+/// live for the process lifetime, matching the Application itself.
+fn compose_application() -> windows_core::Result<Application> {
+    use windows_core::Interface;
+    let outer: windows_core::IInspectable = KayaApplication {
+        provider: RefCell::new(None),
+    }
+    .into();
+    let factory = windows_core::factory::<
+        Application,
+        bindings::Microsoft::UI::Xaml::IApplicationFactory,
+    >()?;
+    unsafe {
+        let mut inner: *mut core::ffi::c_void = core::ptr::null_mut();
+        let mut result: *mut core::ffi::c_void = core::ptr::null_mut();
+        (Interface::vtable(&factory).CreateInstance)(
+            Interface::as_raw(&factory),
+            outer.as_raw(),
+            &mut inner,
+            &mut result,
+        )
+        .ok()?;
+        // The composed pair must outlive this frame: the framework
+        // holds the app for the process lifetime, and dropping our
+        // references here would release the aggregation.
+        std::mem::forget(outer);
+        let _ = inner; // owned by the composition; never released by us
+        windows_core::Type::from_abi(result)
+    }
+}
+
+fn trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_TRACE").is_some())
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
+    // KAYA_WINUI_TRACE=1: print every op before applying it, so a
+    // stowed-exception crash names its last op. The probe sets it.
+    if trace_enabled() {
+        eprintln!("kaya: winui apply {op:?}");
+    }
     match op {
         ApplyOp::Create { id, kind, tag } => {
             let native = match kind {
@@ -145,13 +351,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // with the entry's identity tag, and the app folds
                     // it into its own model.
                     //
-                    // KNOWN LIMITATION: in this unpackaged, code-only
-                    // Application, TextBox's default style cannot
-                    // resolve (XamlControlsResources creation itself
-                    // crashes here) and creation dies with a stowed
-                    // exception. The entry suites stay off the Windows
-                    // matrix until the WinUI resource story lands; see
-                    // deploy-win.sh.
+                    // KNOWN LIMITATION (investigated 2026-07-15, VM
+                    // evidence): rendering any TextBox in this
+                    // unpackaged, code-only Application dies within
+                    // ~1s of mount — a stowed exception (0xC000027B)
+                    // inside Microsoft.UI.Xaml.dll 3.2.2 — regardless
+                    // of resources.pri content, this minimal template,
+                    // IsEnabled, or focus. Two real prerequisites were
+                    // found and kept (MRT init needs an exe-adjacent
+                    // resources.pri — the deploy ships
+                    // tools/guest/minimal-resources.pri — and the
+                    // default template's chrome resources cannot
+                    // resolve, hence the minimal template below), but
+                    // the remaining crash needs dump analysis or a
+                    // different WinAppSDK runtime. Entry suites stay
+                    // gated in deploy-win.sh.
                     let field = TextBox::new()?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
@@ -328,7 +542,69 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // the core is deferred through the dispatcher so it runs after the
     // launch sequence completes.
     let callback = ApplicationInitializationCallback::new(move |_params| {
-        let _app = Application::new()?;
+        // XAML forwards render-loop errors to CoreApplication; with no
+        // handler there, RoReportUnhandledError fail-fasts the process
+        // (0xC000027B) — a channel Application.UnhandledException never
+        // sees. This app has one known, survivable error on that
+        // channel: deferred theme XAML (the built-in TextBox style)
+        // cannot instantiate without an IXamlMetadataProvider, which a
+        // code-only Application does not have. Propagate() rethrows the
+        // stowed HRESULT here, marking it observed; we log it and the
+        // control proceeds with its local (minimal) style.
+        let on_core_error = bindings::Windows::Foundation::EventHandler::new(
+            |_,
+             args: windows_core::Ref<
+                '_,
+                bindings::Windows::ApplicationModel::Core::UnhandledErrorDetectedEventArgs,
+            >| {
+                if let Some(args) = args.as_ref() {
+                    if let Ok(error) = args.UnhandledError() {
+                        match error.Propagate() {
+                            Ok(()) => {}
+                            Err(e) => eprintln!(
+                                "kaya: winui unhandled core error (continuing): {}",
+                                e.message()
+                            ),
+                        }
+                    }
+                }
+                Ok(())
+            },
+        );
+        // The statics interface is activated by hand: pulling in the
+        // CoreApplication class itself drags members whose types the
+        // standalone windows-* crates do not carry.
+        struct CoreApplicationMarker;
+        impl windows_core::RuntimeName for CoreApplicationMarker {
+            const NAME: &'static str = "Windows.ApplicationModel.Core.CoreApplication";
+        }
+        let unhandled: bindings::Windows::ApplicationModel::Core::ICoreApplicationUnhandledError =
+            windows_core::factory::<CoreApplicationMarker, _>()?;
+        unhandled.UnhandledErrorDetected(&on_core_error)?;
+        let app = compose_application()?;
+        APP.with_borrow_mut(|slot| *slot = Some(app));
+        // Stowed exceptions (0xC000027B) die silently; print what XAML
+        // actually complained about before the process goes down. A
+        // permanent diagnostic, not scaffolding.
+        let on_unhandled = UnhandledExceptionEventHandler::new(|_, args| {
+            if let Some(args) = args.as_ref() {
+                eprintln!(
+                    "kaya: winui unhandled exception (continuing): {}",
+                    args.Message().unwrap_or_default()
+                );
+                // Keep the process alive: backends are appliers, and
+                // the exceptions seen here in practice are resource
+                // lookups for control chrome (flyouts) that unpackaged
+                // apps resolve imperfectly. Logged, never silent.
+                args.SetHandled(true)?;
+            }
+            Ok(())
+        });
+        APP.with_borrow(|app| {
+            app.as_ref()
+                .expect("composed just above")
+                .UnhandledException(&on_unhandled)
+        })?;
         let dispatcher = DispatcherQueue::GetForCurrentThread()?;
         let occ_tx = occ_tx.clone();
         let tx_rx_cell = RefCell::new(Some(tx_rx_take()));
@@ -402,8 +678,14 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     window.Activate()?;
 
     match std::env::var("KAYA_SELFTEST") {
-        Ok(script) if script == "entry" => spawn_entry_selftest(),
-        Ok(_) => spawn_selftest(),
+        Ok(script) if script.trim() == "entry" => {
+            eprintln!("kaya: winui selftest armed (entry)");
+            spawn_entry_selftest();
+        }
+        Ok(script) => {
+            eprintln!("kaya: winui selftest armed ({script:?})");
+            spawn_selftest();
+        }
         Err(_) => {}
     }
 
@@ -512,7 +794,9 @@ fn spawn_entry_selftest() {
     }
 
     std::thread::spawn(|| {
+        eprintln!("kaya: winui selftest thread running");
         std::thread::sleep(std::time::Duration::from_millis(800));
+        eprintln!("kaya: winui selftest step: set entry text");
         on_ui(|| {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
@@ -524,6 +808,7 @@ fn spawn_entry_selftest() {
             })
         });
         std::thread::sleep(std::time::Duration::from_millis(300));
+        eprintln!("kaya: winui selftest step: click add");
         on_ui(|| {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");

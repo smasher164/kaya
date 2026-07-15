@@ -124,9 +124,11 @@ Entry (the first owned-state widget) is in every layer-3 surface:
 `on_change` registration beside `on_click`, dispatch keyed by
 (occurrence kind, id) per id space, and an entry example per language
 proving the uncontrolled fold end to end ("added milk, 1 total").
-Backends: AppKit, GTK, UIKit, SwiftUI. WinUI's TextBox is implemented
-but blocked on the unpackaged-app resource story; Android's entry
-(EditText + Compose TextField) is the next backend pass.
+Backends: AppKit, GTK, UIKit, SwiftUI, and WinUI (a code-only WinUI
+app must hand the framework's XamlControlsXamlMetaDataProvider to the
+XAML parser — see install_metadata_provider in winui/mod.rs — and ship
+an exe-adjacent resources.pri). Android's entry (EditText + Compose
+TextField) is the remaining backend pass.
 
 The north star for what layer 3 grows into is DESIGN.md's appendix
 ("the shape of an app"); the tier-1 sugar there (container

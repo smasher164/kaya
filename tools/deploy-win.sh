@@ -43,6 +43,7 @@ for arg in "$@"; do
         rust|python|go|csharp|all) SUITE="$arg" ;;
         entry_rust|entry_python|entry_go|entry_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
+        enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
@@ -105,6 +106,17 @@ if [ "$PROVISION" = 1 ]; then
     run_ssh 'C:\kaya\WindowsAppRuntimeInstall-arm64.exe --quiet --force'
 fi
 
+# A hung or leftover guest keeps kaya.dll locked: the next deploy's
+# copy fails under set -e, or a fresh suite runs beside a zombie. This
+# is a dedicated test VM — python/go/dotnet processes are always kaya
+# guests — so killing by image name is safe. Swept before deploying,
+# after any suite timeout, and on every exit path (trap below).
+kill_guests() {
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+}
+trap kill_guests EXIT
+kill_guests
+
 echo "== deploying artifacts =="
 scp -q \
     "$TARGET/examples/milestone2.exe" \
@@ -118,6 +130,7 @@ scp -q \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
+    "$ROOT/tools/guest/minimal-resources.pri" \
     "$ROOT/tools/guest/shot.ps1" \
     "$HOST:C:/kaya/"
 # Recreated from scratch every deploy: dotnet run picks up whatever
@@ -154,12 +167,31 @@ verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
 verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
 verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
 
+# Run a shipped one-shot guest script via schtasks and print the file
+# it writes once its done-marker appears.
+run_guest_oneshot() {
+    local script="$1" outfile="$2" marker="$3"
+    run_ssh "schtasks /create /tn kaya_oneshot /tr C:\\kaya\\$script /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_oneshot >nul"
+    local tries=0
+    until run_ssh "type C:\\kaya\\$outfile" 2>/dev/null | grep -q "$marker"; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 60 ]; then
+            echo "$script: no $marker after 60 polls" >&2
+            return 1
+        fi
+        sleep 2
+    done
+    run_ssh "type C:\\kaya\\$outfile"
+}
+
 # Start <exe> with no selftest via the shipped probe.cmd and report
 # whether it survives scene construction — the first question when a
 # suite exits with a stowed exception and no output.
 run_probe() {
-    local exe="$1"
-    run_ssh "del C:\\kaya\\out_probe.txt 2>nul & schtasks /create /tn kaya_probe /tr \"C:\\kaya\\probe.cmd $exe\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_probe >nul"
+    # probe=<exe> or probe=<exe>,<selftest-script>
+    local exe="${1%%,*}" script=""
+    case "$1" in *,*) script="${1#*,}" ;; esac
+    run_ssh "del C:\\kaya\\out_probe.txt 2>nul & schtasks /create /tn kaya_probe /tr \"C:\\kaya\\probe.cmd $exe $script\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_probe >nul"
     local tries=0
     until run_ssh "type C:\\kaya\\out_probe.txt" 2>/dev/null | grep -q "PROBEDONE"; do
         tries=$((tries + 1))
@@ -179,7 +211,11 @@ run_suite() {
     until run_ssh "type C:\\kaya\\out_$name.txt" 2>/dev/null | grep -q "EXIT="; do
         tries=$((tries + 1))
         if [ "$tries" -gt 60 ]; then
-            echo "$name: timed out waiting for output" >&2
+            # A guest that never writes EXIT= is hung: kill it so it
+            # cannot hold kaya.dll into the next suite or deploy, and
+            # fail this leg loudly.
+            echo "$name: timed out waiting for output; killing guests" >&2
+            kill_guests
             return 1
         fi
         sleep 5
@@ -200,14 +236,15 @@ case "$SUITE" in
         run_suite python || status=1
         run_suite go || status=1
         run_suite csharp || status=1
-        # Entry suites are deployed but not run by default: WinUI's
-        # TextBox cannot resolve its default style in this unpackaged,
-        # code-only Application (XamlControlsResources creation crashes
-        # with a stowed exception), so entry scenes die at creation.
-        # Run them individually once the resource story lands, e.g.:
-        #     deploy-win.sh user@host entry_rust
+        run_suite entry_rust || status=1
+        run_suite entry_python || status=1
+        run_suite entry_go || status=1
+        run_suite entry_csharp || status=1
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
+    enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;
+    crash-report) run_guest_oneshot crash-report.cmd out_crash_report.txt "REPORTDONE" || status=1 ;;
+    analyze-dump) run_guest_oneshot analyze-dump.cmd out_analyze.txt "ANALYZEDONE" || status=1 ;;
     *) run_suite "$SUITE" || status=1 ;;
 esac
 exit "$status"
