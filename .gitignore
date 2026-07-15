@@ -3,6 +3,8 @@ result
 .direnv
 /third_party/
 tools/winui-bindgen/target
+tools/kaya-bindgen/target
+__pycache__/
 /crates/kaya/examples/obj/
 /crates/kaya/examples/bin/
 # ocamlopt and ghc write intermediates beside the source when run

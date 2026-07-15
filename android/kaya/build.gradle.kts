@@ -19,6 +19,14 @@ android {
         compose = true
     }
 
+    sourceSets {
+        getByName("main") {
+            // The generated wire vocabulary (dev.kaya.KayaWire), shared
+            // with the desktop bindings tree; kaya-bindgen writes it.
+            java.srcDirs("../../bindings/java")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

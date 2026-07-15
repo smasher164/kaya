@@ -6,4 +6,10 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
+  <!-- The kaya bindings: the generated vocabulary and the runtime. The
+       glob is empty on the Windows VM, where the deploy copies the same
+       files next to this project instead. -->
+  <ItemGroup>
+    <Compile Include="../../../bindings/csharp/**/*.cs" />
+  </ItemGroup>
 </Project>

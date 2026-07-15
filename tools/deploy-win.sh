@@ -80,6 +80,8 @@ if [ -n "$missing" ]; then
 fi
 
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
+run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
+run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
 
 if [ "$PROVISION" = 1 ]; then
     echo "== provisioning Windows App Runtime (one-time) =="
@@ -94,6 +96,7 @@ scp -q \
     "$BOOTSTRAP" \
     "$ROOT/crates/kaya/examples/milestone2.py" \
     "$ROOT/crates/kaya/examples/milestone2.go" \
+    "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
     "$ROOT/tools/guest/shot.ps1" \
@@ -102,8 +105,11 @@ scp -q \
 # sources and project files are in the directory, so a leftover from a
 # renamed or removed example would poison the build.
 run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
+scp -q "$ROOT"/bindings/python/*.py "$HOST:C:/kaya/bindings/python/"
+scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
 scp -q "$ROOT/crates/kaya/examples/milestone2.cs" \
     "$ROOT/crates/kaya/examples/milestone2.csproj" \
+    "$ROOT"/bindings/csharp/*.cs \
     "$HOST:C:/kaya/cs/"
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,

@@ -7,6 +7,8 @@ mod app;
 mod protocol;
 mod ring;
 mod scene;
+/// The protocol as data — the root document tools/kaya-bindgen walks.
+pub mod spec;
 mod wire;
 
 #[cfg(target_os = "macos")]

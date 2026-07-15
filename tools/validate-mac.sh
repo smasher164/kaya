@@ -14,6 +14,7 @@ cd "$ROOT"
 # behind.
 cargo build --lib --example milestone2 || exit 1
 tools/gen-header.sh --check || exit 1
+(cd tools/kaya-bindgen && cargo run --quiet -- "$ROOT" --check) || exit 1
 
 status=0
 run() {
@@ -31,20 +32,21 @@ run() {
 # The OCaml guest compiles once and runs in both backend passes.
 # (ocamlopt writes its intermediates beside the source, hence the copy.)
 mkdir -p target/ocaml
-cp crates/kaya/examples/milestone2.ml crates/kaya/examples/milestone2_ml_stubs.c target/ocaml/
+cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
+    bindings/ocaml/kaya_runtime.ml crates/kaya/examples/milestone2.ml target/ocaml/
 (cd target/ocaml && ocamlfind ocamlopt \
     -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    milestone2_ml_stubs.c milestone2.ml -o milestone2-ocaml) >/dev/null
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml milestone2.ml \
+    -o milestone2-ocaml) >/dev/null
 
-# The Haskell guest, likewise compiled once (ghc also writes its
-# intermediates beside the source).
+# The Haskell guest, likewise compiled once (its intermediates go to
+# target/haskell via -outputdir).
 mkdir -p target/haskell
-cp crates/kaya/examples/milestone2.hs crates/kaya/examples/milestone2_hs_stubs.c \
-    target/haskell/
-(cd target/haskell && ghc -threaded -O -o milestone2-hs \
-    milestone2_hs_stubs.c milestone2.hs \
+ghc -threaded -O -ibindings/haskell -outputdir target/haskell \
+    -o target/haskell/milestone2-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
     -L"$ROOT/target/debug" -lkaya \
-    -optl-Wl,-rpath,"$ROOT/target/debug") >/dev/null
+    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
 
 # All six guests against the AppKit backend.
 run rust cargo run --quiet --example milestone2

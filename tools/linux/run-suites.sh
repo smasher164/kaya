@@ -19,7 +19,8 @@ status=0
 # dotnet writes obj/bin next to the csproj; build in a scratch copy so the
 # host's in-tree dotnet artifacts (different RID) are untouched.
 mkdir -p /tmp/cs
-cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj /tmp/cs/
+cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj \
+    bindings/csharp/*.cs /tmp/cs/
 
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
@@ -52,7 +53,7 @@ run() {
 
 # The C guest: the ABI's home language over the function floor.
 clang crates/kaya/examples/milestone2.c \
-    -I crates/kaya/include \
+    -I crates/kaya/include -I bindings/c \
     -o /tmp/milestone2-c \
     -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
     || status=1
@@ -64,18 +65,20 @@ clang crates/kaya/examples/milestone2.c \
 FOREIGN=ctypes-foreign
 ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
 mkdir -p /tmp/ocaml
-cp crates/kaya/examples/milestone2.ml crates/kaya/examples/milestone2_ml_stubs.c /tmp/ocaml/
+cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
+    bindings/ocaml/kaya_runtime.ml crates/kaya/examples/milestone2.ml /tmp/ocaml/
 (cd /tmp/ocaml && ocamlfind ocamlopt \
     -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    milestone2_ml_stubs.c milestone2.ml -o milestone2-ocaml) || status=1
+    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml milestone2.ml \
+    -o milestone2-ocaml) || status=1
 
 # The Haskell guest (direct ring: inline peeks + the same cursor stubs).
 mkdir -p /tmp/haskell
-cp crates/kaya/examples/milestone2.hs crates/kaya/examples/milestone2_hs_stubs.c /tmp/haskell/
-(cd /tmp/haskell && ghc -threaded -O -o milestone2-hs \
-    milestone2_hs_stubs.c milestone2.hs \
+ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell \
+    -o /tmp/haskell/milestone2-hs \
+    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
     -L"$CARGO_TARGET_DIR/debug" -lkaya \
-    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug") || status=1
+    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"

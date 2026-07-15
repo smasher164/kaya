@@ -89,10 +89,13 @@ fi
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --lib
     mkdir -p "$BUNDLES"
+    # With more than one input file, swiftc only allows top-level code in
+    # a file named main.swift; the example is that file.
+    cp tools/ios/milestone2.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        tools/ios/milestone2.swift \
+        bindings/swift/KayaWire.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
