@@ -41,7 +41,7 @@ func main() {
 
 	// The construction sugar: containers take their children,
 	// constructors carry their handlers, and the build body reads as
-	// the tree (milestone2 keeps the explicit floor on purpose).
+	// the tree (the C guests keep the explicit floor).
 	app.Build(func(tx *kaya.Tx) {
 		todos := kaya.CollectionOf[string, Todo](tx)
 		itemsLeft := todos.Derive(tx, func(items []kaya.RecordEntry[string, Todo]) string {

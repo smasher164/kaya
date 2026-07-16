@@ -23,7 +23,7 @@ kaya::record! {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     // The construction sugar: containers take their children, and the
     // build body reads as the tree (milestone2 keeps the fully
-    // explicit floor on purpose). Handlers stay in the occurrence
+    // explicit floor on purpose; see guests/c). Handlers stay in the occurrence
     // loop, the Rust idiom.
     let mut tx = ctx.begin();
     let todos = tx.collection::<Todo>();

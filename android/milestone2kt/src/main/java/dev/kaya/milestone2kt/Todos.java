@@ -8,7 +8,7 @@ import dev.kaya.KayaRecords;
  * type is the schema, constructors carry their handlers (the Swing
  * JButton(Action) shape), containers take their children, and the
  * typed collection's checkbox hands its handler the stamped
- * copy's key — no Object in sight. Milestone2 keeps the explicit floor
+ * copy's key — no Object in sight. The C guests keep the explicit floor
  * on purpose.
  */
 final class Todos {

@@ -16,15 +16,15 @@
 use kaya::{Occurrence, Prop, Value, WidgetKind};
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
+    // The construction sugar: constructors carry their props,
+    // containers take their children. Handlers stay in the occurrence
+    // loop, the Rust idiom; C's guests keep the fully explicit floor.
     let mut tx = ctx.begin();
     let status = tx.signal("step 0");
     let extras = tx.signal(false);
 
-    let column = tx.widget(WidgetKind::Column);
-    let step = tx.widget(WidgetKind::Button);
-    tx.set(step, Prop::Text, "step");
-    let status_label = tx.widget(WidgetKind::Label);
-    tx.bind(status_label, Prop::Text, status);
+    let step = tx.button("step");
+    let status_label = tx.label(status);
 
     let (banner, ()) = tx.when(extras, |t| {
         let label = t.widget(WidgetKind::Label);
@@ -35,31 +35,24 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // value — no side-channel slots.
     let groups = tx.collection::<String>();
     let (group_list, (items, remove_button)) = tx.for_each(&groups, |t| {
-        let group_column = t.widget(WidgetKind::Column);
         let name = t.widget(WidgetKind::Label);
         t.bind_element(name, Prop::Text, 0);
-        t.add_child(group_column, name);
 
         let items = t.collection::<String>();
         let (item_list, remove) = t.for_each(&items, |t| {
-            let row = t.widget(WidgetKind::Column);
             let text = t.widget(WidgetKind::Label);
             t.bind_element(text, Prop::Text, 0);
             let remove = t.widget(WidgetKind::Button);
             t.set(remove, Prop::Text, "remove");
-            t.add_child(row, text);
-            t.add_child(row, remove);
+            t.column(&[text, remove]);
             remove
         });
-        t.add_child(group_column, item_list);
+        t.column(&[name, item_list]);
         (items, remove)
     });
 
-    tx.add_child(column, step);
-    tx.add_child(column, status_label);
-    tx.add_child(column, banner);
-    tx.add_child(column, group_list);
-    tx.mount(column);
+    let root = tx.column(&[step, status_label, banner, group_list]);
+    tx.mount(root);
     tx.commit();
 
     let mut steps = 0u32;

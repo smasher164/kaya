@@ -2,7 +2,7 @@
 // the schema (Mirror walks a prototype), constructors carry their
 // props and handlers, and result-builder containers make the build
 // closure the scene's shape. The sugar lowers eagerly to the same
-// records as the explicit floor — milestone2.swift keeps that style on
+// records as the explicit floor — the C guests keep that style on
 // purpose.
 
 import Foundation

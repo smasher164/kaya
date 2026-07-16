@@ -6,7 +6,7 @@
    the schema (deriving Generic + a KayaRecord instance), constructors
    carry their props and handlers, containers take their children, and
    the do-block reads as the tree. The sugar lowers eagerly to the same
-   records as the explicit floor — milestone2.hs keeps that style on
+   records as the explicit floor — the C guests keep that style on
    purpose.
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=todos. -}

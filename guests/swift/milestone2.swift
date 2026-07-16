@@ -1,27 +1,23 @@
-// The milestone-2 scene from Swift, on the idiomatic surface
-// (KayaApp.swift): typed handles instead of hand-numbered ids, trailing
-// closures instead of template_end bookkeeping, and click handlers
-// instead of a hand-rolled dispatch loop. Handles declared inside a
-// template escape as the body's return value — build and forEach hand
-// them back out, so nothing leaks through mutable globals. The wire
-// vocabulary underneath (KayaWire.swift) is generated from kaya::spec
-// by kaya-bindgen; the kaya C declarations come from kaya.h via
+// The milestone-2 scene from Swift, on the construction sugar: typed
+// handles, constructors carrying their handlers, result-builder
+// containers taking their children, and trailing closures instead of
+// template_end bookkeeping. Handles declared inside a template escape
+// as the body's return value — build and forEach hand them back out,
+// so nothing leaks through mutable globals. The wire vocabulary
+// underneath (KayaWire.swift) is generated from kaya::spec by
+// kaya-bindgen; the kaya C declarations come from kaya.h via
 // -import-objc-header.
 
 import Foundation
 
 let app = KayaApp()
 
-let (status, extras, step, groups, items, removeButton) = app.build {
-    tx -> (KayaSignal, KayaSignal, KayaWidget, KayaCollection, KayaCollection, KayaNodeHandle) in
+var steps = 0
+
+let (status, items, removeButton) = app.build {
+    tx -> (KayaSignal, KayaCollection, KayaNodeHandle) in
     let status = tx.signal(.str("step 0"))
     let extras = tx.signal(.bool(false))
-
-    let column = tx.widget(UInt32(KAYA_KIND_COLUMN))
-    let step = tx.widget(UInt32(KAYA_KIND_BUTTON))
-    tx.setText(step, "step")
-    let statusLabel = tx.widget(UInt32(KAYA_KIND_LABEL))
-    tx.bindText(statusLabel, status)
 
     let (banner, _) = tx.when(extras) { t in
         let bannerLabel = t.widget(UInt32(KAYA_KIND_LABEL))
@@ -31,49 +27,50 @@ let (status, extras, step, groups, items, removeButton) = app.build {
     let groups = tx.collection()
     let (groupList, (items, removeButton)) = tx.forEach(groups) {
         t -> (KayaCollection, KayaNodeHandle) in
-        let groupColumn = t.widget(UInt32(KAYA_KIND_COLUMN))
         let name = t.widget(UInt32(KAYA_KIND_LABEL))
         t.bindTextElement(name)
-        t.addChild(groupColumn, name)
 
         let items = t.collection()
         let (itemList, remove) = t.forEach(items) { item -> KayaNodeHandle in
-            let row = item.widget(UInt32(KAYA_KIND_COLUMN))
             let text = item.widget(UInt32(KAYA_KIND_LABEL))
             item.bindTextElement(text)
             let remove = item.widget(UInt32(KAYA_KIND_BUTTON))
             item.setText(remove, "remove")
-            item.addChild(row, text)
-            item.addChild(row, remove)
+            _ = item.column {
+                text
+                remove
+            }
             return remove
         }
-        t.addChild(groupColumn, itemList)
+        _ = t.column {
+            name
+            itemList
+        }
         return (items, remove)
     }
 
-    tx.addChild(column, step)
-    tx.addChild(column, statusLabel)
-    tx.addChild(column, banner)
-    tx.addChild(column, groupList)
-    tx.mount(column)
-    return (status, extras, step, groups, items, removeButton)
-}
-
-var steps = 0
-app.onClick(step) { tx in
-    steps += 1
-    if steps == 1 {
-        tx.insert(groups, .str("g1"), .str("Work"))
-        let todos = items.at(.str("g1"))
-        tx.insert(todos, .str("a"), .str("send report"))
-        tx.insert(todos, .str("b"), .str("buy milk"))
-    } else if steps == 2 {
-        tx.insert(groups, .str("g2"), .str("Home"))
-        tx.insert(items.at(.str("g2")), .str("a"), .str("water plants"))
-        tx.update(groups, .str("g1"), .str("Office"))
+    let root = tx.column {
+        tx.button("step") { t in
+            steps += 1
+            if steps == 1 {
+                t.insert(groups, .str("g1"), .str("Work"))
+                let todos = items.at(.str("g1"))
+                t.insert(todos, .str("a"), .str("send report"))
+                t.insert(todos, .str("b"), .str("buy milk"))
+            } else if steps == 2 {
+                t.insert(groups, .str("g2"), .str("Home"))
+                t.insert(items.at(.str("g2")), .str("a"), .str("water plants"))
+                t.update(groups, .str("g1"), .str("Office"))
+            }
+            t.write(extras, .bool(steps == 1))
+            t.write(status, .str("step \(steps)"))
+        }
+        tx.label(bind: status)
+        banner
+        groupList
     }
-    tx.write(extras, .bool(steps == 1))
-    tx.write(status, .str("step \(steps)"))
+    tx.mount(root)
+    return (status, items, removeButton)
 }
 
 app.onClick(removeButton) { tx, keys in

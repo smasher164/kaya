@@ -750,7 +750,7 @@ impl Tx<'_> {
     /// body reads as the tree. Lowers to the same records — children
     /// were created by the caller, then the container, then the
     /// add_childs. Handlers stay in the occurrence loop, the Rust
-    /// idiom; milestone2 keeps the fully explicit floor on purpose.
+    /// idiom; the C guests keep the fully explicit floor.
     pub fn column(&mut self, children: &[WidgetId]) -> WidgetId {
         self.container_of(WidgetKind::Column, children)
     }

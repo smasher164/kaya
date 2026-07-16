@@ -2,7 +2,7 @@
 // is the schema, constructors carry their props and handlers, and
 // params-array containers make the build body the scene's shape. The
 // sugar lowers eagerly to the same records as the explicit floor —
-// Milestone2Scene keeps that style on purpose.
+// the C guests keep that style on purpose.
 //
 //     KAYA_SELFTEST=todos KAYA_LIB=target/debug/libkaya.dylib \
 //         dotnet run --project guests/csharp

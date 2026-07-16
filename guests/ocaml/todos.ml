@@ -3,7 +3,7 @@
    ([@@deriving kaya]), constructors carry their props and handlers,
    containers take their children, and the tree reads as a tree. The
    sugar lowers eagerly to the same records as the explicit floor —
-   milestone2.ml keeps that style on purpose.
+   the C guests keep that style on purpose.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=todos. *)
 
