@@ -236,7 +236,7 @@ func (tx *Tx) Collection() Collection {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	tx.records = append(tx.records, TxCreateCollection(c.id))
+	tx.records = append(tx.records, TxCreateCollection(c.id, []uint32{ValueStr}))
 	return c
 }
 
@@ -267,12 +267,12 @@ func (tx *Tx) When(s Signal, fn func(*Tpl)) Widget {
 
 func (tx *Tx) Insert(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, value))
+	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, []any{value}))
 }
 
 func (tx *Tx) Update(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, value))
+	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, []any{value}))
 }
 
 func (tx *Tx) Remove(c Collection, key any) {
@@ -322,7 +322,7 @@ func (t *Tpl) SetText(n Node, text string) {
 // BindTextElement binds text to the element of the enclosing For,
 // `level` Fors up (0 = nearest).
 func (t *Tpl) BindTextElement(n Node, level uint32) {
-	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level))
+	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level, 0))
 }
 
 func (t *Tpl) AddChild(parent, child Node) {

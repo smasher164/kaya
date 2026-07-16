@@ -38,6 +38,7 @@ let tx_kind_collection_remove = 10
 let tx_kind_create_for = 11
 let tx_kind_create_when = 12
 let tx_kind_template_end = 13
+let tx_kind_collection_update_field = 14
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -74,10 +75,18 @@ let encode_value b v =
   pad8 b
 
 (* A key path: {u32 count, u32 reserved, count values}. *)
-let encode_path b keys =
-  Buffer.add_int32_le b (Int32.of_int (List.length keys));
+(* A counted value sequence: a key path or a record. *)
+let encode_values b vals =
+  Buffer.add_int32_le b (Int32.of_int (List.length vals));
   Buffer.add_int32_le b 0l;
-  List.iter (encode_value b) keys
+  List.iter (encode_value b) vals
+
+(* A collection schema: counted value-type tags, padded to 8. *)
+let encode_type_tags b tags =
+  Buffer.add_int32_le b (Int32.of_int (List.length tags));
+  Buffer.add_int32_le b 0l;
+  List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) tags;
+  pad8 b
 
 let finish kind fill =
   let b = Buffer.create 64 in
@@ -121,32 +130,33 @@ let tx_mount window root =
       Buffer.add_int64_le b window;
       Buffer.add_int64_le b root)
 
-(* Declare a collection (a blueprint when inside a template). *)
-let tx_create_collection collection_id =
+(* Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. *)
+let tx_create_collection collection_id schema =
   finish tx_kind_create_collection (fun b ->
-      Buffer.add_int64_le b collection_id)
+      Buffer.add_int64_le b collection_id;
+      encode_type_tags b schema)
 
-(* Insert an entry into the instance at `path`; stamps a copy. *)
-let tx_collection_insert collection_id path key value =
+(* Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. *)
+let tx_collection_insert collection_id path key fields =
   finish tx_kind_collection_insert (fun b ->
       Buffer.add_int64_le b collection_id;
-      encode_path b path;
+      encode_values b path;
       encode_value b key;
-      encode_value b value)
+      encode_values b fields)
 
-(* Update an entry's value; element bindings follow. *)
-let tx_collection_update collection_id path key value =
+(* Replace an entry's record; every element binding follows. *)
+let tx_collection_update collection_id path key fields =
   finish tx_kind_collection_update (fun b ->
       Buffer.add_int64_le b collection_id;
-      encode_path b path;
+      encode_values b path;
       encode_value b key;
-      encode_value b value)
+      encode_values b fields)
 
 (* Remove an entry; its stamped copy tears down. *)
 let tx_collection_remove collection_id path key =
   finish tx_kind_collection_remove (fun b ->
       Buffer.add_int64_le b collection_id;
-      encode_path b path;
+      encode_values b path;
       encode_value b key)
 
 (* A For over a collection; opens a template scope until template_end. *)
@@ -166,6 +176,16 @@ let tx_template_end () =
   finish tx_kind_template_end (fun b ->
       ignore b)
 
+(* Set one field of an entry's record; only bindings on that field re-resolve. *)
+let tx_collection_update_field collection_id path key field value =
+  finish tx_kind_collection_update_field (fun b ->
+      Buffer.add_int64_le b collection_id;
+      encode_values b path;
+      encode_value b key;
+      Buffer.add_int32_le b (Int32.of_int field);
+      Buffer.add_int32_le b 0l;
+      encode_value b value)
+
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
   finish tx_kind_set_property (fun b ->
@@ -182,15 +202,15 @@ let tx_bind_text widget_id signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
-(* set_property bound to the element of the enclosing For, `level`
-   Fors up (0 = nearest). *)
-let tx_bind_text_element ?(level = 0) widget_id =
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_text_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_text);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
-      Buffer.add_int32_le b 0l)
+      Buffer.add_int32_le b (Int32.of_int field))
 
 (* set_property with a constant checked value. *)
 let tx_set_checked widget_id checked =
@@ -208,15 +228,15 @@ let tx_bind_checked widget_id signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
-(* set_property bound to the element of the enclosing For, `level`
-   Fors up (0 = nearest). *)
-let tx_bind_checked_element ?(level = 0) widget_id =
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_checked_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_checked);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
-      Buffer.add_int32_le b 0l)
+      Buffer.add_int32_le b (Int32.of_int field))
 
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)

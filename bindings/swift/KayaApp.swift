@@ -322,7 +322,7 @@ final class KayaAppTx {
     func collection() -> KayaCollection {
         let c = app.nextCollection()
         app.registerCollection(c.id)
-        tx.createCollection(c.id)
+        tx.createCollection(c.id, [UInt32(KAYA_VALUE_STR)])
         return c
     }
 
@@ -352,12 +352,12 @@ final class KayaAppTx {
 
     func insert(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
-        tx.collectionInsert(c.id, c.path, key, value)
+        tx.collectionInsert(c.id, c.path, key, [value])
     }
 
     func update(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
-        tx.collectionUpdate(c.id, c.path, key, value)
+        tx.collectionUpdate(c.id, c.path, key, [value])
     }
 
     func remove(_ c: KayaCollection, _ key: KayaValue) {

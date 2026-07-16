@@ -33,14 +33,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     // Handles declared inside a template escape as the body's return
     // value — no side-channel slots.
-    let groups = tx.collection();
+    let groups = tx.collection::<String>();
     let (group_list, (items, remove_button)) = tx.for_each(&groups, |t| {
         let group_column = t.widget(WidgetKind::Column);
         let name = t.widget(WidgetKind::Label);
         t.bind_element(name, Prop::Text, 0);
         t.add_child(group_column, name);
 
-        let items = t.collection();
+        let items = t.collection::<String>();
         let (item_list, remove) = t.for_each(&items, |t| {
             let row = t.widget(WidgetKind::Column);
             let text = t.widget(WidgetKind::Label);

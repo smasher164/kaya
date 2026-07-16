@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, Key, Prop, PropValue, SignalId, Transaction, TxOp, Value, WidgetId,
-    WidgetKind,
+    ApplyOp, CollectionId, Key, Prop, PropValue, Record, SignalId, Transaction, TxOp, Value,
+    ValueType, WidgetId, WidgetKind,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -81,12 +81,15 @@ struct CollDecl {
     /// collection declared in its own scope.
     scope: u64,
     bound: bool,
+    /// The ordered field types every entry must match; a scalar
+    /// collection is the one-field case.
+    schema: Vec<ValueType>,
 }
 
 #[derive(Default)]
 struct CollInstance {
     order: Vec<Key>,
-    entries: HashMap<Key, Value>,
+    entries: HashMap<Key, Record>,
 }
 
 /// A live rendering site of a For: the (collection, instance path) it
@@ -125,8 +128,8 @@ pub(crate) struct Scene {
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
-    /// entry -> the (widget, property) pairs its value feeds.
-    element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop)>>,
+    /// entry -> the (widget, property, field) triples its record feeds.
+    element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
     template_nodes: HashMap<u64, WidgetKind>,
     collections: HashMap<CollectionId, CollDecl>,
@@ -152,17 +155,42 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
 
-/// Every property has one value type (spec::PROPS), and the typed
-/// setters the bindings generate enforce it at compile time — but the
-/// wire itself is untyped, so an ill-typed record from a raw guest must
-/// die here, not in whichever backend applies it. The match is
+/// Every property has one value type (spec::PROPS). The match is
 /// exhaustive: a new prop cannot ship without declaring its type.
+fn prop_value_type(prop: Prop) -> ValueType {
+    match prop {
+        Prop::Text => ValueType::Str,
+        Prop::Checked => ValueType::Bool,
+    }
+}
+
+/// The typed setters the bindings generate enforce prop types at
+/// compile time — but the wire itself is untyped, so an ill-typed
+/// record from a raw guest must die here, not in whichever backend
+/// applies it.
 fn check_prop_value(prop: Prop, value: &Value) {
-    let ok = match prop {
-        Prop::Text => matches!(value, Value::Str(_)),
-        Prop::Checked => matches!(value, Value::Bool(_)),
-    };
-    assert!(ok, "kaya: {prop:?} cannot hold {value:?}");
+    assert!(
+        value.type_of() == prop_value_type(prop),
+        "kaya: {prop:?} cannot hold {value:?}"
+    );
+}
+
+/// An entry's record against its collection's schema: arity, then each
+/// field's type. Positional and typed is the whole contract; names
+/// never travel.
+fn check_record(schema: &[ValueType], record: &[Value], what: &str) {
+    assert!(
+        record.len() == schema.len(),
+        "kaya: {what} has {} fields, schema declares {}",
+        record.len(),
+        schema.len()
+    );
+    for (i, (value, ty)) in record.iter().zip(schema).enumerate() {
+        assert!(
+            value.type_of() == *ty,
+            "kaya: {what} field {i} is {value:?}, schema declares {ty:?}"
+        );
+    }
 }
 
 fn check_type(current: &Value, incoming: &Value, what: &str) {
@@ -311,7 +339,11 @@ impl Scene {
                     self.mounted = true;
                     out.push(ApplyOp::Mount { window, root });
                 }
-                TxOp::CreateCollection { id } => {
+                TxOp::CreateCollection { id, schema } => {
+                    assert!(
+                        !schema.is_empty(),
+                        "kaya: collection {id:?} declares an empty schema"
+                    );
                     let clash = self
                         .collections
                         .insert(
@@ -319,6 +351,7 @@ impl Scene {
                             CollDecl {
                                 scope: 0,
                                 bound: false,
+                                schema,
                             },
                         )
                         .is_some();
@@ -332,14 +365,21 @@ impl Scene {
                     id,
                     path,
                     key,
-                    value,
-                } => self.insert_entry(id, path, key, value, &mut out),
+                    record,
+                } => self.insert_entry(id, path, key, record, &mut out),
                 TxOp::CollectionUpdate {
                     id,
                     path,
                     key,
+                    record,
+                } => self.update_entry(id, path, key, record, &mut out),
+                TxOp::CollectionUpdateField {
+                    id,
+                    path,
+                    key,
+                    field,
                     value,
-                } => self.update_entry(id, path, key, value, &mut out),
+                } => self.update_field_entry(id, path, key, field, value, &mut out),
                 TxOp::CollectionRemove { id, path, key } => {
                     self.remove_entry(id, path, key, &mut out)
                 }
@@ -454,7 +494,7 @@ impl Scene {
                         });
                         check_prop_value(prop, current);
                     }
-                    PropValue::Element { level } => {
+                    PropValue::Element { level, field } => {
                         let depth = scopes
                             .iter()
                             .filter(|s| matches!(s.header, ScopeHeader::For { .. }))
@@ -462,6 +502,32 @@ impl Scene {
                         assert!(
                             *level < depth,
                             "kaya: element level {level} exceeds For nesting depth {depth}"
+                        );
+                        // The For `level` Fors up names a collection whose
+                        // schema is already declared, so a field binding is
+                        // validated here — before anything ever stamps:
+                        // index in bounds, field type against prop type.
+                        let collection = scopes
+                            .iter()
+                            .rev()
+                            .filter_map(|s| match s.header {
+                                ScopeHeader::For { collection, .. } => Some(collection),
+                                ScopeHeader::When { .. } => None,
+                            })
+                            .nth(*level as usize)
+                            .expect("level checked against For depth above");
+                        let schema = &self.collections[&collection].schema;
+                        assert!(
+                            (*field as usize) < schema.len(),
+                            "kaya: field {field} out of bounds for {collection:?} \
+                             ({} fields)",
+                            schema.len()
+                        );
+                        assert!(
+                            schema[*field as usize] == prop_value_type(prop),
+                            "kaya: {prop:?} cannot bind field {field} of {collection:?} \
+                             (a {:?} field)",
+                            schema[*field as usize]
                         );
                         // Re-borrow after the immutable walk above.
                         let top = scopes.last_mut().unwrap();
@@ -498,7 +564,11 @@ impl Scene {
                     child: child.0,
                 });
             }
-            TxOp::CreateCollection { id } => {
+            TxOp::CreateCollection { id, schema } => {
+                assert!(
+                    !schema.is_empty(),
+                    "kaya: collection {id:?} declares an empty schema"
+                );
                 let scope = top.scope;
                 let clash = self
                     .collections
@@ -507,6 +577,7 @@ impl Scene {
                         CollDecl {
                             scope,
                             bound: false,
+                            schema,
                         },
                     )
                     .is_some();
@@ -694,14 +765,24 @@ impl Scene {
             })
     }
 
+    fn schema_of(&self, id: CollectionId) -> Vec<ValueType> {
+        self.collections
+            .get(&id)
+            .unwrap_or_else(|| panic!("kaya: delta on unknown collection {id:?}"))
+            .schema
+            .clone()
+    }
+
     fn insert_entry(
         &mut self,
         id: CollectionId,
         path: Vec<Value>,
         key: Value,
-        value: Value,
+        record: Record,
         out: &mut Vec<ApplyOp>,
     ) {
+        let schema = self.schema_of(id);
+        check_record(&schema, &record, &format!("insert into {id:?}"));
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
         let inst = self.instance_mut(id, &path);
@@ -710,7 +791,7 @@ impl Scene {
             "kaya: key {key:?} already present in {id:?} at {path:?} (update is explicit)"
         );
         inst.order.push(key.clone());
-        inst.entries.insert(key.clone(), value);
+        inst.entries.insert(key.clone(), record);
         self.stamp_entry(id, &path, &key, out);
     }
 
@@ -719,9 +800,11 @@ impl Scene {
         id: CollectionId,
         path: Vec<Value>,
         key: Value,
-        value: Value,
+        record: Record,
         out: &mut Vec<ApplyOp>,
     ) {
+        let schema = self.schema_of(id);
+        check_record(&schema, &record, &format!("update of {id:?}"));
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
         let inst = self.instance_mut(id, &path);
@@ -729,16 +812,59 @@ impl Scene {
             .entries
             .get_mut(&key)
             .unwrap_or_else(|| panic!("kaya: update of missing key {key:?} in {id:?}"));
-        check_type(current, &value, &format!("entry {key:?} of {id:?}"));
-        *current = value.clone();
-        // The data changed; every property fed by this entry follows.
+        *current = record.clone();
+        // The data changed; every property fed by this entry follows,
+        // each from its own field.
         if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
-            for (widget, prop) in bound {
+            for (widget, prop, field) in bound {
                 out.push(ApplyOp::SetProp {
                     id: *widget,
                     prop: *prop,
-                    value: value.clone(),
+                    value: record[*field as usize].clone(),
                 });
+            }
+        }
+    }
+
+    /// One field's delta: only bindings on that field re-resolve — the
+    /// O(change) doctrine applied within an entry.
+    fn update_field_entry(
+        &mut self,
+        id: CollectionId,
+        path: Vec<Value>,
+        key: Value,
+        field: u32,
+        value: Value,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let schema = self.schema_of(id);
+        assert!(
+            (field as usize) < schema.len(),
+            "kaya: field {field} out of bounds for {id:?} ({} fields)",
+            schema.len()
+        );
+        assert!(
+            value.type_of() == schema[field as usize],
+            "kaya: field {field} of {id:?} is {:?}, cannot hold {value:?}",
+            schema[field as usize]
+        );
+        let path: PathKey = path.iter().map(Key::from_value).collect();
+        let key = Key::from_value(&key);
+        let inst = self.instance_mut(id, &path);
+        let current = inst
+            .entries
+            .get_mut(&key)
+            .unwrap_or_else(|| panic!("kaya: update of missing key {key:?} in {id:?}"));
+        current[field as usize] = value.clone();
+        if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
+            for (widget, prop, bound_field) in bound {
+                if *bound_field == field {
+                    out.push(ApplyOp::SetProp {
+                        id: *widget,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
             }
         }
     }
@@ -842,15 +968,15 @@ impl Scene {
                                 value: current,
                             });
                         }
-                        PropValue::Element { level } => {
+                        PropValue::Element { level, field } => {
                             let entry = chain[chain.len() - 1 - *level as usize].clone();
                             let current = self.coll_instances[&(entry.0, entry.1.clone())]
-                                .entries[&entry.2]
+                                .entries[&entry.2][*field as usize]
                                 .clone();
                             self.element_bindings
                                 .entry(entry.clone())
                                 .or_default()
-                                .push((id, *prop));
+                                .push((id, *prop, *field));
                             stamp.element_binds.push((entry, id));
                             out.push(ApplyOp::SetProp {
                                 id,
@@ -982,7 +1108,7 @@ impl Scene {
         }
         for (entry, widget) in &stamp.element_binds {
             if let Some(bound) = self.element_bindings.get_mut(entry) {
-                bound.retain(|(w, _)| w != widget);
+                bound.retain(|(w, _, _)| w != widget);
             }
         }
         for id in stamp.widgets.iter().rev() {
@@ -1030,7 +1156,7 @@ mod tests {
                 value: PropValue::Const(v("extras")),
             },
             TxOp::TemplateEnd,
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 3,
                 collection: CollectionId(1),
@@ -1046,13 +1172,13 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(21),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 0 },
+                value: PropValue::Element { level: 0, field: 0 },
             },
             TxOp::AddChild {
                 parent: WidgetId(20),
                 child: WidgetId(21),
             },
-            TxOp::CreateCollection { id: CollectionId(2) },
+            TxOp::CreateCollection { id: CollectionId(2), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 22,
                 collection: CollectionId(2),
@@ -1064,7 +1190,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(30),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 0 },
+                value: PropValue::Element { level: 0, field: 0 },
             },
             TxOp::CreateWidget {
                 id: WidgetId(31),
@@ -1101,7 +1227,7 @@ mod tests {
             id: CollectionId(id),
             path,
             key: v(key),
-            value: v(value),
+            record: vec![v(value)],
         }
     }
 
@@ -1193,7 +1319,7 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("g1"),
-            value: v("Home"),
+            record: vec![v("Home")],
         }]);
         assert_eq!(ops.len(), 1);
         assert!(
@@ -1261,7 +1387,7 @@ mod tests {
                 id: SignalId(1),
                 initial: v("tick"),
             },
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1303,7 +1429,7 @@ mod tests {
     fn data_before_for_stamps_at_bind_time() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             insert(1, vec![], "a", "early"),
         ]);
         let ops = scene.apply(vec![
@@ -1318,7 +1444,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(10),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 0 },
+                value: PropValue::Element { level: 0, field: 0 },
             },
             TxOp::TemplateEnd,
             TxOp::Mount {
@@ -1337,12 +1463,12 @@ mod tests {
         // An item row shows its group's name: element level 1.
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
             },
-            TxOp::CreateCollection { id: CollectionId(2) },
+            TxOp::CreateCollection { id: CollectionId(2), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 10,
                 collection: CollectionId(2),
@@ -1354,7 +1480,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(20),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 1 },
+                value: PropValue::Element { level: 1, field: 0 },
             },
             TxOp::TemplateEnd,
             TxOp::TemplateEnd,
@@ -1374,12 +1500,135 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("g1"),
-            value: v("Home"),
+            record: vec![v("Home")],
         }]);
         assert!(ops.iter().any(|op| matches!(
             op,
             ApplyOp::SetProp { value, .. } if *value == v("Home")
         )));
+    }
+
+    /// A record collection end to end: a {title: Str, done: Bool}
+    /// schema, a template binding each field to its own prop, and a
+    /// field update that re-resolves only the bindings on that field.
+    #[test]
+    fn record_fields_bind_and_update_independently() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                schema: vec![ValueType::Str, ValueType::Bool],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Checkbox },
+            TxOp::SetProperty {
+                widget: WidgetId(11),
+                prop: Prop::Checked,
+                value: PropValue::Element { level: 0, field: 1 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let ops = scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            record: vec![v("buy milk"), Value::Bool(false)],
+        }]);
+        // Stamping resolved each field to its own binding.
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetProp { prop: Prop::Text, value, .. } if *value == v("buy milk")
+        )));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetProp { prop: Prop::Checked, value, .. }
+                if *value == Value::Bool(false)
+        )));
+
+        // One field's delta: exactly one SetProp, on the Checked binding.
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            field: 1,
+            value: Value::Bool(true),
+        }]);
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            &ops[0],
+            ApplyOp::SetProp { prop: Prop::Checked, value, .. }
+                if *value == Value::Bool(true)
+        ));
+    }
+
+    /// An insert whose record disagrees with the schema — wrong arity
+    /// or wrong field type — dies at validation.
+    #[test]
+    #[should_panic(expected = "field 1 is")]
+    fn ill_typed_record_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                schema: vec![ValueType::Str, ValueType::Bool],
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                record: vec![v("buy milk"), v("not a bool")],
+            },
+        ]);
+    }
+
+    /// A field binding is validated at template declaration — before
+    /// anything stamps: a Checked prop cannot bind a Str field.
+    #[test]
+    #[should_panic(expected = "cannot bind field 0")]
+    fn ill_typed_field_binding_fails_at_declaration() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                schema: vec![ValueType::Str, ValueType::Bool],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Checkbox },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Checked,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// A field index past the schema is caught at declaration too.
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn field_binding_out_of_bounds_fails_at_declaration() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                schema: vec![ValueType::Str],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 3 },
+            },
+            TxOp::TemplateEnd,
+        ]);
     }
 
     /// The wire is untyped; the scene is not. A raw guest sending a
@@ -1431,7 +1680,7 @@ mod tests {
     fn duplicate_insert_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             insert(1, vec![], "a", "x"),
             insert(1, vec![], "a", "y"),
         ]);
@@ -1442,7 +1691,7 @@ mod tests {
     fn cross_scope_for_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1462,7 +1711,7 @@ mod tests {
     fn element_level_out_of_range_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1474,7 +1723,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(10),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 1 },
+                value: PropValue::Element { level: 1, field: 0 },
             },
             TxOp::TemplateEnd,
         ]);
@@ -1485,7 +1734,7 @@ mod tests {
     fn unterminated_template_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),

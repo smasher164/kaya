@@ -84,6 +84,8 @@ txKindCreateWhen :: Word16
 txKindCreateWhen = 12
 txKindTemplateEnd :: Word16
 txKindTemplateEnd = 13
+txKindCollectionUpdateField :: Word16
+txKindCollectionUpdateField = 14
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -116,9 +118,18 @@ encodeValue v = case v of
           <> byteString (BS.replicate (padded - n) 0)
 
 -- A key path: {u32 count, u32 reserved, count values}.
-encodePath :: [Value] -> Builder
-encodePath keys =
-  word32LE (fromIntegral (length keys)) <> word32LE 0 <> foldMap encodeValue keys
+-- | A counted value sequence: a key path or a record.
+encodeValues :: [Value] -> Builder
+encodeValues vals =
+  word32LE (fromIntegral (length vals)) <> word32LE 0 <> foldMap encodeValue vals
+
+-- | A collection schema: counted value-type tags, padded to 8.
+encodeTypeTags :: [Word32] -> Builder
+encodeTypeTags tags =
+  let body = word32LE (fromIntegral (length tags)) <> word32LE 0 <> foldMap word32LE tags
+      len = 8 + 4 * length tags
+      padding = (8 - len `mod` 8) `mod` 8
+   in body <> byteString (BS.replicate padding 0)
 
 wireRecord :: Word16 -> Builder -> Builder
 wireRecord kind body =
@@ -148,21 +159,21 @@ txAddChild parent child = wireRecord txKindAddChild (word64LE parent <> word64LE
 txMount :: Word64 -> Word64 -> Builder
 txMount window root = wireRecord txKindMount (word64LE window <> word64LE root)
 
--- Declare a collection (a blueprint when inside a template).
-txCreateCollection :: Word64 -> Builder
-txCreateCollection collectionId = wireRecord txKindCreateCollection (word64LE collectionId)
+-- Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
+txCreateCollection :: Word64 -> [Word32] -> Builder
+txCreateCollection collectionId schema = wireRecord txKindCreateCollection (word64LE collectionId <> encodeTypeTags schema)
 
--- Insert an entry into the instance at `path`; stamps a copy.
-txCollectionInsert :: Word64 -> [Value] -> Value -> Value -> Builder
-txCollectionInsert collectionId path key value = wireRecord txKindCollectionInsert (word64LE collectionId <> encodePath path <> encodeValue key <> encodeValue value)
+-- Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
+txCollectionInsert :: Word64 -> [Value] -> Value -> [Value] -> Builder
+txCollectionInsert collectionId path key fields = wireRecord txKindCollectionInsert (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues fields)
 
--- Update an entry's value; element bindings follow.
-txCollectionUpdate :: Word64 -> [Value] -> Value -> Value -> Builder
-txCollectionUpdate collectionId path key value = wireRecord txKindCollectionUpdate (word64LE collectionId <> encodePath path <> encodeValue key <> encodeValue value)
+-- Replace an entry's record; every element binding follows.
+txCollectionUpdate :: Word64 -> [Value] -> Value -> [Value] -> Builder
+txCollectionUpdate collectionId path key fields = wireRecord txKindCollectionUpdate (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues fields)
 
 -- Remove an entry; its stamped copy tears down.
 txCollectionRemove :: Word64 -> [Value] -> Value -> Builder
-txCollectionRemove collectionId path key = wireRecord txKindCollectionRemove (word64LE collectionId <> encodePath path <> encodeValue key)
+txCollectionRemove collectionId path key = wireRecord txKindCollectionRemove (word64LE collectionId <> encodeValues path <> encodeValue key)
 
 -- A For over a collection; opens a template scope until template_end.
 txCreateFor :: Word64 -> Word64 -> Builder
@@ -176,6 +187,10 @@ txCreateWhen id signalId = wireRecord txKindCreateWhen (word64LE id <> word64LE 
 txTemplateEnd :: Builder
 txTemplateEnd = wireRecord txKindTemplateEnd (mempty)
 
+-- Set one field of an entry's record; only bindings on that field re-resolve.
+txCollectionUpdateField :: Word64 -> [Value] -> Value -> Word32 -> Value -> Builder
+txCollectionUpdateField collectionId path key field value = wireRecord txKindCollectionUpdateField (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE field <> word32LE 0 <> encodeValue value)
+
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
 txSetText widgetId text = wireRecord txKindSetProperty
@@ -188,12 +203,12 @@ txBindText widgetId signalId = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propText <> word32LE sourceSignal
     <> word64LE signalId)
 
--- set_property bound to the element of the enclosing For, `level`
--- Fors up (0 = nearest).
-txBindTextElement :: Word64 -> Word32 -> Builder
-txBindTextElement widgetId level = wireRecord txKindSetProperty
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindTextElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindTextElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propText <> word32LE sourceElement
-    <> word32LE level <> word32LE 0)
+    <> word32LE level <> word32LE field)
 
 -- set_property with a constant checked value.
 txSetChecked :: Word64 -> Bool -> Builder
@@ -207,12 +222,12 @@ txBindChecked widgetId signalId = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propChecked <> word32LE sourceSignal
     <> word64LE signalId)
 
--- set_property bound to the element of the enclosing For, `level`
--- Fors up (0 = nearest).
-txBindCheckedElement :: Word64 -> Word32 -> Builder
-txBindCheckedElement widgetId level = wireRecord txKindSetProperty
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindCheckedElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindCheckedElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propChecked <> word32LE sourceElement
-    <> word32LE level <> word32LE 0)
+    <> word32LE level <> word32LE field)
 
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.

@@ -950,6 +950,70 @@ feature rather than reconstructed per backend afterward.
   done, as always: a scene exercising both operators — a nested For with
   per-group items and a When toggle — green on the full matrix from
   every guest.
+- Milestone 3 is records and field projection: collection elements grow
+  from scalars to fixed-shape records, so a todo is `{title, done}` and a
+  template binds `title` to a label's text and `done` to a checkbox's
+  checked. Every collection declares a schema at creation — an ordered
+  list of value types, nothing else — and a scalar collection is the
+  one-field case, not a separate mode. The rejected alternative was an
+  optional schema (schema-less collections keeping milestone-2 semantics
+  beside typed ones): that bifurcation is permanent — every later
+  collection feature, reorder ops, sum types, virtualization, would need
+  semantics and tests in both modes — and it leaves scalar element
+  bindings unchecked forever, while mandatory schemas complete the typing
+  story: with the For's collection known and the collection's schema
+  known, an element binding is validated at template declaration (field
+  index in bounds, field type against the property's type), earlier than
+  any other write in the system. Field names never travel: the wire
+  carries positional values and type tags, and names live in the binding
+  that declared them, because nothing core-side ever resolves one — the
+  invariant to preserve is that no hot path anywhere resolves a name;
+  the scene's checks are an array-bounds test and a type-tag compare.
+  Self-describing records (names on the wire) were rejected as pure
+  inspectability with real cost: strings in every insert, a second
+  encoding to validate, and the C floor wants indexes anyway. There is
+  deliberately no record value type: a schema'd insert is N trailing
+  values, positionally matched, and `Value::Record` waits for the
+  feature that actually needs a record *as a value* — nested fields or
+  sum-typed payloads — because adding it early means dead
+  encode/decode/reject paths in every binding (keys in paths must reject
+  it, signals cannot hold it) with negative tests for each. Projection
+  is one integer: the element source in a template property gains a
+  field index (scalar collections use field 0), and stamping resolves
+  `record[field]`. Mutation gains one op, update_field(collection, path,
+  key, field, value): a single field's delta, so toggling `done` never
+  resends `title`, and only bindings on that field re-resolve — the
+  O(change) doctrine applied within an entry. Keys stay separate from
+  the record on the wire; lifting a named field to the key
+  (`collection(key="id")`) is binding sugar at insert time. Guest-side,
+  the language's own record declaration is the single source of truth:
+  a Python dataclass, a Rust `record!` struct, a Haskell Generic
+  deriving, an OCaml ppx, a C#/Java record class, a Go tagged struct, a
+  Swift prototype — the binding derives the wire schema, the
+  conversions, and a set of field tokens from that one declaration, so
+  schema, insert order, and indexes cannot drift (the same
+  single-source move as the spec-driven emitters, applied to app
+  types). Field tokens are first-class typed projections (index plus
+  value kind, `Todo::DONE : Field<Bool>`) and exist because two sites
+  have no record instance to translate: binding a field in template
+  position, and updating one field of one entry — in static languages
+  they make prop/field type agreement a compile error, the third
+  agreeing layer above the scene's declaration-time check and the
+  setters' signatures. Fields whose type the wire cannot carry (a
+  handler in the record) are guest-only: they live in the guest's model
+  — which stores native records; the patch-producing fold means reads
+  never translate, and translation happens once per mutation, outbound
+  — and never reach the wire. Derives target the encoder, not a value
+  tree: record framing and type tags are compile-time constants, so an
+  insert is a constant prefix plus spliced payloads, the shape the
+  generated property setters already have; dynamic languages precompile
+  per-field encoder closures at declaration. Guests run at occurrence
+  rate, not frame rate, so this is discipline rather than necessity —
+  but it is cheap discipline, pinned by a benchmark leg rather than
+  review vigilance. Definition of done: the appendix's todo scene —
+  entry, add button, a For of checkbox-plus-label rows, items-left
+  label, field-level toggle updates — green on the full matrix from
+  every guest.
 - The conformance gallery is the definition of done. A widget is admitted
   when its scene passes on every platform, and the scene list grows one
   widget at a time, seeded by the layout-normalization worklist scenes.

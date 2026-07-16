@@ -207,7 +207,7 @@ let collection tx =
       Hashtbl.replace tx.app.children parent
         (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
   | [] -> ());
-  emit tx (Kaya_wire.tx_create_collection id);
+  emit tx (Kaya_wire.tx_create_collection id [Kaya_wire.value_str]);
   { cid = id; cpath = [] }
 
 (* The instance of this collection inside the copy keyed by [key] of
@@ -222,11 +222,11 @@ let assert_root c =
 
 let insert c key value tx =
   model_set tx c.cid c.cpath key value;
-  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key value)
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [value])
 
 let update c key value tx =
   model_set tx c.cid c.cpath key value;
-  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key value)
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [value])
 
 let remove c key tx =
   model_remove tx c.cid c.cpath key;

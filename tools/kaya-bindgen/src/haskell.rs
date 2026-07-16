@@ -9,7 +9,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encodeValue", "encodePath", "wireRecord", "parseValue", "parseOccurrence",
+    "encodeValue", "encodeValues", "encodeTypeTags", "wireRecord", "parseValue", "parseOccurrence",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -91,9 +91,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          <> byteString (BS.replicate (padded - n) 0)");
     c.line("");
     c.line("-- A key path: {u32 count, u32 reserved, count values}.");
-    c.line("encodePath :: [Value] -> Builder");
-    c.line("encodePath keys =");
-    c.line("  word32LE (fromIntegral (length keys)) <> word32LE 0 <> foldMap encodeValue keys");
+    c.line("-- | A counted value sequence: a key path or a record.");
+    c.line("encodeValues :: [Value] -> Builder");
+    c.line("encodeValues vals =");
+    c.line("  word32LE (fromIntegral (length vals)) <> word32LE 0 <> foldMap encodeValue vals");
+    c.line("");
+    c.line("-- | A collection schema: counted value-type tags, padded to 8.");
+    c.line("encodeTypeTags :: [Word32] -> Builder");
+    c.line("encodeTypeTags tags =");
+    c.line("  let body = word32LE (fromIntegral (length tags)) <> word32LE 0 <> foldMap word32LE tags");
+    c.line("      len = 8 + 4 * length tags");
+    c.line("      padding = (8 - len `mod` 8) `mod` 8");
+    c.line("   in body <> byteString (BS.replicate padding 0)");
     c.line("");
     c.line("wireRecord :: Word16 -> Builder -> Builder");
     c.line("wireRecord kind body =");
@@ -132,12 +141,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceSignal"));
         c.line("    <> word64LE signalId)");
         c.line("");
-        c.line("-- set_property bound to the element of the enclosing For, `level`");
-        c.line("-- Fors up (0 = nearest).");
-        c.line(&format!("txBind{pc}Element :: Word64 -> Word32 -> Builder"));
-        c.line(&format!("txBind{pc}Element widgetId level = wireRecord txKindSetProperty"));
+        c.line("-- set_property bound to one field of the element of the enclosing");
+        c.line("-- For, `level` Fors up (0 = nearest; field 0 for a scalar).");
+        c.line(&format!("txBind{pc}Element :: Word64 -> Word32 -> Word32 -> Builder"));
+        c.line(&format!("txBind{pc}Element widgetId level field = wireRecord txKindSetProperty"));
         c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceElement"));
-        c.line("    <> word32LE level <> word32LE 0)");
+        c.line("    <> word32LE level <> word32LE field)");
     }
     c.line("");
     c.line("-- Decode one value at offset `at` from the record base; returns the");
@@ -200,7 +209,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => "Word32",
             FieldTy::U64 => "Word64",
             FieldTy::Value => "Value",
-            FieldTy::Path => "[Value]",
+            FieldTy::Values => "[Value]",
+            FieldTy::TypeTags => "[Word32]",
         });
         names.push(camel(f.name));
     }
@@ -218,7 +228,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("word32LE {}", camel(f.name)),
             FieldTy::U64 => format!("word64LE {}", camel(f.name)),
             FieldTy::Value => format!("encodeValue {}", camel(f.name)),
-            FieldTy::Path => format!("encodePath {}", camel(f.name)),
+            FieldTy::Values => format!("encodeValues {}", camel(f.name)),
+            FieldTy::TypeTags => format!("encodeTypeTags {}", camel(f.name)),
         });
     }
     let body = if body.is_empty() {

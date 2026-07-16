@@ -252,7 +252,7 @@ instance Declare Build where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n})
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [W.valueStr]})
   forEach coll body =
     Build $ \s ->
       let cid = assertRoot coll
@@ -278,7 +278,7 @@ instance Declare Tpl where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n})
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [W.valueStr]})
   forEach coll body =
     Tpl $ \s ->
       let cid = assertRoot coll
@@ -305,12 +305,12 @@ writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key value,
+  ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key [value],
           bModel = modelSet n path key value (bModel s)})
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key value,
+  ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key [value],
           bModel = modelSet n path key value (bModel s)})
 
 remove :: Collection -> W.Value -> Build ()
@@ -338,7 +338,7 @@ bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
 bindTextElement :: Node -> Word32 -> Tpl ()
-bindTextElement (Node n) level = emitT (W.txBindTextElement n level)
+bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
 
 -- The app: id counters that outlive any one transaction, and the
 -- dispatch tables.

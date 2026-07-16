@@ -310,7 +310,7 @@ public final class KayaApp {
         public Collection collection() {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
-            records.add(KayaWire.txCreateCollection(c.id));
+            records.add(KayaWire.txCreateCollection(c.id, new int[] { KayaWire.VALUE_STR }));
             return c;
         }
 
@@ -359,12 +359,12 @@ public final class KayaApp {
 
         public void insert(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, value));
+            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, new Object[] { value }));
         }
 
         public void update(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, value));
+            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, new Object[] { value }));
         }
 
         public void remove(Collection c, Object key) {
@@ -424,7 +424,7 @@ public final class KayaApp {
          * Fors up (0 = nearest).
          */
         public void bindTextElement(Node n, int level) {
-            tx.records.add(KayaWire.txBindTextElement(n.id, level));
+            tx.records.add(KayaWire.txBindTextElement(n.id, level, 0));
         }
 
         public void addChild(Node parent, Node child) {

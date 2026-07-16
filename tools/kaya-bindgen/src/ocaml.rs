@@ -10,7 +10,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encode_value", "encode_path", "finish", "parse_value", "parse_occurrence",
+    "encode_value", "encode_values", "encode_type_tags", "finish", "parse_value", "parse_occurrence",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
     "include", "inherit", "initializer", "lazy", "let", "match", "method", "module", "mutable",
@@ -66,10 +66,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  pad8 b");
     c.line("");
     c.line("(* A key path: {u32 count, u32 reserved, count values}. *)");
-    c.line("let encode_path b keys =");
-    c.line("  Buffer.add_int32_le b (Int32.of_int (List.length keys));");
+    c.line("(* A counted value sequence: a key path or a record. *)");
+    c.line("let encode_values b vals =");
+    c.line("  Buffer.add_int32_le b (Int32.of_int (List.length vals));");
     c.line("  Buffer.add_int32_le b 0l;");
-    c.line("  List.iter (encode_value b) keys");
+    c.line("  List.iter (encode_value b) vals");
+    c.line("");
+    c.line("(* A collection schema: counted value-type tags, padded to 8. *)");
+    c.line("let encode_type_tags b tags =");
+    c.line("  Buffer.add_int32_le b (Int32.of_int (List.length tags));");
+    c.line("  Buffer.add_int32_le b 0l;");
+    c.line("  List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) tags;");
+    c.line("  pad8 b");
     c.line("");
     c.line("let finish kind fill =");
     c.line("  let b = Buffer.create 64 in");
@@ -113,15 +121,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
         c.line("      Buffer.add_int64_le b signal_id)");
         c.line("");
-        c.line("(* set_property bound to the element of the enclosing For, `level`");
-        c.line("   Fors up (0 = nearest). *)");
-        c.line(&format!("let tx_bind_{prop}_element ?(level = 0) widget_id ="));
+        c.line("(* set_property bound to one field of the element of the enclosing");
+        c.line("   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)");
+        c.line(&format!("let tx_bind_{prop}_element ?(level = 0) ?(field = 0) widget_id ="));
         c.line("  finish tx_kind_set_property (fun b ->");
         c.line("      Buffer.add_int64_le b widget_id;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_element);");
         c.line("      Buffer.add_int32_le b (Int32.of_int level);");
-        c.line("      Buffer.add_int32_le b 0l)");
+        c.line("      Buffer.add_int32_le b (Int32.of_int field))");
     }
     c.line("");
     c.line("(* Reads assembled from a byte accessor (absolute offset -> byte);");
@@ -197,7 +205,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("      Buffer.add_int32_le b (Int32.of_int {})", f.name),
             FieldTy::U64 => format!("      Buffer.add_int64_le b {}", f.name),
             FieldTy::Value => format!("      encode_value b {}", f.name),
-            FieldTy::Path => format!("      encode_path b {}", f.name),
+            FieldTy::Values => format!("      encode_values b {}", f.name),
+            FieldTy::TypeTags => format!("      encode_type_tags b {}", f.name),
         });
     }
     if lines.is_empty() {

@@ -111,12 +111,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    kaya_wire_pad(tx);");
     c.line("}");
     c.line("");
-    c.line("/* A key path: {u32 count, u32 reserved, count values}. */");
-    c.line("static inline void kaya_wire_path(KayaTx *tx, const KayaVal *keys, uint32_t n) {");
+    c.line("/* A counted value sequence — a key path or a record: {u32 count,");
+    c.line(" * u32 reserved, count values}. */");
+    c.line("static inline void kaya_wire_values(KayaTx *tx, const KayaVal *vals, uint32_t n) {");
     c.line("    kaya_wire_u32(tx, n);");
     c.line("    kaya_wire_u32(tx, 0);");
     c.line("    for (uint32_t i = 0; i < n; i++)");
-    c.line("        kaya_wire_value(tx, keys[i]);");
+    c.line("        kaya_wire_value(tx, vals[i]);");
+    c.line("}");
+    c.line("");
+    c.line("/* A collection schema: {u32 count, u32 reserved, count KAYA_VALUE_*");
+    c.line(" * tags}, padded to 8. */");
+    c.line("static inline void kaya_wire_type_tags(KayaTx *tx, const uint32_t *tags, uint32_t n) {");
+    c.line("    kaya_wire_u32(tx, n);");
+    c.line("    kaya_wire_u32(tx, 0);");
+    c.line("    for (uint32_t i = 0; i < n; i++)");
+    c.line("        kaya_wire_u32(tx, tags[i]);");
+    c.line("    kaya_wire_pad(tx);");
     c.line("}");
     c.line("");
     c.line("static inline size_t kaya_wire_begin(KayaTx *tx, uint16_t kind) {");
@@ -144,7 +155,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::U32 => format!("uint32_t {}", f.name),
                 FieldTy::U64 => format!("uint64_t {}", f.name),
                 FieldTy::Value => format!("KayaVal {}", f.name),
-                FieldTy::Path => format!("const KayaVal *{}, uint32_t {}_len", f.name, f.name),
+                FieldTy::Values => format!("const KayaVal *{}, uint32_t {}_len", f.name, f.name),
+                FieldTy::TypeTags => {
+                    format!("const uint32_t *{}, uint32_t {}_len", f.name, f.name)
+                }
             });
         }
         c.line("");
@@ -164,8 +178,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::U32 => format!("    kaya_wire_u32(tx, {});", f.name),
                 FieldTy::U64 => format!("    kaya_wire_u64(tx, {});", f.name),
                 FieldTy::Value => format!("    kaya_wire_value(tx, {});", f.name),
-                FieldTy::Path => {
-                    format!("    kaya_wire_path(tx, {}, {}_len);", f.name, f.name)
+                FieldTy::Values => {
+                    format!("    kaya_wire_values(tx, {}, {}_len);", f.name, f.name)
+                }
+                FieldTy::TypeTags => {
+                    format!("    kaya_wire_type_tags(tx, {}, {}_len);", f.name, f.name)
                 }
             });
         }
@@ -203,14 +220,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    kaya_wire_end(tx, start);");
         c.line("}");
         c.line("");
-        c.line("/* set_property bound to the element of the enclosing For, `level` Fors up. */");
-        c.line(&format!("static inline void kaya_tx_bind_{prop}_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {{"));
+        c.line("/* set_property bound to one field of the element of the enclosing");
+        c.line(" * For, `level` Fors up (field 0 for a scalar collection). */");
+        c.line(&format!("static inline void kaya_tx_bind_{prop}_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {{"));
         c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);");
         c.line("    kaya_wire_u32(tx, level);");
-        c.line("    kaya_wire_u32(tx, 0);");
+        c.line("    kaya_wire_u32(tx, field);");
         c.line("    kaya_wire_end(tx, start);");
         c.line("}");
     }

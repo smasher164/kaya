@@ -371,7 +371,7 @@ sealed class Tx
     {
         var c = App.NextCollection();
         App.RegisterCollection(c.Id);
-        Records.Add(KayaWire.TxCreateCollection(c.Id));
+        Records.Add(KayaWire.TxCreateCollection(c.Id, new uint[] { KayaWire.ValueStr }));
         return c;
     }
 
@@ -402,13 +402,13 @@ sealed class Tx
     public void Insert(Collection c, object key, object value)
     {
         ModelSet(c.Id, c.Path, key, value);
-        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, value));
+        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, new[] { value }));
     }
 
     public void Update(Collection c, object key, object value)
     {
         ModelSet(c.Id, c.Path, key, value);
-        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, value));
+        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, new[] { value }));
     }
 
     public void Remove(Collection c, object key)

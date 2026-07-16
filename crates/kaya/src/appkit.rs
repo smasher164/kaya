@@ -371,6 +371,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     match std::env::var("KAYA_SELFTEST") {
         Ok(script) if script == "entry" => spawn_entry_selftest(),
         Ok(script) if script == "gallery" => spawn_gallery_selftest(),
+        Ok(script) if script == "todos" => spawn_todos_selftest(),
         Ok(_) => spawn_selftest(),
         Err(_) => {}
     }
@@ -490,6 +491,67 @@ fn spawn_gallery_selftest() {
                 let label = core.selftest_label.as_ref().expect("the scene has a label");
                 let text = label.stringValue().to_string();
                 if text == "urgent: true" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
+/// the entry's delegate path, click Add, toggle the stamped row's
+/// checkbox — a field-level update — and read the items-left label.
+fn spawn_todos_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let (field, delegate) = core
+                    .selftest_entry
+                    .as_ref()
+                    .expect("the scene has an entry");
+                field.setStringValue(&NSString::from_str("buy milk"));
+                delegate.emit("buy milk");
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let button = core
+                    .selftest_button
+                    .as_ref()
+                    .expect("the scene has a button");
+                unsafe { button.performClick(None) };
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let boxed = core
+                    .selftest_checkbox
+                    .as_ref()
+                    .expect("the scene has stamped a checkbox");
+                unsafe { boxed.performClick(None) };
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let label = core.selftest_label.as_ref().expect("the scene has a label");
+                let text = label.stringValue().to_string();
+                if text == "0 items left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

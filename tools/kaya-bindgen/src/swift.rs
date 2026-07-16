@@ -100,10 +100,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    }");
     c.line("");
     c.line("    /// A key path: {u32 count, u32 reserved, count values}.");
-    c.line("    mutating func path(_ keys: [KayaValue]) {");
-    c.line("        u32(UInt32(keys.count))");
+    c.line("    /// A counted value sequence — a key path or a record.");
+    c.line("    mutating func values(_ vals: [KayaValue]) {");
+    c.line("        u32(UInt32(vals.count))");
     c.line("        u32(0)");
-    c.line("        for key in keys { value(key) }");
+    c.line("        for v in vals { value(v) }");
+    c.line("    }");
+    c.line("");
+    c.line("    /// A collection schema: counted KAYA_VALUE_* tags, padded to 8.");
+    c.line("    mutating func typeTags(_ tags: [UInt32]) {");
+    c.line("        u32(UInt32(tags.count))");
+    c.line("        u32(0)");
+    c.line("        for t in tags { u32(t) }");
+    c.line("        while bytes.count % 8 != 0 { bytes.append(0) }");
     c.line("    }");
     c.line("");
     c.line("    mutating func begin(_ kind: UInt16) -> Int {");
@@ -160,15 +169,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        self.end(start)");
         c.line("    }");
         c.line("");
-        c.line("    /// set_property bound to the element of the enclosing For,");
-        c.line("    /// `level` Fors up (0 = nearest).");
-        c.line(&format!("    mutating func bind{pc}Element(_ widgetId: UInt64, level: UInt32 = 0) {{"));
+        c.line("    /// set_property bound to one field of the element of the");
+        c.line("    /// enclosing For, `level` Fors up (0 = nearest).");
+        c.line(&format!("    mutating func bind{pc}Element(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {{"));
         c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_ELEMENT))");
         c.line("        self.u32(level)");
-        c.line("        self.u32(0)");
+        c.line("        self.u32(field)");
         c.line("        self.end(start)");
         c.line("    }");
     }
@@ -242,7 +251,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("_ {}: UInt32", camel(f.name)),
             FieldTy::U64 => format!("_ {}: UInt64", camel(f.name)),
             FieldTy::Value => format!("_ {}: KayaValue", camel(f.name)),
-            FieldTy::Path => format!("_ {}: [KayaValue]", camel(f.name)),
+            FieldTy::Values => format!("_ {}: [KayaValue]", camel(f.name)),
+            FieldTy::TypeTags => format!("_ {}: [UInt32]", camel(f.name)),
         });
     }
     c.line("");
@@ -262,7 +272,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("        self.u32({})", camel(f.name)),
             FieldTy::U64 => format!("        self.u64({})", camel(f.name)),
             FieldTy::Value => format!("        self.value({})", camel(f.name)),
-            FieldTy::Path => format!("        self.path({})", camel(f.name)),
+            FieldTy::Values => format!("        self.values({})", camel(f.name)),
+            FieldTy::TypeTags => format!("        self.typeTags({})", camel(f.name)),
         });
     }
     c.line("        self.end(start)");

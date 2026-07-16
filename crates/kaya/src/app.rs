@@ -15,46 +15,282 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
-    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, PropValue, SignalId, TemplateNodeId,
-    Transaction, TxOp, Value, WidgetId, WidgetKind,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, PropValue, Record, SignalId, TemplateNodeId,
+    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
+
+// --- Records: the app type is the schema --------------------------------
+//
+// The guest's own struct declaration is the single source of truth: the
+// record! macro derives the wire schema, the conversions, and one field
+// token per field, so schema, insert order, and indexes cannot drift.
+// Field tokens are typed projections — Field<K> carries the field's
+// value kind — and the typed prop tokens (props::TEXT, props::CHECKED)
+// carry theirs, so binding a Bool field to a Str property is a compile
+// error, the earliest of the three agreeing layers (token unification,
+// the scene's declaration-time check, the setters' signatures).
+
+/// A value-kind marker, unifying field tokens with prop tokens at
+/// compile time.
+pub trait ValueKind {
+    const TYPE: ValueType;
+}
+pub struct StrKind;
+pub struct BoolKind;
+pub struct I64Kind;
+pub struct F64Kind;
+impl ValueKind for StrKind {
+    const TYPE: ValueType = ValueType::Str;
+}
+impl ValueKind for BoolKind {
+    const TYPE: ValueType = ValueType::Bool;
+}
+impl ValueKind for I64Kind {
+    const TYPE: ValueType = ValueType::I64;
+}
+impl ValueKind for F64Kind {
+    const TYPE: ValueType = ValueType::F64;
+}
+
+/// A first-class typed projection: one field of a record type, by
+/// position. Exists because two sites have no record instance in hand —
+/// binding a field in template position, and updating one field of one
+/// entry.
+pub struct Field<K> {
+    pub index: u32,
+    _kind: PhantomData<K>,
+}
+
+impl<K> Field<K> {
+    pub const fn new(index: u32) -> Self {
+        Field {
+            index,
+            _kind: PhantomData,
+        }
+    }
+}
+
+/// A property with its value kind in the type. The plain Prop enum
+/// stays the wire form; these tokens exist so bind_field can unify the
+/// prop's kind with the field's at compile time.
+pub struct PropToken<K> {
+    pub prop: Prop,
+    _kind: PhantomData<K>,
+}
+
+pub mod props {
+    use super::{BoolKind, PropToken, StrKind};
+    use crate::protocol::Prop;
+    use std::marker::PhantomData;
+
+    pub const TEXT: PropToken<StrKind> = PropToken {
+        prop: Prop::Text,
+        _kind: PhantomData,
+    };
+    pub const CHECKED: PropToken<BoolKind> = PropToken {
+        prop: Prop::Checked,
+        _kind: PhantomData,
+    };
+}
+
+/// A Rust type that can be one record field.
+pub trait KayaField: Clone {
+    type Kind: ValueKind;
+    fn to_value(&self) -> Value;
+    fn from_value(v: &Value) -> Self;
+}
+
+impl KayaField for String {
+    type Kind = StrKind;
+    fn to_value(&self) -> Value {
+        Value::Str(self.clone())
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Str(s) => s.clone(),
+            other => panic!("kaya: expected a Str field, model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for bool {
+    type Kind = BoolKind;
+    fn to_value(&self) -> Value {
+        Value::Bool(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Bool(b) => *b,
+            other => panic!("kaya: expected a Bool field, model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for i64 {
+    type Kind = I64Kind;
+    fn to_value(&self) -> Value {
+        Value::I64(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => *n,
+            other => panic!("kaya: expected an I64 field, model holds {other:?}"),
+        }
+    }
+}
+
+impl KayaField for f64 {
+    type Kind = F64Kind;
+    fn to_value(&self) -> Value {
+        Value::F64(*self)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::F64(x) => *x,
+            other => panic!("kaya: expected an F64 field, model holds {other:?}"),
+        }
+    }
+}
+
+/// A collection element type: schema plus conversions, derived by
+/// record! (or hand-written; the derive just deletes the sync
+/// obligation between the three).
+pub trait KayaRecord: Clone {
+    const SCHEMA: &'static [ValueType];
+    fn to_values(&self) -> Record;
+    fn from_values(values: &[Value]) -> Self;
+}
+
+/// A scalar collection is the one-field case: a String element, field 0.
+impl KayaRecord for String {
+    const SCHEMA: &'static [ValueType] = &[ValueType::Str];
+    fn to_values(&self) -> Record {
+        vec![Value::Str(self.clone())]
+    }
+    fn from_values(values: &[Value]) -> Self {
+        <String as KayaField>::from_value(&values[0])
+    }
+}
+
+/// Declare a record type: the struct, its KayaRecord impl, and one
+/// field-token fn per field (same name as the field; fns and fields
+/// live in different namespaces).
+///
+/// ```ignore
+/// kaya::record! {
+///     pub struct Todo { pub title: String, pub done: bool }
+/// }
+/// let todos = tx.collection::<Todo>();
+/// t.bind_field(check, kaya::props::CHECKED, 0, Todo::done());
+/// ```
+#[macro_export]
+macro_rules! record {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident {
+            $($fvis:vis $field:ident : $ty:ty),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, PartialEq)]
+        $vis struct $name {
+            $($fvis $field: $ty),+
+        }
+
+        impl $crate::KayaRecord for $name {
+            const SCHEMA: &'static [$crate::ValueType] =
+                &[$(<<$ty as $crate::KayaField>::Kind as $crate::ValueKind>::TYPE),+];
+
+            fn to_values(&self) -> Vec<$crate::Value> {
+                vec![$($crate::KayaField::to_value(&self.$field)),+]
+            }
+
+            fn from_values(values: &[$crate::Value]) -> Self {
+                let mut at = 0usize;
+                $(
+                    let $field = <$ty as $crate::KayaField>::from_value(&values[at]);
+                    at += 1;
+                )+
+                let _ = at;
+                Self { $($field),+ }
+            }
+        }
+
+        impl $name {
+            $crate::__record_fields!(0u32; $($fvis $field : $ty),+);
+        }
+    };
+}
+
+/// Internal: the field-token fns, indexed by position.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __record_fields {
+    ($idx:expr;) => {};
+    ($idx:expr; $fvis:vis $field:ident : $ty:ty $(, $rvis:vis $rfield:ident : $rty:ty)*) => {
+        $fvis fn $field() -> $crate::Field<<$ty as $crate::KayaField>::Kind> {
+            $crate::Field::new($idx)
+        }
+        $crate::__record_fields!($idx + 1; $($rvis $rfield : $rty),*);
+    };
+}
 
 /// One instance of a collection: the table inside the stamped copy
 /// selected by `path` (the empty path for a live-zone collection).
-/// Entries keep insertion order, matching the core's rendering.
+/// Entries keep insertion order, matching the core's rendering; values
+/// are wire-shaped records, parsed to the element type on read.
 #[derive(Clone, Debug)]
 struct Instance {
     path: Vec<Value>,
-    entries: Vec<(Value, Value)>,
+    entries: Vec<(Value, Record)>,
 }
 
-/// A collection instance handle: the collection plus the key path
-/// selecting one stamped copy's table. `tx.collection()` returns the
-/// root (empty-path, live-zone) handle; `at(key)` steps into a copy,
-/// one key per enclosing For. Mutations and reads take the handle, so
-/// the target is spelled once.
-#[derive(Clone, Debug)]
-pub struct Collection {
+/// A collection instance handle, typed by its element: the collection
+/// plus the key path selecting one stamped copy's table.
+/// `tx.collection::<T>()` returns the root (empty-path, live-zone)
+/// handle; `at(key)` steps into a copy, one key per enclosing For.
+/// Mutations and reads take the handle, so the target is spelled once
+/// and record/handle agreement is a type, not a convention.
+#[derive(Debug)]
+pub struct Collection<T: KayaRecord = String> {
     id: CollectionId,
     path: Vec<Value>,
+    _element: PhantomData<T>,
 }
 
-impl Collection {
+// Derived Clone would require T: Clone on the handle itself; the handle
+// clones regardless of the element.
+impl<T: KayaRecord> Clone for Collection<T> {
+    fn clone(&self) -> Self {
+        Collection {
+            id: self.id,
+            path: self.path.clone(),
+            _element: PhantomData,
+        }
+    }
+}
+
+impl<T: KayaRecord> Collection<T> {
     /// The instance of this collection inside the copy keyed by `key`
     /// of the next enclosing For; chain for deeper nesting.
-    pub fn at(&self, key: impl Into<Value>) -> Collection {
+    pub fn at(&self, key: impl Into<Value>) -> Collection<T> {
         let mut path = self.path.clone();
         path.push(key.into());
-        Collection { id: self.id, path }
+        Collection {
+            id: self.id,
+            path,
+            _element: PhantomData,
+        }
     }
 }
 
 /// A For binds the collection itself — its template stamps per entry
 /// of every instance — so handing it an `at(...)` handle is a bug.
-fn assert_root(collection: &Collection) {
+fn assert_root<T: KayaRecord>(collection: &Collection<T>) {
     assert!(
         collection.path.is_empty(),
         "kaya: for_each binds the collection itself, not an instance — drop the at(...)"
@@ -181,7 +417,7 @@ impl Tx<'_> {
         }
     }
 
-    fn model_set(&mut self, collection: CollectionId, path: &[Value], key: &Value, value: &Value) {
+    fn model_set(&mut self, collection: CollectionId, path: &[Value], key: &Value, record: &[Value]) {
         self.touch(collection);
         let mut model = self.ctx.model.borrow_mut();
         let instances = model.entry(collection).or_default();
@@ -196,9 +432,28 @@ impl Tx<'_> {
             }
         };
         match instance.entries.iter_mut().find(|(k, _)| k == key) {
-            Some((_, v)) => *v = value.clone(),
-            None => instance.entries.push((key.clone(), value.clone())),
+            Some((_, v)) => *v = record.to_vec(),
+            None => instance.entries.push((key.clone(), record.to_vec())),
         }
+    }
+
+    fn model_set_field(
+        &mut self,
+        collection: CollectionId,
+        path: &[Value],
+        key: &Value,
+        field: u32,
+        value: &Value,
+    ) {
+        self.touch(collection);
+        let mut model = self.ctx.model.borrow_mut();
+        let record = model
+            .get_mut(&collection)
+            .and_then(|instances| instances.iter_mut().find(|i| i.path == path))
+            .and_then(|i| i.entries.iter_mut().find(|(k, _)| k == key))
+            .map(|(_, record)| record)
+            .unwrap_or_else(|| panic!("kaya: update_field of missing key {key:?}"));
+        record[field as usize] = value.clone();
     }
 
     fn model_remove(&mut self, collection: CollectionId, path: &[Value], key: &Value) {
@@ -239,18 +494,24 @@ impl Tx<'_> {
     }
 
     /// The model: what this guest wrote, exactly — the fold of every
-    /// committed patch plus this transaction's own, in insertion order.
-    pub fn items(&self, instance: &Collection) -> Vec<(Value, Value)> {
+    /// committed patch plus this transaction's own, in insertion order,
+    /// parsed to the element type on the way out.
+    pub fn items<T: KayaRecord>(&self, instance: &Collection<T>) -> Vec<(Value, T)> {
         self.ctx
             .model
             .borrow()
             .get(&instance.id)
             .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
-            .map(|i| i.entries.clone())
+            .map(|i| {
+                i.entries
+                    .iter()
+                    .map(|(k, record)| (k.clone(), T::from_values(record)))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
-    pub fn len(&self, instance: &Collection) -> usize {
+    pub fn len<T: KayaRecord>(&self, instance: &Collection<T>) -> usize {
         self.ctx
             .model
             .borrow()
@@ -302,51 +563,81 @@ impl Tx<'_> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
-    /// Declare a collection: a core-side keyed table a For renders.
-    /// Returns the root instance handle (the live-zone table).
-    pub fn collection(&mut self) -> Collection {
+    /// Declare a collection of `T` records: a core-side keyed table a
+    /// For renders. The element type is the schema — `T::SCHEMA` goes
+    /// on the wire here, and every field access derives from the same
+    /// declaration. Returns the root instance handle.
+    pub fn collection<T: KayaRecord>(&mut self) -> Collection<T> {
         let id = self.ctx.alloc_collection();
         self.ctx.register_collection(id);
-        self.ops.push(TxOp::CreateCollection { id });
+        self.ops.push(TxOp::CreateCollection {
+            id,
+            schema: T::SCHEMA.to_vec(),
+        });
         Collection {
             id,
             path: Vec::new(),
+            _element: PhantomData,
         }
     }
 
-    pub fn insert(
+    pub fn insert<T: KayaRecord>(
         &mut self,
-        instance: &Collection,
+        instance: &Collection<T>,
         key: impl Into<Value>,
-        value: impl Into<Value>,
+        value: impl Into<T>,
     ) {
-        let (key, value) = (key.into(), value.into());
-        self.model_set(instance.id, &instance.path, &key, &value);
+        let (key, record) = (key.into(), value.into().to_values());
+        self.model_set(instance.id, &instance.path, &key, &record);
         self.ops.push(TxOp::CollectionInsert {
             id: instance.id,
             path: instance.path.clone(),
             key,
-            value,
+            record,
         });
     }
 
-    pub fn update(
+    pub fn update<T: KayaRecord>(
         &mut self,
-        instance: &Collection,
+        instance: &Collection<T>,
         key: impl Into<Value>,
-        value: impl Into<Value>,
+        value: impl Into<T>,
     ) {
-        let (key, value) = (key.into(), value.into());
-        self.model_set(instance.id, &instance.path, &key, &value);
+        let (key, record) = (key.into(), value.into().to_values());
+        self.model_set(instance.id, &instance.path, &key, &record);
         self.ops.push(TxOp::CollectionUpdate {
             id: instance.id,
             path: instance.path.clone(),
             key,
+            record,
+        });
+    }
+
+    /// One field's delta: the model mutates one slot, the wire carries
+    /// one value, and only bindings on that field re-resolve. The field
+    /// token pins the value's type to the field's at compile time.
+    pub fn update_field<T: KayaRecord, K, V>(
+        &mut self,
+        instance: &Collection<T>,
+        key: impl Into<Value>,
+        field: Field<K>,
+        value: V,
+    ) where
+        K: ValueKind,
+        V: KayaField<Kind = K>,
+    {
+        let (key, value) = (key.into(), value.to_value());
+        self.model_set_field(instance.id, &instance.path, &key, field.index, &value);
+        self.ops.push(TxOp::CollectionUpdateField {
+            id: instance.id,
+            path: instance.path.clone(),
+            key,
+            field: field.index,
             value,
         });
     }
 
-    pub fn remove(&mut self, instance: &Collection, key: impl Into<Value>) {
+    pub fn remove<T: KayaRecord>(&mut self, instance: &Collection<T>, key: impl Into<Value>) {
         let key = key.into();
         self.model_remove(instance.id, &instance.path, &key);
         self.ops.push(TxOp::CollectionRemove {
@@ -361,9 +652,9 @@ impl Tx<'_> {
     /// Returns the For's widget id (a container in the live tree)
     /// alongside the body's result — the way handles declared inside
     /// the template (nested collections, buttons) reach the handlers.
-    pub fn for_each<R>(
+    pub fn for_each<T: KayaRecord, R>(
         &mut self,
-        collection: &Collection,
+        collection: &Collection<T>,
         body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
     ) -> (WidgetId, R) {
         assert_root(collection);
@@ -455,13 +746,36 @@ impl Tpl<'_, '_> {
         });
     }
 
-    /// Bind a property to the element — the entry's value — of the
-    /// enclosing For, `level` Fors up (0 = nearest).
+    /// Bind a property to the element of the enclosing For, `level`
+    /// Fors up (0 = nearest) — the scalar (one-field) case, field 0.
+    /// Record collections bind through bind_field.
     pub fn bind_element(&mut self, node: TemplateNodeId, prop: Prop, level: u32) {
         self.tx.ops.push(TxOp::SetProperty {
             widget: WidgetId(node.0),
             prop,
-            value: PropValue::Element { level },
+            value: PropValue::Element { level, field: 0 },
+        });
+    }
+
+    /// Bind a property to one field of the element of the enclosing
+    /// For. The prop token and the field token share a value kind, so a
+    /// Bool field on a Str property is a compile error — the earliest
+    /// of the three agreeing layers (the scene re-checks at declaration,
+    /// the setters at write).
+    pub fn bind_field<K: ValueKind>(
+        &mut self,
+        node: TemplateNodeId,
+        prop: PropToken<K>,
+        level: u32,
+        field: Field<K>,
+    ) {
+        self.tx.ops.push(TxOp::SetProperty {
+            widget: WidgetId(node.0),
+            prop: prop.prop,
+            value: PropValue::Element {
+                level,
+                field: field.index,
+            },
         });
     }
 
@@ -476,21 +790,25 @@ impl Tpl<'_, '_> {
     /// its own instance, addressed via `at(key)` on the returned root
     /// handle. Return it from the template body so handlers can reach
     /// it — for_each hands the body's result back out.
-    pub fn collection(&mut self) -> Collection {
+    pub fn collection<T: KayaRecord>(&mut self) -> Collection<T> {
         let id = self.tx.ctx.alloc_collection();
         self.tx.ctx.register_collection(id);
-        self.tx.ops.push(TxOp::CreateCollection { id });
+        self.tx.ops.push(TxOp::CreateCollection {
+            id,
+            schema: T::SCHEMA.to_vec(),
+        });
         Collection {
             id,
             path: Vec::new(),
+            _element: PhantomData,
         }
     }
 
     /// A nested For; its collection must be declared in this template.
     /// Returns the For's node alongside the body's result.
-    pub fn for_each<R>(
+    pub fn for_each<T: KayaRecord, R>(
         &mut self,
-        collection: &Collection,
+        collection: &Collection<T>,
         body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
     ) -> (TemplateNodeId, R) {
         assert_root(collection);
@@ -523,7 +841,29 @@ impl Tpl<'_, '_> {
 mod tests {
     use std::sync::mpsc;
 
-    use super::AppCtx;
+    use super::{AppCtx, KayaRecord};
+    use crate::protocol::{Value, ValueType};
+
+    crate::record! {
+        struct Todo {
+            title: String,
+            done: bool,
+        }
+    }
+
+    /// One declaration drives all three: the schema, the conversions,
+    /// and the field tokens — none can drift from the others.
+    #[test]
+    fn record_derives_schema_conversions_and_tokens() {
+        assert_eq!(Todo::SCHEMA, &[ValueType::Str, ValueType::Bool]);
+        let todo = Todo { title: "buy milk".into(), done: false };
+        let values = todo.to_values();
+        assert_eq!(values, vec![Value::from("buy milk"), Value::Bool(false)]);
+        assert_eq!(Todo::from_values(&values), todo);
+        assert_eq!(Todo::title().index, 0);
+        assert_eq!(Todo::done().index, 1);
+    }
+
     use crate::protocol::{Occurrence, Prop, WidgetId, WidgetKind};
     use crate::scene::Scene;
 
@@ -603,8 +943,8 @@ mod tests {
         let ctx = AppCtx::new(occ_rx, tx_tx);
 
         let mut tx = ctx.begin();
-        let groups = tx.collection();
-        let (_list, items) = tx.for_each(&groups, |t| t.collection());
+        let groups = tx.collection::<String>();
+        let (_list, items) = tx.for_each(&groups, |t| t.collection::<String>());
 
         let g1_items = items.at("g1");
         tx.insert(&groups, "g1", "Work");
@@ -641,7 +981,7 @@ mod tests {
         let (tx_tx, _tx_rx) = mpsc::channel();
         let ctx = AppCtx::new(occ_rx, tx_tx);
         let mut tx = ctx.begin();
-        let c = tx.collection();
+        let c = tx.collection::<String>();
         let _ = tx.for_each(&c.at("g1"), |_| ());
     }
 }

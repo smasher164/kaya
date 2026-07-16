@@ -10,7 +10,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encodeValue", "encodePath", "beginRecord", "endRecord", "ParseOccurrence",
+    "encodeValue", "encodeValues", "encodeTypeTags", "beginRecord", "endRecord", "ParseOccurrence",
     "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
     "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range",
     "return", "select", "struct", "switch", "type", "var",
@@ -104,12 +104,27 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn pad8(b)");
     c.line("}");
     c.line("");
-    c.line("// encodePath appends a key path: {u32 count, u32 reserved, count values}.");
-    c.line("func encodePath(b []byte, keys []any) []byte {");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, uint32(len(keys)))");
+    c.line("// encodeValues appends a counted value sequence — a key path or a");
+    c.line("// record: {u32 count, u32 reserved, count values}.");
+    c.line("func encodeValues(b []byte, vals []any) []byte {");
+    c.line("\tb = binary.LittleEndian.AppendUint32(b, uint32(len(vals)))");
     c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
-    c.line("\tfor _, k := range keys {");
-    c.line("\t\tb = encodeValue(b, k)");
+    c.line("\tfor _, v := range vals {");
+    c.line("\t\tb = encodeValue(b, v)");
+    c.line("\t}");
+    c.line("\treturn b");
+    c.line("}");
+    c.line("");
+    c.line("// encodeTypeTags appends a collection schema: {u32 count, u32 reserved,");
+    c.line("// count Value* tags}, padded to 8.");
+    c.line("func encodeTypeTags(b []byte, tags []uint32) []byte {");
+    c.line("\tb = binary.LittleEndian.AppendUint32(b, uint32(len(tags)))");
+    c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
+    c.line("\tfor _, t := range tags {");
+    c.line("\t\tb = binary.LittleEndian.AppendUint32(b, t)");
+    c.line("\t}");
+    c.line("\tfor len(b)%8 != 0 {");
+    c.line("\t\tb = append(b, 0)");
     c.line("\t}");
     c.line("\treturn b");
     c.line("}");
@@ -164,15 +179,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\treturn endRecord(b)");
         c.line("}");
         c.line("");
-        c.line(&format!("// TxBind{pc}Element: set_property bound to the element of the"));
+        c.line(&format!("// TxBind{pc}Element: set_property bound to one field of the element of the"));
         c.line("// enclosing For, `level` Fors up (0 = nearest).");
-        c.line(&format!("func TxBind{pc}Element(widgetID uint64, level uint32) []byte {{"));
+        c.line(&format!("func TxBind{pc}Element(widgetID uint64, level uint32, field uint32) []byte {{"));
         c.line("\tb := beginRecord(txSetProperty)");
         c.line("\tb = binary.LittleEndian.AppendUint64(b, widgetID)");
         c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Prop{pc})"));
         c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceElement)");
         c.line("\tb = binary.LittleEndian.AppendUint32(b, level)");
-        c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, field)");
         c.line("\treturn endRecord(b)");
         c.line("}");
     }
@@ -229,7 +244,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("{} uint32", param(f.name)),
             FieldTy::U64 => format!("{} uint64", param(f.name)),
             FieldTy::Value => format!("{} any", param(f.name)),
-            FieldTy::Path => format!("{} []any", param(f.name)),
+            FieldTy::Values => format!("{} []any", param(f.name)),
+            FieldTy::TypeTags => format!("{} []uint32", param(f.name)),
         });
     }
     c.line("");
@@ -254,7 +270,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
                 param(f.name)
             ),
             FieldTy::Value => format!("\tb = encodeValue(b, {})", param(f.name)),
-            FieldTy::Path => format!("\tb = encodePath(b, {})", param(f.name)),
+            FieldTy::Values => format!("\tb = encodeValues(b, {})", param(f.name)),
+            FieldTy::TypeTags => format!("\tb = encodeTypeTags(b, {})", param(f.name)),
         });
     }
     c.line("\treturn endRecord(b)");

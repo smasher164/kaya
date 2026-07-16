@@ -36,10 +36,10 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_STATUS, SIG_STATUS);
 
-    kaya_tx_create_collection(&tx, C_TODOS);
+    kaya_tx_create_collection(&tx, C_TODOS, (uint32_t[]){KAYA_VALUE_STR}, 1);
     kaya_tx_create_for(&tx, W_FOR_TODOS, C_TODOS);
     kaya_tx_create_widget(&tx, N_TODO_LABEL, KAYA_KIND_LABEL);
-    kaya_tx_bind_text_element(&tx, N_TODO_LABEL, 0);
+    kaya_tx_bind_text_element(&tx, N_TODO_LABEL, 0, 0);
     kaya_tx_template_end(&tx);
 
     kaya_tx_add_child(&tx, W_COLUMN, W_FIELD);
@@ -82,7 +82,7 @@ static void *app(void *arg) {
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
                 kaya_tx_collection_insert(&tx, C_TODOS, 0, 0, kaya_str(key),
-                                          kaya_str(draft));
+                                          (KayaVal[]){kaya_str(draft)}, 1);
                 char status[192];
                 snprintf(status, sizeof status, "added %s, %u total", draft,
                          total);

@@ -196,6 +196,10 @@ func kayaStartSelftest() {
         kayaStartGallerySelftest()
         return
     }
+    if script == "todos" {
+        kayaStartTodosSelftest()
+        return
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
         if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
     }
@@ -234,6 +238,38 @@ func kayaStartEntrySelftest() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
         let text = kayaScene.firstLabel?.text ?? "(no label)"
         if text == "added milk, 1 total" {
+            print("KAYA_SELFTEST: OK (\(text))")
+            exit(0)
+        } else {
+            FileHandle.standardError.write(
+                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
+            exit(1)
+        }
+    }
+}
+
+/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
+/// the binding path, add, toggle the stamped row's checkbox — a
+/// field-level update — and read the items-left label.
+func kayaStartTodosSelftest() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        if let entry = kayaScene.firstEntry {
+            entry.text = "buy milk"
+            KayaHost.emitText(entry.tag, "buy milk")
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.9) {
+        if let box = kayaScene.firstCheckbox {
+            box.checked = true
+            KayaHost.emitToggled(box.tag, true)
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        let text = kayaScene.firstLabel?.text ?? "(no label)"
+        if text == "0 items left" {
             print("KAYA_SELFTEST: OK (\(text))")
             exit(0)
         } else {

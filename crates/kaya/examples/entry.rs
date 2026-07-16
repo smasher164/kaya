@@ -22,7 +22,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let status_label = tx.widget(WidgetKind::Label);
     tx.bind(status_label, Prop::Text, status);
 
-    let todos = tx.collection();
+    let todos = tx.collection::<String>();
     let (todo_list, ()) = tx.for_each(&todos, |t| {
         let label = t.widget(WidgetKind::Label);
         t.bind_element(label, Prop::Text, 0);

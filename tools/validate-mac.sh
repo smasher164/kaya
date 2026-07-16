@@ -111,6 +111,11 @@ run gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya
     target/ocaml/gallery-ocaml
 run gallery-haskell env KAYA_SELFTEST=gallery target/haskell/gallery-hs
 
+# The todos scene (records + field projection; the milestone-3 depth
+# slice — Rust and Python carry the record surfaces so far).
+run todos-rust env KAYA_SELFTEST=todos cargo run --quiet --example todos
+run todos-python env KAYA_SELFTEST=todos python3 crates/kaya/examples/todos.py
+
 # The same six guests against the SwiftUI backend, selected at runtime:
 # identical examples, KAYA_BACKEND=swiftui.
 tools/swiftui/build-dylib.sh >/dev/null
@@ -140,6 +145,8 @@ run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debu
 run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     target/ocaml/gallery-ocaml
 run gallery-haskell-swiftui env KAYA_SELFTEST=gallery target/haskell/gallery-hs
+run todos-rust-swiftui env KAYA_SELFTEST=todos cargo run --quiet --example todos
+run todos-python-swiftui env KAYA_SELFTEST=todos python3 crates/kaya/examples/todos.py
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 
 # The one-line verdict: suites accumulate failures rather than abort,

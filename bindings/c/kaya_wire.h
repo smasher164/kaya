@@ -90,12 +90,23 @@ static inline void kaya_wire_value(KayaTx *tx, KayaVal v) {
     kaya_wire_pad(tx);
 }
 
-/* A key path: {u32 count, u32 reserved, count values}. */
-static inline void kaya_wire_path(KayaTx *tx, const KayaVal *keys, uint32_t n) {
+/* A counted value sequence — a key path or a record: {u32 count,
+ * u32 reserved, count values}. */
+static inline void kaya_wire_values(KayaTx *tx, const KayaVal *vals, uint32_t n) {
     kaya_wire_u32(tx, n);
     kaya_wire_u32(tx, 0);
     for (uint32_t i = 0; i < n; i++)
-        kaya_wire_value(tx, keys[i]);
+        kaya_wire_value(tx, vals[i]);
+}
+
+/* A collection schema: {u32 count, u32 reserved, count KAYA_VALUE_*
+ * tags}, padded to 8. */
+static inline void kaya_wire_type_tags(KayaTx *tx, const uint32_t *tags, uint32_t n) {
+    kaya_wire_u32(tx, n);
+    kaya_wire_u32(tx, 0);
+    for (uint32_t i = 0; i < n; i++)
+        kaya_wire_u32(tx, tags[i]);
+    kaya_wire_pad(tx);
 }
 
 static inline size_t kaya_wire_begin(KayaTx *tx, uint16_t kind) {
@@ -153,30 +164,31 @@ static inline void kaya_tx_mount(KayaTx *tx, uint64_t window, uint64_t root) {
     kaya_wire_end(tx, start);
 }
 
-/* Declare a collection (a blueprint when inside a template). */
-static inline void kaya_tx_create_collection(KayaTx *tx, uint64_t collection_id) {
+/* Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. */
+static inline void kaya_tx_create_collection(KayaTx *tx, uint64_t collection_id, const uint32_t *schema, uint32_t schema_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_COLLECTION);
     kaya_wire_u64(tx, collection_id);
+    kaya_wire_type_tags(tx, schema, schema_len);
     kaya_wire_end(tx, start);
 }
 
-/* Insert an entry into the instance at `path`; stamps a copy. */
-static inline void kaya_tx_collection_insert(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, KayaVal value) {
+/* Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. */
+static inline void kaya_tx_collection_insert(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *fields, uint32_t fields_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_INSERT);
     kaya_wire_u64(tx, collection_id);
-    kaya_wire_path(tx, path, path_len);
+    kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
-    kaya_wire_value(tx, value);
+    kaya_wire_values(tx, fields, fields_len);
     kaya_wire_end(tx, start);
 }
 
-/* Update an entry's value; element bindings follow. */
-static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, KayaVal value) {
+/* Replace an entry's record; every element binding follows. */
+static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *fields, uint32_t fields_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE);
     kaya_wire_u64(tx, collection_id);
-    kaya_wire_path(tx, path, path_len);
+    kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
-    kaya_wire_value(tx, value);
+    kaya_wire_values(tx, fields, fields_len);
     kaya_wire_end(tx, start);
 }
 
@@ -184,7 +196,7 @@ static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id,
 static inline void kaya_tx_collection_remove(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_REMOVE);
     kaya_wire_u64(tx, collection_id);
-    kaya_wire_path(tx, path, path_len);
+    kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_end(tx, start);
 }
@@ -211,6 +223,18 @@ static inline void kaya_tx_template_end(KayaTx *tx) {
     kaya_wire_end(tx, start);
 }
 
+/* Set one field of an entry's record; only bindings on that field re-resolve. */
+static inline void kaya_tx_collection_update_field(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t field, KayaVal value) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE_FIELD);
+    kaya_wire_u64(tx, collection_id);
+    kaya_wire_values(tx, path, path_len);
+    kaya_wire_value(tx, key);
+    kaya_wire_u32(tx, field);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, value);
+    kaya_wire_end(tx, start);
+}
+
 /* set_property with a constant text value. */
 static inline void kaya_tx_set_text(KayaTx *tx, uint64_t widget_id, const char *text) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
@@ -231,14 +255,15 @@ static inline void kaya_tx_bind_text(KayaTx *tx, uint64_t widget_id, uint64_t si
     kaya_wire_end(tx, start);
 }
 
-/* set_property bound to the element of the enclosing For, `level` Fors up. */
-static inline void kaya_tx_bind_text_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_text_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_TEXT);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
-    kaya_wire_u32(tx, 0);
+    kaya_wire_u32(tx, field);
     kaya_wire_end(tx, start);
 }
 
@@ -262,14 +287,15 @@ static inline void kaya_tx_bind_checked(KayaTx *tx, uint64_t widget_id, uint64_t
     kaya_wire_end(tx, start);
 }
 
-/* set_property bound to the element of the enclosing For, `level` Fors up. */
-static inline void kaya_tx_bind_checked_element(KayaTx *tx, uint64_t widget_id, uint32_t level) {
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_checked_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
-    kaya_wire_u32(tx, 0);
+    kaya_wire_u32(tx, field);
     kaya_wire_end(tx, start);
 }
 

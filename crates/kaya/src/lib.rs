@@ -40,10 +40,12 @@ mod swiftui_host;
 ))]
 pub mod capi;
 
-pub use app::{AppCtx, Tpl, Tx};
+pub use app::{
+    AppCtx, Collection, Field, KayaField, KayaRecord, PropToken, Tpl, Tx, ValueKind, props,
+};
 pub use protocol::{
-    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, WidgetId,
-    WidgetKind, WindowId,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, ValueType,
+    WidgetId, WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "macos")]

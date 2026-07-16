@@ -109,11 +109,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        while (b.position() % 8 != 0) b.put((byte) 0);");
     c.line("    }");
     c.line("");
-    c.line("    // A key path: {u32 count, u32 reserved, count values}.");
-    c.line("    private static void encodePath(ByteBuffer b, Object[] keys) {");
-    c.line("        int n = keys == null ? 0 : keys.length;");
+    c.line("    // A counted value sequence — a key path or a record:");
+    c.line("    // {u32 count, u32 reserved, count values}.");
+    c.line("    private static void encodeValues(ByteBuffer b, Object[] vals) {");
+    c.line("        int n = vals == null ? 0 : vals.length;");
     c.line("        b.putInt(n).putInt(0);");
-    c.line("        for (int i = 0; i < n; i++) encodeValue(b, keys[i]);");
+    c.line("        for (int i = 0; i < n; i++) encodeValue(b, vals[i]);");
+    c.line("    }");
+    c.line("");
+    c.line("    // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},");
+    c.line("    // padded to 8.");
+    c.line("    private static void encodeTypeTags(ByteBuffer b, int[] tags) {");
+    c.line("        b.putInt(tags.length).putInt(0);");
+    c.line("        for (int t : tags) b.putInt(t);");
+    c.line("        while (b.position() % 8 != 0) b.put((byte) 0);");
     c.line("    }");
 
     for r in spec.tx {
@@ -149,11 +158,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return finish(b);");
         c.line("    }");
         c.line("");
-        c.line("    /** set_property bound to the element of the enclosing For, `level` Fors up. */");
-        c.line(&format!("    public static byte[] txBind{pc}Element(long widgetId, int level) {{"));
+        c.line("    /** set_property bound to one field of the element of the enclosing For. */");
+        c.line(&format!("    public static byte[] txBind{pc}Element(long widgetId, int level, int field) {{"));
         c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_ELEMENT)"));
-        c.line("                .putInt(level).putInt(0);");
+        c.line("                .putInt(level).putInt(field);");
         c.line("        return finish(b);");
         c.line("    }");
     }
@@ -241,7 +250,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("int {}", camel(f.name)),
             FieldTy::U64 => format!("long {}", camel(f.name)),
             FieldTy::Value => format!("Object {}", camel(f.name)),
-            FieldTy::Path => format!("Object[] {}", camel(f.name)),
+            FieldTy::Values => format!("Object[] {}", camel(f.name)),
+            FieldTy::TypeTags => format!("int[] {}", camel(f.name)),
         });
     }
     c.line("");
@@ -261,7 +271,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("        b.putInt({});", camel(f.name)),
             FieldTy::U64 => format!("        b.putLong({});", camel(f.name)),
             FieldTy::Value => format!("        encodeValue(b, {});", camel(f.name)),
-            FieldTy::Path => format!("        encodePath(b, {});", camel(f.name)),
+            FieldTy::Values => format!("        encodeValues(b, {});", camel(f.name)),
+            FieldTy::TypeTags => format!("        encodeTypeTags(b, {});", camel(f.name)),
         });
     }
     c.line("        return finish(b);");

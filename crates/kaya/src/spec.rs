@@ -10,10 +10,13 @@
 //! surfacing as a guest whose bytes the core rejects.
 //!
 //! Field types are deliberately few: every record is a sequence drawn
-//! from { u32, u64, value, path }, where value is the tagged scalar
-//! encoding and path is a length-prefixed sequence of key values. New
-//! vocabulary should be new records over these types, not new types —
-//! that is what keeps eight bindings mechanical.
+//! from { u32, u64, value, values, type_tags }, where value is the
+//! tagged scalar encoding, values is a count-prefixed sequence of them
+//! (a key path or an entry's record — same shape, different meaning),
+//! and type_tags is a count-prefixed sequence of u32 value-type tags (a
+//! collection's schema). New vocabulary should be new records over
+//! these types, not new types — that is what keeps eight bindings
+//! mechanical.
 
 /// A record field: its name (for generated helper signatures and docs)
 /// and its wire type.
@@ -31,8 +34,12 @@ pub enum FieldTy {
     U64,
     /// { u32 type; u32 len; payload padded to 8 }.
     Value,
-    /// { u32 count; u32 reserved; count values }.
-    Path,
+    /// { u32 count; u32 reserved; count values }: a key path or an
+    /// entry's record — one encoding, named by the field.
+    Values,
+    /// { u32 count; u32 reserved; count u32 value-type tags, padded to
+    /// 8 }: a collection's schema.
+    TypeTags,
 }
 
 /// One record kind of a channel: the numeric kind, a name, its fields
@@ -90,7 +97,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] =
 /// union type.
 pub const SET_PROPERTY_NOTE: &str =
     "tail after `source`: value (SOURCE_CONST) | u64 signal_id (SOURCE_SIGNAL) \
-     | u32 level, u32 reserved (SOURCE_ELEMENT)";
+     | u32 level, u32 field (SOURCE_ELEMENT — which field of the element's \
+     record; 0 for a scalar collection)";
 
 pub const SPEC: ProtocolSpec = ProtocolSpec {
     tx: &[
@@ -141,37 +149,43 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         Record {
             kind: 7,
             name: "create_collection",
-            fields: &[f("collection_id", FieldTy::U64)],
-            doc: "Declare a collection (a blueprint when inside a template).",
+            fields: &[
+                f("collection_id", FieldTy::U64),
+                f("schema", FieldTy::TypeTags),
+            ],
+            doc: "Declare a collection and its schema — the ordered field \
+                  types every entry must match; a scalar collection is the \
+                  one-field case. A blueprint when inside a template.",
         },
         Record {
             kind: 8,
             name: "collection_insert",
             fields: &[
                 f("collection_id", FieldTy::U64),
-                f("path", FieldTy::Path),
+                f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
-                f("value", FieldTy::Value),
+                f("fields", FieldTy::Values),
             ],
-            doc: "Insert an entry into the instance at `path`; stamps a copy.",
+            doc: "Insert an entry into the instance at `path`; the fields \
+                  match the schema positionally. Stamps a copy.",
         },
         Record {
             kind: 9,
             name: "collection_update",
             fields: &[
                 f("collection_id", FieldTy::U64),
-                f("path", FieldTy::Path),
+                f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
-                f("value", FieldTy::Value),
+                f("fields", FieldTy::Values),
             ],
-            doc: "Update an entry's value; element bindings follow.",
+            doc: "Replace an entry's record; every element binding follows.",
         },
         Record {
             kind: 10,
             name: "collection_remove",
             fields: &[
                 f("collection_id", FieldTy::U64),
-                f("path", FieldTy::Path),
+                f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
             ],
             doc: "Remove an entry; its stamped copy tears down.",
@@ -193,6 +207,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             name: "template_end",
             fields: &[],
             doc: "Close the innermost template scope.",
+        },
+        Record {
+            kind: 14,
+            name: "collection_update_field",
+            fields: &[
+                f("collection_id", FieldTy::U64),
+                f("path", FieldTy::Values),
+                f("key", FieldTy::Value),
+                f("field", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            doc: "Set one field of an entry's record; only bindings on that \
+                  field re-resolve.",
         },
     ],
     apply: &[
@@ -316,7 +344,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
 mod tests {
     use super::*;
     use crate::protocol::{
-        CollectionId, Prop, PropValue, SignalId, TxOp, Value, WidgetId, WidgetKind, WindowId,
+        CollectionId, Prop, PropValue, SignalId, TxOp, Value, ValueType, WidgetId, WidgetKind,
+        WindowId,
     };
     use crate::wire;
 
@@ -331,7 +360,8 @@ mod tests {
         U32(u32),
         U64(u64),
         Value(Value),
-        Path(Vec<Value>),
+        Values(Vec<Value>),
+        TypeTags(Vec<u32>),
     }
 
     impl GenericWriter {
@@ -344,11 +374,21 @@ mod tests {
                     (FieldTy::U32, Arg::U32(v)) => self.buf.extend_from_slice(&v.to_le_bytes()),
                     (FieldTy::U64, Arg::U64(v)) => self.buf.extend_from_slice(&v.to_le_bytes()),
                     (FieldTy::Value, Arg::Value(v)) => self.value(v),
-                    (FieldTy::Path, Arg::Path(p)) => {
+                    (FieldTy::Values, Arg::Values(p)) => {
                         self.buf.extend_from_slice(&(p.len() as u32).to_le_bytes());
                         self.buf.extend_from_slice(&0u32.to_le_bytes());
-                        for key in p {
-                            self.value(key);
+                        for v in p {
+                            self.value(v);
+                        }
+                    }
+                    (FieldTy::TypeTags, Arg::TypeTags(tags)) => {
+                        self.buf.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+                        self.buf.extend_from_slice(&0u32.to_le_bytes());
+                        for tag in tags {
+                            self.buf.extend_from_slice(&tag.to_le_bytes());
+                        }
+                        while self.buf.len() % 8 != 0 {
+                            self.buf.push(0);
                         }
                     }
                     (ty, _) => panic!("{}.{}: wrong arg for {ty:?}", rec.name, field.name),
@@ -399,6 +439,7 @@ mod tests {
             ("create_for", wire::TX_CREATE_FOR),
             ("create_when", wire::TX_CREATE_WHEN),
             ("template_end", wire::TX_TEMPLATE_END),
+            ("collection_update_field", wire::TX_COLLECTION_UPDATE_FIELD),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -487,19 +528,34 @@ mod tests {
             &[Arg::U64(2), Arg::U32(wire::KIND_BUTTON), Arg::U32(0)],
         );
         w.record(
+            tx_record("create_collection"),
+            &[Arg::U64(3), Arg::TypeTags(vec![wire::VALUE_STR, wire::VALUE_BOOL])],
+        );
+        w.record(
             tx_record("collection_insert"),
             &[
                 Arg::U64(3),
-                Arg::Path(vec![Value::from("g1")]),
+                Arg::Values(vec![Value::from("g1")]),
                 Arg::Value(Value::from("a")),
-                Arg::Value(Value::I64(9)),
+                Arg::Values(vec![Value::from("send report"), Value::Bool(false)]),
+            ],
+        );
+        w.record(
+            tx_record("collection_update_field"),
+            &[
+                Arg::U64(3),
+                Arg::Values(vec![Value::from("g1")]),
+                Arg::Value(Value::from("a")),
+                Arg::U32(1),
+                Arg::U32(0),
+                Arg::Value(Value::Bool(true)),
             ],
         );
         w.record(
             tx_record("collection_remove"),
             &[
                 Arg::U64(3),
-                Arg::Path(vec![]),
+                Arg::Values(vec![]),
                 Arg::Value(Value::from("g1")),
             ],
         );
@@ -517,11 +573,22 @@ mod tests {
                 id: WidgetId(2),
                 kind: WidgetKind::Button,
             },
+            TxOp::CreateCollection {
+                id: CollectionId(3),
+                schema: vec![ValueType::Str, ValueType::Bool],
+            },
             TxOp::CollectionInsert {
                 id: CollectionId(3),
                 path: vec![Value::from("g1")],
                 key: Value::from("a"),
-                value: Value::I64(9),
+                record: vec![Value::from("send report"), Value::Bool(false)],
+            },
+            TxOp::CollectionUpdateField {
+                id: CollectionId(3),
+                path: vec![Value::from("g1")],
+                key: Value::from("a"),
+                field: 1,
+                value: Value::Bool(true),
             },
             TxOp::CollectionRemove {
                 id: CollectionId(3),

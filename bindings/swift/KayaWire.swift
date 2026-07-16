@@ -58,10 +58,19 @@ struct KayaTx {
     }
 
     /// A key path: {u32 count, u32 reserved, count values}.
-    mutating func path(_ keys: [KayaValue]) {
-        u32(UInt32(keys.count))
+    /// A counted value sequence — a key path or a record.
+    mutating func values(_ vals: [KayaValue]) {
+        u32(UInt32(vals.count))
         u32(0)
-        for key in keys { value(key) }
+        for v in vals { value(v) }
+    }
+
+    /// A collection schema: counted KAYA_VALUE_* tags, padded to 8.
+    mutating func typeTags(_ tags: [UInt32]) {
+        u32(UInt32(tags.count))
+        u32(0)
+        for t in tags { u32(t) }
+        while bytes.count % 8 != 0 { bytes.append(0) }
     }
 
     mutating func begin(_ kind: UInt16) -> Int {
@@ -121,30 +130,31 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// Declare a collection (a blueprint when inside a template).
-    mutating func createCollection(_ collectionId: UInt64) {
+    /// Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
+    mutating func createCollection(_ collectionId: UInt64, _ schema: [UInt32]) {
         let start = self.begin(UInt16(KAYA_TX_CREATE_COLLECTION))
         self.u64(collectionId)
+        self.typeTags(schema)
         self.end(start)
     }
 
-    /// Insert an entry into the instance at `path`; stamps a copy.
-    mutating func collectionInsert(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+    /// Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
+    mutating func collectionInsert(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ fields: [KayaValue]) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_INSERT))
         self.u64(collectionId)
-        self.path(path)
+        self.values(path)
         self.value(key)
-        self.value(value)
+        self.values(fields)
         self.end(start)
     }
 
-    /// Update an entry's value; element bindings follow.
-    mutating func collectionUpdate(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+    /// Replace an entry's record; every element binding follows.
+    mutating func collectionUpdate(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ fields: [KayaValue]) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE))
         self.u64(collectionId)
-        self.path(path)
+        self.values(path)
         self.value(key)
-        self.value(value)
+        self.values(fields)
         self.end(start)
     }
 
@@ -152,7 +162,7 @@ struct KayaTx {
     mutating func collectionRemove(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_REMOVE))
         self.u64(collectionId)
-        self.path(path)
+        self.values(path)
         self.value(key)
         self.end(start)
     }
@@ -179,6 +189,18 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// Set one field of an entry's record; only bindings on that field re-resolve.
+    mutating func collectionUpdateField(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ field: UInt32, _ value: KayaValue) {
+        let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE_FIELD))
+        self.u64(collectionId)
+        self.values(path)
+        self.value(key)
+        self.u32(field)
+        self.u32(0)
+        self.value(value)
+        self.end(start)
+    }
+
     /// set_property with a constant text value.
     mutating func setText(_ widgetId: UInt64, _ text: String) {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
@@ -199,15 +221,15 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// set_property bound to the element of the enclosing For,
-    /// `level` Fors up (0 = nearest).
-    mutating func bindTextElement(_ widgetId: UInt64, level: UInt32 = 0) {
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindTextElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_TEXT))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
-        self.u32(0)
+        self.u32(field)
         self.end(start)
     }
 
@@ -231,15 +253,15 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// set_property bound to the element of the enclosing For,
-    /// `level` Fors up (0 = nearest).
-    mutating func bindCheckedElement(_ widgetId: UInt64, level: UInt32 = 0) {
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindCheckedElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
-        self.u32(0)
+        self.u32(field)
         self.end(start)
     }
 

@@ -43,6 +43,7 @@ static class KayaWire
     public const ushort TxKindCreateFor = 11;
     public const ushort TxKindCreateWhen = 12;
     public const ushort TxKindTemplateEnd = 13;
+    public const ushort TxKindCollectionUpdateField = 14;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -85,13 +86,25 @@ static class KayaWire
         Pad(w);
     }
 
-    // A key path: {u32 count, u32 reserved, count values}.
-    static void EncodePath(BinaryWriter w, object[] keys)
+    // A counted value sequence — a key path or a record:
+    // {u32 count, u32 reserved, count values}.
+    static void EncodeValues(BinaryWriter w, object[] vals)
     {
-        w.Write((uint)(keys?.Length ?? 0));
+        w.Write((uint)(vals?.Length ?? 0));
         w.Write(0u);
-        foreach (object k in keys ?? Array.Empty<object>())
-            EncodeValue(w, k);
+        foreach (object v in vals ?? Array.Empty<object>())
+            EncodeValue(w, v);
+    }
+
+    // A collection schema: {u32 count, u32 reserved, count Value* tags},
+    // padded to 8.
+    static void EncodeTypeTags(BinaryWriter w, uint[] tags)
+    {
+        w.Write((uint)tags.Length);
+        w.Write(0u);
+        foreach (uint t in tags)
+            w.Write(t);
+        Pad(w);
     }
 
     static byte[] Finish(MemoryStream stream, BinaryWriter w, ushort kind)
@@ -157,33 +170,34 @@ static class KayaWire
         return Finish(stream, w, TxKindMount);
     }
 
-    /// Declare a collection (a blueprint when inside a template).
-    public static byte[] TxCreateCollection(ulong collectionId)
+    /// Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
+    public static byte[] TxCreateCollection(ulong collectionId, uint[] schema)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
+        EncodeTypeTags(w, schema);
         return Finish(stream, w, TxKindCreateCollection);
     }
 
-    /// Insert an entry into the instance at `path`; stamps a copy.
-    public static byte[] TxCollectionInsert(ulong collectionId, object[] path, object key, object value)
+    /// Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
+    public static byte[] TxCollectionInsert(ulong collectionId, object[] path, object key, object[] fields)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
-        EncodePath(w, path);
+        EncodeValues(w, path);
         EncodeValue(w, key);
-        EncodeValue(w, value);
+        EncodeValues(w, fields);
         return Finish(stream, w, TxKindCollectionInsert);
     }
 
-    /// Update an entry's value; element bindings follow.
-    public static byte[] TxCollectionUpdate(ulong collectionId, object[] path, object key, object value)
+    /// Replace an entry's record; every element binding follows.
+    public static byte[] TxCollectionUpdate(ulong collectionId, object[] path, object key, object[] fields)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
-        EncodePath(w, path);
+        EncodeValues(w, path);
         EncodeValue(w, key);
-        EncodeValue(w, value);
+        EncodeValues(w, fields);
         return Finish(stream, w, TxKindCollectionUpdate);
     }
 
@@ -192,7 +206,7 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
-        EncodePath(w, path);
+        EncodeValues(w, path);
         EncodeValue(w, key);
         return Finish(stream, w, TxKindCollectionRemove);
     }
@@ -222,6 +236,19 @@ static class KayaWire
         return Finish(stream, w, TxKindTemplateEnd);
     }
 
+    /// Set one field of an entry's record; only bindings on that field re-resolve.
+    public static byte[] TxCollectionUpdateField(ulong collectionId, object[] path, object key, uint field, object value)
+    {
+        var w = Begin(out var stream);
+        w.Write(collectionId);
+        EncodeValues(w, path);
+        EncodeValue(w, key);
+        w.Write(field);
+        w.Write(0u);
+        EncodeValue(w, value);
+        return Finish(stream, w, TxKindCollectionUpdateField);
+    }
+
     /// set_property with a constant text value.
     public static byte[] TxSetText(ulong widgetId, string text)
     {
@@ -239,11 +266,11 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
-    /// set_property bound to the element of the enclosing For, `level` Fors up.
-    public static byte[] TxBindTextElement(ulong widgetId, uint level = 0)
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindTextElement(ulong widgetId, uint level = 0, uint field = 0)
     {
         var w = Begin(out var stream);
-        w.Write(widgetId); w.Write(PropText); w.Write(SourceElement); w.Write(level); w.Write(0u);
+        w.Write(widgetId); w.Write(PropText); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 
@@ -264,11 +291,11 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
-    /// set_property bound to the element of the enclosing For, `level` Fors up.
-    public static byte[] TxBindCheckedElement(ulong widgetId, uint level = 0)
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindCheckedElement(ulong widgetId, uint level = 0, uint field = 0)
     {
         var w = Begin(out var stream);
-        w.Write(widgetId); w.Write(PropChecked); w.Write(SourceElement); w.Write(level); w.Write(0u);
+        w.Write(widgetId); w.Write(PropChecked); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

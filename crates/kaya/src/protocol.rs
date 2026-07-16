@@ -61,8 +61,11 @@ pub enum Occurrence {
     Shutdown,
 }
 
-/// A signal, property, element, or key value. The scalar set; records
-/// and variant dispatch arrive with milestone 3.
+/// A signal, property, element-field, or key value. The scalar set;
+/// there is deliberately no record *value* — a collection entry is a
+/// Record (one Value per schema field), and Value::Record waits for
+/// the feature that needs a record as a value (nested fields, sum-typed
+/// payloads).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -70,6 +73,32 @@ pub enum Value {
     F64(f64),
     Str(String),
 }
+
+/// A value's type: the schema element. Every collection declares an
+/// ordered list of these at creation, and every field access — inserts,
+/// field updates, element bindings — is validated against it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueType {
+    Bool,
+    I64,
+    F64,
+    Str,
+}
+
+impl Value {
+    pub fn type_of(&self) -> ValueType {
+        match self {
+            Value::Bool(_) => ValueType::Bool,
+            Value::I64(_) => ValueType::I64,
+            Value::F64(_) => ValueType::F64,
+            Value::Str(_) => ValueType::Str,
+        }
+    }
+}
+
+/// One collection entry's value: one Value per schema field, positional.
+/// A scalar collection is the one-field case.
+pub type Record = Vec<Value>;
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
@@ -147,14 +176,14 @@ pub enum Prop {
 }
 
 /// A bound property's source: a constant, a signal reference, or —
-/// inside a template — the element (the entry's value) of an enclosing
-/// For, `level` Fors up (0 = nearest). Nothing else; the binding rule,
-/// wire-concrete.
+/// inside a template — one field of the element (the entry's record)
+/// of an enclosing For, `level` Fors up (0 = nearest). Nothing else;
+/// the binding rule, wire-concrete.
 #[derive(Debug, Clone)]
 pub enum PropValue {
     Const(Value),
     Signal(SignalId),
-    Element { level: u32 },
+    Element { level: u32, field: u32 },
 }
 
 /// One record of a transaction, app -> core.
@@ -172,12 +201,18 @@ pub enum TxOp {
     SetProperty { widget: WidgetId, prop: Prop, value: PropValue },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
-    CreateCollection { id: CollectionId },
+    /// Declare a collection with its schema: the ordered field types
+    /// every entry must match. Mandatory — a scalar collection is the
+    /// one-field case, not a separate mode.
+    CreateCollection { id: CollectionId, schema: Vec<ValueType> },
     /// Delta ops. `path` addresses the collection instance (one key per
     /// enclosing For of the collection's declaration site; empty for a
     /// top-level collection).
-    CollectionInsert { id: CollectionId, path: Path, key: Value, value: Value },
-    CollectionUpdate { id: CollectionId, path: Path, key: Value, value: Value },
+    CollectionInsert { id: CollectionId, path: Path, key: Value, record: Record },
+    CollectionUpdate { id: CollectionId, path: Path, key: Value, record: Record },
+    /// One field's delta: toggling a todo's `done` never resends its
+    /// title, and only bindings on that field re-resolve.
+    CollectionUpdateField { id: CollectionId, path: Path, key: Value, field: u32, value: Value },
     CollectionRemove { id: CollectionId, path: Path, key: Value },
     /// Opens a template scope; records until TemplateEnd are the
     /// blueprint. The For itself lives where it was declared (live

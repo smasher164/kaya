@@ -44,6 +44,7 @@ public final class KayaWire {
     public static final short TX_KIND_CREATE_FOR = 11;
     public static final short TX_KIND_CREATE_WHEN = 12;
     public static final short TX_KIND_TEMPLATE_END = 13;
+    public static final short TX_KIND_COLLECTION_UPDATE_FIELD = 14;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -88,11 +89,20 @@ public final class KayaWire {
         while (b.position() % 8 != 0) b.put((byte) 0);
     }
 
-    // A key path: {u32 count, u32 reserved, count values}.
-    private static void encodePath(ByteBuffer b, Object[] keys) {
-        int n = keys == null ? 0 : keys.length;
+    // A counted value sequence — a key path or a record:
+    // {u32 count, u32 reserved, count values}.
+    private static void encodeValues(ByteBuffer b, Object[] vals) {
+        int n = vals == null ? 0 : vals.length;
         b.putInt(n).putInt(0);
-        for (int i = 0; i < n; i++) encodeValue(b, keys[i]);
+        for (int i = 0; i < n; i++) encodeValue(b, vals[i]);
+    }
+
+    // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},
+    // padded to 8.
+    private static void encodeTypeTags(ByteBuffer b, int[] tags) {
+        b.putInt(tags.length).putInt(0);
+        for (int t : tags) b.putInt(t);
+        while (b.position() % 8 != 0) b.put((byte) 0);
     }
 
     /** Create a signal holding `initial`. */
@@ -136,30 +146,31 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Declare a collection (a blueprint when inside a template). */
-    public static byte[] txCreateCollection(long collectionId) {
+    /** Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. */
+    public static byte[] txCreateCollection(long collectionId, int[] schema) {
         ByteBuffer b = begin(TX_KIND_CREATE_COLLECTION);
         b.putLong(collectionId);
+        encodeTypeTags(b, schema);
         return finish(b);
     }
 
-    /** Insert an entry into the instance at `path`; stamps a copy. */
-    public static byte[] txCollectionInsert(long collectionId, Object[] path, Object key, Object value) {
+    /** Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. */
+    public static byte[] txCollectionInsert(long collectionId, Object[] path, Object key, Object[] fields) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_INSERT);
         b.putLong(collectionId);
-        encodePath(b, path);
+        encodeValues(b, path);
         encodeValue(b, key);
-        encodeValue(b, value);
+        encodeValues(b, fields);
         return finish(b);
     }
 
-    /** Update an entry's value; element bindings follow. */
-    public static byte[] txCollectionUpdate(long collectionId, Object[] path, Object key, Object value) {
+    /** Replace an entry's record; every element binding follows. */
+    public static byte[] txCollectionUpdate(long collectionId, Object[] path, Object key, Object[] fields) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE);
         b.putLong(collectionId);
-        encodePath(b, path);
+        encodeValues(b, path);
         encodeValue(b, key);
-        encodeValue(b, value);
+        encodeValues(b, fields);
         return finish(b);
     }
 
@@ -167,7 +178,7 @@ public final class KayaWire {
     public static byte[] txCollectionRemove(long collectionId, Object[] path, Object key) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_REMOVE);
         b.putLong(collectionId);
-        encodePath(b, path);
+        encodeValues(b, path);
         encodeValue(b, key);
         return finish(b);
     }
@@ -194,6 +205,18 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** Set one field of an entry's record; only bindings on that field re-resolve. */
+    public static byte[] txCollectionUpdateField(long collectionId, Object[] path, Object key, int field, Object value) {
+        ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE_FIELD);
+        b.putLong(collectionId);
+        encodeValues(b, path);
+        encodeValue(b, key);
+        b.putInt(field);
+        b.putInt(0);
+        encodeValue(b, value);
+        return finish(b);
+    }
+
     /** set_property with a constant text value. */
     public static byte[] txSetText(long widgetId, String text) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
@@ -209,11 +232,11 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** set_property bound to the element of the enclosing For, `level` Fors up. */
-    public static byte[] txBindTextElement(long widgetId, int level) {
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindTextElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_TEXT).putInt(SOURCE_ELEMENT)
-                .putInt(level).putInt(0);
+                .putInt(level).putInt(field);
         return finish(b);
     }
 
@@ -232,11 +255,11 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** set_property bound to the element of the enclosing For, `level` Fors up. */
-    public static byte[] txBindCheckedElement(long widgetId, int level) {
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindCheckedElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_CHECKED).putInt(SOURCE_ELEMENT)
-                .putInt(level).putInt(0);
+                .putInt(level).putInt(field);
         return finish(b);
     }
 

@@ -94,6 +94,7 @@ pub const KAYA_TX_COLLECTION_REMOVE: u16 = 10;
 pub const KAYA_TX_CREATE_FOR: u16 = 11;
 pub const KAYA_TX_CREATE_WHEN: u16 = 12;
 pub const KAYA_TX_TEMPLATE_END: u16 = 13;
+pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 const _: () = assert!(
     KAYA_TX_CREATE_SIGNAL == wire::TX_CREATE_SIGNAL
         && KAYA_TX_WRITE_SIGNAL == wire::TX_WRITE_SIGNAL
@@ -108,6 +109,7 @@ const _: () = assert!(
         && KAYA_TX_CREATE_FOR == wire::TX_CREATE_FOR
         && KAYA_TX_CREATE_WHEN == wire::TX_CREATE_WHEN
         && KAYA_TX_TEMPLATE_END == wire::TX_TEMPLATE_END
+        && KAYA_TX_COLLECTION_UPDATE_FIELD == wire::TX_COLLECTION_UPDATE_FIELD
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).

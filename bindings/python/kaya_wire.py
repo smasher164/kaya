@@ -41,6 +41,7 @@ TX_COLLECTION_REMOVE = 10
 TX_CREATE_FOR = 11
 TX_CREATE_WHEN = 12
 TX_TEMPLATE_END = 13
+TX_COLLECTION_UPDATE_FIELD = 14
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -72,9 +73,15 @@ class _enc:
 
 
     @staticmethod
-    def path(keys):
-        """Encode a key path."""
-        return struct.pack("<II", len(keys), 0) + b"".join(_enc.value(k) for k in keys)
+    def values(vals):
+        """Encode a counted value sequence: a key path or a record."""
+        return struct.pack("<II", len(vals), 0) + b"".join(_enc.value(v) for v in vals)
+
+
+    @staticmethod
+    def type_tags(schema):
+        """Encode a collection schema: a counted list of VALUE_* tags."""
+        return _pad(struct.pack("<II", len(schema), 0) + b"".join(struct.pack("<I", t) for t in schema))
 
 
 def record(kind, body):
@@ -103,21 +110,21 @@ def tx_mount(window, root):
     """Mount a root into a window (0 = the default window)."""
     return record(TX_MOUNT, struct.pack("<Q", window) + struct.pack("<Q", root))
 
-def tx_create_collection(collection_id):
-    """Declare a collection (a blueprint when inside a template)."""
-    return record(TX_CREATE_COLLECTION, struct.pack("<Q", collection_id))
+def tx_create_collection(collection_id, schema):
+    """Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template."""
+    return record(TX_CREATE_COLLECTION, struct.pack("<Q", collection_id) + _enc.type_tags(schema))
 
-def tx_collection_insert(collection_id, path, key, value):
-    """Insert an entry into the instance at `path`; stamps a copy."""
-    return record(TX_COLLECTION_INSERT, struct.pack("<Q", collection_id) + _enc.path(path) + _enc.value(key) + _enc.value(value))
+def tx_collection_insert(collection_id, path, key, fields):
+    """Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy."""
+    return record(TX_COLLECTION_INSERT, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(fields))
 
-def tx_collection_update(collection_id, path, key, value):
-    """Update an entry's value; element bindings follow."""
-    return record(TX_COLLECTION_UPDATE, struct.pack("<Q", collection_id) + _enc.path(path) + _enc.value(key) + _enc.value(value))
+def tx_collection_update(collection_id, path, key, fields):
+    """Replace an entry's record; every element binding follows."""
+    return record(TX_COLLECTION_UPDATE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(fields))
 
 def tx_collection_remove(collection_id, path, key):
     """Remove an entry; its stamped copy tears down."""
-    return record(TX_COLLECTION_REMOVE, struct.pack("<Q", collection_id) + _enc.path(path) + _enc.value(key))
+    return record(TX_COLLECTION_REMOVE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key))
 
 def tx_create_for(id, collection_id):
     """A For over a collection; opens a template scope until template_end."""
@@ -131,6 +138,10 @@ def tx_template_end():
     """Close the innermost template scope."""
     return record(TX_TEMPLATE_END, b"")
 
+def tx_collection_update_field(collection_id, path, key, field, value):
+    """Set one field of an entry's record; only bindings on that field re-resolve."""
+    return record(TX_COLLECTION_UPDATE_FIELD, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", field) + struct.pack("<I", 0) + _enc.value(value))
+
 
 def tx_set_text(widget_id, text):
     """set_property with a constant text value (str)."""
@@ -142,9 +153,9 @@ def tx_bind_text(widget_id, signal_id):
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TEXT, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_text_element(widget_id, level=0):
-    """set_property bound to the element of the enclosing For, `level` Fors up."""
-    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT, SOURCE_ELEMENT, level, 0))
+def tx_bind_text_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_checked(widget_id, checked):
@@ -157,9 +168,9 @@ def tx_bind_checked(widget_id, signal_id):
     return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_CHECKED, SOURCE_SIGNAL, signal_id))
 
 
-def tx_bind_checked_element(widget_id, level=0):
-    """set_property bound to the element of the enclosing For, `level` Fors up."""
-    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CHECKED, SOURCE_ELEMENT, level, 0))
+def tx_bind_checked_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CHECKED, SOURCE_ELEMENT, level, field))
 
 
 def parse_value(buf, at):

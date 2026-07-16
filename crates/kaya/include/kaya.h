@@ -44,6 +44,8 @@
 
 #define TX_TEMPLATE_END 13
 
+#define TX_COLLECTION_UPDATE_FIELD 14
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -155,6 +157,8 @@
 
 #define KAYA_TX_TEMPLATE_END 13
 
+#define KAYA_TX_COLLECTION_UPDATE_FIELD 14
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
@@ -221,6 +225,15 @@
 
 #define KAYA_SOURCE_ELEMENT 2
 
+typedef struct BoolKind BoolKind;
+
+/**
+ * Property keys; grows with widgets.
+ */
+typedef struct Prop Prop;
+
+typedef struct StrKind StrKind;
+
 typedef struct WindowId WindowId;
 
 /**
@@ -273,6 +286,10 @@ typedef struct KayaHostApi {
   void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
 } KayaHostApi;
+
+
+
+
 
 
 

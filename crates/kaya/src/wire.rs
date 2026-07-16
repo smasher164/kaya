@@ -14,8 +14,8 @@
 //! runtime condition.
 
 use crate::protocol::{
-    ApplyOp, CollectionId, Occurrence, Path, Prop, PropValue, SignalId, TemplateNodeId,
-    Transaction, TxOp, Value, WidgetId, WidgetKind, WindowId,
+    ApplyOp, CollectionId, Occurrence, Path, Prop, PropValue, Record, SignalId, TemplateNodeId,
+    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
 
 pub const HEADER_SIZE: usize = 8;
@@ -34,6 +34,7 @@ pub const TX_COLLECTION_REMOVE: u16 = 10;
 pub const TX_CREATE_FOR: u16 = 11;
 pub const TX_CREATE_WHEN: u16 = 12;
 pub const TX_TEMPLATE_END: u16 = 13;
+pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -119,6 +120,44 @@ impl<'a> Reader<'a> {
         let _reserved = self.u32();
         (0..count).map(|_| self.value()).collect()
     }
+
+    /// A record: same shape as a path — { u32 count; u32 reserved;
+    /// count values } — but the values are one entry's fields, not keys.
+    fn record(&mut self) -> Record {
+        self.path()
+    }
+
+    /// A schema: { u32 count; u32 reserved; count u32 value-type tags },
+    /// padded to 8.
+    fn schema(&mut self) -> Vec<ValueType> {
+        let count = self.u32() as usize;
+        let _reserved = self.u32();
+        let schema = (0..count).map(|_| value_type(self.u32())).collect();
+        self.at = pad8(self.at);
+        schema
+    }
+}
+
+fn value_type(raw: u32) -> ValueType {
+    match raw {
+        VALUE_BOOL => ValueType::Bool,
+        VALUE_I64 => ValueType::I64,
+        VALUE_F64 => ValueType::F64,
+        VALUE_STR => ValueType::Str,
+        other => panic!("kaya: unknown value type {other} in schema"),
+    }
+}
+
+/// Used by the test-only transaction encoder today; foreign guests
+/// write their own tags from the generated constants.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn value_type_raw(ty: ValueType) -> u32 {
+    match ty {
+        ValueType::Bool => VALUE_BOOL,
+        ValueType::I64 => VALUE_I64,
+        ValueType::F64 => VALUE_F64,
+        ValueType::Str => VALUE_STR,
+    }
 }
 
 fn widget_kind(raw: u32) -> WidgetKind {
@@ -178,8 +217,8 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                     SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
                     SOURCE_ELEMENT => {
                         let level = r.u32();
-                        let _pad = r.u32();
-                        PropValue::Element { level }
+                        let field = r.u32();
+                        PropValue::Element { level, field }
                     }
                     other => panic!("kaya: unknown property source {other}"),
                 };
@@ -199,17 +238,29 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
             },
             TX_CREATE_COLLECTION => TxOp::CreateCollection {
                 id: CollectionId(r.u64()),
+                schema: r.schema(),
             },
             TX_COLLECTION_INSERT => TxOp::CollectionInsert {
                 id: CollectionId(r.u64()),
                 path: r.path(),
                 key: r.value(),
-                value: r.value(),
+                record: r.record(),
             },
             TX_COLLECTION_UPDATE => TxOp::CollectionUpdate {
                 id: CollectionId(r.u64()),
                 path: r.path(),
                 key: r.value(),
+                record: r.record(),
+            },
+            TX_COLLECTION_UPDATE_FIELD => TxOp::CollectionUpdateField {
+                id: CollectionId(r.u64()),
+                path: r.path(),
+                key: r.value(),
+                field: {
+                    let field = r.u32();
+                    let _reserved = r.u32();
+                    field
+                },
                 value: r.value(),
             },
             TX_COLLECTION_REMOVE => TxOp::CollectionRemove {
@@ -414,10 +465,10 @@ impl Writer {
                         b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
                         b.extend_from_slice(&id.0.to_le_bytes());
                     }
-                    PropValue::Element { level } => {
+                    PropValue::Element { level, field } => {
                         b.extend_from_slice(&SOURCE_ELEMENT.to_le_bytes());
                         b.extend_from_slice(&level.to_le_bytes());
-                        b.extend_from_slice(&0u32.to_le_bytes());
+                        b.extend_from_slice(&field.to_le_bytes());
                     }
                 }
             }),
@@ -429,22 +480,42 @@ impl Writer {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
-            TxOp::CreateCollection { id } => self.record(TX_CREATE_COLLECTION, |b| {
-                b.extend_from_slice(&id.0.to_le_bytes());
-            }),
-            TxOp::CollectionInsert { id, path, key, value } => {
+            TxOp::CreateCollection { id, schema } => {
+                self.record(TX_CREATE_COLLECTION, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&(schema.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for ty in schema {
+                        b.extend_from_slice(&value_type_raw(*ty).to_le_bytes());
+                    }
+                    while b.len() % 8 != 0 {
+                        b.push(0);
+                    }
+                })
+            }
+            TxOp::CollectionInsert { id, path, key, record } => {
                 self.record(TX_COLLECTION_INSERT, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     write_path(b, path);
                     write_value(b, key);
-                    write_value(b, value);
+                    write_values(b, record);
                 })
             }
-            TxOp::CollectionUpdate { id, path, key, value } => {
+            TxOp::CollectionUpdate { id, path, key, record } => {
                 self.record(TX_COLLECTION_UPDATE, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     write_path(b, path);
                     write_value(b, key);
+                    write_values(b, record);
+                })
+            }
+            TxOp::CollectionUpdateField { id, path, key, field, value } => {
+                self.record(TX_COLLECTION_UPDATE_FIELD, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path);
+                    write_value(b, key);
+                    b.extend_from_slice(&field.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
                     write_value(b, value);
                 })
             }
@@ -474,6 +545,16 @@ fn write_path(b: &mut Vec<u8>, path: &Path) {
     b.extend_from_slice(&0u32.to_le_bytes());
     for key in path {
         write_value(b, key);
+    }
+}
+
+/// A record's fields, count-prefixed — the same shape as a path.
+#[cfg(test)]
+fn write_values(b: &mut Vec<u8>, values: &[Value]) {
+    b.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for v in values {
+        write_value(b, v);
     }
 }
 
@@ -602,13 +683,13 @@ mod tests {
     fn structural_ops_round_trip() {
         use crate::protocol::CollectionId;
         let ops = vec![
-            TxOp::CreateCollection { id: CollectionId(1) },
+            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
             TxOp::CreateFor { id: 2, collection: CollectionId(1) },
             TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
             TxOp::SetProperty {
                 widget: WidgetId(3),
                 prop: Prop::Text,
-                value: PropValue::Element { level: 0 },
+                value: PropValue::Element { level: 0, field: 0 },
             },
             TxOp::TemplateEnd,
             TxOp::CreateWhen { id: 4, signal: SignalId(9) },
@@ -617,13 +698,13 @@ mod tests {
                 id: CollectionId(1),
                 path: vec![],
                 key: Value::from("g1"),
-                value: Value::from("Work"),
+                record: vec![Value::from("Work")],
             },
             TxOp::CollectionUpdate {
                 id: CollectionId(7),
                 path: vec![Value::from("g1"), Value::I64(4)],
                 key: Value::I64(4),
-                value: Value::Bool(true),
+                record: vec![Value::Bool(true)],
             },
             TxOp::CollectionRemove {
                 id: CollectionId(7),

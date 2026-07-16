@@ -131,13 +131,25 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        Pad(w);");
     c.line("    }");
     c.line("");
-    c.line("    // A key path: {u32 count, u32 reserved, count values}.");
-    c.line("    static void EncodePath(BinaryWriter w, object[] keys)");
+    c.line("    // A counted value sequence — a key path or a record:");
+    c.line("    // {u32 count, u32 reserved, count values}.");
+    c.line("    static void EncodeValues(BinaryWriter w, object[] vals)");
     c.line("    {");
-    c.line("        w.Write((uint)(keys?.Length ?? 0));");
+    c.line("        w.Write((uint)(vals?.Length ?? 0));");
     c.line("        w.Write(0u);");
-    c.line("        foreach (object k in keys ?? Array.Empty<object>())");
-    c.line("            EncodeValue(w, k);");
+    c.line("        foreach (object v in vals ?? Array.Empty<object>())");
+    c.line("            EncodeValue(w, v);");
+    c.line("    }");
+    c.line("");
+    c.line("    // A collection schema: {u32 count, u32 reserved, count Value* tags},");
+    c.line("    // padded to 8.");
+    c.line("    static void EncodeTypeTags(BinaryWriter w, uint[] tags)");
+    c.line("    {");
+    c.line("        w.Write((uint)tags.Length);");
+    c.line("        w.Write(0u);");
+    c.line("        foreach (uint t in tags)");
+    c.line("            w.Write(t);");
+    c.line("        Pad(w);");
     c.line("    }");
     c.line("");
     c.line("    static byte[] Finish(MemoryStream stream, BinaryWriter w, ushort kind)");
@@ -191,11 +203,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return Finish(stream, w, TxKindSetProperty);");
         c.line("    }");
         c.line("");
-        c.line("    /// set_property bound to the element of the enclosing For, `level` Fors up.");
-        c.line(&format!("    public static byte[] TxBind{pc}Element(ulong widgetId, uint level = 0)"));
+        c.line("    /// set_property bound to one field of the element of the enclosing For.");
+        c.line(&format!("    public static byte[] TxBind{pc}Element(ulong widgetId, uint level = 0, uint field = 0)"));
         c.line("    {");
         c.line("        var w = Begin(out var stream);");
-        c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceElement); w.Write(level); w.Write(0u);"));
+        c.line(&format!("        w.Write(widgetId); w.Write(Prop{pc}); w.Write(SourceElement); w.Write(level); w.Write(field);"));
         c.line("        return Finish(stream, w, TxKindSetProperty);");
         c.line("    }");
     }
@@ -253,7 +265,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("uint {}", camel(f.name)),
             FieldTy::U64 => format!("ulong {}", camel(f.name)),
             FieldTy::Value => format!("object {}", camel(f.name)),
-            FieldTy::Path => format!("object[] {}", camel(f.name)),
+            FieldTy::Values => format!("object[] {}", camel(f.name)),
+            FieldTy::TypeTags => format!("uint[] {}", camel(f.name)),
         });
     }
     c.line("");
@@ -271,7 +284,8 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U32 => format!("        w.Write({});", camel(f.name)),
             FieldTy::U64 => format!("        w.Write({});", camel(f.name)),
             FieldTy::Value => format!("        EncodeValue(w, {});", camel(f.name)),
-            FieldTy::Path => format!("        EncodePath(w, {});", camel(f.name)),
+            FieldTy::Values => format!("        EncodeValues(w, {});", camel(f.name)),
+            FieldTy::TypeTags => format!("        EncodeTypeTags(w, {});", camel(f.name)),
         });
     }
     c.line(&format!(

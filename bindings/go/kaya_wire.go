@@ -43,6 +43,7 @@ const (
 	txCreateFor = 11
 	txCreateWhen = 12
 	txTemplateEnd = 13
+	txCollectionUpdateField = 14
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -92,12 +93,27 @@ func encodeValue(b []byte, v any) []byte {
 	return pad8(b)
 }
 
-// encodePath appends a key path: {u32 count, u32 reserved, count values}.
-func encodePath(b []byte, keys []any) []byte {
-	b = binary.LittleEndian.AppendUint32(b, uint32(len(keys)))
+// encodeValues appends a counted value sequence — a key path or a
+// record: {u32 count, u32 reserved, count values}.
+func encodeValues(b []byte, vals []any) []byte {
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(vals)))
 	b = binary.LittleEndian.AppendUint32(b, 0)
-	for _, k := range keys {
-		b = encodeValue(b, k)
+	for _, v := range vals {
+		b = encodeValue(b, v)
+	}
+	return b
+}
+
+// encodeTypeTags appends a collection schema: {u32 count, u32 reserved,
+// count Value* tags}, padded to 8.
+func encodeTypeTags(b []byte, tags []uint32) []byte {
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(tags)))
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	for _, t := range tags {
+		b = binary.LittleEndian.AppendUint32(b, t)
+	}
+	for len(b)%8 != 0 {
+		b = append(b, 0)
 	}
 	return b
 }
@@ -156,30 +172,31 @@ func TxMount(window uint64, root uint64) []byte {
 	return endRecord(b)
 }
 
-// TxCreateCollection: Declare a collection (a blueprint when inside a template).
-func TxCreateCollection(collectionId uint64) []byte {
+// TxCreateCollection: Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
+func TxCreateCollection(collectionId uint64, schema []uint32) []byte {
 	b := beginRecord(txCreateCollection)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
+	b = encodeTypeTags(b, schema)
 	return endRecord(b)
 }
 
-// TxCollectionInsert: Insert an entry into the instance at `path`; stamps a copy.
-func TxCollectionInsert(collectionId uint64, path []any, key any, value any) []byte {
+// TxCollectionInsert: Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
+func TxCollectionInsert(collectionId uint64, path []any, key any, fields []any) []byte {
 	b := beginRecord(txCollectionInsert)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
-	b = encodePath(b, path)
+	b = encodeValues(b, path)
 	b = encodeValue(b, key)
-	b = encodeValue(b, value)
+	b = encodeValues(b, fields)
 	return endRecord(b)
 }
 
-// TxCollectionUpdate: Update an entry's value; element bindings follow.
-func TxCollectionUpdate(collectionId uint64, path []any, key any, value any) []byte {
+// TxCollectionUpdate: Replace an entry's record; every element binding follows.
+func TxCollectionUpdate(collectionId uint64, path []any, key any, fields []any) []byte {
 	b := beginRecord(txCollectionUpdate)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
-	b = encodePath(b, path)
+	b = encodeValues(b, path)
 	b = encodeValue(b, key)
-	b = encodeValue(b, value)
+	b = encodeValues(b, fields)
 	return endRecord(b)
 }
 
@@ -187,7 +204,7 @@ func TxCollectionUpdate(collectionId uint64, path []any, key any, value any) []b
 func TxCollectionRemove(collectionId uint64, path []any, key any) []byte {
 	b := beginRecord(txCollectionRemove)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
-	b = encodePath(b, path)
+	b = encodeValues(b, path)
 	b = encodeValue(b, key)
 	return endRecord(b)
 }
@@ -214,6 +231,18 @@ func TxTemplateEnd() []byte {
 	return endRecord(b)
 }
 
+// TxCollectionUpdateField: Set one field of an entry's record; only bindings on that field re-resolve.
+func TxCollectionUpdateField(collectionId uint64, path []any, key any, field uint32, value any) []byte {
+	b := beginRecord(txCollectionUpdateField)
+	b = binary.LittleEndian.AppendUint64(b, collectionId)
+	b = encodeValues(b, path)
+	b = encodeValue(b, key)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
 // TxSetText: set_property with a constant text value.
 func TxSetText(widgetID uint64, text string) []byte {
 	b := beginRecord(txSetProperty)
@@ -234,15 +263,15 @@ func TxBindText(widgetID uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
-// TxBindTextElement: set_property bound to the element of the
+// TxBindTextElement: set_property bound to one field of the element of the
 // enclosing For, `level` Fors up (0 = nearest).
-func TxBindTextElement(widgetID uint64, level uint32) []byte {
+func TxBindTextElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropText)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, field)
 	return endRecord(b)
 }
 
@@ -266,15 +295,15 @@ func TxBindChecked(widgetID uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
-// TxBindCheckedElement: set_property bound to the element of the
+// TxBindCheckedElement: set_property bound to one field of the element of the
 // enclosing For, `level` Fors up (0 = nearest).
-func TxBindCheckedElement(widgetID uint64, level uint32) []byte {
+func TxBindCheckedElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropChecked)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, field)
 	return endRecord(b)
 }
 

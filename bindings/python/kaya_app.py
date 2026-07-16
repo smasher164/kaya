@@ -46,10 +46,25 @@ core never calls into the guest. The wire vocabulary underneath
 (kaya_wire) is generated from kaya::spec by kaya-bindgen.
 """
 
+import dataclasses
+import operator
 import threading
 
 import kaya
 import kaya_wire as wire
+
+# The wire-representable field types; a dataclass field of any other
+# type (a handler, say) is guest-only: it lives in the model and never
+# reaches the wire. bool before int — bool is an int in Python.
+_WIRE_TYPES = [(bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
+               (float, wire.VALUE_F64), (str, wire.VALUE_STR)]
+
+
+def _wire_tag(py_type):
+    for ty, tag in _WIRE_TYPES:
+        if py_type is ty:
+            return tag
+    return None
 
 _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
@@ -180,13 +195,33 @@ class Node:
 
 class Element:
     """The element of an enclosing For: what a stamped copy's bindings
-    read. Yielded by `with kaya.for_each(c) as element:`."""
+    read. Yielded by `with kaya.for_each(c) as element:`. For a record
+    collection, `element.title` projects one field — a FieldRef the
+    widget constructors accept wherever a binding goes."""
 
-    def __init__(self, for_index):
+    def __init__(self, for_index, coll):
         self._for_index = for_index
+        self._coll = coll
 
     def _level(self):
         return len(_for_stack) - 1 - self._for_index
+
+    def __getattr__(self, name):
+        fields = object.__getattribute__(self, "_coll")._fields
+        if name.startswith("_") or fields is None or name not in fields:
+            raise AttributeError(name)
+        return FieldRef(self, fields[name])
+
+
+class FieldRef:
+    """One field of an element: index plus level, ready to bind."""
+
+    def __init__(self, element, index):
+        self._element = element
+        self._index = index
+
+    def _level(self):
+        return self._element._level()
 
 
 class _BoundCollection:
@@ -208,17 +243,44 @@ class _BoundCollection:
         _journal_once(owner, restore)
         return owner._instances.setdefault(tuple(self._path), {})
 
+    def _encode(self, value):
+        """The entry's wire fields, in schema order. The model keeps the
+        value itself (a dataclass instance for record collections, the
+        scalar otherwise); only wire fields travel."""
+        getters = self._owner._wire_getters
+        if getters is None:
+            return [value]
+        return [g(value) for g in getters]
+
     def insert(self, key, value):
         _records().append(
-            wire.tx_collection_insert(self._owner._id, self._path, key, value)
+            wire.tx_collection_insert(self._owner._id, self._path, key,
+                                      self._encode(value))
         )
         self._mirror()[key] = value
 
     def update(self, key, value):
         _records().append(
-            wire.tx_collection_update(self._owner._id, self._path, key, value)
+            wire.tx_collection_update(self._owner._id, self._path, key,
+                                      self._encode(value))
         )
         self._mirror()[key] = value
+
+    def patch(self, key, **fields):
+        """Field-level deltas: `todos.patch(k, done=True)` sends one
+        update_field per kwarg and mutates the model instance in place —
+        toggling `done` never resends `title`."""
+        entry = self._mirror()[key]
+        owner_fields = self._owner._fields
+        if owner_fields is None:
+            raise TypeError("kaya: patch() needs a record collection")
+        for name, value in fields.items():
+            _records().append(
+                wire.tx_collection_update_field(
+                    self._owner._id, self._path, key, owner_fields[name], value
+                )
+            )
+            setattr(entry, name, value)
 
     def remove(self, key):
         _records().append(wire.tx_collection_remove(self._owner._id, self._path, key))
@@ -287,10 +349,35 @@ class _Draft:
 
 
 class Collection(_BoundCollection):
-    def __init__(self, id):
+    def __init__(self, id, record_type=None):
         self._id = id
         self._instances = {}
         self._children = []  # collections declared inside our template
+        self._record_type = record_type
+        if record_type is None:
+            # A scalar collection: one Str field, bound as field 0.
+            self._fields = None
+            self._schema = [wire.VALUE_STR]
+            self._wire_getters = None
+        else:
+            # The dataclass is the schema: wire-typed fields in
+            # declaration order; anything else (a handler) is
+            # guest-only. The accessor list is built once, here — the
+            # per-insert path is a loop over precompiled getters.
+            self._fields = {}
+            self._schema = []
+            self._wire_getters = []
+            for f in dataclasses.fields(record_type):
+                tag = _wire_tag(f.type)
+                if tag is None:
+                    continue
+                self._fields[f.name] = len(self._schema)
+                self._schema.append(tag)
+                self._wire_getters.append(operator.attrgetter(f.name))
+            if not self._schema:
+                raise TypeError(
+                    f"kaya: {record_type.__name__} has no wire-typed fields"
+                )
         super().__init__(self, [])
 
     def at(self, *path):
@@ -360,7 +447,7 @@ class _Template(_Scope):
         if self._is_for:
             _for_stack.append(len(_for_stack))
             _for_collections.append(self._coll)
-            return Element(_for_stack[-1])
+            return Element(_for_stack[-1], self._coll)
         return None
 
     def _exit(self):
@@ -394,9 +481,13 @@ def signal(initial):
     return handle
 
 
-def collection():
-    handle = Collection(_app._next("collection"))
-    _records().append(wire.tx_create_collection(handle._id))
+def collection(record_type=None):
+    """Declare a collection. With no argument, a scalar (str) table —
+    the one-field case. With a dataclass, a record collection: the
+    dataclass IS the schema (wire-typed fields, declaration order), and
+    `element.field` / `patch(key, field=...)` project it."""
+    handle = Collection(_app._next("collection"), record_type)
+    _records().append(wire.tx_create_collection(handle._id, handle._schema))
     # Declared inside a For's template: entries removed from the parent
     # tear down our instances, so the mirror bookkeeping needs the edge.
     if _for_collections:
@@ -436,6 +527,11 @@ def checkbox(text=None, checked=None, on_toggle=None):
     if checked is not None:
         if isinstance(checked, Signal):
             _records().append(wire.tx_bind_checked(handle.id, checked.id))
+        elif isinstance(checked, FieldRef):
+            _records().append(
+                wire.tx_bind_checked_element(handle.id, checked._level(),
+                                             checked._index)
+            )
         else:
             _records().append(wire.tx_set_checked(handle.id, checked))
     if on_toggle is not None:
@@ -466,6 +562,10 @@ def label(text=None, bind=None):
         _records().append(wire.tx_bind_text(handle.id, bind.id))
     elif isinstance(bind, Element):
         _records().append(wire.tx_bind_text_element(handle.id, bind._level()))
+    elif isinstance(bind, FieldRef):
+        _records().append(
+            wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
+        )
     return handle
 
 

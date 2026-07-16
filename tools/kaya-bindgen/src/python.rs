@@ -68,9 +68,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("");
     c.line("    @staticmethod");
-    c.line("    def path(keys):");
-    c.line("        \"\"\"Encode a key path.\"\"\"");
-    c.line("        return struct.pack(\"<II\", len(keys), 0) + b\"\".join(_enc.value(k) for k in keys)");
+    c.line("    def values(vals):");
+    c.line("        \"\"\"Encode a counted value sequence: a key path or a record.\"\"\"");
+    c.line("        return struct.pack(\"<II\", len(vals), 0) + b\"\".join(_enc.value(v) for v in vals)");
+    c.line("");
+    c.line("");
+    c.line("    @staticmethod");
+    c.line("    def type_tags(schema):");
+    c.line("        \"\"\"Encode a collection schema: a counted list of VALUE_* tags.\"\"\"");
+    c.line("        return _pad(struct.pack(\"<II\", len(schema), 0) + b\"\".join(struct.pack(\"<I\", t) for t in schema))");
     c.line("");
     c.line("");
     c.line("def record(kind, body):");
@@ -97,7 +103,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::U32 => format!("struct.pack(\"<I\", {})", f.name),
                 FieldTy::U64 => format!("struct.pack(\"<Q\", {})", f.name),
                 FieldTy::Value => format!("_enc.value({})", f.name),
-                FieldTy::Path => format!("_enc.path({})", f.name),
+                FieldTy::Values => format!("_enc.values({})", f.name),
+                FieldTy::TypeTags => format!("_enc.type_tags({})", f.name),
             });
         }
         let body = if parts.is_empty() {
@@ -129,9 +136,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIQ\", widget_id, PROP_{up}, SOURCE_SIGNAL, signal_id))"));
         c.line("");
         c.line("");
-        c.line(&format!("def tx_bind_{prop}_element(widget_id, level=0):"));
-        c.line(&format!("    \"\"\"set_property bound to the element of the enclosing For, `level` Fors up.\"\"\""));
-        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_{up}, SOURCE_ELEMENT, level, 0))"));
+        c.line(&format!("def tx_bind_{prop}_element(widget_id, level=0, field=0):"));
+        c.line(&format!("    \"\"\"set_property bound to one field of the element of the enclosing For, `level` Fors up.\"\"\""));
+        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_{up}, SOURCE_ELEMENT, level, field))"));
     }
     c.line("");
     c.line("");
