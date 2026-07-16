@@ -374,6 +374,40 @@ impl<T: KayaRecord> Clone for Collection<T> {
 }
 
 impl<T: KayaRecord> Collection<T> {
+    /// A signal the binding recomputes from this collection's entries
+    /// after every mutation, written into the same transaction — the
+    /// items-left label without any handler remembering to update it.
+    /// The closure is pure presentation: entries in, one value out;
+    /// the core sees an ordinary signal.
+    pub fn derive<V: Into<Value>>(
+        &self,
+        tx: &mut Tx<'_>,
+        compute: impl Fn(&[(Value, T)]) -> V + Send + Sync + 'static,
+    ) -> SignalId {
+        assert_root(self);
+        let compute = std::sync::Arc::new(move |entries: &[(Value, Record)]| {
+            let typed: Vec<(Value, T)> = entries
+                .iter()
+                .map(|(k, record)| (k.clone(), T::from_values(record)))
+                .collect();
+            compute(&typed).into()
+        });
+        // The initial value covers the entries already present — a
+        // derive declared mid-transaction still starts consistent.
+        let entries: Vec<(Value, Record)> = tx
+            .ctx
+            .model
+            .borrow()
+            .get(&self.id)
+            .and_then(|instances| instances.iter().find(|i| i.path.is_empty()))
+            .map(|i| i.entries.clone())
+            .unwrap_or_default();
+        let initial = compute(&entries);
+        let signal = tx.signal(initial);
+        tx.pending_derived.push((self.id, Derived { signal, compute }));
+        signal
+    }
+
     /// The instance of this collection inside the copy keyed by `key`
     /// of the next enclosing For; chain for deeper nesting.
     pub fn at(&self, key: impl Into<Value>) -> Collection<T> {
@@ -396,6 +430,17 @@ fn assert_root<T: KayaRecord>(collection: &Collection<T>) {
     );
 }
 
+/// One derived signal: recomputed from its collection's entries after
+/// every mutation, written into the same transaction. The compute is
+/// wire-level; Collection::derive wraps the typed closure once.
+#[derive(Clone)]
+struct Derived {
+    signal: SignalId,
+    // Arc, not Rc: AppCtx crosses into the app thread once at spawn,
+    // so every field must be Send (and Arc<T>: Send wants T: Sync).
+    compute: std::sync::Arc<dyn Fn(&[(Value, Record)]) -> Value + Send + Sync>,
+}
+
 pub struct AppCtx {
     pub(crate) occurrences: Receiver<Occurrence>,
     pub(crate) transactions: Sender<Transaction>,
@@ -409,6 +454,7 @@ pub struct AppCtx {
     // model needs the same edge to purge along.
     children: RefCell<HashMap<CollectionId, Vec<CollectionId>>>,
     open_fors: RefCell<Vec<CollectionId>>,
+    derived: RefCell<HashMap<CollectionId, Vec<Derived>>>,
 }
 
 impl AppCtx {
@@ -423,6 +469,7 @@ impl AppCtx {
             model: RefCell::new(HashMap::new()),
             children: RefCell::new(HashMap::new()),
             open_fors: RefCell::new(Vec::new()),
+            derived: RefCell::new(HashMap::new()),
         }
     }
 
@@ -441,6 +488,7 @@ impl AppCtx {
             ctx: self,
             ops: Vec::new(),
             journal: Vec::new(),
+            pending_derived: Vec::new(),
             committed: false,
         }
     }
@@ -488,6 +536,10 @@ pub struct Tx<'a> {
     // How to undo this transaction's model edits: a snapshot per
     // touched collection, taken on first touch.
     journal: Vec<(CollectionId, Vec<Instance>)>,
+    // Deriveds registered in this transaction: promoted to the app
+    // registry at commit, abandoned with an aborted Tx (their signals
+    // were never created).
+    pending_derived: Vec<(CollectionId, Derived)>,
     committed: bool,
 }
 
@@ -553,6 +605,38 @@ impl Tx<'_> {
             .map(|(_, record)| record)
             .unwrap_or_else(|| panic!("kaya: update_field of missing key {key:?}"));
         record[field as usize] = value.clone();
+    }
+
+    /// Recompute every derived signal rooted at this collection and
+    /// write each into this transaction. Runs after each mutation of
+    /// the live-zone instance (deriveds are declared on root handles,
+    /// so nested-instance mutations cannot change their input).
+    fn recompute_derived(&mut self, collection: CollectionId) {
+        let entries: Vec<(Value, Record)> = self
+            .ctx
+            .model
+            .borrow()
+            .get(&collection)
+            .and_then(|instances| instances.iter().find(|i| i.path.is_empty()))
+            .map(|i| i.entries.clone())
+            .unwrap_or_default();
+        let mut derived: Vec<Derived> = self
+            .ctx
+            .derived
+            .borrow()
+            .get(&collection)
+            .cloned()
+            .unwrap_or_default();
+        derived.extend(
+            self.pending_derived
+                .iter()
+                .filter(|(c, _)| *c == collection)
+                .map(|(_, d)| d.clone()),
+        );
+        for d in derived {
+            let value = (d.compute)(&entries);
+            self.ops.push(TxOp::WriteSignal { id: d.signal, value });
+        }
     }
 
     fn model_remove(&mut self, collection: CollectionId, path: &[Value], key: &Value) {
@@ -729,6 +813,9 @@ impl Tx<'_> {
             key,
             record,
         });
+        if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
     }
 
     pub fn update<T: KayaRecord>(
@@ -745,6 +832,9 @@ impl Tx<'_> {
             key,
             record,
         });
+        if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
     }
 
     /// One field's delta: the model mutates one slot, the wire carries
@@ -769,6 +859,9 @@ impl Tx<'_> {
             field: field.index,
             value,
         });
+        if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
     }
 
     pub fn remove<T: KayaRecord>(&mut self, instance: &Collection<T>, key: impl Into<Value>) {
@@ -779,6 +872,9 @@ impl Tx<'_> {
             path: instance.path.clone(),
             key,
         });
+        if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
     }
 
     /// A For over `collection`: the closure declares the template — a
@@ -831,6 +927,9 @@ impl Tx<'_> {
     /// Send the batch and wake the main loop to apply it. The model
     /// edits stand: they are exactly what was sent.
     pub fn commit(mut self) {
+        for (collection, derived) in self.pending_derived.drain(..) {
+            self.ctx.derived.borrow_mut().entry(collection).or_default().push(derived);
+        }
         self.committed = true;
         let ops = std::mem::take(&mut self.ops);
         if self.ctx.transactions.send(ops).is_ok() {
@@ -1020,7 +1119,7 @@ impl Tpl<'_, '_> {
 mod tests {
     use std::sync::mpsc;
 
-    use super::{AppCtx, KayaRecord};
+    use super::{AppCtx, KayaRecord, Tx};
     use crate::protocol::{Value, ValueType};
 
     crate::record! {
@@ -1077,6 +1176,52 @@ mod tests {
             tx.items(&todos),
             vec![(Value::from("a"), Todo { title: "oat milk".into(), done: true })]
         );
+    }
+
+    /// A derived signal recomputes from the collection after every
+    /// mutation, into the same transaction — and an abandoned Tx
+    /// abandons its registration with its records.
+    #[test]
+    fn derived_signal_recomputes_per_mutation() {
+        use crate::protocol::TxOp;
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        let items_left = todos.derive(&mut tx, |items| {
+            let n = items.iter().filter(|(_, t)| !t.done).count();
+            format!("{n} left")
+        });
+
+        let last_write = |tx: &Tx<'_>| match tx.ops.last() {
+            Some(TxOp::WriteSignal { id, value }) => (id.0, value.clone()),
+            other => panic!("expected a derived write, got {other:?}"),
+        };
+
+        tx.insert(&todos, "a", Todo { title: "milk".into(), done: false });
+        assert_eq!(last_write(&tx), (items_left.0, Value::from("1 left")));
+        todos.patch(&mut tx, "a").done(true);
+        assert_eq!(last_write(&tx), (items_left.0, Value::from("0 left")));
+        tx.remove(&todos, "a");
+        assert_eq!(last_write(&tx), (items_left.0, Value::from("0 left")));
+        tx.commit();
+
+        // A second transaction still recomputes (the registration was
+        // promoted at commit) ...
+        let mut tx = ctx.begin();
+        tx.insert(&todos, "b", Todo { title: "eggs".into(), done: false });
+        assert_eq!(last_write(&tx), (items_left.0, Value::from("1 left")));
+        tx.commit();
+
+        // ... but a derive registered in an abandoned Tx never lands.
+        let mut tx = ctx.begin();
+        let _dropped = todos.derive(&mut tx, |items| items.len() as i64);
+        drop(tx);
+        assert_eq!(ctx.derived.borrow()[&todos.id].len(), 1);
     }
 
     use crate::protocol::{Occurrence, Prop, WidgetId, WidgetKind};

@@ -34,12 +34,13 @@ var draft = ""
 var nextKey = 0
 
 app.build { tx in
-    let itemsLeft = tx.signal(.str("0 items left"))
     let todos = tx.collection(of: Todo.self)
-
-    func itemsLeftText(_ tx: KayaAppTx) -> String {
-        let n = todos.items(tx).filter { !$0.value.done }.count
-        return n == 1 ? "1 item left" : "\(n) items left"
+    // The items-left label is a derived signal: the binding recomputes
+    // it from the collection after every mutation, so no handler
+    // mentions it.
+    let itemsLeft = todos.derive(tx) { items in
+        let n = items.filter { !$0.value.done }.count
+        return .str(n == 1 ? "1 item left" : "\(n) items left")
     }
 
     let root = tx.column {
@@ -47,15 +48,14 @@ app.build { tx in
         tx.button("Add") { tx in
             nextKey += 1
             todos.insert(tx, .str("t\(nextKey)"), Todo(title: draft, done: false))
-            tx.write(itemsLeft, .str(itemsLeftText(tx)))
         }
         tx.label(bind: itemsLeft)
         tx.each(todos.collection) { t in
             _ = t.row {
                 todos.checkbox(t, \.done) { tx, keys, checked in
-                    // One field's delta: the title never travels.
+                    // One field's delta: the title never travels; the
+                    // derived signal updates itself.
                     todos.patch(tx, keys[0]).set(\.done, checked)
-                    tx.write(itemsLeft, .str(itemsLeftText(tx)))
                 }
                 todos.label(t, \.title)
             }

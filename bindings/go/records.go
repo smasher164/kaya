@@ -141,12 +141,14 @@ func (info *recordInfo) values(value any) []any {
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, c.info.values(value)))
+	tx.recomputeDerived(c.id, c.path)
 }
 
 // Update replaces a record wholesale; UpdateField is the one-field way.
 func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, c.info.values(value)))
+	tx.recomputeDerived(c.id, c.path)
 }
 
 // Items is the typed model: what this guest wrote, in insertion order.
@@ -189,6 +191,20 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 		}
 	}
 	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, value))
+	tx.recomputeDerived(c.id, c.path)
+}
+
+// Derive returns a signal the binding recomputes from this
+// collection's entries after every mutation, written into the same
+// transaction — the items-left label with no handler remembering to
+// update it. The compute is pure presentation: entries in, one value
+// out; the core sees an ordinary signal (a Go 1.27 generic method).
+func (c RecordCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
+	s := tx.Signal(compute(c.Items(tx)))
+	tx.app.derived[c.id] = append(tx.app.derived[c.id], func(tx *Tx) {
+		tx.Write(s, compute(c.Items(tx)))
+	})
+	return s
 }
 
 // RecordPatch is typed field writes with the key spelled once:

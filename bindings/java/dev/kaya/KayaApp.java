@@ -40,6 +40,9 @@ public final class KayaApp {
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
+    // Signals recomputed from a collection after each of its
+    // mutations, written into the same transaction.
+    private final Map<Long, List<Consumer<Tx>>> derived = new HashMap<>();
 
     /** A template entry's change handler: the stamped copy's keys, then
      * the entry's new text. */
@@ -212,7 +215,38 @@ public final class KayaApp {
         // touched collection, taken on first touch.
         private final Map<Long, List<Instance>> journal = new HashMap<>();
 
+        // Deriveds registered in this transaction: promoted to the app
+        // registry on submit, abandoned with a rolled-back Tx (their
+        // signals were never created).
+        private final List<Map.Entry<Long, Consumer<Tx>>> pendingDerived = new ArrayList<>();
+
+        void registerDerived(long coll, Consumer<Tx> recompute) {
+            pendingDerived.add(Map.entry(coll, recompute));
+        }
+
+        /** Every derived signal rooted at this collection, recomputed
+         * and written into this transaction. Deriveds hang off root
+         * handles, so nested-instance mutations cannot change their
+         * input. */
+        private void recomputeDerived(Collection c) {
+            if (!c.path.isEmpty()) {
+                return;
+            }
+            for (Consumer<Tx> recompute : derived.getOrDefault(c.id, java.util.Collections.emptyList())) {
+                recompute.accept(this);
+            }
+            for (Map.Entry<Long, Consumer<Tx>> entry : pendingDerived) {
+                if (entry.getKey() == c.id) {
+                    entry.getValue().accept(this);
+                }
+            }
+        }
+
         void submitIfAny() {
+            for (Map.Entry<Long, Consumer<Tx>> entry : pendingDerived) {
+                derived.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
+            }
+            pendingDerived.clear();
             if (!records.isEmpty()) {
                 KayaRing.submit(KayaWire.tx(records.toArray(new byte[0][])));
             }
@@ -417,11 +451,13 @@ public final class KayaApp {
         public void insert(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
             records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, new Object[] { value }));
+            recomputeDerived(c);
         }
 
         public void update(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
             records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, new Object[] { value }));
+            recomputeDerived(c);
         }
 
         // The raw record paths KayaRecords builds on: the model keeps
@@ -436,21 +472,25 @@ public final class KayaApp {
         void insertRecordRaw(Collection c, Object key, Object model, Object[] fields) {
             modelSet(c.id, c.path, key, model);
             records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, fields));
+            recomputeDerived(c);
         }
 
         void updateRecordRaw(Collection c, Object key, Object model, Object[] fields) {
             modelSet(c.id, c.path, key, model);
             records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, fields));
+            recomputeDerived(c);
         }
 
         void updateFieldRaw(Collection c, Object key, Object model, int field, Object value) {
             modelSet(c.id, c.path, key, model);
             records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, value));
+            recomputeDerived(c);
         }
 
         public void remove(Collection c, Object key) {
             modelRemove(c.id, c.path, key);
             records.add(KayaWire.txCollectionRemove(c.id, c.path.toArray(), key));
+            recomputeDerived(c);
         }
 
         /**

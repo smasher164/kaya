@@ -64,6 +64,9 @@ type app = {
   model : (int64, instance list) Hashtbl.t;
   children : (int64, int64 list) Hashtbl.t;
   mutable open_fors : int64 list;
+  (* Signals recomputed from a collection after each of its mutations,
+     written into the same transaction. *)
+  derived : (int64, (tx -> unit) list) Hashtbl.t;
 }
 
 (* One transaction: everything queued inside build (or a handler)
@@ -74,6 +77,10 @@ and tx = {
   app : app;
   mutable records : string list;
   mutable journal : (int64 * instance list) list;
+  (* Deriveds registered in this transaction: promoted to the app
+     registry on submit, abandoned with a rolled-back tx (their signals
+     were never created). *)
+  mutable pending_derived : (int64 * (tx -> unit)) list;
 }
 
 (* A declaration program: what [build] runs against one transaction.
@@ -96,6 +103,7 @@ let create () =
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
     open_fors = [];
+    derived = Hashtbl.create 8;
   }
 
 let emit tx record = tx.records <- record :: tx.records
@@ -147,13 +155,29 @@ let model_remove tx cid path key =
      instances with it; the model follows. *)
   purge_children tx cid (path @ [ key ])
 
+(* Every derived signal rooted at this collection, recomputed and
+   written into this transaction. Deriveds hang off root handles, so
+   nested-instance mutations cannot change their input. *)
+let recompute_derived tx cid path =
+  if path = [] then begin
+    (match Hashtbl.find_opt tx.app.derived cid with
+    | Some fns -> List.iter (fun f -> f tx) fns
+    | None -> ());
+    List.iter (fun (c, f) -> if c = cid then f tx) (List.rev tx.pending_derived)
+  end
+
 (* Run a declaration program with a fresh transaction and submit it
    atomically. A handler that raises abandons its records, and the
    model abandons the same writes before the exception continues. *)
 let build app (program : 'a decl) =
-  let tx = { app; records = []; journal = [] } in
+  let tx = { app; records = []; journal = []; pending_derived = [] } in
   match program tx with
   | result ->
+      List.iter
+        (fun (cid, f) ->
+          Hashtbl.replace app.derived cid
+            (Option.value ~default:[] (Hashtbl.find_opt app.derived cid) @ [ f ]))
+        (List.rev tx.pending_derived);
       if tx.records <> [] then Kaya_runtime.submit (List.rev tx.records);
       result
   | exception e ->
@@ -294,15 +318,18 @@ let assert_root c =
 
 let insert c key value tx =
   model_set tx c.cid c.cpath key [ value ];
-  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [ value ])
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [ value ]);
+  recompute_derived tx c.cid c.cpath
 
 let update c key value tx =
   model_set tx c.cid c.cpath key [ value ];
-  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [ value ])
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [ value ]);
+  recompute_derived tx c.cid c.cpath
 
 let remove c key tx =
   model_remove tx c.cid c.cpath key;
-  emit tx (Kaya_wire.tx_collection_remove c.cid c.cpath key)
+  emit tx (Kaya_wire.tx_collection_remove c.cid c.cpath key);
+  recompute_derived tx c.cid c.cpath
 
 (* The model: what this guest wrote, exactly — the fold of every patch
    so far (this transaction's included), in insertion order. *)
@@ -367,12 +394,14 @@ let collection_of rt tx =
 let insert_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
-  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key fields)
+  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key fields);
+  recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 let update_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
-  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key fields)
+  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key fields);
+  recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* One field's delta: the rest of the record never travels; the
    model's copy updates the same slot. *)
@@ -394,7 +423,8 @@ let update_field rc key fd value tx =
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key updated;
   emit tx
     (Kaya_wire.tx_collection_update_field rc.rc_handle.cid rc.rc_handle.cpath key
-       fd.fd_index wire)
+       fd.fd_index wire);
+  recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* The typed model: what this guest wrote, in insertion order. *)
 let record_items rc tx =
@@ -403,6 +433,18 @@ let record_items rc tx =
   with
   | Some i -> List.map (fun (k, vs) -> (k, rc.rc_type.rt_of_values vs)) i.entries
   | None -> []
+
+(* A signal recomputed from this collection's entries after every
+   mutation, written into the same transaction — the items-left label
+   with no handler remembering to update it. The function is pure
+   presentation: entries in, one value out; the core sees an ordinary
+   signal. *)
+let derive rc compute tx =
+  let s = signal (compute (record_items rc tx)) tx in
+  tx.pending_derived <-
+    (rc.rc_handle.cid, fun tx' -> write s (compute (record_items rc tx')) tx')
+    :: tx.pending_derived;
+  s
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)

@@ -25,17 +25,18 @@ static class TodosScene
 
         app.Build(tx =>
         {
-            var itemsLeft = tx.Signal("0 items left");
             var todos = tx.CollectionOf<Todo>();
-
-            string ItemsLeftText(Tx t)
+            // The items-left label is a derived signal: the binding
+            // recomputes it from the collection after every mutation,
+            // so no handler mentions it.
+            var itemsLeft = todos.Derive(tx, items =>
             {
                 int n = 0;
-                foreach (var entry in todos.Items(t))
+                foreach (var entry in items)
                     if (!entry.Value.Done)
                         n++;
                 return n == 1 ? "1 item left" : $"{n} items left";
-            }
+            });
 
             tx.Mount(tx.Column(
                 tx.Entry((t, text) => draft = text),
@@ -43,15 +44,14 @@ static class TodosScene
                 {
                     nextKey++;
                     todos.Insert(t, $"t{nextKey}", new Todo(draft, false));
-                    t.Write(itemsLeft, ItemsLeftText(t));
                 }),
                 tx.Label(bind: itemsLeft),
                 tx.Each(todos.Collection, t => t.Row(
                     todos.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
                     {
-                        // One field's delta: the title never travels.
+                        // One field's delta: the title never travels;
+                        // the derived signal updates itself.
                         todos.Patch(t2, keys[0]).Set(x => x.Done, isChecked);
-                        t2.Write(itemsLeft, ItemsLeftText(t2));
                     }),
                     todos.Label(t, x => x.Title)))));
         });

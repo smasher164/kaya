@@ -99,6 +99,10 @@ sealed class KayaInstance
 
 sealed class KayaApp
 {
+    // Signals recomputed from a collection after each of its
+    // mutations, written into the same transaction.
+    internal readonly Dictionary<ulong, List<Action<Tx>>> Derived = new();
+
     ulong signals, widgets, collections, nodes;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
@@ -267,10 +271,22 @@ sealed class Tx
     // touched collection, taken on first touch.
     readonly Dictionary<ulong, List<KayaInstance>> journal = new();
 
+    // Deriveds registered in this transaction: promoted to the app
+    // registry on submit, abandoned with a rolled-back Tx (their
+    // signals were never created).
+    readonly List<(ulong Coll, Action<Tx> Recompute)> pendingDerived = new();
+
     internal Tx(KayaApp app) => App = app;
 
     internal void SubmitIfAny()
     {
+        foreach (var (coll, recompute) in pendingDerived)
+        {
+            if (!App.Derived.TryGetValue(coll, out var list))
+                App.Derived[coll] = list = new List<Action<Tx>>();
+            list.Add(recompute);
+        }
+        pendingDerived.Clear();
         if (Records.Count > 0)
             Kaya.Submit(Records.ToArray());
     }
@@ -461,18 +477,39 @@ sealed class Tx
     {
         ModelSet(c.Id, c.Path, key, value);
         Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, new[] { value }));
+        RecomputeDerived(c);
     }
 
     public void Update(Collection c, object key, object value)
     {
         ModelSet(c.Id, c.Path, key, value);
         Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, new[] { value }));
+        RecomputeDerived(c);
     }
 
     public void Remove(Collection c, object key)
     {
         ModelRemove(c.Id, c.Path, key);
         Records.Add(KayaWire.TxCollectionRemove(c.Id, c.Path, key));
+        RecomputeDerived(c);
+    }
+
+    internal void RegisterDerived(ulong coll, Action<Tx> recompute) =>
+        pendingDerived.Add((coll, recompute));
+
+    // Every derived signal rooted at this collection, recomputed and
+    // written into this transaction. Deriveds hang off root handles,
+    // so nested-instance mutations cannot change their input.
+    void RecomputeDerived(Collection c)
+    {
+        if (c.Path.Length != 0)
+            return;
+        if (App.Derived.TryGetValue(c.Id, out var list))
+            foreach (var recompute in list)
+                recompute(this);
+        foreach (var (coll, recompute) in pendingDerived)
+            if (coll == c.Id)
+                recompute(this);
     }
 
     // The raw record paths KayaRecords builds on: the model keeps the
@@ -489,18 +526,21 @@ sealed class Tx
     {
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, fields));
+        RecomputeDerived(c);
     }
 
     internal void UpdateRecordRaw(Collection c, object key, object model, object[] fields)
     {
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, fields));
+        RecomputeDerived(c);
     }
 
     internal void UpdateFieldRaw(Collection c, object key, object model, uint field, object value)
     {
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionUpdateField(c.Id, c.Path, key, field, value));
+        RecomputeDerived(c);
     }
 
     /// The model: what this guest wrote, exactly — the fold of every

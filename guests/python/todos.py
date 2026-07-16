@@ -4,6 +4,8 @@ elements are records; the dataclass IS the schema (wire-typed fields in
 declaration order), the template binds each field to its own widget
 (title -> label text, done -> checkbox state), and toggling a row sends
 one field's delta — `patch(key, done=...)` never resends the title.
+The items-left label is a derived signal recomputed from the collection
+after every mutation, so no handler mentions it.
 
 The backend selftest (KAYA_SELFTEST=todos) types "buy milk", clicks
 Add, toggles the stamped row's checkbox, and expects the status label
@@ -38,9 +40,9 @@ draft = ""
 next_key = 0
 
 
-def items_left_text():
-    n = sum(1 for _, t in todos.items() if not t.done)
-    return f"{n} item left" if n == 1 else f"{n} items left"
+def items_left_text(items):
+    n = sum(1 for t in items.values() if not t.done)
+    return "1 item left" if n == 1 else f"{n} items left"
 
 
 def on_change(text):
@@ -52,18 +54,17 @@ def on_add():
     global next_key
     next_key += 1
     todos.insert(f"t{next_key}", Todo(title=draft, done=False))
-    items_left.set(items_left_text())
 
 
 def on_toggle(key, checked):
-    # One field's delta: the title never travels.
+    # One field's delta: the title never travels; the derived signal
+    # updates itself.
     todos.patch(key, done=checked)
-    items_left.set(items_left_text())
 
 
 with app.window():
-    items_left = kaya.signal("0 items left")
     todos = kaya.collection(Todo)
+    items_left = todos.derive(items_left_text)
 
     with kaya.column():
         kaya.entry(on_change=on_change)

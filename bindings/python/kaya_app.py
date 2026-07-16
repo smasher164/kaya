@@ -177,6 +177,30 @@ class _Derived(Signal):
                 derived._recompute()
 
 
+class _CollectionDerived(Signal):
+    """Binding-maintained from a collection: recomputed after every
+    mutation of the live-zone instance, the write batched into the same
+    transaction. The core sees an ordinary signal."""
+
+    def __init__(self, id, coll, compute):
+        super().__init__(id, compute(dict(coll._mirror())))
+        self._coll = coll
+        self._compute = compute
+
+    def set(self, value):
+        raise RuntimeError("kaya: derived signals are written by their source")
+
+    def _recompute(self):
+        new = self._compute(dict(self._coll._mirror()))
+        if new != self._mirror:
+            old = self._mirror
+            _journal_once(self, lambda: setattr(self, "_mirror", old))
+            _records().append(wire.tx_write_signal(self.id, new))
+            self._mirror = new
+            for derived in self._dependents:
+                derived._recompute()
+
+
 class Widget:
     """A live widget: exactly one thing on screen."""
 
@@ -252,12 +276,38 @@ class _BoundCollection:
             return [value]
         return [g(value) for g in getters]
 
+    def derive(self, compute):
+        """A signal the binding recomputes from this collection's
+        entries after every mutation, batched into the same transaction
+        — `todos.derive(lambda items: ...)`; chain .eq/.fmt for further
+        derivation. The callable is pure presentation: the entries dict
+        in, one value out."""
+        if self._path:
+            raise RuntimeError(
+                "kaya: derive on the collection itself, not an instance — drop the at()"
+            )
+        derived = _CollectionDerived(_app._next("signal"), self, compute)
+        _records().append(wire.tx_create_signal(derived.id, derived._mirror))
+        self._owner._derived.append(derived)
+        _journal_once(
+            ("derive", derived), lambda: self._owner._derived.remove(derived)
+        )
+        return derived
+
+    def _recompute_derived(self):
+        # Deriveds hang off root handles, so nested-instance mutations
+        # cannot change their input.
+        if not self._path:
+            for derived in self._owner._derived:
+                derived._recompute()
+
     def insert(self, key, value):
         _records().append(
             wire.tx_collection_insert(self._owner._id, self._path, key,
                                       self._encode(value))
         )
         self._mirror()[key] = value
+        self._recompute_derived()
 
     def update(self, key, value):
         _records().append(
@@ -265,6 +315,7 @@ class _BoundCollection:
                                       self._encode(value))
         )
         self._mirror()[key] = value
+        self._recompute_derived()
 
     def patch(self, key, **fields):
         """Field-level deltas: `todos.patch(k, done=True)` sends one
@@ -281,10 +332,12 @@ class _BoundCollection:
                 )
             )
             setattr(entry, name, value)
+        self._recompute_derived()
 
     def remove(self, key):
         _records().append(wire.tx_collection_remove(self._owner._id, self._path, key))
         self._mirror().pop(key, None)
+        self._recompute_derived()
         # The core tears down the copy, taking descendant collection
         # instances with it; the mirrors follow.
         prefix = tuple(self._path) + (key,)
@@ -353,6 +406,7 @@ class Collection(_BoundCollection):
         self._id = id
         self._instances = {}
         self._children = []  # collections declared inside our template
+        self._derived = []  # signals recomputed from this collection
         self._record_type = record_type
         if record_type is None:
             # A scalar collection: one Str field, bound as field 0.

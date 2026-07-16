@@ -2,8 +2,10 @@
 //! design appendix's app on the structural core. The record! macro
 //! derives the schema, the conversions, and the field tokens from one
 //! struct; bind_field unifies each field's type with its property's at
-//! compile time; and toggling a row records one field's delta through
-//! the generated patch builder — the title never travels.
+//! compile time; toggling a row records one field's delta through the
+//! generated patch builder — the title never travels — and the
+//! items-left label is a derived signal the binding recomputes from
+//! the collection after every mutation, so no handler mentions it.
 //!
 //! The backend selftest (KAYA_SELFTEST=todos) types "buy milk", clicks
 //! Add, toggles the stamped row's checkbox, and expects the status
@@ -18,23 +20,17 @@ kaya::record! {
     }
 }
 
-fn items_left_text(tx: &kaya::Tx<'_>, todos: &kaya::Collection<Todo>) -> String {
-    let n = tx.items(todos).iter().filter(|(_, t)| !t.done).count();
-    if n == 1 {
-        "1 item left".to_string()
-    } else {
-        format!("{n} items left")
-    }
-}
-
 pub(crate) fn app(ctx: kaya::AppCtx) {
     // The construction sugar: containers take their children, and the
     // build body reads as the tree (milestone2 keeps the fully
     // explicit floor on purpose). Handlers stay in the occurrence
     // loop, the Rust idiom.
     let mut tx = ctx.begin();
-    let items_left = tx.signal("0 items left");
     let todos = tx.collection::<Todo>();
+    let items_left = todos.derive(&mut tx, |items| {
+        let n = items.iter().filter(|(_, t)| !t.done).count();
+        if n == 1 { "1 item left".to_string() } else { format!("{n} items left") }
+    });
 
     let field = tx.widget(WidgetKind::Entry);
     let add = tx.button("Add");
@@ -64,8 +60,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     format!("t{next_key}"),
                     Todo { title: draft.clone(), done: false },
                 );
-                let status_text = items_left_text(&tx, &todos);
-                tx.write(items_left, status_text);
                 tx.commit();
             }
             Occurrence::InstanceToggled { node, path, checked } if node == check => {
@@ -74,8 +68,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // one update_field.
                 let mut tx = ctx.begin();
                 todos.patch(&mut tx, path[0].clone()).done(checked);
-                let status_text = items_left_text(&tx, &todos);
-                tx.write(items_left, status_text);
                 tx.commit();
             }
             Occurrence::Shutdown => break,

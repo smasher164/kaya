@@ -266,6 +266,20 @@ public final class KayaRecords {
         }
 
         /**
+         * A signal the binding recomputes from this collection's
+         * entries after every mutation, written into the same
+         * transaction — the items-left label with no handler
+         * remembering to update it. The function is pure presentation:
+         * entries in, one value out; the core sees an ordinary signal.
+         */
+        public <V> KayaApp.Signal<V> derive(KayaApp.Tx tx,
+                java.util.function.Function<List<Entry<K, T>>, V> compute) {
+            KayaApp.Signal<V> s = tx.signal(compute.apply(items(tx)));
+            tx.registerDerived(handle.id, t -> t.write(s, compute.apply(items(t))));
+            return s;
+        }
+
+        /**
          * Typed field writes with the key spelled once:
          * {@code todos.patch(tx, key).set(Todo::done, true)}. Each set
          * records one update_field — a patch is recorded writes, never

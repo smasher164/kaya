@@ -142,6 +142,21 @@ struct KayaRecordCollection<T: KayaRecord> {
         tx.recordEntries(collection).map { (key: $0.key, value: $0.value as! T) }
     }
 
+    /// A signal the binding recomputes from this collection's entries
+    /// after every mutation, written into the same transaction — the
+    /// items-left label with no handler remembering to update it. The
+    /// closure is pure presentation: entries in, one value out; the
+    /// core sees an ordinary signal.
+    func derive(
+        _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
+    ) -> KayaSignal {
+        let s = tx.signal(compute(items(tx)))
+        tx.app.derived[collection.id, default: []].append { t in
+            t.write(s, compute(self.items(t)))
+        }
+        return s
+    }
+
     /// Typed field writes with the key spelled once:
     /// todos.patch(tx, key).set(\.done, true).set(\.title, "x").
     /// Each set records one update_field — a patch is recorded writes,

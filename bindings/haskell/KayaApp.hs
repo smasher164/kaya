@@ -65,6 +65,7 @@ module KayaApp
     FieldSet,
     set,
     patch,
+    derive,
     recordItems,
     bindTextField,
     bindCheckedField,
@@ -154,7 +155,13 @@ data BuildState = BuildState
     -- checkbox ...): pure data until buildTx registers them with
     -- the app alongside the submit — an abandoned Build abandons its
     -- handlers with its records.
-    bPending :: ![Pending]
+    bPending :: ![Pending],
+    -- Signals recomputed from a collection after each of its
+    -- mutations, written into the same transaction; stored back at
+    -- buildTx like the model, so an abandoned Build abandons its
+    -- registrations too. The compute is wire-level: entries in, one
+    -- value out.
+    bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, [W.Value])] -> W.Value)])
   }
 
 data Pending
@@ -360,20 +367,38 @@ signal initial = Build $ \s ->
 writeSignal :: Signal -> W.Value -> Build ()
 writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 
+-- Every derived signal rooted at this collection, recomputed from the
+-- new model and written into the same transaction. Deriveds hang off
+-- root handles, so nested-instance mutations cannot change their
+-- input.
+recomputeDerived :: Word64 -> [W.Value] -> BuildState -> BuildState
+recomputeDerived cid path s
+  | not (null path) = s
+  | otherwise =
+      let entries = lookupEntries cid [] (bModel s)
+          writes =
+            foldMap
+              (\(sid, f) -> W.txWriteSignal sid (f entries))
+              (Map.findWithDefault [] cid (bDerived s))
+       in s {bRecords = bRecords s <> writes}
+
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key [value],
-          bModel = modelSet n path key [value] (bModel s)})
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionInsert n path key [value],
+       bModel = modelSet n path key [value] (bModel s)})
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key [value],
-          bModel = modelSet n path key [value] (bModel s)})
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionUpdate n path key [value],
+       bModel = modelSet n path key [value] (bModel s)})
 
 remove :: Collection -> W.Value -> Build ()
 remove (Collection n path) key = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionRemove n path key,
-          bModel = modelRemove (bChildren s) n path key (bModel s)})
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionRemove n path key,
+       bModel = modelRemove (bChildren s) n path key (bModel s)})
 
 -- | The model: what this guest wrote, exactly — the fold of every
 -- patch so far (this transaction's included), in insertion order.
@@ -613,13 +638,15 @@ collectionOf p = Build $ \s ->
 
 insertRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key (toValues value),
-          bModel = modelSet n path key (toValues value) (bModel s)})
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionInsert n path key (toValues value),
+       bModel = modelSet n path key (toValues value) (bModel s)})
 
 updateRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
-  ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key (toValues value),
-          bModel = modelSet n path key (toValues value) (bModel s)})
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionUpdate n path key (toValues value),
+       bModel = modelSet n path key (toValues value) (bModel s)})
 
 -- | One field's delta: the rest of the record never travels; the
 -- model's copy updates the same slot.
@@ -634,8 +661,9 @@ updateFieldWire (RecordCollection (Collection n path)) key i wire = Build $ \s -
         Just vs -> vs
         Nothing -> error "kaya: update of missing key"
       updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
-   in ((), s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i wire,
-              bModel = modelSet n path key updated (bModel s)})
+   in ((), recomputeDerived n path
+        s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i wire,
+           bModel = modelSet n path key updated (bModel s)})
 
 -- | One recorded field write of an a-record: the value's type checks
 -- against the field's at the use site, then the pair travels as
@@ -656,6 +684,24 @@ recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
 recordItems (RecordCollection (Collection n path)) = Build $ \s ->
   (map (\(k, vs) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
 
+-- | A signal the binding recomputes from this collection's entries
+-- after every mutation, written into the same transaction — the
+-- items-left label with no handler remembering to update it. The
+-- function is pure presentation: entries in, one value out; the core
+-- sees an ordinary signal.
+derive ::
+  forall a. KayaRecord a =>
+  RecordCollection a -> ([(W.Value, a)] -> W.Value) -> Build Signal
+derive (RecordCollection (Collection n _)) compute = Build $ \s ->
+  let wireCompute entries = compute (map (\(k, vs) -> (k, fromValues vs :: a)) entries)
+      initial = wireCompute (lookupEntries n [] (bModel s))
+      c = bCounters s
+      sid = cSignal c + 1
+      s' = s {bCounters = c {cSignal = sid},
+              bRecords = bRecords s <> W.txCreateSignal sid initial,
+              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
+   in (Signal sid, s')
+
 -- | Bind a label's text to one field of the element; KField String
 -- only — the phantom pins it at compile time.
 bindTextField :: Node -> Word32 -> KField String -> Tpl ()
@@ -672,6 +718,7 @@ bindCheckedField (Node n) level (KField i) = emitT (W.txBindCheckedElement n lev
 data App = App
   { appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
+    appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, [W.Value])] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
@@ -689,9 +736,11 @@ buildTx :: App -> Build a -> IO a
 buildTx app (Build f) = do
   counters <- readIORef (appCounters app)
   (model, children) <- readIORef (appModel app)
-  let (a, s) = f (BuildState counters mempty model children [] [])
+  derived <- readIORef (appDerived app)
+  let (a, s) = f (BuildState counters mempty model children [] [] derived)
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
+  writeIORef (appDerived app) (bDerived s)
   -- Handlers declared at their constructors register alongside the
   -- submit; a Build that threw never reaches here, abandoning them
   -- with its records.
@@ -753,6 +802,7 @@ kayaMain setup = do
     App
       <$> newIORef (Counters 0 0 0 0)
       <*> newIORef (Map.empty, Map.empty)
+      <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty

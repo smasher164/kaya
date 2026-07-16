@@ -21,27 +21,24 @@ let () =
   let next_key = ref 0 in
 
   build app
-    (let* items_left = signal (Str "0 items left") in
-     let* todos = collection_of todo_record in
-
-     let items_left_text =
-       let* entries = record_items todos in
-       let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
-       io (fun () -> if n = 1 then "1 item left" else Printf.sprintf "%d items left" n)
+    (let* todos = collection_of todo_record in
+     (* The items-left label is a derived signal: the binding
+        recomputes it from the collection after every mutation, so no
+        handler mentions it. *)
+     let* items_left =
+       derive todos (fun entries ->
+           let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
+           Str (if n = 1 then "1 item left" else Printf.sprintf "%d items left" n))
      in
      let on_add =
        let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
-       let* () = insert_record todos (Str key) { title = !draft; done_ = false } in
-       let* status = items_left_text in
-       write items_left (Str status)
+       insert_record todos (Str key) { title = !draft; done_ = false }
      in
      let on_toggle keys checked =
-       (* One field's delta: the title never travels. todo_patch is
-          ppx-generated — one optional labelled argument per field,
-          each supplied one recording one update_field. *)
-       let* () = todo_patch ~done_:checked todos (List.hd keys) in
-       let* status = items_left_text in
-       write items_left (Str status)
+       (* One field's delta: the title never travels; the derived
+          signal updates itself. todo_patch is ppx-generated — one
+          optional labelled argument per field. *)
+       todo_patch ~done_:checked todos (List.hd keys)
      in
 
      let* root =

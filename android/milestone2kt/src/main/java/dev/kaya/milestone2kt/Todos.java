@@ -20,10 +20,9 @@ final class Todos {
     private static String draft = "";
     private static int nextKey;
 
-    private static String itemsLeftText(KayaApp.Tx tx,
-            KayaRecords.Collection<String, Todo> todos) {
+    private static String itemsLeftText(java.util.List<KayaRecords.Entry<String, Todo>> items) {
         int n = 0;
-        for (KayaRecords.Entry<String, Todo> entry : todos.items(tx)) {
+        for (KayaRecords.Entry<String, Todo> entry : items) {
             if (!entry.value.done()) {
                 n++;
             }
@@ -35,24 +34,27 @@ final class Todos {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            KayaApp.Signal<String> itemsLeft = tx.signal("0 items left");
             KayaRecords.Collection<String, Todo> todos =
                     KayaRecords.collectionOf(tx, Todo.class);
+            // The items-left label is a derived signal: the binding
+            // recomputes it from the collection after every mutation,
+            // so no handler mentions it.
+            KayaApp.Signal<String> itemsLeft = todos.derive(tx, Todos::itemsLeftText);
 
             tx.mount(tx.column(
                     tx.entry((t, text) -> draft = text),
                     tx.button("Add", t -> {
                         nextKey++;
                         todos.insert(t, "t" + nextKey, new Todo(draft, false));
-                        t.write(itemsLeft, itemsLeftText(t, todos));
                     }),
                     tx.label(itemsLeft),
                     tx.forEach(todos.handle, t -> {
                         t.row(
                                 todos.checkbox(t, Todo::done, (t2, key, checked) -> {
-                                    // One field's delta: the title never travels.
+                                    // One field's delta: the title never
+                                    // travels; the derived signal updates
+                                    // itself.
                                     todos.patch(t2, key).set(Todo::done, checked);
-                                    t2.write(itemsLeft, itemsLeftText(t2, todos));
                                 }),
                                 todos.label(t, Todo::title));
                     })));

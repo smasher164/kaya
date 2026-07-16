@@ -274,7 +274,14 @@ rules so far:
   hijacking `__eq__` breaks naive hashing and identity comparison, the
   familiar SQLAlchemy and pandas trade-off. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
-  transaction; the core never knows about them.
+  transaction; the core never knows about them. A derived signal's source
+  can also be a collection — `todos.derive(|items| ...)` — recomputed
+  after every mutation of the live-zone instance from the binding's own
+  model copy (never a core read): the items-left label updates itself,
+  and no handler carries a "remember to also write the status" line.
+  The compute is pure presentation, entries in, one value out; deriveds
+  hang off root handles, since a stamped copy's instance has no
+  live-zone signal to feed.
 - Values in handlers, signals in templates. Collection mirrors read a
   binding-maintained snapshot of what the guest wrote, which is correct
   in transition code and a frozen-branch bug in template position;

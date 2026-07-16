@@ -3,7 +3,9 @@
 // their handlers, the Fyne shape (widget.NewButton("Add", tapped)).
 // The struct is the schema, the template binds each field through
 // typed tokens, and toggling a row records one field's delta through
-// Patch: the title never travels.
+// Patch: the title never travels. The items-left label is a derived
+// signal the binding recomputes from the collection after every
+// mutation, so no handler mentions it.
 //
 // Build the library first (cargo build), then, from the repo root:
 //
@@ -41,12 +43,10 @@ func main() {
 	// constructors carry their handlers, and the build body reads as
 	// the tree (milestone2 keeps the explicit floor on purpose).
 	app.Build(func(tx *kaya.Tx) {
-		itemsLeft := tx.Signal("0 items left")
 		todos := kaya.CollectionOf[string, Todo](tx)
-
-		itemsLeftText := func(tx *kaya.Tx) string {
+		itemsLeft := todos.Derive(tx, func(items []kaya.RecordEntry[string, Todo]) string {
 			n := 0
-			for _, e := range todos.Items(tx) {
+			for _, e := range items {
 				if !e.Value.Done {
 					n++
 				}
@@ -55,7 +55,7 @@ func main() {
 				return "1 item left"
 			}
 			return fmt.Sprintf("%d items left", n)
-		}
+		})
 
 		tx.Mount(tx.Column(
 			tx.Entry(func(tx *kaya.Tx, text string) {
@@ -64,16 +64,16 @@ func main() {
 			tx.Button("Add", func(tx *kaya.Tx) {
 				nextKey++
 				todos.Insert(tx, fmt.Sprintf("t%d", nextKey), Todo{Title: draft})
-				tx.Write(itemsLeft, itemsLeftText(tx))
 			}),
 			tx.Label(itemsLeft),
 			tx.ForEach(todos.Collection, func(t *kaya.Tpl) {
 				t.Row(
 					todos.Checkbox(t, func(t *Todo) *bool { return &t.Done },
 						func(tx *kaya.Tx, key string, checked bool) {
-							// One field's delta: the title never travels.
+							// One field's delta: the title never
+							// travels; the derived signal updates
+							// itself.
 							todos.Patch(tx, key).Set(func(t *Todo) *bool { return &t.Done }, checked)
-							tx.Write(itemsLeft, itemsLeftText(tx))
 						}),
 					todos.Label(t, func(t *Todo) *string { return &t.Title }),
 				)

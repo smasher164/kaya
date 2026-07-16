@@ -136,6 +136,18 @@ sealed class RecordCollection<T>
         tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), f.Index, value);
     }
 
+    /// A signal the binding recomputes from this collection's entries
+    /// after every mutation, written into the same transaction — the
+    /// items-left label with no handler remembering to update it. The
+    /// compute is pure presentation: entries in, one value out; the
+    /// core sees an ordinary signal.
+    public Signal Derive(Tx tx, Func<List<KeyValuePair<object, T>>, object> compute)
+    {
+        var s = tx.Signal(compute(Items(tx)));
+        tx.RegisterDerived(Collection.Id, t => t.Write(s, compute(Items(t))));
+        return s;
+    }
+
     /// Typed field writes with the key spelled once:
     /// todos.Patch(tx, key).Set(x => x.Done, true).Set(x => x.Title, "x").
     /// Each Set records one update_field — a patch is recorded writes,

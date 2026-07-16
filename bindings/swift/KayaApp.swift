@@ -94,6 +94,9 @@ final class KayaApp {
     private var model: [UInt64: [KayaInstance]] = [:]
     private var childCollections: [UInt64: [UInt64]] = [:]
     fileprivate var openFors: [UInt64] = []
+    // Signals recomputed from a collection after each of its
+    // mutations, written into the same transaction.
+    var derived: [UInt64: [(KayaAppTx) -> Void]] = [:]
 
     /// A collection declared inside a For's template is torn down with
     /// its copies: record the edge so the model purges along it.
@@ -436,19 +439,32 @@ final class KayaAppTx {
         return (w, out)
     }
 
+    // Every derived signal rooted at this collection, recomputed and
+    // written into this transaction. Deriveds hang off root handles,
+    // so nested-instance mutations cannot change their input.
+    func recomputeDerived(_ c: KayaCollection) {
+        guard c.path.isEmpty else { return }
+        for recompute in app.derived[c.id, default: []] {
+            recompute(self)
+        }
+    }
+
     func insert(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
         tx.collectionInsert(c.id, c.path, key, [value])
+        recomputeDerived(c)
     }
 
     func update(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
         tx.collectionUpdate(c.id, c.path, key, [value])
+        recomputeDerived(c)
     }
 
     func remove(_ c: KayaCollection, _ key: KayaValue) {
         app.modelRemove(c.id, c.path, key)
         tx.collectionRemove(c.id, c.path, key)
+        recomputeDerived(c)
     }
 
     /// The model: what this guest wrote, exactly — the fold of every
@@ -469,16 +485,19 @@ final class KayaAppTx {
     func insertRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
         app.modelSet(c.id, c.path, key, model)
         tx.collectionInsert(c.id, c.path, key, fields)
+        recomputeDerived(c)
     }
 
     func updateRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
         app.modelSet(c.id, c.path, key, model)
         tx.collectionUpdate(c.id, c.path, key, fields)
+        recomputeDerived(c)
     }
 
     func updateFieldRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ field: UInt32, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, model)
         tx.collectionUpdateField(c.id, c.path, key, field, value)
+        recomputeDerived(c)
     }
 
     func recordEntries(_ c: KayaCollection) -> [(key: KayaValue, value: Any)] {

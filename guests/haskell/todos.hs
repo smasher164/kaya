@@ -31,26 +31,25 @@ main = kayaMain $ \app -> do
   keyRef <- newIORef (0 :: Int)
 
   buildTx app $ do
-    itemsLeft <- signal (VStr "0 items left")
     todos <- collectionOf (Proxy :: Proxy Todo)
+    -- The items-left label is a derived signal: the binding recomputes
+    -- it from the collection after every mutation, so no handler
+    -- mentions it.
+    itemsLeft <-
+      derive todos $ \entries ->
+        let n = length (filter (not . done . snd) entries)
+         in VStr (if n == 1 then "1 item left" else show n ++ " items left")
 
-    let itemsLeftText = do
-          entries <- recordItems todos
-          let n = length (filter (not . done . snd) entries)
-          return (if n == 1 then "1 item left" else show n ++ " items left")
-        onAdd = do
+    let onAdd = do
           draft <- readIORef draftRef
           key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
-          submitTx app $ do
+          submitTx app $
             insertRecord todos (VStr ("t" ++ show key)) (Todo draft False)
-            status <- itemsLeftText
-            writeSignal itemsLeft (VStr status)
         onToggle keys checked =
-          submitTx app $ do
-            -- One field's delta: the title never travels.
+          submitTx app $
+            -- One field's delta: the title never travels; the derived
+            -- signal updates itself.
             patch todos (head keys) [set (field @"done" @Todo) checked]
-            status <- itemsLeftText
-            writeSignal itemsLeft (VStr status)
 
     root <-
       column

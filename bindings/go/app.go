@@ -98,6 +98,9 @@ type App struct {
 	// model needs the same edge to purge along.
 	children map[uint64][]uint64
 	openFors []uint64
+	// Signals recomputed from a collection after each of its
+	// mutations, written into the same transaction.
+	derived map[uint64][]func(*Tx)
 }
 
 func NewApp() *App {
@@ -111,6 +114,7 @@ func NewApp() *App {
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
+		derived:        make(map[uint64][]func(*Tx)),
 	}
 }
 
@@ -339,16 +343,31 @@ func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 func (tx *Tx) Insert(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, []any{value}))
+	tx.recomputeDerived(c.id, c.path)
 }
 
 func (tx *Tx) Update(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, []any{value}))
+	tx.recomputeDerived(c.id, c.path)
 }
 
 func (tx *Tx) Remove(c Collection, key any) {
 	tx.app.modelRemove(c.id, c.path, key)
 	tx.records = append(tx.records, TxCollectionRemove(c.id, c.path, key))
+	tx.recomputeDerived(c.id, c.path)
+}
+
+// recomputeDerived runs every derived signal rooted at this collection
+// and writes each into this transaction. Deriveds hang off root
+// handles, so nested-instance mutations cannot change their input.
+func (tx *Tx) recomputeDerived(coll uint64, path []any) {
+	if len(path) != 0 {
+		return
+	}
+	for _, recompute := range tx.app.derived[coll] {
+		recompute(tx)
+	}
 }
 
 // Items is the model: what this guest wrote, exactly — the fold of
