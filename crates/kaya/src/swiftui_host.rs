@@ -13,7 +13,8 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 
 use crate::capi::{
-    kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled, kaya_next_commands,
+    kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled, kaya_emit_value_changed,
+    kaya_next_commands,
 };
 
 /// The presentation-side functions handed to a guest-language backend.
@@ -27,6 +28,7 @@ pub struct KayaHostApi {
     pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
     pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
+    pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
 }
 
 unsafe extern "C" {
@@ -58,6 +60,7 @@ pub(crate) fn run() -> i32 {
         next_commands: kaya_next_commands,
         emit_text_changed: kaya_emit_text_changed,
         emit_toggled: kaya_emit_toggled,
+        emit_value_changed: kaya_emit_value_changed,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

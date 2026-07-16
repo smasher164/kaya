@@ -11,7 +11,7 @@
 //! Add, toggles the stamped row's checkbox, and expects the status
 //! label to read exactly "0 items left".
 
-use kaya::{Occurrence, WidgetKind};
+use kaya::Occurrence;
 
 kaya::record! {
     struct Todo {
@@ -32,7 +32,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         if n == 1 { "1 item left".to_string() } else { format!("{n} items left") }
     });
 
-    let field = tx.widget(WidgetKind::Entry);
+    let field = tx.entry();
     let add = tx.button("Add");
     let status = tx.label(items_left);
     let (todo_list, check) = tx.for_each(&todos, |t| {

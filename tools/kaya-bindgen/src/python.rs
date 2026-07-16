@@ -126,6 +126,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let ty = match kind {
             PropKind::Str => "str",
             PropKind::Bool => "bool",
+            PropKind::F64 => "float",
         };
         c.line("");
         c.line("");
@@ -167,10 +168,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    Returns (kind, id, keys, payload). keys is [] when id is a");
     c.line("    widget id, else id is a template node id and keys is the");
     c.line("    copy's key path. text is the entry's new content for");
-    c.line("    OCC_TEXT_CHANGED, None otherwise.");
+    c.line("    OCC_TEXT_CHANGED, the new state for OCC_TOGGLED, the new");
+    c.line("    value for OCC_VALUE_CHANGED, None otherwise.");
+    // (kind lists below derive from the spec's Record::payload.)
     c.line("    \"\"\"");
     c.line("    _size, kind, _flags = struct.unpack_from(\"<IHH\", buf, 0)");
-    c.line("    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED):");
+    let accepted = crate::occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line(&format!("    if kind not in ({accepted}):"));
     c.line("        return kind, None, [], None");
     c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
@@ -179,7 +187,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        key, at = parse_value(buf, at)");
     c.line("        keys.append(key)");
     c.line("    payload = None");
-    c.line("    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED):");
+    let with_payload = crate::payload_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line(&format!("    if kind in ({with_payload},):"));
     c.line("        payload, at = parse_value(buf, at)");
     c.line("    return kind, ident, keys, payload");
 

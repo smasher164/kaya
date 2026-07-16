@@ -127,6 +127,21 @@ pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u3
     kaya::spec::PROPS
 }
 
+/// Occurrence records, split by whether they carry a trailing payload
+/// value after the key path — a spec fact (Record::payload), so the
+/// generated parsers' kind lists derive rather than drift.
+pub(crate) fn occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence.iter().map(|r| r.name).collect()
+}
+
+pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| r.payload.is_some())
+        .map(|r| r.name)
+        .collect()
+}
+
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
     rec.fields
         .iter()

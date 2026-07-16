@@ -22,7 +22,7 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
     UIControlEvents, UIControlState, UILabel, UILayoutConstraintAxis, UIScreen, UIStackView,
-    UISwitch, UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
+    UISlider, UISwitch, UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
 };
 
 use crate::protocol::{
@@ -39,6 +39,7 @@ enum NativeWidget {
     // iOS has no checkbox control; the native presentation is a labeled
     // UISwitch. The stack is the widget's view; the caption label and
     // the switch are its fixed children.
+    Slider(Retained<UISlider>),
     Checkbox {
         stack: Retained<UIStackView>,
         toggle: Retained<UISwitch>,
@@ -55,6 +56,7 @@ impl NativeWidget {
             NativeWidget::Label(v) => v,
             NativeWidget::Entry(v) => v,
             NativeWidget::Checkbox { stack, .. } => stack,
+            NativeWidget::Slider(v) => v,
         }
     }
 }
@@ -66,9 +68,12 @@ struct CoreState {
     widgets: HashMap<WidgetId, NativeWidget>,
     selftest_button: Option<Retained<UIButton>>,
     selftest_last_button: Option<Retained<UIButton>>,
-    selftest_label: Option<Retained<UILabel>>,
+    // Every label, creation order; drivers read the one their scene
+    // puts the verdict in (gallery checks two).
+    selftest_labels: Vec<Retained<UILabel>>,
     selftest_entry: Option<Retained<UITextField>>,
     selftest_checkbox: Option<Retained<UISwitch>>,
+    selftest_slider: Option<Retained<UISlider>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -184,6 +189,33 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     }
                     NativeWidget::Checkbox { stack, toggle, caption }
                 }
+                WidgetKind::Slider => {
+                    // Uncontrolled, like the entry: the slider owns its
+                    // position; ValueChanged reports each move with its
+                    // identity tag. UISlider is f32-valued; the wire is
+                    // f64 — the cast is the platform flavor.
+                    let tag = tag.expect("sliders carry a tag");
+                    let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    debug_assert!(target.respondsToSelector(sel!(valueChanged:)));
+                    let slider = UISlider::new(mtm);
+                    unsafe {
+                        slider.setMinimumValue(0.0);
+                        slider.setMaximumValue(1.0);
+                    }
+                    let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
+                    unsafe {
+                        slider.addTarget_action_forControlEvents(
+                            Some(target_obj),
+                            sel!(valueChanged:),
+                            UIControlEvents::ValueChanged,
+                        );
+                    }
+                    core._targets.push(target);
+                    if core.selftest_slider.is_none() {
+                        core.selftest_slider = Some(slider.clone());
+                    }
+                    NativeWidget::Slider(slider)
+                }
                 WidgetKind::Button => {
                     // The tag is the click's identity, emitted verbatim;
                     // this backend never learns what it means.
@@ -209,9 +241,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 WidgetKind::Label => {
                     let label = UILabel::new(mtm);
                     unsafe { label.setTextColor(Some(&objc2_ui_kit::UIColor::labelColor())) };
-                    if core.selftest_label.is_none() {
-                        core.selftest_label = Some(label.clone());
-                    }
+                    core.selftest_labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -241,6 +271,15 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 (NativeWidget::Checkbox { toggle, .. }, Prop::Checked, Value::Bool(b)) => {
                     unsafe { toggle.setOn(b) };
+                }
+                (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
+                    unsafe { slider.setValue(v as f32) };
+                }
+                (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
+                    unsafe { slider.setMinimumValue(v as f32) };
+                }
+                (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
+                    unsafe { slider.setMaximumValue(v as f32) };
                 }
                 (_, prop, value) => {
                     panic!("kaya: uikit cannot apply {prop:?} = {value:?} here")
@@ -306,6 +345,17 @@ define_class!(
             self.ivars()
                 .occurrences
                 .send_toggle_tag(&self.ivars().tag, checked);
+        }
+
+        #[unsafe(method(valueChanged:))]
+        fn value_changed(&self, sender: Option<&objc2::runtime::AnyObject>) {
+            let value = sender
+                .and_then(|s| s.downcast_ref::<UISlider>())
+                .map(|s| unsafe { s.value() } as f64)
+                .unwrap_or(0.0);
+            self.ivars()
+                .occurrences
+                .send_value_tag(&self.ivars().tag, value);
         }
 
         #[unsafe(method(textChanged:))]
@@ -383,9 +433,10 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             widgets: HashMap::new(),
             selftest_button: None,
             selftest_last_button: None,
-            selftest_label: None,
+            selftest_labels: Vec::new(),
             selftest_entry: None,
             selftest_checkbox: None,
+            selftest_slider: None,
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -469,8 +520,8 @@ fn spawn_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text()
                     .map(|t| t.to_string())
@@ -509,22 +560,33 @@ fn spawn_gallery_selftest() {
                 }
             });
         });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    let slider = core
+                        .selftest_slider
+                        .as_ref()
+                        .expect("the scene has a slider");
+                    unsafe { slider.setValue(0.75) };
+                    slider.sendActionsForControlEvents(UIControlEvents::ValueChanged);
+                }
+            });
+        });
         std::thread::sleep(std::time::Duration::from_millis(700));
         on_main(|| {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_label
-                    .as_ref()
-                    .expect("the scene has a label")
-                    .text()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
-                if text == "urgent: true" {
-                    println!("KAYA_SELFTEST: OK ({text})");
+                let text_of = |l: &Retained<UILabel>| {
+                    l.text().map(|t| t.to_string()).unwrap_or_default()
+                };
+                let status = text_of(&core.selftest_labels[0]);
+                let volume = text_of(&core.selftest_labels[1]);
+                if status == "urgent: true" && volume == "volume: 75%" {
+                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
                     std::process::exit(0);
                 } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
                     std::process::exit(1);
                 }
             });
@@ -583,8 +645,8 @@ fn spawn_todos_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text()
                     .map(|t| t.to_string())
@@ -640,8 +702,8 @@ fn spawn_entry_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text()
                     .map(|t| t.to_string())

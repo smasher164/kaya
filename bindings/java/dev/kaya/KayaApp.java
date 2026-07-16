@@ -39,6 +39,7 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
@@ -372,6 +373,31 @@ public final class KayaApp {
         public Widget button(String text, Consumer<Tx> onClick) {
             Widget w = button(text);
             KayaApp.this.onClick(w, onClick);
+            return w;
+        }
+
+        /** A labeled checkbox with its toggle handler co-located
+         * (null for none). */
+        public Widget checkbox(String text, BiConsumer<Tx, Boolean> onToggle) {
+            Widget w = widget(KayaWire.KIND_CHECKBOX);
+            setText(w, text);
+            if (onToggle != null) {
+                KayaApp.this.onToggle(w, onToggle);
+            }
+            return w;
+        }
+
+        /** A slider over min..max at value, with its change handler
+         * co-located (null for none). */
+        public Widget slider(double min, double max, double value,
+                BiConsumer<Tx, Double> onChange) {
+            Widget w = widget(KayaWire.KIND_SLIDER);
+            records.add(KayaWire.txSetMin(w.id, min));
+            records.add(KayaWire.txSetMax(w.id, max));
+            records.add(KayaWire.txSetValue(w.id, value));
+            if (onChange != null) {
+                KayaApp.this.onValueChanged(w, onChange);
+            }
             return w;
         }
 
@@ -723,6 +749,13 @@ public final class KayaApp {
         widgetToggles.put(w.id, handler);
     }
 
+    /** Register a change handler for a live slider: the bar owns its
+     * position and reports each move with the new value — the entry's
+     * uncontrolled contract, with a double. */
+    public void onValueChanged(Widget w, BiConsumer<Tx, Double> handler) {
+        widgetValues.put(w.id, handler);
+    }
+
     /**
      * Register a toggle handler for a template checkbox; it also
      * receives the stamped copy's keys, outermost first.
@@ -852,6 +885,13 @@ public final class KayaApp {
                 if (handler != null) {
                     build(tx -> {
                         handler.accept(tx, occ.keys, (Boolean) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_VALUE_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Double> handler = widgetValues.get(occ.id);
+                if (handler != null) {
+                    build(tx -> {
+                        handler.accept(tx, (Double) occ.payload);
                     });
                 }
             }

@@ -16,6 +16,8 @@
 
 #define REC_TOGGLED 3
 
+#define REC_VALUE_CHANGED 4
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -76,9 +78,17 @@
 
 #define KIND_CHECKBOX 6
 
+#define KIND_SLIDER 7
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
+
+#define PROP_VALUE 3
+
+#define PROP_MIN 4
+
+#define PROP_MAX 5
 
 #define SOURCE_CONST 0
 
@@ -100,6 +110,8 @@
 #define KAYA_OCCURRENCE_TEXT_CHANGED 2
 
 #define KAYA_OCCURRENCE_TOGGLED 3
+
+#define KAYA_OCCURRENCE_VALUE_CHANGED 4
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -209,12 +221,20 @@
 
 #define KAYA_KIND_CHECKBOX 6
 
+#define KAYA_KIND_SLIDER 7
+
 /**
  * Property keys.
  */
 #define KAYA_PROP_TEXT 1
 
 #define KAYA_PROP_CHECKED 2
+
+#define KAYA_PROP_VALUE 3
+
+#define KAYA_PROP_MIN 4
+
+#define KAYA_PROP_MAX 5
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -285,6 +305,7 @@ typedef struct KayaHostApi {
   uintptr_t (*next_commands)(uint8_t*, uintptr_t);
   void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
+  void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
 } KayaHostApi;
 
 
@@ -357,6 +378,14 @@ void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
  * combine with kaya_run.
  */
 void kaya_emit_toggled(const uint8_t *tag, uintptr_t tag_len, uint8_t checked);
+
+/**
+ * Presentation side: emit a slider move, exactly as a backend's
+ * change handler would — `tag` is the tag bytes delivered with the
+ * slider's CREATE record, `value` the new position. Do not combine
+ * with kaya_run.
+ */
+void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value);
 
 /**
  * Presentation side: emit an entry edit, exactly as a backend's

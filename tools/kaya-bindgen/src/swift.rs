@@ -150,6 +150,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, ctor) = match kind {
             crate::PropKind::Str => ("String", "str"),
             crate::PropKind::Bool => ("Bool", "bool"),
+            crate::PropKind::F64 => ("Double", "f64"),
         };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));
@@ -196,15 +197,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// unknown kinds. keys is [] when id is a widget id; otherwise id is");
     c.line("/// a template node id and keys is the copy's key path, outermost");
     c.line("/// first. payload is the entry's new text for TEXT_CHANGED, the");
-    c.line("/// checkbox's new state for TOGGLED, nil for clicks.");
+    c.line("/// checkbox's new state for TOGGLED, the slider's new value for");
+    c.line("/// VALUE_CHANGED, nil for clicks.");
     c.line("func kayaParseOccurrence(_ rec: [UInt8])");
     c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?");
     c.line("{");
     c.line("    rec.withUnsafeBytes { raw in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
-    c.line("        guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED)");
-    c.line("            || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)");
-    c.line("            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)");
+    let accepted = crate::occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    c.line(&format!("        guard {}", accepted[0]));
+    for cond in &accepted[1..] {
+        c.line(&format!("            || {cond}"));
+    }
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -229,14 +236,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            at += 8 + ((vlen + 7) & ~7)");
     c.line("        }");
     c.line("        var payload: KayaValue? = nil");
-    c.line("        if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)");
-    c.line("            || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)");
+    let with_payload = crate::payload_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    c.line(&format!("        if {}", with_payload[0]));
+    for cond in &with_payload[1..] {
+        c.line(&format!("            || {cond}"));
+    }
     c.line("        {");
+    // Type-generic payload decode, same shape as the key loop: no
+    // per-kind logic left to drift.
     c.line("            let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
     c.line("            let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
-    c.line("            if ptype == UInt32(KAYA_VALUE_BOOL) {");
+    c.line("            switch ptype {");
+    c.line("            case UInt32(KAYA_VALUE_BOOL):");
     c.line("                payload = .bool(raw[at + 8] != 0)");
-    c.line("            } else {");
+    c.line("            case UInt32(KAYA_VALUE_I64):");
+    c.line("                payload = .i64(Int64(bitPattern:");
+    c.line("                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))");
+    c.line("            case UInt32(KAYA_VALUE_F64):");
+    c.line("                payload = .f64(Double(bitPattern:");
+    c.line("                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))");
+    c.line("            default:");
     c.line("                payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))");
     c.line("            }");
     c.line("        }");

@@ -109,6 +109,7 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
+    readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
 
     // The collection is the model — the only copy: every mutation op
@@ -202,6 +203,12 @@ sealed class KayaApp
     /// its own state.
     public void OnToggle(Widget w, Action<Tx, bool> handler) => widgetToggles[w.Id] = handler;
 
+    /// A live slider's change handler: the bar owns its position and
+    /// reports each move with the new value — the entry's uncontrolled
+    /// contract, with a double.
+    public void OnValueChanged(Widget w, Action<Tx, double> handler) =>
+        widgetValues[w.Id] = handler;
+
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     public void OnToggle(Node n, Action<Tx, List<object>, bool> handler) =>
@@ -243,6 +250,11 @@ sealed class KayaApp
             {
                 if (nodeToggles.TryGetValue(id, out var fn))
                     Build(tx => fn(tx, keys, isChecked));
+            }
+            else if (kind == KayaWire.OccKindValueChanged && keys.Count == 0)
+            {
+                if (widgetValues.TryGetValue(id, out var fn))
+                    Build(tx => fn(tx, payload is double d ? d : 0.0));
             }
         }
     }
@@ -410,6 +422,19 @@ sealed class Tx
         var w = Widget(KayaWire.KindLabel);
         if (text != null) SetText(w, text);
         if (bind is Signal s) BindText(w, s);
+        return w;
+    }
+
+    /// A slider over min..max at value, with its change handler
+    /// co-located.
+    public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
+        Action<Tx, double> onChange = null)
+    {
+        var w = Widget(KayaWire.KindSlider);
+        Records.Add(KayaWire.TxSetMin(w.Id, min));
+        Records.Add(KayaWire.TxSetMax(w.Id, max));
+        Records.Add(KayaWire.TxSetValue(w.Id, value));
+        if (onChange != null) App.OnValueChanged(w, onChange);
         return w;
     }
 

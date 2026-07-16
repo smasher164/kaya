@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xe43514ac23c5f1c5;
+    public const ulong SpecHash = 0xe22da1c95f74a5a4;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -24,8 +24,12 @@ static class KayaWire
     public const uint KindEntry = 4;
     public const uint KindRow = 5;
     public const uint KindCheckbox = 6;
+    public const uint KindSlider = 7;
     public const uint PropText = 1;
     public const uint PropChecked = 2;
+    public const uint PropValue = 3;
+    public const uint PropMin = 4;
+    public const uint PropMax = 5;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -33,6 +37,7 @@ static class KayaWire
     public const uint OccurrenceButtonClicked = 1;
     public const uint OccurrenceTextChanged = 2;
     public const uint OccurrenceToggled = 3;
+    public const uint OccurrenceValueChanged = 4;
     public const ushort TxKindCreateSignal = 1;
     public const ushort TxKindWriteSignal = 2;
     public const ushort TxKindCreateWidget = 3;
@@ -55,6 +60,7 @@ static class KayaWire
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
+    public const ushort OccKindValueChanged = 4;
 
     static void Pad(BinaryWriter w)
     {
@@ -302,6 +308,81 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant value value.
+    public static byte[] TxSetValue(ulong widgetId, double value)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropValue); w.Write(SourceConst);
+        EncodeValue(w, value);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound value value.
+    public static byte[] TxBindValue(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropValue); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindValueElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropValue); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant min value.
+    public static byte[] TxSetMin(ulong widgetId, double min)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMin); w.Write(SourceConst);
+        EncodeValue(w, min);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound min value.
+    public static byte[] TxBindMin(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMin); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMinElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMin); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant max value.
+    public static byte[] TxSetMax(ulong widgetId, double max)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMax); w.Write(SourceConst);
+        EncodeValue(w, max);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound max value.
+    public static byte[] TxBindMax(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMax); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMaxElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMax); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
@@ -313,8 +394,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged
-            && kind != OccKindToggled)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         uint pathLen = BitConverter.ToUInt32(rec, 16);
@@ -332,14 +412,17 @@ static class KayaWire
             }
             at += 8 + ((vlen + 7) & ~7);
         }
-        if (kind == OccKindTextChanged || kind == OccKindToggled)
+        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);
             int plen = BitConverter.ToInt32(rec, at + 4);
-            if (ptype == ValueBool)
-                payload = rec[at + 8] != 0;
-            else
-                payload = Encoding.UTF8.GetString(rec, at + 8, plen);
+            switch (ptype)
+            {
+                case ValueBool: payload = rec[at + 8] != 0; break;
+                case ValueI64: payload = BitConverter.ToInt64(rec, at + 8); break;
+                case ValueF64: payload = BitConverter.ToDouble(rec, at + 8); break;
+                default: payload = Encoding.UTF8.GetString(rec, at + 8, plen); break;
+            }
         }
         return true;
     }

@@ -187,6 +187,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let ty = match kind {
             crate::PropKind::Str => "string",
             crate::PropKind::Bool => "bool",
+            crate::PropKind::F64 => "double",
         };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));
@@ -226,8 +227,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        keys = new List<object>();");
     c.line("        payload = null;");
     c.line("        kind = BitConverter.ToUInt16(rec, 4);");
-    c.line("        if (kind != OccKindButtonClicked && kind != OccKindTextChanged");
-    c.line("            && kind != OccKindToggled)");
+    let accepted = crate::occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind != OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    c.line(&format!("        if ({accepted})"));
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
@@ -245,14 +250,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            at += 8 + ((vlen + 7) & ~7);");
     c.line("        }");
-    c.line("        if (kind == OccKindTextChanged || kind == OccKindToggled)");
+    let with_payload = crate::payload_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line(&format!("        if ({with_payload})"));
     c.line("        {");
+    // Type-generic payload decode, same shape as the key loop: no
+    // per-kind logic left to drift.
     c.line("            uint ptype = BitConverter.ToUInt32(rec, at);");
     c.line("            int plen = BitConverter.ToInt32(rec, at + 4);");
-    c.line("            if (ptype == ValueBool)");
-    c.line("                payload = rec[at + 8] != 0;");
-    c.line("            else");
-    c.line("                payload = Encoding.UTF8.GetString(rec, at + 8, plen);");
+    c.line("            switch (ptype)");
+    c.line("            {");
+    c.line("                case ValueBool: payload = rec[at + 8] != 0; break;");
+    c.line("                case ValueI64: payload = BitConverter.ToInt64(rec, at + 8); break;");
+    c.line("                case ValueF64: payload = BitConverter.ToDouble(rec, at + 8); break;");
+    c.line("                default: payload = Encoding.UTF8.GetString(rec, at + 8, plen); break;");
+    c.line("            }");
     c.line("        }");
     c.line("        return true;");
     c.line("    }");

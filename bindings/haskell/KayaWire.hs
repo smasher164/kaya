@@ -22,7 +22,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xe43514ac23c5f1c5
+specHash = 0xe22da1c95f74a5a4
 
 valueBool :: Word32
 valueBool = 1
@@ -44,10 +44,18 @@ kindRow :: Word32
 kindRow = 5
 kindCheckbox :: Word32
 kindCheckbox = 6
+kindSlider :: Word32
+kindSlider = 7
 propText :: Word32
 propText = 1
 propChecked :: Word32
 propChecked = 2
+propValue :: Word32
+propValue = 3
+propMin :: Word32
+propMin = 4
+propMax :: Word32
+propMax = 5
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -62,6 +70,8 @@ occurrenceTextChanged :: Word32
 occurrenceTextChanged = 2
 occurrenceToggled :: Word32
 occurrenceToggled = 3
+occurrenceValueChanged :: Word32
+occurrenceValueChanged = 4
 txKindCreateSignal :: Word16
 txKindCreateSignal = 1
 txKindWriteSignal :: Word16
@@ -106,6 +116,8 @@ occKindTextChanged :: Word16
 occKindTextChanged = 2
 occKindToggled :: Word16
 occKindToggled = 3
+occKindValueChanged :: Word16
+occKindValueChanged = 4
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -233,6 +245,63 @@ txBindCheckedElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propChecked <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant value value.
+txSetValue :: Word64 -> Double -> Builder
+txSetValue widgetId value = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propValue <> word32LE sourceConst
+    <> encodeValue (VF64 value))
+
+-- set_property with a signal-bound value value.
+txBindValue :: Word64 -> Word64 -> Builder
+txBindValue widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propValue <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindValueElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindValueElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propValue <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant min value.
+txSetMin :: Word64 -> Double -> Builder
+txSetMin widgetId min = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMin <> word32LE sourceConst
+    <> encodeValue (VF64 min))
+
+-- set_property with a signal-bound min value.
+txBindMin :: Word64 -> Word64 -> Builder
+txBindMin widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMin <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMinElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMinElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMin <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant max value.
+txSetMax :: Word64 -> Double -> Builder
+txSetMax widgetId max = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMax <> word32LE sourceConst
+    <> encodeValue (VF64 max))
+
+-- set_property with a signal-bound max value.
+txBindMax :: Word64 -> Word64 -> Builder
+txBindMax widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMax <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindMaxElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindMaxElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propMax <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -258,13 +327,13 @@ parseValue rec at = do
 -- Decode one occurrence record at `rec` (header included). Just
 -- (kind, id, keys, payload) — keys is [] when id is a widget id,
 -- else id is a template node id and keys is the copy's key path;
--- payload is Just for text_changed (VStr) and toggled (VBool),
+-- payload is Just for text_changed (VStr), toggled (VBool), and
+-- value_changed (VF64),
 -- Nothing for clicks. Nothing for pad or unknown kinds.
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged
-       && kind /= occKindToggled
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -275,7 +344,7 @@ parseOccurrence rec = do
             go next (n - 1 :: Word32) (v : acc)
       (keys, at') <- go (24 :: Int) pathLen []
       payload <-
-        if kind == occKindTextChanged || kind == occKindToggled
+        if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged
           then do
             (v, _) <- parseValue rec at'
             return (Just v)

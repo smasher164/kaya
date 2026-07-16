@@ -22,6 +22,7 @@ pub const REC_PAD: u16 = 0;
 pub const REC_BUTTON_CLICKED: u16 = 1;
 pub const REC_TEXT_CHANGED: u16 = 2;
 pub const REC_TOGGLED: u16 = 3;
+pub const REC_VALUE_CHANGED: u16 = 4;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

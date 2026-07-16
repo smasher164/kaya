@@ -593,6 +593,32 @@ def checkbox(text=None, checked=None, on_toggle=None):
     return handle
 
 
+def slider(value=None, min=None, max=None, on_change=None):
+    """A slider over a numeric range. Uncontrolled, like the entry: the
+    widget owns its position and reports each change to `on_change`
+    (the new value as a float; template copies get the stamped keys
+    first). `value` sets the position (a float, a Signal, or an element
+    field); `min`/`max` the range, 0..1 unless set."""
+    handle = _widget(wire.KIND_SLIDER)
+    if min is not None:
+        _records().append(wire.tx_set_min(handle.id, min))
+    if max is not None:
+        _records().append(wire.tx_set_max(handle.id, max))
+    if value is not None:
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_value(handle.id, value.id))
+        elif isinstance(value, FieldRef):
+            _records().append(
+                wire.tx_bind_value_element(handle.id, value._level(),
+                                           value._index)
+            )
+        else:
+            _records().append(wire.tx_set_value(handle.id, value))
+    if on_change is not None:
+        _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
+    return handle
+
+
 def entry(text=None, on_change=None):
     """A single-line text field. Uncontrolled, by doctrine: the widget
     owns its text and reports each edit to `on_change` (the new content

@@ -1,32 +1,36 @@
-{- The gallery scene from Haskell: a row container laying a checkbox
-   and the status label side by side. The box owns its checked bit and
-   reports each flip through onToggle; the app answers by writing the
-   status signal — the same uncontrolled contract as the entry, with a
-   bool.
+{- The gallery scene from Haskell: a row with a checkbox and its
+   status label, and a row with a slider and its volume label. Both
+   controls own their state and report each change; the app answers by
+   writing the paired signal — the entry's uncontrolled contract, with
+   a Bool and a Double.
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=gallery. -}
 
 import KayaApp
-import KayaWire (Value (..), kindCheckbox, kindColumn, kindLabel, kindRow)
+import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  (status, urgent) <- buildTx app $ do
+  -- The construction sugar: constructors carry their handlers,
+  -- containers take their children, and the do-block reads as the
+  -- tree.
+  buildTx app $ do
     status <- signal (VStr "urgent: false")
+    volume <- signal (VStr "volume: 50%")
 
-    column <- widget kindColumn
-    row <- widget kindRow
-    urgent <- widget kindCheckbox
-    setText urgent "urgent"
-    statusLabel <- widget kindLabel
-    bindText statusLabel status
+    let onUrgent checked =
+          submitTx app $
+            writeSignal status
+              (VStr ("urgent: " ++ if checked then "true" else "false"))
+        onVolume v =
+          -- Integer percent, so every language's formatting agrees.
+          submitTx app $
+            writeSignal volume
+              (VStr ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
 
-    addChild row urgent
-    addChild row statusLabel
-    addChild column row
-    mount column
-    return (status, urgent)
-
-  onToggle app urgent $ \checked ->
-    submitTx app $
-      writeSignal status (VStr ("urgent: " ++ if checked then "true" else "false"))
+    root <-
+      column
+        [ row [checkboxOn "urgent" onUrgent, labelBound status],
+          row [sliderOn 0 1 0.5 onVolume, labelBound volume]
+        ]
+    mount root

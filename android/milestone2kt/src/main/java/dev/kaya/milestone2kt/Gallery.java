@@ -1,49 +1,38 @@
 package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 /**
- * The gallery scene from the JVM: a row container laying a checkbox and
- * the status label side by side. The box owns its checked bit and
- * reports each flip through onToggle; the app answers by writing the
- * status signal — the same uncontrolled contract as the entry, with a
- * bool.
+ * The gallery scene from the JVM: a row with a checkbox and its status
+ * label, and a row with a slider and its volume label. Both controls
+ * own their state and report each change; the app answers by writing
+ * the paired signal — the entry's uncontrolled contract, with a bool
+ * and a double.
  */
 final class Gallery {
-    /** The scene's handles, returned by the build body. */
-    private static final class Scene {
-        final KayaApp.Signal<String> status;
-        final KayaApp.Widget urgent;
-
-        Scene(KayaApp.Signal<String> status, KayaApp.Widget urgent) {
-            this.status = status;
-            this.urgent = urgent;
-        }
-    }
-
     static void app() {
         KayaApp app = new KayaApp();
 
-        Scene scene = app.build(tx -> {
+        // The construction sugar: constructors carry their handlers,
+        // containers take their children, and the build body reads as
+        // the tree.
+        app.build(tx -> {
             KayaApp.Signal<String> status = tx.signal("urgent: false");
+            KayaApp.Signal<String> volume = tx.signal("volume: 50%");
 
-            KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);
-            KayaApp.Widget row = tx.widget(KayaWire.KIND_ROW);
-            KayaApp.Widget urgent = tx.widget(KayaWire.KIND_CHECKBOX);
-            tx.setText(urgent, "urgent");
-            KayaApp.Widget statusLabel = tx.widget(KayaWire.KIND_LABEL);
-            tx.bindText(statusLabel, status);
-
-            tx.addChild(row, urgent);
-            tx.addChild(row, statusLabel);
-            tx.addChild(column, row);
-            tx.mount(column);
-            return new Scene(status, urgent);
+            tx.mount(tx.column(
+                    tx.row(
+                            tx.checkbox("urgent", (t, checked) ->
+                                    t.write(status, "urgent: " + checked)),
+                            tx.label(status)),
+                    tx.row(
+                            // Integer percent, so every language's
+                            // formatting agrees.
+                            tx.slider(0.0, 1.0, 0.5, (t, value) ->
+                                    t.write(volume, "volume: " + Math.round(value * 100) + "%")),
+                            tx.label(volume))));
+            return null;
         });
-
-        app.onToggle(scene.urgent, (tx, checked) ->
-            tx.write(scene.status, "urgent: " + checked));
 
         app.dispatchLoop();
     }

@@ -151,6 +151,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry | WidgetKind::Checkbox
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
+        Prop::Value | Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -161,6 +162,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
     match prop {
         Prop::Text => ValueType::Str,
         Prop::Checked => ValueType::Bool,
+        Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
     }
 }
 
@@ -266,9 +268,10 @@ impl Scene {
                     // Interactive widgets carry their identity tag:
                     // buttons emit it on click, entries on edit.
                     let tag = match kind {
-                        WidgetKind::Button | WidgetKind::Entry | WidgetKind::Checkbox => {
-                            Self::button_tag(id.0, &vec![])
-                        }
+                        WidgetKind::Button
+                        | WidgetKind::Entry
+                        | WidgetKind::Checkbox
+                        | WidgetKind::Slider => Self::button_tag(id.0, &vec![]),
                         _ => None,
                     };
                     out.push(ApplyOp::Create { id, kind, tag });
@@ -939,9 +942,10 @@ impl Scene {
                     node_map.insert(*node, id);
                     stamp.widgets.push(id);
                     let tag = match kind {
-                        WidgetKind::Button | WidgetKind::Entry | WidgetKind::Checkbox => {
-                            Self::button_tag(*node, copy_path)
-                        }
+                        WidgetKind::Button
+                        | WidgetKind::Entry
+                        | WidgetKind::Checkbox
+                        | WidgetKind::Slider => Self::button_tag(*node, copy_path),
                         _ => None,
                     };
                     out.push(ApplyOp::Create {

@@ -15,7 +15,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xe43514ac23c5f1c5
+let kayaSpecHash: UInt64 = 0xe22da1c95f74a5a4
 
 struct KayaTx {
     var bytes = Data()
@@ -268,6 +268,102 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_property with a constant value value.
+    mutating func setValue(_ widgetId: UInt64, _ value: Double) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_VALUE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(value))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound value value.
+    mutating func bindValue(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_VALUE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindValueElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_VALUE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(start)
+    }
+
+    /// set_property with a constant min value.
+    mutating func setMin(_ widgetId: UInt64, _ min: Double) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(min))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound min value.
+    mutating func bindMin(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMinElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MIN))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(start)
+    }
+
+    /// set_property with a constant max value.
+    mutating func setMax(_ widgetId: UInt64, _ max: Double) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(max))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound max value.
+    mutating func bindMax(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMaxElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MAX))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -279,7 +375,8 @@ struct KayaTx {
 /// unknown kinds. keys is [] when id is a widget id; otherwise id is
 /// a template node id and keys is the copy's key path, outermost
 /// first. payload is the entry's new text for TEXT_CHANGED, the
-/// checkbox's new state for TOGGLED, nil for clicks.
+/// checkbox's new state for TOGGLED, the slider's new value for
+/// VALUE_CHANGED, nil for clicks.
 func kayaParseOccurrence(_ rec: [UInt8])
     -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?
 {
@@ -288,6 +385,7 @@ func kayaParseOccurrence(_ rec: [UInt8])
         guard kind == UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED)
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
+            || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
@@ -314,12 +412,20 @@ func kayaParseOccurrence(_ rec: [UInt8])
         var payload: KayaValue? = nil
         if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
+            || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
-            if ptype == UInt32(KAYA_VALUE_BOOL) {
+            switch ptype {
+            case UInt32(KAYA_VALUE_BOOL):
                 payload = .bool(raw[at + 8] != 0)
-            } else {
+            case UInt32(KAYA_VALUE_I64):
+                payload = .i64(Int64(bitPattern:
+                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_F64):
+                payload = .f64(Double(bitPattern:
+                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+            default:
                 payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))
             }
         }

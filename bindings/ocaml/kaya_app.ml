@@ -55,6 +55,7 @@ type app = {
   widget_changes : (int64, string -> tx -> unit) Hashtbl.t;
   node_changes : (int64, Kaya_wire.value list -> string -> tx -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> tx -> unit) Hashtbl.t;
+  widget_values : (int64, float -> tx -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
@@ -99,6 +100,7 @@ let create () =
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
+    widget_values = Hashtbl.create 8;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -267,6 +269,20 @@ let entry ?on_change () tx =
   | Some handler ->
       let (Widget id) = w in
       Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  w
+
+(* A slider over min..max at value. Uncontrolled, like the entry: the
+   bar owns its position and reports each change to [on_change] (the
+   new value as a float). *)
+let slider ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
+  let w = widget Kaya_wire.kind_slider tx in
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_min id min);
+  emit tx (Kaya_wire.tx_set_max id max);
+  emit tx (Kaya_wire.tx_set_value id value);
+  (match on_change with
+  | Some handler -> Hashtbl.replace tx.app.widget_values id handler
   | None -> ());
   w
 
@@ -611,6 +627,12 @@ let on_change_node app (Node id) (handler : Kaya_wire.value list -> string -> un
 let on_toggle app (Widget id) (handler : bool -> unit decl) =
   Hashtbl.replace app.widget_toggles id handler
 
+(* Register a change handler for a live slider: the bar owns its
+   position and reports each move with the new value — the entry's
+   uncontrolled contract, with a float. *)
+let on_value_changed app (Widget id) (handler : float -> unit decl) =
+  Hashtbl.replace app.widget_values id handler
+
 (* Register a toggle handler for a template checkbox; it also receives
    the stamped copy's keys, outermost first. *)
 let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit decl) =
@@ -641,6 +663,13 @@ let dispatch_loop app =
            | Some (Kaya_wire.Bool checked), keys ->
                (match Hashtbl.find_opt app.node_toggles id with
                | Some handler -> build app (handler keys checked)
+               | None -> ())
+           | _ -> ()
+         else if kind = Kaya_wire.occ_kind_value_changed then
+           match (payload, keys) with
+           | Some (Kaya_wire.F64 v), [] ->
+               (match Hashtbl.find_opt app.widget_values id with
+               | Some handler -> build app (handler v)
                | None -> ())
            | _ -> ()
          else

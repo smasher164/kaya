@@ -56,6 +56,12 @@ pub enum Occurrence {
     Toggled { id: WidgetId, checked: bool },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
+    /// The user moved a slider the guest created directly; carries the
+    /// new value, one occurrence per change (the entry's per-edit
+    /// granularity). Same ownership stance as TextChanged.
+    ValueChanged { id: WidgetId, value: f64 },
+    /// The user moved a stamped copy of a template slider.
+    InstanceValueChanged { node: TemplateNodeId, path: Path, value: f64 },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -120,6 +126,11 @@ impl From<bool> for Value {
         Value::Bool(v)
     }
 }
+impl From<f64> for Value {
+    fn from(v: f64) -> Self {
+        Value::F64(v)
+    }
+}
 
 /// A collection key, core-side: domain identity, unique per collection
 /// instance. I64 and Str only — a float is not an identity, and a bool
@@ -165,6 +176,11 @@ pub enum WidgetKind {
     /// A labeled on/off box. Prop::Text is the caption, Prop::Checked
     /// the state; user toggles report as Toggled occurrences.
     Checkbox,
+    /// A continuous control over a numeric range. Prop::Value is the
+    /// position, Prop::Min/Prop::Max the range (0..1 unless set); user
+    /// drags report as ValueChanged occurrences, one per change.
+    /// Uncontrolled, like the entry: the widget owns its position.
+    Slider,
 }
 
 /// Property keys; grows with widgets.
@@ -173,6 +189,12 @@ pub enum Prop {
     Text,
     /// A checkbox's state (Bool-valued).
     Checked,
+    /// A slider's position (F64-valued).
+    Value,
+    /// A slider's range, lower bound (F64-valued).
+    Min,
+    /// A slider's range, upper bound (F64-valued).
+    Max,
 }
 
 /// A bound property's source: a constant, a signal reference, or —
@@ -294,6 +316,16 @@ impl OccSink {
                     let body = crate::wire::toggled_body(&tag, checked);
                     ring.push_record(crate::ring::REC_TOGGLED, &body);
                 }
+                Occurrence::ValueChanged { id, value } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    let body = crate::wire::value_changed_body(&tag, value);
+                    ring.push_record(crate::ring::REC_VALUE_CHANGED, &body);
+                }
+                Occurrence::InstanceValueChanged { node, path, value } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    let body = crate::wire::value_changed_body(&tag, value);
+                    ring.push_record(crate::ring::REC_VALUE_CHANGED, &body);
+                }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },
         }
@@ -323,6 +355,22 @@ impl OccSink {
                 ring.push_record(
                     crate::ring::REC_TOGGLED,
                     &crate::wire::toggled_body(tag, checked),
+                );
+            }
+        }
+    }
+
+    /// The same fast path for a slider move: the stored tag plus the
+    /// new value.
+    pub(crate) fn send_value_tag(&self, tag: &[u8], value: f64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_value_changed_tag(tag, value));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_VALUE_CHANGED,
+                    &crate::wire::value_changed_body(tag, value),
                 );
             }
         }

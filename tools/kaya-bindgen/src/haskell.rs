@@ -131,6 +131,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, ctor) = match kind {
             crate::PropKind::Str => ("String", "VStr"),
             crate::PropKind::Bool => ("Bool", "VBool"),
+            crate::PropKind::F64 => ("Double", "VF64"),
         };
         c.line("");
         c.line(&format!("-- set_property with a constant {prop} value."));
@@ -178,13 +179,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("-- Decode one occurrence record at `rec` (header included). Just");
     c.line("-- (kind, id, keys, payload) — keys is [] when id is a widget id,");
     c.line("-- else id is a template node id and keys is the copy's key path;");
-    c.line("-- payload is Just for text_changed (VStr) and toggled (VBool),");
+    c.line("-- payload is Just for text_changed (VStr), toggled (VBool), and");
+    c.line("-- value_changed (VF64),");
     c.line("-- Nothing for clicks. Nothing for pad or unknown kinds.");
     c.line("parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))");
     c.line("parseOccurrence rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
-    c.line("  if kind /= occKindButtonClicked && kind /= occKindTextChanged");
-    c.line("       && kind /= occKindToggled");
+    let accepted = crate::occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind /= occKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    c.line(&format!("  if {accepted}"));
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
@@ -195,7 +201,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            go next (n - 1 :: Word32) (v : acc)");
     c.line("      (keys, at') <- go (24 :: Int) pathLen []");
     c.line("      payload <-");
-    c.line("        if kind == occKindTextChanged || kind == occKindToggled");
+    let with_payload = crate::payload_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line(&format!("        if {with_payload}"));
     c.line("          then do");
     c.line("            (v, _) <- parseValue rec at'");
     c.line("            return (Just v)");

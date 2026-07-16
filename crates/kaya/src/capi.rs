@@ -46,11 +46,13 @@ pub const KAYA_OCCURRENCE_PAD: u16 = 0;
 pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
 pub const KAYA_OCCURRENCE_TEXT_CHANGED: u16 = 2;
 pub const KAYA_OCCURRENCE_TOGGLED: u16 = 3;
+pub const KAYA_OCCURRENCE_VALUE_CHANGED: u16 = 4;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
         && KAYA_OCCURRENCE_TEXT_CHANGED == ring::REC_TEXT_CHANGED
         && KAYA_OCCURRENCE_TOGGLED == ring::REC_TOGGLED
+        && KAYA_OCCURRENCE_VALUE_CHANGED == ring::REC_VALUE_CHANGED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -166,6 +168,7 @@ pub const KAYA_KIND_LABEL: u32 = 3;
 pub const KAYA_KIND_ENTRY: u32 = 4;
 pub const KAYA_KIND_ROW: u32 = 5;
 pub const KAYA_KIND_CHECKBOX: u32 = 6;
+pub const KAYA_KIND_SLIDER: u32 = 7;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -173,13 +176,21 @@ const _: () = assert!(
         && KAYA_KIND_ENTRY == wire::KIND_ENTRY
         && KAYA_KIND_ROW == wire::KIND_ROW
         && KAYA_KIND_CHECKBOX == wire::KIND_CHECKBOX
+        && KAYA_KIND_SLIDER == wire::KIND_SLIDER
 );
 
 /// Property keys.
 pub const KAYA_PROP_TEXT: u32 = 1;
 pub const KAYA_PROP_CHECKED: u32 = 2;
+pub const KAYA_PROP_VALUE: u32 = 3;
+pub const KAYA_PROP_MIN: u32 = 4;
+pub const KAYA_PROP_MAX: u32 = 5;
 const _: () = assert!(
-    KAYA_PROP_TEXT == wire::PROP_TEXT && KAYA_PROP_CHECKED == wire::PROP_CHECKED
+    KAYA_PROP_TEXT == wire::PROP_TEXT
+        && KAYA_PROP_CHECKED == wire::PROP_CHECKED
+        && KAYA_PROP_VALUE == wire::PROP_VALUE
+        && KAYA_PROP_MIN == wire::PROP_MIN
+        && KAYA_PROP_MAX == wire::PROP_MAX
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -381,6 +392,23 @@ pub unsafe extern "C" fn kaya_emit_toggled(tag: *const u8, tag_len: usize, check
     state()
         .ring
         .push_record(ring::REC_TOGGLED, &wire::toggled_body(tag, checked != 0));
+}
+
+/// Presentation side: emit a slider move, exactly as a backend's
+/// change handler would — `tag` is the tag bytes delivered with the
+/// slider's CREATE record, `value` the new position. Do not combine
+/// with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_value_changed(tag: *const u8, tag_len: usize, value: f64) {
+    assert!(!tag.is_null() && tag_len != 0, "kaya: empty slider tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_value_tag(tag, value);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_VALUE_CHANGED, &wire::value_changed_body(tag, value));
 }
 
 /// Presentation side: emit an entry edit, exactly as a backend's

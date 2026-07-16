@@ -22,6 +22,7 @@ python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks
 # Fast cross-language/-platform gates: catch cfg'd-backend and guest
 # breakage here, in seconds, not on an emulator or VM.
 tools/check-targets.sh || exit 1
+tools/check-sugar-surface.sh || exit 1
 tools/swift-typecheck.sh || exit 1
 tools/java-typecheck.sh || exit 1
 

@@ -32,7 +32,8 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, Orientation, StackPanel, TextBlock, TextBox, TextChangedEventHandler,
+    Button, CheckBox, Orientation, Slider, StackPanel, TextBlock, TextBox,
+    TextChangedEventHandler,
 };
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Microsoft::UI::Xaml::{
@@ -49,6 +50,7 @@ enum NativeWidget {
     Column(StackPanel),
     Row(StackPanel),
     Checkbox { check: CheckBox, caption: TextBlock },
+    Slider(Slider),
     // The caption TextBlock is the button's text surface.
     Button { button: Button, caption: TextBlock },
     Label(TextBlock),
@@ -62,6 +64,7 @@ impl NativeWidget {
             NativeWidget::Column(panel) => panel.cast(),
             NativeWidget::Row(panel) => panel.cast(),
             NativeWidget::Checkbox { check, .. } => check.cast(),
+            NativeWidget::Slider(slider) => slider.cast(),
             NativeWidget::Button { button, .. } => button.cast(),
             NativeWidget::Label(label) => label.cast(),
             NativeWidget::Entry(field) => field.cast(),
@@ -80,9 +83,12 @@ struct CoreState {
     // selftest's round trip.
     selftest_button: Option<Vec<u8>>,
     selftest_last_button: Option<Vec<u8>>,
-    selftest_label: Option<TextBlock>,
+    // Every label, creation order; drivers read the one their scene
+    // puts the verdict in (gallery checks two).
+    selftest_labels: Vec<TextBlock>,
     selftest_entry: Option<TextBox>,
     selftest_checkbox: Option<CheckBox>,
+    selftest_slider: Option<Slider>,
     window: Window,
 }
 
@@ -418,6 +424,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Checkbox { check, caption }
                 }
+                WidgetKind::Slider => {
+                    // Uncontrolled, like the entry: the slider owns its
+                    // position; ValueChanged reports each move with its
+                    // identity tag. (WinUI raises it for programmatic
+                    // SetValue too, which is what lets the selftest
+                    // drag like a user.)
+                    let slider = Slider::new()?;
+                    slider.SetMinimum(0.0)?;
+                    slider.SetMaximum(1.0)?;
+                    slider.SetStepFrequency(0.01)?;
+                    slider.SetMinWidth(160.0)?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("sliders carry a tag");
+                    let handler = bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventHandler::new(
+                        move |_, args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs>| {
+                            if let Some(args) = args.as_ref() {
+                                sink.send_value_tag(&tag, args.NewValue()?);
+                            }
+                            Ok(())
+                        },
+                    );
+                    slider.ValueChanged(&handler)?;
+                    if core.selftest_slider.is_none() {
+                        core.selftest_slider = Some(slider.clone());
+                    }
+                    NativeWidget::Slider(slider)
+                }
                 WidgetKind::Button => {
                     let button = Button::new()?;
                     let caption = TextBlock::new()?;
@@ -439,9 +472,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Label => {
                     let label = TextBlock::new()?;
-                    if core.selftest_label.is_none() {
-                        core.selftest_label = Some(label.clone());
-                    }
+                    core.selftest_labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -477,6 +508,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         PropertyValue::CreateBoolean(b)?.cast()?;
                     check.SetIsChecked(&boxed)?;
                 }
+                (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
+                    slider.SetValue(v)?;
+                }
+                (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
+                    slider.SetMinimum(v)?;
+                }
+                (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
+                    slider.SetMaximum(v)?;
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -494,6 +534,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Label(label) => children.Append(label)?,
                 NativeWidget::Entry(field) => children.Append(field)?,
                 NativeWidget::Checkbox { check, .. } => children.Append(check)?,
+                NativeWidget::Slider(slider) => children.Append(slider)?,
             }
             core.parents.insert(child, panel);
         }
@@ -506,6 +547,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Label(label) => core.window.SetContent(label)?,
                 NativeWidget::Entry(field) => core.window.SetContent(field)?,
                 NativeWidget::Checkbox { check, .. } => core.window.SetContent(check)?,
+                NativeWidget::Slider(slider) => core.window.SetContent(slider)?,
             }
         }
     }
@@ -754,9 +796,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             parents: HashMap::new(),
             selftest_button: None,
             selftest_last_button: None,
-            selftest_label: None,
+            selftest_labels: Vec::new(),
             selftest_entry: None,
             selftest_checkbox: None,
+            selftest_slider: None,
             window,
         });
     });
@@ -821,8 +864,8 @@ fn spawn_selftest() {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .Text()?
                     .to_string();
@@ -864,21 +907,29 @@ fn spawn_gallery_selftest() {
                 Ok(())
             })
         });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let slider = core
+                    .selftest_slider
+                    .as_ref()
+                    .expect("the scene has a slider");
+                slider.SetValue(0.75)?;
+                Ok(())
+            })
+        });
         std::thread::sleep(std::time::Duration::from_millis(700));
         on_ui(|| {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
-                let text = core
-                    .selftest_label
-                    .as_ref()
-                    .expect("the scene has a label")
-                    .Text()?
-                    .to_string();
-                if text == "urgent: true" {
-                    println!("KAYA_SELFTEST: OK ({text})");
+                let status = core.selftest_labels[0].Text()?.to_string();
+                let volume = core.selftest_labels[1].Text()?.to_string();
+                if status == "urgent: true" && volume == "volume: 75%" {
+                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
                     request_exit(0);
                 } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
                     request_exit(1);
                 }
                 Ok(())
@@ -940,8 +991,8 @@ fn spawn_todos_selftest() {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .Text()?
                     .to_string();
@@ -1001,8 +1052,8 @@ fn spawn_entry_selftest() {
             CORE.with_borrow(|core| {
                 let core = core.as_ref().expect("core state initialized");
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .Text()?
                     .to_string();

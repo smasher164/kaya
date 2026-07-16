@@ -7,7 +7,7 @@
 type value = Bool of bool | I64 of int64 | F64 of float | Str of string
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xe43514ac23c5f1c5L
+let spec_hash = 0xe22da1c95f74a5a4L
 
 let value_bool = 1
 let value_i64 = 2
@@ -19,8 +19,12 @@ let kind_label = 3
 let kind_entry = 4
 let kind_row = 5
 let kind_checkbox = 6
+let kind_slider = 7
 let prop_text = 1
 let prop_checked = 2
+let prop_value = 3
+let prop_min = 4
+let prop_max = 5
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -28,6 +32,7 @@ let occurrence_pad = 0
 let occurrence_button_clicked = 1
 let occurrence_text_changed = 2
 let occurrence_toggled = 3
+let occurrence_value_changed = 4
 let tx_kind_create_signal = 1
 let tx_kind_write_signal = 2
 let tx_kind_create_widget = 3
@@ -50,6 +55,7 @@ let apply_kind_destroy = 5
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
+let occ_kind_value_changed = 4
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -241,6 +247,84 @@ let tx_bind_checked_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant value value. *)
+let tx_set_value widget_id value =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_value);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 value))
+
+(* set_property with a signal-bound value value. *)
+let tx_bind_value widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_value);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_value_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_value);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant min value. *)
+let tx_set_min widget_id min =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 min))
+
+(* set_property with a signal-bound min value. *)
+let tx_bind_min widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_min_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_min);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant max value. *)
+let tx_set_max widget_id max =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 max))
+
+(* set_property with a signal-bound max value. *)
+let tx_bind_max widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_max_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_max);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)
 let u16_at byte i = byte i lor (byte (i + 1) lsl 8)
@@ -268,12 +352,12 @@ let parse_value byte at =
 (* Decode one occurrence record (header included) through the byte
    accessor. Some (kind, id, keys, payload) — keys is [] when id is
    a widget id, else id is a template node id and keys is the copy's
-   key path; payload is Some for text_changed/toggled (a Str or Bool
+   key path; payload is Some for text_changed/toggled/value_changed
+   (a Str, Bool, or F64
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed
-     && kind <> occ_kind_toggled then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -286,7 +370,7 @@ let parse_occurrence byte =
       at := next
     done;
     let payload =
-      if kind = occ_kind_text_changed || kind = occ_kind_toggled then
+      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed then
         Some (fst (parse_value byte !at))
       else None
     in

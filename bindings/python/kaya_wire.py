@@ -9,7 +9,7 @@ Python bool, int, float, and str, mapped to the kaya value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xe43514ac23c5f1c5
+SPEC_HASH = 0xe22da1c95f74a5a4
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -21,8 +21,12 @@ KIND_LABEL = 3
 KIND_ENTRY = 4
 KIND_ROW = 5
 KIND_CHECKBOX = 6
+KIND_SLIDER = 7
 PROP_TEXT = 1
 PROP_CHECKED = 2
+PROP_VALUE = 3
+PROP_MIN = 4
+PROP_MAX = 5
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -30,6 +34,7 @@ OCCURRENCE_PAD = 0
 OCCURRENCE_BUTTON_CLICKED = 1
 OCCURRENCE_TEXT_CHANGED = 2
 OCCURRENCE_TOGGLED = 3
+OCCURRENCE_VALUE_CHANGED = 4
 
 TX_CREATE_SIGNAL = 1
 TX_WRITE_SIGNAL = 2
@@ -53,6 +58,7 @@ APPLY_DESTROY = 5
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
+OCC_VALUE_CHANGED = 4
 
 
 def _pad(b):
@@ -176,6 +182,51 @@ def tx_bind_checked_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_CHECKED, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_value(widget_id, value):
+    """set_property with a constant value value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_VALUE, SOURCE_CONST) + _enc.value(value))
+
+
+def tx_bind_value(widget_id, signal_id):
+    """set_property with a signal-bound value value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_VALUE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_value_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_VALUE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_min(widget_id, min):
+    """set_property with a constant min value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MIN, SOURCE_CONST) + _enc.value(min))
+
+
+def tx_bind_min(widget_id, signal_id):
+    """set_property with a signal-bound min value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MIN, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_min_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MIN, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_max(widget_id, max):
+    """set_property with a constant max value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MAX, SOURCE_CONST) + _enc.value(max))
+
+
+def tx_bind_max(widget_id, signal_id):
+    """set_property with a signal-bound max value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MAX, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_max_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX, SOURCE_ELEMENT, level, field))
+
+
 def parse_value(buf, at):
     """Decode one value; returns (python value, next offset)."""
     vtype, vlen = struct.unpack_from("<II", buf, at)
@@ -198,10 +249,11 @@ def parse_occurrence(buf):
     Returns (kind, id, keys, payload). keys is [] when id is a
     widget id, else id is a template node id and keys is the
     copy's key path. text is the entry's new content for
-    OCC_TEXT_CHANGED, None otherwise.
+    OCC_TEXT_CHANGED, the new state for OCC_TOGGLED, the new
+    value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED):
         return kind, None, [], None
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
@@ -210,6 +262,6 @@ def parse_occurrence(buf):
         key, at = parse_value(buf, at)
         keys.append(key)
     payload = None
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED,):
         payload, at = parse_value(buf, at)
     return kind, ident, keys, payload

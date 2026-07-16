@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xe43514ac23c5f1c5L;
+    public static final long SPEC_HASH = 0xe22da1c95f74a5a4L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -25,8 +25,12 @@ public final class KayaWire {
     public static final int KIND_ENTRY = 4;
     public static final int KIND_ROW = 5;
     public static final int KIND_CHECKBOX = 6;
+    public static final int KIND_SLIDER = 7;
     public static final int PROP_TEXT = 1;
     public static final int PROP_CHECKED = 2;
+    public static final int PROP_VALUE = 3;
+    public static final int PROP_MIN = 4;
+    public static final int PROP_MAX = 5;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
@@ -34,6 +38,7 @@ public final class KayaWire {
     public static final int OCCURRENCE_BUTTON_CLICKED = 1;
     public static final int OCCURRENCE_TEXT_CHANGED = 2;
     public static final int OCCURRENCE_TOGGLED = 3;
+    public static final int OCCURRENCE_VALUE_CHANGED = 4;
     public static final short TX_KIND_CREATE_SIGNAL = 1;
     public static final short TX_KIND_WRITE_SIGNAL = 2;
     public static final short TX_KIND_CREATE_WIDGET = 3;
@@ -56,6 +61,7 @@ public final class KayaWire {
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
+    public static final short OCC_KIND_VALUE_CHANGED = 4;
 
     private static ByteBuffer begin(short kind) {
         ByteBuffer b = ByteBuffer.allocate(4096).order(ByteOrder.LITTLE_ENDIAN);
@@ -266,6 +272,75 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant value value. */
+    public static byte[] txSetValue(long widgetId, double value) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_CONST);
+        encodeValue(b, value);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound value value. */
+    public static byte[] txBindValue(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindValueElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_VALUE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant min value. */
+    public static byte[] txSetMin(long widgetId, double min) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_CONST);
+        encodeValue(b, min);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound min value. */
+    public static byte[] txBindMin(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMinElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MIN).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant max value. */
+    public static byte[] txSetMax(long widgetId, double max) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_CONST);
+        encodeValue(b, max);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound max value. */
+    public static byte[] txBindMax(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMaxElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MAX).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** Concatenate packed records into one transaction. */
     public static byte[] tx(byte[]... records) {
         int len = 0;
@@ -283,7 +358,8 @@ public final class KayaWire {
      * (empty when id is a widget id; otherwise id is a template
      * node id), and the payload — the entry's new text (String)
      * for TEXT_CHANGED, the checkbox's new state (Boolean) for
-     * TOGGLED, null for clicks. */
+     * TOGGLED, the slider's new value (Double) for VALUE_CHANGED,
+     * null for clicks. */
     public static final class Occ {
         public final short kind;
         public final long id;
@@ -303,8 +379,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED
-                && kind != OCC_KIND_TOGGLED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -324,13 +399,15 @@ public final class KayaWire {
             at += 8 + ((vlen + 7) & ~7);
         }
         Object payload = null;
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
-            if (ptype == VALUE_BOOL) {
-                payload = rec[at + 8] != 0;
-            } else {
-                payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);
+            switch (ptype) {
+                case VALUE_BOOL: payload = rec[at + 8] != 0; break;
+                case VALUE_I64: payload = b.getLong(at + 8); break;
+                case VALUE_F64: payload = b.getDouble(at + 8); break;
+                default:
+                    payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);
             }
         }
         return new Occ(kind, id, keys, payload);

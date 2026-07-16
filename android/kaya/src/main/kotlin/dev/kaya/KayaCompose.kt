@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -44,6 +45,9 @@ import kotlin.concurrent.thread
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var text by mutableStateOf("")
     var checked by mutableStateOf(false)
+    var value by mutableStateOf(0.0)
+    var minValue by mutableStateOf(0.0)
+    var maxValue by mutableStateOf(1.0)
     val children = mutableStateListOf<KayaNode>()
 }
 
@@ -54,8 +58,11 @@ object KayaSceneModel {
     var firstButton: KayaNode? = null
     var lastButton: KayaNode? = null
     var firstLabel: KayaNode? = null
+    // Every label, creation order; the gallery verdict reads two.
+    val labels = ArrayList<KayaNode>()
     var firstEntry: KayaNode? = null
     var firstCheckbox: KayaNode? = null
+    var firstSlider: KayaNode? = null
 }
 
 object KayaCompose {
@@ -72,9 +79,14 @@ object KayaCompose {
     const val KIND_ENTRY = 4
     const val KIND_ROW = 5
     const val KIND_CHECKBOX = 6
+    const val KIND_SLIDER = 7
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
+    private const val PROP_VALUE = 3
+    private const val PROP_MIN = 4
+    private const val PROP_MAX = 5
     private const val VALUE_BOOL = 1
+    private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
 
     /**
@@ -122,8 +134,14 @@ object KayaCompose {
                         }
                         KayaSceneModel.lastButton = node
                     }
-                    if (widgetKind == KIND_LABEL && KayaSceneModel.firstLabel == null) {
-                        KayaSceneModel.firstLabel = node
+                    if (widgetKind == KIND_LABEL) {
+                        if (KayaSceneModel.firstLabel == null) {
+                            KayaSceneModel.firstLabel = node
+                        }
+                        KayaSceneModel.labels.add(node)
+                    }
+                    if (widgetKind == KIND_SLIDER && KayaSceneModel.firstSlider == null) {
+                        KayaSceneModel.firstSlider = node
                     }
                     if (widgetKind == KIND_ENTRY && KayaSceneModel.firstEntry == null) {
                         KayaSceneModel.firstEntry = node
@@ -139,6 +157,9 @@ object KayaCompose {
                     when (prop) {
                         PROP_TEXT -> KayaSceneModel.nodes[id]!!.text = readString(b)
                         PROP_CHECKED -> KayaSceneModel.nodes[id]!!.checked = readBool(b)
+                        PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
+                        PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
+                        PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
                         else -> error("kaya: unknown prop $prop")
                     }
                 }
@@ -173,6 +194,13 @@ object KayaCompose {
         b.get(bytes)
         check(type == VALUE_STR) { "kaya: expected a string value, got type $type" }
         return String(bytes, Charsets.UTF_8)
+    }
+
+    private fun readF64(b: ByteBuffer): Double {
+        val type = b.int
+        b.int // len
+        check(type == VALUE_F64) { "kaya: expected an f64 value, got type $type" }
+        return b.double
     }
 
     private fun readBool(b: ByteBuffer): Boolean {
@@ -311,14 +339,22 @@ object KayaCompose {
                     KayaPresent.emitToggled(box.tag, true)
                 }
             }
+            Thread.sleep(400)
+            activity.runOnUiThread {
+                KayaSceneModel.firstSlider?.let { slider ->
+                    slider.value = 0.75
+                    KayaPresent.emitValueChanged(slider.tag, 0.75)
+                }
+            }
             Thread.sleep(700)
             activity.runOnUiThread {
-                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "urgent: true") {
-                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
+                val status = KayaSceneModel.labels.getOrNull(0)?.text ?: "(no label)"
+                val volume = KayaSceneModel.labels.getOrNull(1)?.text ?: "(no label)"
+                val code = if (status == "urgent: true" && volume == "volume: 75%") {
+                    Log.i("kaya", "KAYA_SELFTEST: OK ($status, $volume)")
                     0
                 } else {
-                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
+                    Log.e("kaya", "KAYA_SELFTEST: FAILED (labels read $status, $volume)")
                     1
                 }
                 activity.finishAndRemoveTask()
@@ -369,6 +405,18 @@ fun KayaRender(node: KayaNode) {
                 )
                 Text(node.text)
             }
+        KayaCompose.KIND_SLIDER ->
+            // Uncontrolled toward the app, the entry's shape: the node
+            // mirrors the slider's position (Compose needs the state),
+            // and every move is emitted with the slider's identity tag.
+            Slider(
+                value = node.value.toFloat(),
+                onValueChange = { newValue ->
+                    node.value = newValue.toDouble()
+                    KayaPresent.emitValueChanged(node.tag, newValue.toDouble())
+                },
+                valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
+            )
         KayaCompose.KIND_ENTRY ->
             // Uncontrolled toward the app: the node mirrors what the
             // user types (Compose needs the state), and every edit is

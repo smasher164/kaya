@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xe43514ac23c5f1c5
+	SpecHash uint64 = 0xe22da1c95f74a5a4
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -24,8 +24,12 @@ const (
 	KindEntry = 4
 	KindRow = 5
 	KindCheckbox = 6
+	KindSlider = 7
 	PropText = 1
 	PropChecked = 2
+	PropValue = 3
+	PropMin = 4
+	PropMax = 5
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -33,6 +37,7 @@ const (
 	OccurrenceButtonClicked = 1
 	OccurrenceTextChanged = 2
 	OccurrenceToggled = 3
+	OccurrenceValueChanged = 4
 	txCreateSignal = 1
 	txWriteSignal = 2
 	txCreateWidget = 3
@@ -55,6 +60,7 @@ const (
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
+	occValueChanged = 4
 )
 
 func pad8(b []byte) []byte {
@@ -310,15 +316,112 @@ func TxBindCheckedElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetValue: set_property with a constant value value.
+func TxSetValue(widgetID uint64, value float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropValue)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
+// TxBindValue: set_property with a signal-bound value value.
+func TxBindValue(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropValue)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindValueElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindValueElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropValue)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMin: set_property with a constant min value.
+func TxSetMin(widgetID uint64, min float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMin)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, min)
+	return endRecord(b)
+}
+
+// TxBindMin: set_property with a signal-bound min value.
+func TxBindMin(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMin)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMinElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMinElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMin)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMax: set_property with a constant max value.
+func TxSetMax(widgetID uint64, max float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMax)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, max)
+	return endRecord(b)
+}
+
+// TxBindMax: set_property with a signal-bound max value.
+func TxBindMax(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMax)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMaxElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMaxElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMax)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
 // is the entry's new text (string) for occTextChanged, the
-// checkbox's new state (bool) for occToggled, nil for clicks. ok is
+// checkbox's new state (bool) for occToggled, the slider's new
+// value (float64) for occValueChanged, nil for clicks. ok is
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -340,12 +443,17 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		}
 		at += 8 + (vlen+7)&^7
 	}
-	if kind == occTextChanged || kind == occToggled {
+	if kind == occTextChanged || kind == occToggled || kind == occValueChanged {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
-		if vtype == ValueBool {
+		switch vtype {
+		case ValueBool:
 			payload = rec[at+8] != 0
-		} else {
+		case ValueI64:
+			payload = int64(binary.LittleEndian.Uint64(rec[at+8:]))
+		case ValueF64:
+			payload = math.Float64frombits(binary.LittleEndian.Uint64(rec[at+8:]))
+		default:
 			payload = string(rec[at+8 : at+8+vlen])
 		}
 	}

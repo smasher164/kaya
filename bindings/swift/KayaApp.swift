@@ -84,6 +84,7 @@ final class KayaApp {
     private var widgetChanges: [UInt64: (KayaAppTx, String) -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) -> Void] = [:]
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) -> Void] = [:]
+    private var widgetValues: [UInt64: (KayaAppTx, Double) -> Void] = [:]
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
@@ -209,6 +210,13 @@ final class KayaApp {
         widgetToggles[w.id] = handler
     }
 
+    /// A live slider's change handler: the bar owns its position and
+    /// reports each move with the new value — the entry's uncontrolled
+    /// contract, with a Double.
+    func onValueChanged(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double) -> Void) {
+        widgetValues[w.id] = handler
+    }
+
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     func onToggle(
@@ -227,9 +235,11 @@ final class KayaApp {
             guard let (kind, id, keys, payload) = kayaParseOccurrence(buf) else { continue }
             var text: String?
             var checked = false
+            var value = 0.0
             switch payload {
             case .str(let s): text = s
             case .bool(let b): checked = b
+            case .f64(let x): value = x
             default: break
             }
             switch (kind, keys.isEmpty) {
@@ -256,6 +266,10 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), false):
                 if let handler = nodeToggles[id] {
                     build { tx in handler(tx, keys, checked) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), true):
+                if let handler = widgetValues[id] {
+                    build { tx in handler(tx, value) }
                 }
             default:
                 break
@@ -370,6 +384,20 @@ final class KayaAppTx {
         let w = widget(UInt32(KAYA_KIND_LABEL))
         if let text { setText(w, text) }
         if let bind { bindText(w, bind) }
+        return w
+    }
+
+    /// A slider over min...max at value, with its change handler
+    /// co-located.
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
+        onChange: ((KayaAppTx, Double) -> Void)? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SLIDER))
+        tx.setMin(w.id, min)
+        tx.setMax(w.id, max)
+        tx.setValue(w.id, value)
+        if let onChange { app.onValueChanged(w, onChange) }
         return w
     }
 

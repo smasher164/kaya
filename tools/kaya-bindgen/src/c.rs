@@ -201,6 +201,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, ctor) = match kind {
             crate::PropKind::Str => ("const char *", "kaya_str"),
             crate::PropKind::Bool => ("int ", "kaya_bool"),
+            crate::PropKind::F64 => ("double ", "kaya_f64"),
         };
         c.line("");
         c.line(&format!("/* set_property with a constant {prop} value. */"));
@@ -279,42 +280,39 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return 1;");
     c.line("}");
     c.line("");
-    c.line("/* Decode a toggled occurrence: same identity head as a click, then");
-    c.line(" * the checkbox's new state as one Bool value. Returns 1 and fills");
-    c.line(" * the outputs, or 0 for other kinds. */");
-    c.line("static inline int kaya_parse_toggled(const uint8_t *rec, uint64_t *id,");
-    c.line("                                     KayaVal *keys, uint32_t max_keys,");
-    c.line("                                     uint32_t *n_keys, KayaVal *checked) {");
-    c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
-    c.line("    if (r->header.kind != KAYA_OCCURRENCE_TOGGLED)");
-    c.line("        return 0;");
-    c.line("    *id = r->id;");
-    c.line("    *n_keys = r->path_len;");
-    c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
-    c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
-    c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
-    c.line("    kaya_parse_value(rec, at, checked);");
-    c.line("    return 1;");
-    c.line("}");
-    c.line("");
-    c.line("/* Decode a text_changed occurrence: same identity head as a click,");
-    c.line(" * then the entry's new text as one value (text->s/s_len point into");
-    c.line(" * rec). Returns 1 and fills the outputs, or 0 for other kinds. */");
-    c.line("static inline int kaya_parse_text_changed(const uint8_t *rec, uint64_t *id,");
-    c.line("                                          KayaVal *keys, uint32_t max_keys,");
-    c.line("                                          uint32_t *n_keys, KayaVal *text) {");
-    c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
-    c.line("    if (r->header.kind != KAYA_OCCURRENCE_TEXT_CHANGED)");
-    c.line("        return 0;");
-    c.line("    *id = r->id;");
-    c.line("    *n_keys = r->path_len;");
-    c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
-    c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
-    c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
-    c.line("    kaya_parse_value(rec, at, text);");
-    c.line("    return 1;");
-    c.line("}");
-    c.line("");
+    // One parse helper per payload-carrying occurrence, from the spec's
+    // Record::payload — the kind list derives rather than drifts. The
+    // payload lands in a KayaVal, kaya_parse_value's generic decode.
+    for r in spec.occurrence.iter().filter(|r| r.payload.is_some()) {
+        let name = r.name;
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: same identity head as a click, then"
+        ));
+        c.line(&format!(
+            " * its payload as one {:?} value (strings point into rec). Returns 1",
+            r.payload.unwrap()
+        ));
+        c.line(" * and fills the outputs, or 0 for other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys, KayaVal *payload) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
+        c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+        c.line("    kaya_parse_value(rec, at, payload);");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
     c.line("#endif /* KAYA_WIRE_H */");
     c.out
 }

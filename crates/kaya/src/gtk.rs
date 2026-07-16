@@ -28,6 +28,7 @@ enum NativeWidget {
     Entry(gtk4::Entry),
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
+    Slider(gtk4::Scale),
 }
 
 impl NativeWidget {
@@ -39,6 +40,7 @@ impl NativeWidget {
             NativeWidget::Entry(w) => w.clone().upcast(),
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
+            NativeWidget::Slider(w) => w.clone().upcast(),
         }
     }
 }
@@ -50,9 +52,12 @@ struct CoreState {
     widgets: HashMap<WidgetId, NativeWidget>,
     selftest_button: Option<gtk4::Button>,
     selftest_last_button: Option<gtk4::Button>,
-    selftest_label: Option<gtk4::Label>,
+    // Every label, creation order; drivers read the one their scene
+    // puts the verdict in (gallery checks two).
+    selftest_labels: Vec<gtk4::Label>,
     selftest_entry: Option<gtk4::Entry>,
     selftest_checkbox: Option<gtk4::CheckButton>,
+    selftest_slider: Option<gtk4::Scale>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -139,6 +144,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     }
                     NativeWidget::Checkbox(check)
                 }
+                WidgetKind::Slider => {
+                    // Uncontrolled, like the entry: the slider owns its
+                    // position; each change goes up with its identity
+                    // tag. (GTK fires `value-changed` for programmatic
+                    // set_value too, which is what lets the selftest
+                    // drag like a user.)
+                    let scale =
+                        gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 1.0, 0.01);
+                    scale.set_size_request(160, -1);
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("sliders carry a tag");
+                    scale.connect_value_changed(move |sc| {
+                        sink.send_value_tag(&tag, sc.value());
+                    });
+                    if core.selftest_slider.is_none() {
+                        core.selftest_slider = Some(scale.clone());
+                    }
+                    NativeWidget::Slider(scale)
+                }
                 WidgetKind::Button => {
                     let button = gtk4::Button::new();
                     let sink = core.occurrences.clone();
@@ -156,9 +180,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 WidgetKind::Label => {
                     let label = gtk4::Label::new(None);
-                    if core.selftest_label.is_none() {
-                        core.selftest_label = Some(label.clone());
-                    }
+                    core.selftest_labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -193,6 +215,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Checkbox(check), Prop::Checked, Value::Bool(b)) => {
                     check.set_active(b);
+                }
+                (NativeWidget::Slider(scale), Prop::Value, Value::F64(v)) => {
+                    scale.set_value(v);
+                }
+                (NativeWidget::Slider(scale), Prop::Min, Value::F64(v)) => {
+                    scale.adjustment().set_lower(v);
+                }
+                (NativeWidget::Slider(scale), Prop::Max, Value::F64(v)) => {
+                    scale.adjustment().set_upper(v);
                 }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
@@ -270,9 +301,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 widgets: HashMap::new(),
                 selftest_button: None,
                 selftest_last_button: None,
-                selftest_label: None,
+                selftest_labels: Vec::new(),
                 selftest_entry: None,
                 selftest_checkbox: None,
+                selftest_slider: None,
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -343,8 +375,8 @@ fn spawn_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text();
                 if text == "removed g2/a, 0 left" {
@@ -383,20 +415,28 @@ fn spawn_gallery_selftest() {
                 }
             });
         });
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_slider
+                        .as_ref()
+                        .expect("the scene has a slider")
+                        .set_value(0.75);
+                }
+            });
+        });
         std::thread::sleep(std::time::Duration::from_millis(700));
         on_main(|| {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_label
-                    .as_ref()
-                    .expect("the scene has a label")
-                    .text();
-                if text == "urgent: true" {
-                    println!("KAYA_SELFTEST: OK ({text})");
+                let status = core.selftest_labels[0].text();
+                let volume = core.selftest_labels[1].text();
+                if status == "urgent: true" && volume == "volume: 75%" {
+                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
                     request_exit(0);
                 } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
                     request_exit(1);
                 }
             });
@@ -454,8 +494,8 @@ fn spawn_todos_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text();
                 if text == "0 items left" {
@@ -511,8 +551,8 @@ fn spawn_entry_selftest() {
             CORE.with_borrow(|core| {
                 let Some(core) = core.as_ref() else { return };
                 let text = core
-                    .selftest_label
-                    .as_ref()
+                    .selftest_labels
+                    .first()
                     .expect("the scene has a label")
                     .text();
                 if text == "added milk, 1 total" {

@@ -40,6 +40,7 @@ module KayaApp
     onChangeNode,
     onToggle,
     onToggleNode,
+    onValueChanged,
     signal,
     writeSignal,
     at,
@@ -73,6 +74,8 @@ module KayaApp
     entryOn,
     labelText,
     labelBound,
+    checkboxOn,
+    sliderOn,
     TplTextSource (..),
     TplBoolSource (..),
     label,
@@ -167,6 +170,8 @@ data BuildState = BuildState
 data Pending
   = PClick !Word64 (IO ())
   | PChange !Word64 (String -> IO ())
+  | PToggle !Word64 (Bool -> IO ())
+  | PValue !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
@@ -443,6 +448,25 @@ entryOn :: (String -> IO ()) -> Build Widget
 entryOn handler = do
   w@(Widget n) <- widget W.kindEntry
   pendB (PChange n handler)
+  return w
+
+-- | A labeled checkbox with its toggle handler co-located.
+checkboxOn :: String -> (Bool -> IO ()) -> Build Widget
+checkboxOn text handler = do
+  w@(Widget n) <- widget W.kindCheckbox
+  setText w text
+  pendB (PToggle n handler)
+  return w
+
+-- | A slider over min..max at value, with its change handler
+-- co-located.
+sliderOn :: Double -> Double -> Double -> (Double -> IO ()) -> Build Widget
+sliderOn lo hi value handler = do
+  w@(Widget n) <- widget W.kindSlider
+  emitB (W.txSetMin n lo)
+  emitB (W.txSetMax n hi)
+  emitB (W.txSetValue n value)
+  pendB (PValue n handler)
   return w
 
 labelText :: String -> Build Widget
@@ -724,7 +748,8 @@ data App = App
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),
     appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
-    appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ()))
+    appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
+    appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ()))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -752,6 +777,8 @@ register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
   PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+  PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
+  PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
 -- | buildTx for handlers that keep no handles.
@@ -782,6 +809,13 @@ onChangeNode app (Node n) handler =
 -- | Register a toggle handler for a live checkbox: the box owns its
 -- checked bit and reports each flip here; the app folds it into its
 -- own state.
+-- | Register a change handler for a live slider: the bar owns its
+-- position and reports each move with the new value — the entry's
+-- uncontrolled contract, with a Double.
+onValueChanged :: App -> Widget -> (Double -> IO ()) -> IO ()
+onValueChanged app (Widget n) handler =
+  modifyIORef' (appWidgetValues app) (Map.insert n handler)
+
 onToggle :: App -> Widget -> (Bool -> IO ()) -> IO ()
 onToggle app (Widget n) handler =
   modifyIORef' (appWidgetToggles app) (Map.insert n handler)
@@ -802,6 +836,7 @@ kayaMain setup = do
     App
       <$> newIORef (Counters 0 0 0 0)
       <*> newIORef (Map.empty, Map.empty)
+      <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty
       <*> newIORef Map.empty
@@ -841,6 +876,14 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (appNodeToggles app)
               mapM_ (\h -> h keys checked) (Map.lookup ident handlers)
+          dispatchLoop app
+      | kind == W.occKindValueChanged -> do
+          let v = case payload of Just (W.VF64 x) -> x; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appWidgetValues app)
+              mapM_ ($ v) (Map.lookup ident handlers)
+            _ -> return ()
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)

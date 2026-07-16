@@ -123,7 +123,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xe43514ac23c5f1c5ULL
+#define KAYA_SPEC_HASH 0xe22da1c95f74a5a4ULL
 
 
 /* Create a signal holding `initial`. */
@@ -302,6 +302,102 @@ static inline void kaya_tx_bind_checked_element(KayaTx *tx, uint64_t widget_id, 
     kaya_wire_end(tx, start);
 }
 
+/* set_property with a constant value value. */
+static inline void kaya_tx_set_value(KayaTx *tx, uint64_t widget_id, double value) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_VALUE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(value));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound value value. */
+static inline void kaya_tx_bind_value(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_VALUE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_value_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_VALUE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a constant min value. */
+static inline void kaya_tx_set_min(KayaTx *tx, uint64_t widget_id, double min) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(min));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound min value. */
+static inline void kaya_tx_bind_min(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_min_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MIN);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a constant max value. */
+static inline void kaya_tx_set_max(KayaTx *tx, uint64_t widget_id, double max) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(max));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound max value. */
+static inline void kaya_tx_bind_max(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_max_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MAX);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
 /* Decode one value at `at`; returns the next offset. */
 static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {
     memcpy(&out->type, buf + at, 4);
@@ -345,30 +441,12 @@ static inline int kaya_parse_click(const uint8_t *rec, uint64_t *id,
     return 1;
 }
 
-/* Decode a toggled occurrence: same identity head as a click, then
- * the checkbox's new state as one Bool value. Returns 1 and fills
- * the outputs, or 0 for other kinds. */
-static inline int kaya_parse_toggled(const uint8_t *rec, uint64_t *id,
-                                     KayaVal *keys, uint32_t max_keys,
-                                     uint32_t *n_keys, KayaVal *checked) {
-    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
-    if (r->header.kind != KAYA_OCCURRENCE_TOGGLED)
-        return 0;
-    *id = r->id;
-    *n_keys = r->path_len;
-    size_t at = sizeof(KayaRecordButtonClicked);
-    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
-        at = kaya_parse_value(rec, at, &keys[k]);
-    kaya_parse_value(rec, at, checked);
-    return 1;
-}
-
-/* Decode a text_changed occurrence: same identity head as a click,
- * then the entry's new text as one value (text->s/s_len point into
- * rec). Returns 1 and fills the outputs, or 0 for other kinds. */
+/* Decode a text_changed occurrence: same identity head as a click, then
+ * its payload as one Str value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
 static inline int kaya_parse_text_changed(const uint8_t *rec, uint64_t *id,
-                                          KayaVal *keys, uint32_t max_keys,
-                                          uint32_t *n_keys, KayaVal *text) {
+                                           KayaVal *keys, uint32_t max_keys,
+                                           uint32_t *n_keys, KayaVal *payload) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_TEXT_CHANGED)
         return 0;
@@ -377,7 +455,43 @@ static inline int kaya_parse_text_changed(const uint8_t *rec, uint64_t *id,
     size_t at = sizeof(KayaRecordButtonClicked);
     for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
         at = kaya_parse_value(rec, at, &keys[k]);
-    kaya_parse_value(rec, at, text);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a toggled occurrence: same identity head as a click, then
+ * its payload as one Bool value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_toggled(const uint8_t *rec, uint64_t *id,
+                                      KayaVal *keys, uint32_t max_keys,
+                                      uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TOGGLED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a value_changed occurrence: same identity head as a click, then
+ * its payload as one F64 value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_value_changed(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *keys, uint32_t max_keys,
+                                            uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_VALUE_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
     return 1;
 }
 

@@ -160,6 +160,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let ty = match kind {
             crate::PropKind::Str => "string",
             crate::PropKind::Bool => "bool",
+            crate::PropKind::F64 => "float64",
         };
         c.line("");
         c.line(&format!("// TxSet{pc}: set_property with a constant {prop} value."));
@@ -199,11 +200,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
     c.line("// node id and keys is the copy's key path, outermost first. payload");
     c.line("// is the entry's new text (string) for occTextChanged, the");
-    c.line("// checkbox's new state (bool) for occToggled, nil for clicks. ok is");
+    c.line("// checkbox's new state (bool) for occToggled, the slider's new");
+    c.line("// value (float64) for occValueChanged, nil for clicks. ok is");
     c.line("// false for pad/unknown records.");
     c.line("func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {");
     c.line("\tkind = binary.LittleEndian.Uint16(rec[4:])");
-    c.line("\tif kind != occButtonClicked && kind != occTextChanged && kind != occToggled {");
+    let accepted = crate::occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind != occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" && ");
+    c.line(&format!("\tif {accepted} {{"));
     c.line("\t\treturn 0, 0, nil, nil, false");
     c.line("\t}");
     c.line("\tid = binary.LittleEndian.Uint64(rec[8:])");
@@ -225,12 +232,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\tat += 8 + (vlen+7)&^7");
     c.line("\t}");
-    c.line("\tif kind == occTextChanged || kind == occToggled {");
+    let with_payload = crate::payload_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line(&format!("\tif {with_payload} {{"));
     c.line("\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
     c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
-    c.line("\t\tif vtype == ValueBool {");
+    // Type-generic payload decode, same shape as the key loop: no
+    // per-kind logic left to drift.
+    c.line("\t\tswitch vtype {");
+    c.line("\t\tcase ValueBool:");
     c.line("\t\t\tpayload = rec[at+8] != 0");
-    c.line("\t\t} else {");
+    c.line("\t\tcase ValueI64:");
+    c.line("\t\t\tpayload = int64(binary.LittleEndian.Uint64(rec[at+8:]))");
+    c.line("\t\tcase ValueF64:");
+    c.line("\t\t\tpayload = math.Float64frombits(binary.LittleEndian.Uint64(rec[at+8:]))");
+    c.line("\t\tdefault:");
     c.line("\t\t\tpayload = string(rec[at+8 : at+8+vlen])");
     c.line("\t\t}");
     c.line("\t}");

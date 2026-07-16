@@ -1,7 +1,8 @@
-// The gallery scene from Go: a row container laying a checkbox and the
-// status label side by side. The box owns its checked bit and reports
-// each flip through OnToggle; the app answers by writing the status
-// signal — the same uncontrolled contract as the entry, with a bool.
+// The gallery scene from Go: a row with a checkbox and its status
+// label, and a row with a slider and its volume label. Both controls
+// own their state and report each change; the app answers by writing
+// the paired signal — the entry's uncontrolled contract, with a bool
+// and a float64.
 //
 // Build the library first (cargo build), then, from the repo root:
 //
@@ -24,29 +25,29 @@ func init() {
 func main() {
 	app := kaya.NewApp()
 
-	var (
-		status kaya.Signal[string]
-		urgent kaya.Widget
-	)
-
+	// The construction sugar: constructors carry their handlers,
+	// containers take their children, and the build body reads as the
+	// tree.
 	app.Build(func(tx *kaya.Tx) {
-		status = tx.Signal("urgent: false")
+		status := tx.Signal("urgent: false")
+		volume := tx.Signal("volume: 50%")
 
-		column := tx.Widget(kaya.KindColumn)
-		row := tx.Widget(kaya.KindRow)
-		urgent = tx.Widget(kaya.KindCheckbox)
-		tx.SetText(urgent, "urgent")
-		statusLabel := tx.Widget(kaya.KindLabel)
-		tx.BindText(statusLabel, status)
-
-		tx.AddChild(row, urgent)
-		tx.AddChild(row, statusLabel)
-		tx.AddChild(column, row)
-		tx.Mount(column)
-	})
-
-	app.OnToggle(urgent, func(tx *kaya.Tx, checked bool) {
-		tx.Write(status, fmt.Sprintf("urgent: %t", checked))
+		tx.Mount(tx.Column(
+			tx.Row(
+				tx.Checkbox("urgent", func(tx *kaya.Tx, checked bool) {
+					tx.Write(status, fmt.Sprintf("urgent: %t", checked))
+				}),
+				tx.Label(status),
+			),
+			tx.Row(
+				tx.Slider(0.0, 1.0, 0.5, func(tx *kaya.Tx, value float64) {
+					// Integer percent, so every language's formatting
+					// agrees.
+					tx.Write(volume, fmt.Sprintf("volume: %d%%", int(value*100+0.5)))
+				}),
+				tx.Label(volume),
+			),
+		))
 	})
 
 	os.Exit(app.Run())

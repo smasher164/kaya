@@ -1,8 +1,9 @@
-(* The gallery scene from OCaml, on the let* surface: a row container
-   laying a checkbox and the status label side by side. The box owns
-   its checked bit and reports each flip through on_toggle; the app
-   answers by writing the status signal — the same uncontrolled
-   contract as the entry, with a bool.
+(* The gallery scene from OCaml, on the let* surface with the
+   construction sugar: a row with a checkbox and its status label, and
+   a row with a slider and its volume label. Constructors carry their
+   handlers, containers take their children, and the tree reads as a
+   tree. Both controls own their state and report each change — the
+   entry's uncontrolled contract, with a bool and a float.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=gallery. *)
 
@@ -12,25 +13,31 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  let status, urgent =
-    build app
-      (let* status = signal (Str "urgent: false") in
+  build app
+    (let* status = signal (Str "urgent: false") in
+     let* volume = signal (Str "volume: 50%") in
 
-       let* column = widget kind_column in
-       let* row = widget kind_row in
-       let* urgent = widget kind_checkbox in
-       let* () = set_text urgent "urgent" in
-       let* status_label = widget kind_label in
-       let* () = bind_text status_label status in
+     let on_urgent checked =
+       write status (Str (Printf.sprintf "urgent: %b" checked))
+     in
+     let on_volume v =
+       (* Integer percent, so every language's formatting agrees. *)
+       write volume
+         (Str (Printf.sprintf "volume: %d%%"
+                 (int_of_float (Float.round (v *. 100.)))))
+     in
 
-       let* () = add_child row urgent in
-       let* () = add_child row status_label in
-       let* () = add_child column row in
-       let+ () = mount column in
-       (status, urgent))
-  in
-
-  on_toggle app urgent (fun checked ->
-      write status (Str (Printf.sprintf "urgent: %b" checked)));
+     let* root =
+       column
+         [
+           row [ checkbox ~text:"urgent" ~on_toggle:on_urgent (); label ~bind:status () ];
+           row
+             [
+               slider ~min:0.0 ~max:1.0 ~value:0.5 ~on_change:on_volume ();
+               label ~bind:volume ();
+             ];
+         ]
+     in
+     mount root);
 
   exit (run app)

@@ -91,6 +91,7 @@ type App struct {
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
 	widgetToggles  map[uint64]func(*Tx, bool)
+	widgetValues   map[uint64]func(*Tx, float64)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
@@ -111,6 +112,7 @@ func NewApp() *App {
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
+		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
@@ -290,6 +292,19 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindEntry)
 	if onChange != nil {
 		tx.app.OnChange(w, onChange)
+	}
+	return w
+}
+
+// Slider creates a slider over min..max at value, with its change
+// handler co-located (nil for none) — the Fyne shape, like Button.
+func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widget {
+	w := tx.Widget(KindSlider)
+	tx.records = append(tx.records, TxSetMin(w.id, min))
+	tx.records = append(tx.records, TxSetMax(w.id, max))
+	tx.records = append(tx.records, TxSetValue(w.id, value))
+	if onChange != nil {
+		tx.app.OnValueChanged(w, onChange)
 	}
 	return w
 }
@@ -485,6 +500,13 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
+// OnValueChanged registers a handler for a live slider's moves: the
+// bar owns its position and reports each change with the new value —
+// the entry's uncontrolled contract, with a float64.
+func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
+	a.widgetValues[w.id] = fn
+}
+
 // OnToggle registers a handler for a live checkbox's toggles: the box
 // owns its checked bit and reports each flip here; the app folds it
 // into its own state.
@@ -513,6 +535,7 @@ func (a *App) Run() int {
 			}
 			text, _ := payload.(string)
 			checked, _ := payload.(bool)
+			value, _ := payload.(float64)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -537,6 +560,10 @@ func (a *App) Run() int {
 			case kind == occToggled:
 				if fn := a.nodeToggles[id]; fn != nil {
 					a.Build(func(tx *Tx) { fn(tx, keys, checked) })
+				}
+			case kind == occValueChanged && len(keys) == 0:
+				if fn := a.widgetValues[id]; fn != nil {
+					a.Build(func(tx *Tx) { fn(tx, value) })
 				}
 			}
 		}

@@ -56,10 +56,14 @@ pub const KIND_LABEL: u32 = 3;
 pub const KIND_ENTRY: u32 = 4;
 pub const KIND_ROW: u32 = 5;
 pub const KIND_CHECKBOX: u32 = 6;
+pub const KIND_SLIDER: u32 = 7;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
 pub const PROP_CHECKED: u32 = 2;
+pub const PROP_VALUE: u32 = 3;
+pub const PROP_MIN: u32 = 4;
+pub const PROP_MAX: u32 = 5;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -168,6 +172,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_ENTRY => WidgetKind::Entry,
         KIND_ROW => WidgetKind::Row,
         KIND_CHECKBOX => WidgetKind::Checkbox,
+        KIND_SLIDER => WidgetKind::Slider,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -176,6 +181,9 @@ fn prop(raw: u32) -> Prop {
     match raw {
         PROP_TEXT => Prop::Text,
         PROP_CHECKED => Prop::Checked,
+        PROP_VALUE => Prop::Value,
+        PROP_MIN => Prop::Min,
+        PROP_MAX => Prop::Max,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -335,6 +343,33 @@ pub fn toggled_body(tag: &[u8], checked: bool) -> Vec<u8> {
     b.extend_from_slice(tag);
     write_value(&mut b, &Value::Bool(checked));
     b
+}
+
+// A value-changed occurrence body: the slider's stored tag (identity,
+// same layout as a click) followed by the new value.
+pub fn value_changed_body(tag: &[u8], value: f64) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 16);
+    b.extend_from_slice(tag);
+    write_value(&mut b, &Value::F64(value));
+    b
+}
+
+pub fn decode_value_changed_tag(tag: &[u8], value: f64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0 };
+    let id = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::ValueChanged {
+            id: WidgetId(id),
+            value,
+        }
+    } else {
+        Occurrence::InstanceValueChanged {
+            node: TemplateNodeId(id),
+            path,
+            value,
+        }
+    }
 }
 
 pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
@@ -566,6 +601,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Entry => KIND_ENTRY,
         WidgetKind::Row => KIND_ROW,
         WidgetKind::Checkbox => KIND_CHECKBOX,
+        WidgetKind::Slider => KIND_SLIDER,
     }
 }
 
@@ -573,6 +609,9 @@ fn prop_raw(prop: Prop) -> u32 {
     match prop {
         Prop::Text => PROP_TEXT,
         Prop::Checked => PROP_CHECKED,
+        Prop::Value => PROP_VALUE,
+        Prop::Min => PROP_MIN,
+        Prop::Max => PROP_MAX,
     }
 }
 

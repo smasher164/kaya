@@ -48,6 +48,7 @@ const OP_SELFTEST_CHECK: jlong = 2;
 const OP_SELFTEST_CLICK_LAST: jlong = 3;
 const OP_SELFTEST_SET_TEXT: jlong = 4;
 const OP_SELFTEST_TOGGLE: jlong = 5;
+const OP_SELFTEST_SET_VALUE: jlong = 6;
 
 /// Shared with the app thread (doorbell) and the selftest thread.
 struct Globals {
@@ -59,6 +60,7 @@ struct Globals {
     selftest_click_last: GlobalRef,
     selftest_set_text: GlobalRef,
     selftest_toggle: GlobalRef,
+    selftest_set_value: GlobalRef,
 }
 
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
@@ -75,6 +77,13 @@ struct NativeWidget {
 /// own lock (never CORE's): clicks dispatch synchronously on the UI
 /// thread from under performClick.
 static TAGS: Mutex<Option<HashMap<u64, Vec<u8>>>> = Mutex::new(None);
+
+/// Slider ranges by the same registry key. SeekBar is integer-valued
+/// (a fixed 0..SEEK_SCALE progress range); the wire is f64 — this map
+/// owns the conversion both ways. Same lock discipline as TAGS:
+/// setProgress dispatches onProgressChanged synchronously.
+static RANGES: Mutex<Option<HashMap<u64, (f64, f64)>>> = Mutex::new(None);
+const SEEK_SCALE: f64 = 10000.0;
 static NEXT_TAG_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Touched only from the UI thread, but a Mutex keeps the types honest
@@ -88,8 +97,11 @@ struct CoreState {
     selftest_button: Option<GlobalRef>,
     selftest_entry: Option<GlobalRef>,
     selftest_last_button: Option<GlobalRef>,
-    selftest_label: Option<GlobalRef>,
+    // Every label, creation order; the verdict reads the one its scene
+    // writes (gallery checks two).
+    selftest_labels: Vec<GlobalRef>,
     selftest_checkbox: Option<GlobalRef>,
+    selftest_slider: Option<GlobalRef>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -241,6 +253,15 @@ fn setup(
             fn_ptr: native_checked_changed as *mut _,
         }],
     )?;
+    let seek_class = env.find_class("dev/kaya/KayaSeekListener")?;
+    env.register_native_methods(
+        &seek_class,
+        &[NativeMethod {
+            name: "nativeProgressChanged".into(),
+            sig: "(JI)V".into(),
+            fn_ptr: native_progress_changed as *mut _,
+        }],
+    )?;
 
     // The main-thread hops posted from native threads. Instances are made
     // here, on the UI thread, where find_class sees the app class loader;
@@ -255,6 +276,7 @@ fn setup(
     let selftest_click_last = make_runnable(env, OP_SELFTEST_CLICK_LAST)?;
     let selftest_set_text = make_runnable(env, OP_SELFTEST_SET_TEXT)?;
     let selftest_toggle = make_runnable(env, OP_SELFTEST_TOGGLE)?;
+    let selftest_set_value = make_runnable(env, OP_SELFTEST_SET_VALUE)?;
 
     let globals = Globals {
         vm: env.get_java_vm()?,
@@ -265,20 +287,23 @@ fn setup(
         selftest_click_last,
         selftest_set_text,
         selftest_toggle,
+        selftest_set_value,
     };
     let _ = GLOBALS.set(globals);
 
     let _ = OCC_SINK.set(occ_tx);
     *TAGS.lock().unwrap() = Some(HashMap::new());
+    *RANGES.lock().unwrap() = Some(HashMap::new());
     *CORE.lock().unwrap() = Some(CoreState {
         transactions: tx_rx,
         scene: Scene::new(),
         widgets: HashMap::new(),
         selftest_button: None,
         selftest_last_button: None,
-        selftest_label: None,
+        selftest_labels: Vec::new(),
         selftest_entry: None,
         selftest_checkbox: None,
+        selftest_slider: None,
     });
 
     if std::env::var_os("KAYA_SELFTEST").is_some() {
@@ -321,6 +346,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 WidgetKind::Button => "android/widget/Button",
                 WidgetKind::Label => "android/widget/TextView",
                 WidgetKind::Checkbox => "android/widget/CheckBox",
+                WidgetKind::Slider => "android/widget/SeekBar",
             };
             let view = env.new_object(
                 class,
@@ -381,6 +407,36 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                         &[JValue::Object(&watcher)],
                     )?;
                 }
+                WidgetKind::Slider => {
+                    // The bar owns its position; the listener reports
+                    // each change (programmatic setProgress included,
+                    // which is what lets the selftest drag like a
+                    // user). SeekBar is integer-valued: a fixed
+                    // 0..SEEK_SCALE progress range, mapped to the
+                    // wire's f64 range through RANGES.
+                    let tag = tag.expect("sliders carry a tag");
+                    let key = NEXT_TAG_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    TAGS.lock().unwrap().as_mut().expect("attach ran").insert(key, tag);
+                    RANGES.lock().unwrap().as_mut().expect("attach ran").insert(key, (0.0, 1.0));
+                    tag_key = Some(key);
+                    env.call_method(
+                        &view,
+                        "setMax",
+                        "(I)V",
+                        &[JValue::Int(SEEK_SCALE as i32)],
+                    )?;
+                    let listener = env.new_object(
+                        "dev/kaya/KayaSeekListener",
+                        "(J)V",
+                        &[JValue::Long(key as jlong)],
+                    )?;
+                    env.call_method(
+                        &view,
+                        "setOnSeekBarChangeListener",
+                        "(Landroid/widget/SeekBar$OnSeekBarChangeListener;)V",
+                        &[JValue::Object(&listener)],
+                    )?;
+                }
                 WidgetKind::Checkbox => {
                     // The box owns its checked bit; the listener reports
                     // each flip (programmatic setChecked included, which
@@ -413,14 +469,17 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     }
                     core.selftest_last_button = Some(view.clone());
                 }
-                WidgetKind::Label if core.selftest_label.is_none() => {
-                    core.selftest_label = Some(view.clone());
+                WidgetKind::Label => {
+                    core.selftest_labels.push(view.clone());
                 }
                 WidgetKind::Entry if core.selftest_entry.is_none() => {
                     core.selftest_entry = Some(view.clone());
                 }
                 WidgetKind::Checkbox if core.selftest_checkbox.is_none() => {
                     core.selftest_checkbox = Some(view.clone());
+                }
+                WidgetKind::Slider if core.selftest_slider.is_none() => {
+                    core.selftest_slider = Some(view.clone());
                 }
                 _ => {}
             }
@@ -465,6 +524,30 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 }
                 (Prop::Checked, Value::Bool(b)) => {
                     env.call_method(view.as_obj(), "setChecked", "(Z)V", &[JValue::Bool(b as u8)])?;
+                }
+                (Prop::Value, Value::F64(v)) => {
+                    let key = with_widget(id, |w| w.tag_key).expect("sliders carry a tag");
+                    let (min, max) = RANGES
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .and_then(|r| r.get(&key).copied())
+                        .unwrap_or((0.0, 1.0));
+                    let span = if max > min { max - min } else { 1.0 };
+                    let progress = (((v - min) / span) * SEEK_SCALE).round() as i32;
+                    env.call_method(view.as_obj(), "setProgress", "(I)V", &[JValue::Int(progress)])?;
+                }
+                (Prop::Min, Value::F64(v)) => {
+                    let key = with_widget(id, |w| w.tag_key).expect("sliders carry a tag");
+                    if let Some(ranges) = RANGES.lock().unwrap().as_mut() {
+                        ranges.entry(key).or_insert((0.0, 1.0)).0 = v;
+                    }
+                }
+                (Prop::Max, Value::F64(v)) => {
+                    let key = with_widget(id, |w| w.tag_key).expect("sliders carry a tag");
+                    if let Some(ranges) = RANGES.lock().unwrap().as_mut() {
+                        ranges.entry(key).or_insert((0.0, 1.0)).1 = v;
+                    }
                 }
                 (prop, value) => {
                     panic!("kaya: android cannot apply {prop:?} = {value:?} here")
@@ -513,6 +596,7 @@ extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
         OP_SELFTEST_CHECK => selftest_check(&mut env),
         OP_SELFTEST_SET_TEXT => selftest_set_text(&mut env),
         OP_SELFTEST_TOGGLE => selftest_toggle(&mut env),
+        OP_SELFTEST_SET_VALUE => selftest_set_value(&mut env),
         _ => Ok(()),
     };
     if let Err(e) = result {
@@ -560,6 +644,32 @@ extern "system" fn native_checked_changed(
         .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
     if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
         sink.send_toggle_tag(&tag, checked != 0);
+    }
+}
+
+/// KayaSeekListener.nativeProgressChanged: map the SeekBar's integer
+/// progress back to the wire's f64 range and emit it with the bar's
+/// tag.
+extern "system" fn native_progress_changed(
+    _env: JNIEnv,
+    _this: JObject,
+    tag_key: jlong,
+    progress: jni::sys::jint,
+) {
+    let tag = TAGS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|tags| tags.get(&(tag_key as u64)).cloned());
+    let (min, max) = RANGES
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|r| r.get(&(tag_key as u64)).copied())
+        .unwrap_or((0.0, 1.0));
+    if let (Some(sink), Some(tag)) = (OCC_SINK.get(), tag) {
+        let value = min + (f64::from(progress) / SEEK_SCALE) * (max - min);
+        sink.send_value_tag(&tag, value);
     }
 }
 
@@ -617,10 +727,13 @@ fn spawn_selftest() {
             return;
         }
         if std::env::var("KAYA_SELFTEST").as_deref() == Ok("gallery") {
-            // The gallery scene: setChecked fires the listener — the
-            // same path a tap takes — then the verdict.
+            // The gallery scene: setChecked fires the listener, then
+            // setProgress fires the seek listener — the same paths a
+            // tap and a drag take — then the verdict.
             std::thread::sleep(std::time::Duration::from_millis(1500));
             post(&g.selftest_toggle);
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            post(&g.selftest_set_value);
             std::thread::sleep(std::time::Duration::from_millis(700));
             post(&g.selftest_check);
             return;
@@ -701,31 +814,58 @@ fn selftest_toggle(env: &mut JNIEnv) -> jni::errors::Result<()> {
     Ok(())
 }
 
-fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let label = {
+fn selftest_set_value(env: &mut JNIEnv) -> jni::errors::Result<()> {
+    let slider = {
         let core = CORE.lock().unwrap();
         let Some(core) = core.as_ref() else {
             return Ok(());
         };
-        core.selftest_label.clone()
+        core.selftest_slider.clone()
     };
-    let Some(label) = label else {
+    if let Some(slider) = slider {
+        // 0.75 of the fixed integer range; setProgress fires the
+        // listener, the same path a drag takes.
+        env.call_method(slider.as_obj(), "setProgress", "(I)V", &[JValue::Int(7500)])?;
+    }
+    Ok(())
+}
+
+fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
+    let labels = {
+        let core = CORE.lock().unwrap();
+        let Some(core) = core.as_ref() else {
+            return Ok(());
+        };
+        core.selftest_labels.clone()
+    };
+    if labels.is_empty() {
         log::error!("KAYA_SELFTEST: FAILED (no label in the scene)");
         unsafe { libc::_exit(1) };
+    }
+    let mut read_label = |label: &GlobalRef| -> jni::errors::Result<String> {
+        let chars = env
+            .call_method(label.as_obj(), "getText", "()Ljava/lang/CharSequence;", &[])?
+            .l()?;
+        let string = env
+            .call_method(&chars, "toString", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&JString::from(string))?.into())
     };
-    let chars = env
-        .call_method(label.as_obj(), "getText", "()Ljava/lang/CharSequence;", &[])?
-        .l()?;
-    let string = env
-        .call_method(&chars, "toString", "()Ljava/lang/String;", &[])?
-        .l()?;
-    let text: String = env.get_string(&JString::from(string))?.into();
 
-    let expected = match std::env::var("KAYA_SELFTEST").as_deref() {
-        Ok("entry") => "added milk, 1 total",
-        Ok("gallery") => "urgent: true",
-        Ok("todos") => "0 items left",
-        _ => "removed g2/a, 0 left",
+    // Every scene's verdict is one label, except the gallery's, which
+    // checks the status and volume labels together.
+    let (text, expected) = match std::env::var("KAYA_SELFTEST").as_deref() {
+        Ok("entry") => (read_label(&labels[0])?, "added milk, 1 total".to_string()),
+        Ok("gallery") => {
+            let status = read_label(&labels[0])?;
+            let volume = read_label(&labels[1])?;
+            (
+                format!("{status}, {volume}"),
+                "urgent: true, volume: 75%".to_string(),
+            )
+        }
+        Ok("todos") => (read_label(&labels[0])?, "0 items left".to_string()),
+        _ => (read_label(&labels[0])?, "removed g2/a, 0 left".to_string()),
     };
     let code = if text == expected {
         log::info!("KAYA_SELFTEST: OK ({text})");
@@ -852,6 +992,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_toggled as *mut _,
             },
             NativeMethod {
+                name: "emitValueChanged".into(),
+                sig: "([BD)V".into(),
+                fn_ptr: present_emit_value_changed as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -888,6 +1033,18 @@ extern "system" fn present_emit_text(
             text.len(),
         )
     };
+}
+
+extern "system" fn present_emit_value_changed(
+    mut env: JNIEnv,
+    _class: JClass,
+    tag: JByteArray,
+    value: jni::sys::jdouble,
+) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the slider tag failed");
+    unsafe { crate::capi::kaya_emit_value_changed(bytes.as_ptr(), bytes.len(), value) };
 }
 
 extern "system" fn present_emit_toggled(

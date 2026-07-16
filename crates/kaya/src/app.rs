@@ -781,6 +781,28 @@ impl Tx<'_> {
         w
     }
 
+    /// A single-line text field; edits arrive in the occurrence loop.
+    pub fn entry(&mut self) -> WidgetId {
+        self.widget(WidgetKind::Entry)
+    }
+
+    /// A labeled checkbox; toggles arrive in the occurrence loop.
+    pub fn checkbox(&mut self, text: &str) -> WidgetId {
+        let w = self.widget(WidgetKind::Checkbox);
+        self.set(w, Prop::Text, text);
+        w
+    }
+
+    /// A slider over min..max at value; moves arrive in the
+    /// occurrence loop.
+    pub fn slider(&mut self, min: f64, max: f64, value: f64) -> WidgetId {
+        let w = self.widget(WidgetKind::Slider);
+        self.set(w, Prop::Min, min);
+        self.set(w, Prop::Max, max);
+        self.set(w, Prop::Value, value);
+        w
+    }
+
     /// Declare a collection of `T` records: a core-side keyed table a
     /// For renders. The element type is the schema — `T::SCHEMA` goes
     /// on the wire here, and every field access derives from the same
@@ -1262,7 +1284,9 @@ mod tests {
                     Occurrence::TextChanged { .. }
                     | Occurrence::InstanceTextChanged { .. }
                     | Occurrence::Toggled { .. }
-                    | Occurrence::InstanceToggled { .. } => {}
+                    | Occurrence::InstanceToggled { .. }
+                    | Occurrence::ValueChanged { .. }
+                    | Occurrence::InstanceValueChanged { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

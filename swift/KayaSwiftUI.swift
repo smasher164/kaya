@@ -29,9 +29,14 @@ private let kindLabel: UInt32 = 3
 private let kindEntry: UInt32 = 4
 private let kindRow: UInt32 = 5
 private let kindCheckbox: UInt32 = 6
+private let kindSlider: UInt32 = 7
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
+private let propValue: UInt32 = 3
+private let propMin: UInt32 = 4
+private let propMax: UInt32 = 5
 private let valueBool: UInt32 = 1
+private let valueF64: UInt32 = 3
 private let valueStr: UInt32 = 4
 
 @Observable
@@ -41,6 +46,9 @@ final class KayaNode: Identifiable {
     let tag: [UInt8]
     var text = ""
     var checked = false
+    var value = 0.0
+    var minValue = 0.0
+    var maxValue = 1.0
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -58,8 +66,11 @@ final class KayaSceneModel {
     var firstButton: KayaNode?
     var lastButton: KayaNode?
     var firstLabel: KayaNode?
+    // Every label, creation order; the gallery verdict reads two.
+    var labels: [KayaNode] = []
     var firstEntry: KayaNode?
     var firstCheckbox: KayaNode?
+    var firstSlider: KayaNode?
 }
 
 let kayaScene = KayaSceneModel()
@@ -80,6 +91,12 @@ enum KayaHost {
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_toggled(buffer.baseAddress, UInt(buffer.count), checked ? 1 : 0)
+        }
+    }
+
+    static func emitValue(_ tag: [UInt8], _ value: Double) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_value_changed(buffer.baseAddress, UInt(buffer.count), value)
         }
     }
 
@@ -133,8 +150,12 @@ private func kayaApply(_ batch: Data) {
                     if kayaScene.firstButton == nil { kayaScene.firstButton = node }
                     kayaScene.lastButton = node
                 }
-                if widgetKind == kindLabel && kayaScene.firstLabel == nil {
-                    kayaScene.firstLabel = node
+                if widgetKind == kindLabel {
+                    if kayaScene.firstLabel == nil { kayaScene.firstLabel = node }
+                    kayaScene.labels.append(node)
+                }
+                if widgetKind == kindSlider && kayaScene.firstSlider == nil {
+                    kayaScene.firstSlider = node
                 }
                 if widgetKind == kindEntry && kayaScene.firstEntry == nil {
                     kayaScene.firstEntry = node
@@ -154,6 +175,15 @@ private func kayaApply(_ batch: Data) {
                     kayaScene.nodes[id]!.text = String(decoding: bytes, as: UTF8.self)
                 case (propChecked, valueBool):
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
+                case (propValue, valueF64):
+                    kayaScene.nodes[id]!.value =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propMin, valueF64):
+                    kayaScene.nodes[id]!.minValue =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propMax, valueF64):
+                    kayaScene.nodes[id]!.maxValue =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 default:
                     fatalError("kaya: cannot apply prop \(prop) with value type \(valueType)")
                 }
@@ -290,14 +320,21 @@ func kayaStartGallerySelftest() {
             KayaHost.emitToggled(box.tag, true)
         }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
-        let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "urgent: true" {
-            print("KAYA_SELFTEST: OK (\(text))")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        if let slider = kayaScene.firstSlider {
+            slider.value = 0.75
+            KayaHost.emitValue(slider.tag, 0.75)
+        }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
+        let status = kayaScene.labels.first?.text ?? "(no label)"
+        let volume = kayaScene.labels.count > 1 ? kayaScene.labels[1].text : "(no label)"
+        if status == "urgent: true" && volume == "volume: 75%" {
+            print("KAYA_SELFTEST: OK (\(status), \(volume))")
             exit(0)
         } else {
             FileHandle.standardError.write(
-                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
+                "KAYA_SELFTEST: FAILED (labels read \(status), \(volume))\n".data(using: .utf8)!)
             exit(1)
         }
     }
@@ -344,6 +381,21 @@ struct KayaRender: View {
             #if os(macOS)
                 .toggleStyle(.checkbox)
             #endif
+        case kindSlider:
+            // Uncontrolled toward the app, the entry's shape: the node
+            // mirrors the slider's position (SwiftUI needs the
+            // binding), and every move is emitted with the slider's
+            // identity tag.
+            Slider(
+                value: Binding(
+                    get: { node.value },
+                    set: { newValue in
+                        node.value = newValue
+                        KayaHost.emitValue(node.tag, newValue)
+                    }),
+                in: node.minValue...node.maxValue
+            )
+            .frame(maxWidth: 200)
         case kindEntry:
             // Uncontrolled toward the app: the node mirrors what the
             // user types (SwiftUI needs the binding), and every edit is

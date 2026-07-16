@@ -43,12 +43,16 @@ pub enum FieldTy {
 }
 
 /// One record kind of a channel: the numeric kind, a name, its fields
-/// in wire order, and a one-line doc.
+/// in wire order, and a one-line doc. `payload` is the type of the one
+/// trailing value an occurrence carries after its key path (None for
+/// clicks and every non-occurrence record) — a spec fact, so the
+/// generated parsers' payload-kind lists derive rather than drift.
 #[derive(Debug, Clone, Copy)]
 pub struct Record {
     pub kind: u16,
     pub name: &'static str,
     pub fields: &'static [Field],
+    pub payload: Option<PropKind>,
     pub doc: &'static str,
 }
 
@@ -77,18 +81,25 @@ const fn f(name: &'static str, ty: FieldTy) -> Field {
     Field { name, ty }
 }
 
-/// A property's value type, driving the generated typed setters:
-/// set_text takes a string, set_checked a bool, in every language.
+/// A typed wire slot's value type: drives the generated typed setters
+/// (set_text takes a string, set_checked a bool, in every language)
+/// and names occurrence payload types (Record::payload).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropKind {
     Str,
     Bool,
+    F64,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
 /// with the "prop" enum (pinned by test).
-pub const PROPS: &[(&'static str, u32, PropKind)] =
-    &[("text", 1, PropKind::Str), ("checked", 2, PropKind::Bool)];
+pub const PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("text", 1, PropKind::Str),
+    ("checked", 2, PropKind::Bool),
+    ("value", 3, PropKind::F64),
+    ("min", 4, PropKind::F64),
+    ("max", 5, PropKind::F64),
+];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
 /// SOURCE_CONST, a u64 signal id for SOURCE_SIGNAL, or u32 level + u32
@@ -128,6 +139,7 @@ pub fn hash() -> u64 {
                 eat(f.name.as_bytes());
                 eat(format!("{:?}", f.ty).as_bytes());
             }
+            eat(format!("{:?}", r.payload).as_bytes());
         }
     }
     for e in SPEC.enums {
@@ -151,12 +163,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             kind: 1,
             name: "create_signal",
             fields: &[f("signal_id", FieldTy::U64), f("initial", FieldTy::Value)],
+            payload: None,
             doc: "Create a signal holding `initial`.",
         },
         Record {
             kind: 2,
             name: "write_signal",
             fields: &[f("signal_id", FieldTy::U64), f("value", FieldTy::Value)],
+            payload: None,
             doc: "Replace a signal's value; keep-latest per batch.",
         },
         Record {
@@ -167,6 +181,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("kind", FieldTy::U32),
                 f("reserved", FieldTy::U32),
             ],
+            payload: None,
             doc: "Create a live widget, or declare a template node inside a scope.",
         },
         Record {
@@ -177,18 +192,21 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("prop", FieldTy::U32),
                 f("source", FieldTy::U32),
             ],
+            payload: None,
             doc: "Bind a property; see SET_PROPERTY_NOTE for the tail.",
         },
         Record {
             kind: 5,
             name: "add_child",
             fields: &[f("parent", FieldTy::U64), f("child", FieldTy::U64)],
+            payload: None,
             doc: "Append `child` to `parent` (same zone only).",
         },
         Record {
             kind: 6,
             name: "mount",
             fields: &[f("window", FieldTy::U64), f("root", FieldTy::U64)],
+            payload: None,
             doc: "Mount a root into a window (0 = the default window).",
         },
         Record {
@@ -198,6 +216,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("collection_id", FieldTy::U64),
                 f("schema", FieldTy::TypeTags),
             ],
+            payload: None,
             doc: "Declare a collection and its schema — the ordered field \
                   types every entry must match; a scalar collection is the \
                   one-field case. A blueprint when inside a template.",
@@ -211,6 +230,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("key", FieldTy::Value),
                 f("fields", FieldTy::Values),
             ],
+            payload: None,
             doc: "Insert an entry into the instance at `path`; the fields \
                   match the schema positionally. Stamps a copy.",
         },
@@ -223,6 +243,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("key", FieldTy::Value),
                 f("fields", FieldTy::Values),
             ],
+            payload: None,
             doc: "Replace an entry's record; every element binding follows.",
         },
         Record {
@@ -233,24 +254,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
             ],
+            payload: None,
             doc: "Remove an entry; its stamped copy tears down.",
         },
         Record {
             kind: 11,
             name: "create_for",
             fields: &[f("id", FieldTy::U64), f("collection_id", FieldTy::U64)],
+            payload: None,
             doc: "A For over a collection; opens a template scope until template_end.",
         },
         Record {
             kind: 12,
             name: "create_when",
             fields: &[f("id", FieldTy::U64), f("signal_id", FieldTy::U64)],
+            payload: None,
             doc: "A When over a Bool signal; opens a template scope until template_end.",
         },
         Record {
             kind: 13,
             name: "template_end",
             fields: &[],
+            payload: None,
             doc: "Close the innermost template scope.",
         },
         Record {
@@ -264,6 +289,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("reserved", FieldTy::U32),
                 f("value", FieldTy::Value),
             ],
+            payload: None,
             doc: "Set one field of an entry's record; only bindings on that \
                   field re-resolve.",
         },
@@ -277,6 +303,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("kind", FieldTy::U32),
                 f("tag_len", FieldTy::U32),
             ],
+            payload: None,
             doc: "Create a widget; tag_len bytes follow (padded to 8): the \
                   click tag an interactive widget emits verbatim.",
         },
@@ -289,24 +316,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("reserved", FieldTy::U32),
                 f("value", FieldTy::Value),
             ],
+            payload: None,
             doc: "Set a property to an already-resolved value.",
         },
         Record {
             kind: 3,
             name: "add_child",
             fields: &[f("parent", FieldTy::U64), f("child", FieldTy::U64)],
+            payload: None,
             doc: "Append `child` to `parent`.",
         },
         Record {
             kind: 4,
             name: "mount",
             fields: &[f("window", FieldTy::U64), f("root", FieldTy::U64)],
+            payload: None,
             doc: "Mount a root into a window.",
         },
         Record {
             kind: 5,
             name: "destroy",
             fields: &[f("widget_id", FieldTy::U64)],
+            payload: None,
             doc: "Remove the widget from its parent and forget it; \
                   teardown arrives children-first.",
         },
@@ -320,6 +351,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("path_len", FieldTy::U32),
                 f("reserved", FieldTy::U32),
             ],
+            payload: None,
             doc: "path_len key values follow. path_len 0: id is a widget id. \
                   Otherwise: id is a template node id and the values are the \
                   copy's key path, outermost first.",
@@ -332,6 +364,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("path_len", FieldTy::U32),
                 f("reserved", FieldTy::U32),
             ],
+            payload: Some(PropKind::Str),
             doc: "path_len key values follow, then the entry's new text as \
                   one value. Identity reads as in button_clicked. The widget \
                   owns its text; the app folds these into its own model.",
@@ -344,9 +377,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("path_len", FieldTy::U32),
                 f("reserved", FieldTy::U32),
             ],
+            payload: Some(PropKind::Bool),
             doc: "path_len key values follow, then the checkbox's new state \
                   as one Bool value. Same shape and ownership stance as \
                   text_changed.",
+        },
+        Record {
+            kind: 4,
+            name: "value_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::F64),
+            doc: "path_len key values follow, then the slider's new value as \
+                  one F64 value. One occurrence per change, the entry's \
+                  per-edit granularity; same ownership stance.",
         },
     ],
     enums: &[
@@ -363,11 +410,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("entry", 4),
                 ("row", 5),
                 ("checkbox", 6),
+                ("slider", 7),
             ],
         },
         EnumSpec {
             name: "prop",
-            variants: &[("text", 1), ("checked", 2)],
+            variants: &[
+                ("text", 1),
+                ("checked", 2),
+                ("value", 3),
+                ("min", 4),
+                ("max", 5),
+            ],
         },
         EnumSpec {
             name: "source",
@@ -380,6 +434,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("button_clicked", 1),
                 ("text_changed", 2),
                 ("toggled", 3),
+                ("value_changed", 4),
             ],
         },
     ],
@@ -551,8 +606,12 @@ mod tests {
                     ("kind", "entry") => wire::KIND_ENTRY,
                     ("kind", "row") => wire::KIND_ROW,
                     ("kind", "checkbox") => wire::KIND_CHECKBOX,
+                    ("kind", "slider") => wire::KIND_SLIDER,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
+                    ("prop", "value") => wire::PROP_VALUE,
+                    ("prop", "min") => wire::PROP_MIN,
+                    ("prop", "max") => wire::PROP_MAX,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,
@@ -560,6 +619,7 @@ mod tests {
                     ("occurrence", "button_clicked") => crate::ring::REC_BUTTON_CLICKED as u32,
                     ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
                     ("occurrence", "toggled") => crate::ring::REC_TOGGLED as u32,
+                    ("occurrence", "value_changed") => crate::ring::REC_VALUE_CHANGED as u32,
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);

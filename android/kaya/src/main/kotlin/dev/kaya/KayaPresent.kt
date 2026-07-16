@@ -25,6 +25,7 @@ object KayaPresent {
      * box's CREATE record, [checked] its new state.
      */
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
+    @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
     /**
      * Block until the next transaction resolves, fill [buffer] with

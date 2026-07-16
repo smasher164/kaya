@@ -1,32 +1,36 @@
-// The gallery scene from Swift: a row container laying a checkbox and
-// the status label side by side. The box owns its checked bit and
-// reports each flip through onToggle; the app answers by writing the
-// status signal — the same uncontrolled contract as the entry, with a
-// bool.
+// The gallery scene from Swift: a row with a checkbox and its status
+// label, and a row with a slider and its volume label. Both controls
+// own their state and report each change; the app answers by writing
+// the paired signal — the entry's uncontrolled contract, with a bool
+// and a Double.
 
 import Foundation
 
 let app = KayaApp()
 
-let (status, urgent) = app.build { tx -> (KayaSignal, KayaWidget) in
+// The construction sugar: constructors carry their handlers,
+// result-builder containers take their children, and the build closure
+// reads as the tree.
+app.build { tx in
     let status = tx.signal(.str("urgent: false"))
+    let volume = tx.signal(.str("volume: 50%"))
 
-    let column = tx.widget(UInt32(KAYA_KIND_COLUMN))
-    let row = tx.widget(UInt32(KAYA_KIND_ROW))
-    let urgent = tx.widget(UInt32(KAYA_KIND_CHECKBOX))
-    tx.setText(urgent, "urgent")
-    let statusLabel = tx.widget(UInt32(KAYA_KIND_LABEL))
-    tx.bindText(statusLabel, status)
-
-    tx.addChild(row, urgent)
-    tx.addChild(row, statusLabel)
-    tx.addChild(column, row)
-    tx.mount(column)
-    return (status, urgent)
-}
-
-app.onToggle(urgent) { tx, checked in
-    tx.write(status, .str("urgent: \(checked)"))
+    let root = tx.column {
+        tx.row {
+            tx.checkbox("urgent") { t, checked in
+                t.write(status, .str("urgent: \(checked)"))
+            }
+            tx.label(bind: status)
+        }
+        tx.row {
+            // Integer percent, so every language's formatting agrees.
+            tx.slider(min: 0.0, max: 1.0, value: 0.5) { t, value in
+                t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
+            }
+            tx.label(bind: volume)
+        }
+    }
+    tx.mount(root)
 }
 
 app.run()

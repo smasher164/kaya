@@ -1,29 +1,33 @@
 //! The gallery scene: the conformance pass for the widget vocabulary as
-//! it grows — today a row container laying a checkbox and the status
-//! label side by side. The box owns its checked bit and reports each
-//! flip as a Toggled occurrence; the app answers by writing the status
-//! signal — the same uncontrolled contract as the entry, with a bool.
+//! it grows — a row with a checkbox and its status label, and a row
+//! with a slider and its volume label. Both controls own their state
+//! (the box its checked bit, the slider its position) and report each
+//! change as an occurrence; the app answers by writing the paired
+//! signal — the entry's uncontrolled contract, with a bool and an f64.
 //!
-//! The backend selftest (KAYA_SELFTEST=gallery) clicks the checkbox and
-//! expects the status label to read exactly "urgent: true".
+//! The backend selftest (KAYA_SELFTEST=gallery) clicks the checkbox,
+//! sets the slider to 0.75 through the control's own event path, and
+//! expects the labels to read exactly "urgent: true" and "volume: 75%".
 
-use kaya::{Occurrence, Prop, WidgetKind};
+use kaya::Occurrence;
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
+    // The construction sugar: constructors carry their props,
+    // containers take their children, and the build body reads as the
+    // tree. Handlers stay in the occurrence loop, the Rust idiom.
     let mut tx = ctx.begin();
     let status = tx.signal("urgent: false");
+    let volume_text = tx.signal("volume: 50%");
 
-    let column = tx.widget(WidgetKind::Column);
-    let row = tx.widget(WidgetKind::Row);
-    let urgent = tx.widget(WidgetKind::Checkbox);
-    tx.set(urgent, Prop::Text, "urgent");
-    let status_label = tx.widget(WidgetKind::Label);
-    tx.bind(status_label, Prop::Text, status);
+    let urgent = tx.checkbox("urgent");
+    let status_label = tx.label(status);
+    let volume = tx.slider(0.0, 1.0, 0.5);
+    let volume_label = tx.label(volume_text);
 
-    tx.add_child(row, urgent);
-    tx.add_child(row, status_label);
-    tx.add_child(column, row);
-    tx.mount(column);
+    let status_row = tx.row(&[urgent, status_label]);
+    let volume_row = tx.row(&[volume, volume_label]);
+    let root = tx.column(&[status_row, volume_row]);
+    tx.mount(root);
     tx.commit();
 
     loop {
@@ -31,6 +35,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::Toggled { id, checked } if id == urgent => {
                 let mut tx = ctx.begin();
                 tx.write(status, format!("urgent: {checked}"));
+                tx.commit();
+            }
+            Occurrence::ValueChanged { id, value } if id == volume => {
+                // Integer percent, so every language's formatting
+                // agrees on the selftest string.
+                let mut tx = ctx.begin();
+                tx.write(volume_text, format!("volume: {}%", (value * 100.0).round() as i64));
                 tx.commit();
             }
             Occurrence::Shutdown => break,
