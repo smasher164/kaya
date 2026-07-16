@@ -6,5 +6,5 @@ set PATH=C:\kaya;%MINGW%;C:\Program Files\Go\bin;%PATH%
 set CGO_ENABLED=1
 set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=gallery
-go run C:\kaya\gallery.go > C:\kaya\out_gallery_go.txt 2>&1
+go run dev.kaya/guests/go/gallery > C:\kaya\out_gallery_go.txt 2>&1
 echo EXIT=%ERRORLEVEL% >> C:\kaya\out_gallery_go.txt

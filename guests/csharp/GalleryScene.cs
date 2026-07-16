@@ -5,11 +5,11 @@
 //
 // Build the library first (cargo build), then:
 //     KAYA_SELFTEST=gallery KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project crates/kaya/examples/gallery.csproj
+//         dotnet run --project guests/csharp
 
-static class Program
+static class GalleryScene
 {
-    static void Main()
+    public static void Run()
     {
         var app = new KayaApp();
 

@@ -1,5 +1,5 @@
 @echo off
-cd /d C:\kaya\cs-entry
+cd /d C:\kaya\cs
 set PATH=C:\kaya;%PATH%
 set KAYA_SELFTEST=entry
 set DOTNET_CLI_TELEMETRY_OPTOUT=1

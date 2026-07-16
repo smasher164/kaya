@@ -5,23 +5,21 @@ result
 tools/winui-bindgen/target
 tools/kaya-bindgen/target
 __pycache__/
-/crates/kaya/examples/obj/
-/crates/kaya/examples/bin/
 # ocamlopt and ghc write intermediates beside the source when run
 # in-place (the validation scripts copy to target/ first, but ad-hoc
 # runs don't).
-/crates/kaya/examples/*.cmi
-/crates/kaya/examples/*.cmx
-/crates/kaya/examples/*.o
-/crates/kaya/examples/*.hi
+/guests/ocaml/*.cmi
+/guests/ocaml/*.cmx
+/guests/ocaml/*.o
+/guests/haskell/*.hi
+/guests/haskell/*.o
 /target-linux/
 /android/.gradle/
 /android/**/build/
 /android/*/src/main/jniLibs/
 /android/.kotlin/
-crates/kaya/examples/bin-entry/
-crates/kaya/examples/obj-entry/
-crates/kaya/examples/bin-gallery/
-crates/kaya/examples/obj-gallery/
-crates/kaya/examples/bin-todos/
-crates/kaya/examples/obj-todos/
+guests/csharp/bin/
+guests/csharp/obj/
+/_build/
+/_build-linux/
+guests/haskell/dist-newstyle/

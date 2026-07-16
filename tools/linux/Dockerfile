@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates git \
     python3 golang \
     ocaml-nox opam libffi-dev \
-    ghc \
+    ghc cabal-install \
     xvfb xauth imagemagick x11-utils \
     weston \
     && rm -rf /var/lib/apt/lists/*
@@ -20,8 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # omits the foreign (libffi) half entirely — its META even dangles.
 RUN opam init -a --bare --disable-sandboxing \
     && opam switch create default ocaml-system \
-    && opam install -y ocamlfind ctypes ctypes-foreign
+    && opam install -y ocamlfind ctypes ctypes-foreign dune ppxlib
 ENV PATH=/root/.opam/default/bin:$PATH
+
+# cabal needs a package index even for local-only builds; fetch it once
+# in the image, not per run.
+RUN cabal update
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 RUN curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \

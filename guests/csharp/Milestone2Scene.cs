@@ -9,9 +9,9 @@
 
 using System.Collections.Generic;
 
-static class Program
+static class Milestone2Scene
 {
-    static void Main()
+    public static void Run()
     {
         var app = new KayaApp();
 

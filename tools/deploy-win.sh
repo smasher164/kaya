@@ -102,6 +102,10 @@ fi
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
+for guest in milestone2 entry gallery todos; do
+    run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
+    scp -q "$ROOT/guests/go/$guest/main.go" "$HOST:C:/kaya/guests/go/$guest/"
+done
 
 if [ "$PROVISION" = 1 ]; then
     echo "== provisioning Windows App Runtime (one-time) =="
@@ -128,14 +132,10 @@ scp -q \
     "$TARGET/examples/todos.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
-    "$ROOT/crates/kaya/examples/milestone2.py" \
-    "$ROOT/crates/kaya/examples/milestone2.go" \
-    "$ROOT/crates/kaya/examples/entry.py" \
-    "$ROOT/crates/kaya/examples/entry.go" \
-    "$ROOT/crates/kaya/examples/gallery.py" \
-    "$ROOT/crates/kaya/examples/gallery.go" \
-    "$ROOT/crates/kaya/examples/todos.py" \
-    "$ROOT/crates/kaya/examples/todos.go" \
+    "$ROOT/guests/python/milestone2.py" \
+    "$ROOT/guests/python/entry.py" \
+    "$ROOT/guests/python/gallery.py" \
+    "$ROOT/guests/python/todos.py" \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
@@ -146,27 +146,11 @@ scp -q \
 # sources and project files are in the directory, so a leftover from a
 # renamed or removed example would poison the build.
 run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
-run_ssh 'cmd /c "if exist C:\kaya\cs-entry rmdir /s /q C:\kaya\cs-entry & mkdir C:\kaya\cs-entry"'
-run_ssh 'cmd /c "if exist C:\kaya\cs-gallery rmdir /s /q C:\kaya\cs-gallery & mkdir C:\kaya\cs-gallery"'
-run_ssh 'cmd /c "if exist C:\kaya\cs-todos rmdir /s /q C:\kaya\cs-todos & mkdir C:\kaya\cs-todos"'
 scp -q "$ROOT"/bindings/python/*.py "$HOST:C:/kaya/bindings/python/"
 scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
-scp -q "$ROOT/crates/kaya/examples/milestone2.cs" \
-    "$ROOT/crates/kaya/examples/milestone2.csproj" \
+scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
     "$ROOT"/bindings/csharp/*.cs \
     "$HOST:C:/kaya/cs/"
-scp -q "$ROOT/crates/kaya/examples/entry.cs" \
-    "$ROOT/crates/kaya/examples/entry.csproj" \
-    "$ROOT"/bindings/csharp/*.cs \
-    "$HOST:C:/kaya/cs-entry/"
-scp -q "$ROOT/crates/kaya/examples/gallery.cs" \
-    "$ROOT/crates/kaya/examples/gallery.csproj" \
-    "$ROOT"/bindings/csharp/*.cs \
-    "$HOST:C:/kaya/cs-gallery/"
-scp -q "$ROOT/crates/kaya/examples/todos.cs" \
-    "$ROOT/crates/kaya/examples/todos.csproj" \
-    "$ROOT"/bindings/csharp/*.cs \
-    "$HOST:C:/kaya/cs-todos/"
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
 # so an overwrite can fail while everything else copies fine, and the

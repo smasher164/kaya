@@ -8,6 +8,10 @@ set -uo pipefail
 
 cd /work
 export CARGO_TARGET_DIR=/work/target-linux
+# Dune resolves external libraries through OCAMLPATH, which only opam
+# env provides — the image's bare PATH export is enough for ocamlfind
+# (its config is baked in) but not for dune.
+eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
@@ -19,11 +23,7 @@ status=0
 # dotnet writes obj/bin next to the csproj; build in a scratch copy so the
 # host's in-tree dotnet artifacts (different RID) are untouched.
 mkdir -p /tmp/cs
-cp crates/kaya/examples/milestone2.cs crates/kaya/examples/milestone2.csproj \
-    crates/kaya/examples/entry.cs crates/kaya/examples/entry.csproj \
-    crates/kaya/examples/gallery.cs crates/kaya/examples/gallery.csproj \
-    crates/kaya/examples/todos.cs crates/kaya/examples/todos.csproj \
-    bindings/csharp/*.cs /tmp/cs/
+cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp/cs/
 
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
@@ -104,137 +104,72 @@ drain() {
 }
 
 # The C guests: the ABI's home language over the function floor.
-clang crates/kaya/examples/milestone2.c \
-    -I crates/kaya/include -I bindings/c \
-    -o /tmp/milestone2-c \
-    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
-    || status=1
-clang crates/kaya/examples/entry.c \
-    -I crates/kaya/include -I bindings/c \
-    -o /tmp/entry-c \
-    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
-    || status=1
-clang crates/kaya/examples/gallery.c \
-    -I crates/kaya/include -I bindings/c \
-    -o /tmp/gallery-c \
-    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
-    || status=1
-clang crates/kaya/examples/todos.c \
-    -I crates/kaya/include -I bindings/c \
-    -o /tmp/todos-c \
-    -L "$CARGO_TARGET_DIR/debug" -lkaya -Wl,-rpath,"$CARGO_TARGET_DIR/debug" \
-    || status=1
+make -C guests/c TARGET_DIR="$CARGO_TARGET_DIR/debug" OUT=/tmp/c-guests || status=1
 
-# The OCaml guest (direct ring: Bigarray data path + noalloc cursor
-# stubs). ocamlopt writes its intermediates beside the source, hence the
-# copy. The foreign half's findlib name differs across ctypes
-# packagings; take whichever exists.
-FOREIGN=ctypes-foreign
-ocamlfind list 2>/dev/null | grep -q "^ctypes-foreign" || FOREIGN=ctypes.foreign
-mkdir -p /tmp/ocaml
-cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
-    bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml \
-    crates/kaya/examples/gallery.ml crates/kaya/examples/todos.ml /tmp/ocaml/
-(cd /tmp/ocaml && ocamlfind ocamlopt \
-    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
-    -o milestone2-ocaml) || status=1
-(cd /tmp/ocaml && ocamlfind ocamlopt \
-    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
-    -o entry-ocaml) || status=1
-(cd /tmp/ocaml && ocamlfind ocamlopt \
-    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml gallery.ml \
-    -o gallery-ocaml) || status=1
-(cd /tmp/ocaml && ocamlfind ocamlopt \
-    -package "ctypes,$FOREIGN,threads.posix" -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml todos.ml \
-    -o todos-ocaml) || status=1
+# The OCaml guests: one dune build for the binding library and all
+# four scenes. Its own build dir: _build is shared with the host
+# through the repo mount, and dune keys targets on source hashes, not
+# platform — without this the container gets handed mac binaries as
+# "fresh" (the same disease target-linux/ exists to prevent for cargo).
+dune build --build-dir=_build-linux || status=1
 
-# The Haskell guest (direct ring: inline peeks + the same cursor stubs).
-mkdir -p /tmp/haskell
-ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell \
-    -o /tmp/haskell/milestone2-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
-    -L"$CARGO_TARGET_DIR/debug" -lkaya \
-    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
-mkdir -p /tmp/haskell-entry
-ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-entry \
-    -o /tmp/haskell/entry-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
-    -L"$CARGO_TARGET_DIR/debug" -lkaya \
-    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
-mkdir -p /tmp/haskell-gallery
-ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-gallery \
-    -o /tmp/haskell/gallery-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/gallery.hs \
-    -L"$CARGO_TARGET_DIR/debug" -lkaya \
-    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
-mkdir -p /tmp/haskell-todos
-ghc -threaded -O -ibindings/haskell -outputdir /tmp/haskell-todos \
-    -o /tmp/haskell/todos-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/todos.hs \
-    -L"$CARGO_TARGET_DIR/debug" -lkaya \
-    -optl-Wl,-rpath,"$CARGO_TARGET_DIR/debug" || status=1
+# The Haskell guests: one cabal build; list-bin locates the outputs.
+# The rpath travels via ghc-options — macOS resolves libkaya by its
+# absolute install name, Linux only by rpath or LD_LIBRARY_PATH.
+(cd guests/haskell && cabal build all \
+    --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
+    --ghc-options="-optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0) || status=1
+hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 
 # dotnet run and go run rebuild per invocation; build each guest once
 # and let the legs exec the outputs.
-for guest in milestone2 entry gallery todos; do
-    KAYA_LIB="$LIB" dotnet build --nologo -v q "/tmp/cs/$guest.csproj" >/dev/null || status=1
-done
+dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
+CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
 for guest in milestone2 entry gallery todos; do
-    go build -o "/tmp/go-guests/$guest" "crates/kaya/examples/$guest.go" || status=1
+    go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
-dotnet_dll() {
-    case "$1" in
-        milestone2) echo "/tmp/cs/bin/Debug/net10.0/milestone2.dll" ;;
-        *) echo "/tmp/cs/bin-$1/Debug/net10.0/$1.dll" ;;
-    esac
-}
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
-    run "$proto" c /tmp/milestone2-c
-    run "$proto" python env KAYA_LIB="$LIB" python3 crates/kaya/examples/milestone2.py
+    run "$proto" c /tmp/c-guests/milestone2
+    run "$proto" python env KAYA_LIB="$LIB" python3 guests/python/milestone2.py
     run "$proto" go /tmp/go-guests/milestone2
-    run "$proto" csharp env KAYA_LIB="$LIB" dotnet exec "$(dotnet_dll milestone2)"
-    run "$proto" ocaml env KAYA_LIB="$LIB" /tmp/ocaml/milestone2-ocaml
-    run "$proto" haskell /tmp/haskell/milestone2-hs
+    run "$proto" csharp env KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" ocaml env KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/milestone2.exe
+    run "$proto" haskell "$(hs_bin milestone2)"
     # The entry scene: the inner env overrides run()'s KAYA_SELFTEST=1.
     run "$proto" entry-rust env KAYA_SELFTEST=entry "$CARGO_TARGET_DIR/debug/examples/entry"
-    run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/entry-c
+    run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
     run "$proto" entry-python env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
-        python3 crates/kaya/examples/entry.py
+        python3 guests/python/entry.py
     run "$proto" entry-go env KAYA_SELFTEST=entry /tmp/go-guests/entry
     run "$proto" entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
-        dotnet exec "$(dotnet_dll entry)"
-    run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" /tmp/ocaml/entry-ocaml
-    run "$proto" entry-haskell env KAYA_SELFTEST=entry /tmp/haskell/entry-hs
+        dotnet exec "$CS_GUEST"
+    run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/entry.exe
+    run "$proto" entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
     # The gallery scene (row + checkbox): the toggle arrives as an
     # occurrence the app answers with the status signal.
     run "$proto" gallery-rust env KAYA_SELFTEST=gallery "$CARGO_TARGET_DIR/debug/examples/gallery"
-    run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/gallery-c
+    run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/c-guests/gallery
     run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        python3 crates/kaya/examples/gallery.py
+        python3 guests/python/gallery.py
     run "$proto" gallery-go env KAYA_SELFTEST=gallery /tmp/go-guests/gallery
     run "$proto" gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
-        dotnet exec "$(dotnet_dll gallery)"
-    run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" /tmp/ocaml/gallery-ocaml
-    run "$proto" gallery-haskell env KAYA_SELFTEST=gallery /tmp/haskell/gallery-hs
+        dotnet exec "$CS_GUEST"
+    run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/gallery.exe
+    run "$proto" gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
     # The todos scene (records + field projection): one field's delta
     # travels; the items-left label proves the fold.
     run "$proto" todos-rust env KAYA_SELFTEST=todos "$CARGO_TARGET_DIR/debug/examples/todos"
-    run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/todos-c
+    run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/c-guests/todos
     run "$proto" todos-python env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
-        python3 crates/kaya/examples/todos.py
+        python3 guests/python/todos.py
     run "$proto" todos-go env KAYA_SELFTEST=todos /tmp/go-guests/todos
     run "$proto" todos-csharp env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
-        dotnet exec "$(dotnet_dll todos)"
-    run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" /tmp/ocaml/todos-ocaml
-    run "$proto" todos-haskell env KAYA_SELFTEST=todos /tmp/haskell/todos-hs
+        dotnet exec "$CS_GUEST"
+    run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/todos.exe
+    run "$proto" todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
 done
 drain
 

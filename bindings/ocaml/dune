@@ -1,0 +1,12 @@
+; The OCaml binding as a dune library — unwrapped, so guests keep the
+; established `open Kaya_wire` / `Kaya_app` module names. Also the
+; doorway to ppxlib: a [@@deriving kaya] record deriver becomes an
+; ordinary preprocess clause here when it lands.
+(library
+ (name kaya_guest_binding)
+ (wrapped false)
+ (modules kaya_wire kaya_runtime kaya_app)
+ (libraries ctypes ctypes-foreign threads.posix)
+ (foreign_stubs
+  (language c)
+  (names kaya_ml_stubs)))

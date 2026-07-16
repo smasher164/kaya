@@ -88,117 +88,70 @@ drain() {
     leg_names=()
 }
 
-# The OCaml guest compiles once and runs in both backend passes.
-# (ocamlopt writes its intermediates beside the source, hence the copy.)
-mkdir -p target/ocaml
-cp bindings/ocaml/kaya_ml_stubs.c bindings/ocaml/kaya_wire.ml \
-    bindings/ocaml/kaya_runtime.ml bindings/ocaml/kaya_app.ml \
-    crates/kaya/examples/milestone2.ml crates/kaya/examples/entry.ml \
-    crates/kaya/examples/gallery.ml crates/kaya/examples/todos.ml target/ocaml/
-(cd target/ocaml && ocamlfind ocamlopt \
-    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml milestone2.ml \
-    -o milestone2-ocaml) >/dev/null
-(cd target/ocaml && ocamlfind ocamlopt \
-    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml entry.ml \
-    -o entry-ocaml) >/dev/null
-(cd target/ocaml && ocamlfind ocamlopt \
-    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml gallery.ml \
-    -o gallery-ocaml) >/dev/null
-(cd target/ocaml && ocamlfind ocamlopt \
-    -package ctypes,ctypes-foreign,threads.posix -linkpkg \
-    kaya_ml_stubs.c kaya_wire.ml kaya_runtime.ml kaya_app.ml todos.ml \
-    -o todos-ocaml) >/dev/null
+# The OCaml guests: one dune build covers the binding library and all
+# four scenes (dune-project at the repo root scopes to bindings/ and
+# guests/).
+dune build || exit 1
 
-# The Haskell guest, likewise compiled once (its intermediates go to
-# target/haskell via -outputdir).
-mkdir -p target/haskell
-ghc -threaded -O -ibindings/haskell -outputdir target/haskell \
-    -o target/haskell/milestone2-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/milestone2.hs \
-    -L"$ROOT/target/debug" -lkaya \
-    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
-mkdir -p target/haskell-entry
-ghc -threaded -O -ibindings/haskell -outputdir target/haskell-entry \
-    -o target/haskell/entry-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/entry.hs \
-    -L"$ROOT/target/debug" -lkaya \
-    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
-mkdir -p target/haskell-gallery
-ghc -threaded -O -ibindings/haskell -outputdir target/haskell-gallery \
-    -o target/haskell/gallery-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/gallery.hs \
-    -L"$ROOT/target/debug" -lkaya \
-    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
-mkdir -p target/haskell-todos
-ghc -threaded -O -ibindings/haskell -outputdir target/haskell-todos \
-    -o target/haskell/todos-hs \
-    bindings/haskell/kaya_hs_stubs.c crates/kaya/examples/todos.hs \
-    -L"$ROOT/target/debug" -lkaya \
-    -optl-Wl,-rpath,"$ROOT/target/debug" >/dev/null
+# The Haskell guests: one cabal build for the binding library and all
+# four scenes; list-bin locates the outputs.
+(cd guests/haskell && cabal build all \
+    --extra-lib-dirs="$ROOT/target/debug" \
+    --ghc-options="-optl-Wl,-rpath,$ROOT/target/debug" -v0) || exit 1
+hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 
 # dotnet run and go run rebuild per invocation; build each guest once
 # and let the legs exec the outputs.
-for guest in milestone2 entry gallery todos; do
-    KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-        dotnet build --nologo -v q "crates/kaya/examples/$guest.csproj" >/dev/null || exit 1
-done
+dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
+CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
 for guest in milestone2 entry gallery todos; do
-    go build -o "target/go-guests/$guest" "crates/kaya/examples/$guest.go" || exit 1
+    go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
-dotnet_dll() {
-    case "$1" in
-        milestone2) echo "crates/kaya/examples/bin/Debug/net10.0/milestone2.dll" ;;
-        *) echo "crates/kaya/examples/bin-$1/Debug/net10.0/$1.dll" ;;
-    esac
-}
 
 # All guests against the AppKit backend.
 run rust target/debug/examples/milestone2
-run python python3 crates/kaya/examples/milestone2.py
+run python python3 guests/python/milestone2.py
 run go target/go-guests/milestone2
 run csharp env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll milestone2)"
+    dotnet exec "$CS_GUEST"
 run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/milestone2-ocaml
-run haskell target/haskell/milestone2-hs
+    _build/default/guests/ocaml/milestone2.exe
+run haskell "$(hs_bin milestone2)"
 
 # The entry scene (uncontrolled text field; text arrives as occurrences
 # the app folds into its own state), every language against AppKit. The
 # inner env overrides run()'s KAYA_SELFTEST=1 with the entry script.
 run entry-rust env KAYA_SELFTEST=entry target/debug/examples/entry
-run entry-python env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+run entry-python env KAYA_SELFTEST=entry python3 guests/python/entry.py
 run entry-go env KAYA_SELFTEST=entry target/go-guests/entry
 run entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll entry)"
+    dotnet exec "$CS_GUEST"
 run entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/entry-ocaml
-run entry-haskell env KAYA_SELFTEST=entry target/haskell/entry-hs
+    _build/default/guests/ocaml/entry.exe
+run entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
 
 # The gallery scene (row + checkbox; toggles arrive as occurrences the
 # app answers with the status signal), every language against AppKit.
 run gallery-rust env KAYA_SELFTEST=gallery target/debug/examples/gallery
-run gallery-python env KAYA_SELFTEST=gallery python3 crates/kaya/examples/gallery.py
+run gallery-python env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 run gallery-go env KAYA_SELFTEST=gallery target/go-guests/gallery
 run gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll gallery)"
+    dotnet exec "$CS_GUEST"
 run gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/gallery-ocaml
-run gallery-haskell env KAYA_SELFTEST=gallery target/haskell/gallery-hs
+    _build/default/guests/ocaml/gallery.exe
+run gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
 
 # The todos scene (records + field projection), every language against
 # AppKit.
 run todos-rust env KAYA_SELFTEST=todos target/debug/examples/todos
-run todos-python env KAYA_SELFTEST=todos python3 crates/kaya/examples/todos.py
+run todos-python env KAYA_SELFTEST=todos python3 guests/python/todos.py
 run todos-go env KAYA_SELFTEST=todos target/go-guests/todos
 run todos-csharp env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll todos)"
+    dotnet exec "$CS_GUEST"
 run todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/todos-ocaml
-run todos-haskell env KAYA_SELFTEST=todos target/haskell/todos-hs
+    _build/default/guests/ocaml/todos.exe
+run todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
 
 drain
 
@@ -208,37 +161,37 @@ tools/swiftui/build-dylib.sh >/dev/null
 export KAYA_BACKEND=swiftui
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 run rust-swiftui target/debug/examples/milestone2
-run python-swiftui python3 crates/kaya/examples/milestone2.py
+run python-swiftui python3 guests/python/milestone2.py
 run go-swiftui target/go-guests/milestone2
 run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll milestone2)"
+    dotnet exec "$CS_GUEST"
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/milestone2-ocaml
-run haskell-swiftui target/haskell/milestone2-hs
+    _build/default/guests/ocaml/milestone2.exe
+run haskell-swiftui "$(hs_bin milestone2)"
 run entry-rust-swiftui env KAYA_SELFTEST=entry target/debug/examples/entry
-run entry-python-swiftui env KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+run entry-python-swiftui env KAYA_SELFTEST=entry python3 guests/python/entry.py
 run entry-go-swiftui env KAYA_SELFTEST=entry target/go-guests/entry
 run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll entry)"
+    dotnet exec "$CS_GUEST"
 run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/entry-ocaml
-run entry-haskell-swiftui env KAYA_SELFTEST=entry target/haskell/entry-hs
+    _build/default/guests/ocaml/entry.exe
+run entry-haskell-swiftui env KAYA_SELFTEST=entry "$(hs_bin entry)"
 run gallery-rust-swiftui env KAYA_SELFTEST=gallery target/debug/examples/gallery
-run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 crates/kaya/examples/gallery.py
+run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 run gallery-go-swiftui env KAYA_SELFTEST=gallery target/go-guests/gallery
 run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll gallery)"
+    dotnet exec "$CS_GUEST"
 run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/gallery-ocaml
-run gallery-haskell-swiftui env KAYA_SELFTEST=gallery target/haskell/gallery-hs
+    _build/default/guests/ocaml/gallery.exe
+run gallery-haskell-swiftui env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
 run todos-rust-swiftui env KAYA_SELFTEST=todos target/debug/examples/todos
-run todos-python-swiftui env KAYA_SELFTEST=todos python3 crates/kaya/examples/todos.py
+run todos-python-swiftui env KAYA_SELFTEST=todos python3 guests/python/todos.py
 run todos-go-swiftui env KAYA_SELFTEST=todos target/go-guests/todos
 run todos-csharp-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$(dotnet_dll todos)"
+    dotnet exec "$CS_GUEST"
 run todos-ocaml-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    target/ocaml/todos-ocaml
-run todos-haskell-swiftui env KAYA_SELFTEST=todos target/haskell/todos-hs
+    _build/default/guests/ocaml/todos.exe
+run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB
 drain
 

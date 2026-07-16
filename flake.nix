@@ -65,11 +65,14 @@
             # OCaml guest (direct ring over ocaml-ctypes + cursor stubs);
             # findlib's setup hook wires OCAMLPATH for the shell.
             ocaml
+            dune_3
             ocamlPackages.findlib
             ocamlPackages.ctypes
             ocamlPackages.ctypes-foreign
+            ocamlPackages.ppxlib
             # Haskell guest (direct ring; base-only, so bare ghc suffices).
             ghc
+            cabal-install
             # Android: SDK/emulator/NDK from androidenv; Gradle builds the
             # app shells (fetches AGP/Compose from Google Maven at build time).
             androidSdk

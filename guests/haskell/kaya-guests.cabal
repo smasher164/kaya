@@ -1,0 +1,41 @@
+cabal-version: 2.4
+-- The Haskell guests. The binding compiles once as an internal library
+-- (sources still live in bindings/haskell — packaging it as its own
+-- distribution is the packaging milestone); each scene is an
+-- executable. libkaya's location comes from the invocation:
+--   cabal build all --extra-lib-dirs=$ROOT/target/debug
+name: kaya-guests
+version: 0
+build-type: Simple
+
+common shared
+  default-language: GHC2021
+  build-depends: base, bytestring, containers
+  ghc-options: -threaded -O
+
+library
+  import: shared
+  exposed-modules: KayaApp, KayaRuntime, KayaWire
+  hs-source-dirs: ../../bindings/haskell
+  c-sources: ../../bindings/haskell/kaya_hs_stubs.c
+  extra-libraries: kaya
+
+executable milestone2
+  import: shared
+  main-is: milestone2.hs
+  build-depends: kaya-guests
+
+executable entry
+  import: shared
+  main-is: entry.hs
+  build-depends: kaya-guests
+
+executable gallery
+  import: shared
+  main-is: gallery.hs
+  build-depends: kaya-guests
+
+executable todos
+  import: shared
+  main-is: todos.hs
+  build-depends: kaya-guests

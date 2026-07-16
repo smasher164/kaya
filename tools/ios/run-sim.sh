@@ -106,7 +106,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     mkdir -p "$BUNDLES"
     # With more than one input file, swiftc only allows top-level code in
     # a file named main.swift; the example is that file.
-    cp tools/ios/milestone2.swift "$BUNDLES/main.swift"
+    cp guests/swift/milestone2.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
@@ -118,7 +118,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.milestone2swift swift || status=1
 
-    cp tools/ios/entry.swift "$BUNDLES/main.swift"
+    cp guests/swift/entry.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
@@ -130,7 +130,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.entryswift entry-swift entry || status=1
 
-    cp tools/ios/gallery.swift "$BUNDLES/main.swift"
+    cp guests/swift/gallery.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
@@ -142,7 +142,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle galleryswift dev.kaya.galleryswift "$BUNDLES/galleryswift-bin")
     run_bundle "$UDID" "$APP" dev.kaya.galleryswift gallery-swift gallery || status=1
 
-    cp tools/ios/todos.swift "$BUNDLES/main.swift"
+    cp guests/swift/todos.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \

@@ -1,0 +1,6 @@
+(library
+ (name kaya_ppx)
+ (kind ppx_deriver)
+ (libraries ppxlib)
+ (preprocess
+  (pps ppxlib.metaquot)))

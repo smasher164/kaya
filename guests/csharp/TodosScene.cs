@@ -6,18 +6,18 @@
 //
 // Build the library first (cargo build), then:
 //     KAYA_SELFTEST=todos KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project crates/kaya/examples/todos.csproj
+//         dotnet run --project guests/csharp
 
 // The record is the schema.
 record Todo(string Title, bool Done);
 
-static class Program
+static class TodosScene
 {
     // The field tokens, checked against the record at startup.
     static readonly Field<string> FieldTitle = KayaRecords.FieldOf<Todo, string>("Title");
     static readonly Field<bool> FieldDone = KayaRecords.FieldOf<Todo, bool>("Done");
 
-    static void Main()
+    public static void Run()
     {
         var app = new KayaApp();
 
