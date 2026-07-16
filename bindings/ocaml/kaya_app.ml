@@ -199,6 +199,76 @@ let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked 
 let add_child (Widget parent) (Widget child) tx =
   emit tx (Kaya_wire.tx_add_child parent child)
 
+(* --- Construction sugar: the tree reads as a tree -------------------
+
+   Co-located constructors (props and handlers at the declaration
+   site) and containers taking their children, so
+
+     let* check = widget kind_checkbox in
+     let* () = bind_checked_field check todo_done_ in
+     ...
+     let* row = widget kind_row in
+     let* () = add_child row check in
+     let* () = add_child row title in
+
+   reads instead as
+
+     let* r = row [ checkbox ~on_toggle (); label ~bind:status () ] in
+
+   Everything lowers eagerly to the same records in the same order —
+   children created first, then the container, then the add_childs.
+   Sugar is syntax over the record calls, never a scene value the
+   binding interprets later (the design's no-guest-AST rule); the
+   explicit floor above stays for whoever wants one call ≈ one record. *)
+
+let button ?text ?on_click () tx =
+  let w = widget Kaya_wire.kind_button tx in
+  Option.iter (fun t -> set_text w t tx) text;
+  (match on_click with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_handlers id handler
+  | None -> ());
+  w
+
+let label ?text ?bind () tx =
+  let w = widget Kaya_wire.kind_label tx in
+  Option.iter (fun t -> set_text w t tx) text;
+  Option.iter (fun s -> bind_text w s tx) bind;
+  w
+
+let entry ?on_change () tx =
+  let w = widget Kaya_wire.kind_entry tx in
+  (match on_change with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  w
+
+let checkbox ?text ?checked ?on_toggle () tx =
+  let w = widget Kaya_wire.kind_checkbox tx in
+  Option.iter (fun t -> set_text w t tx) text;
+  Option.iter (fun c -> set_checked w c tx) checked;
+  (match on_toggle with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_toggles id handler
+  | None -> ());
+  w
+
+(* A container from its children: runs each child declaration (their
+   records land first), then creates the container and parents them. *)
+let container kind children tx =
+  let handles = List.map (fun child -> child tx) children in
+  let parent = widget kind tx in
+  List.iter (fun child -> add_child parent child tx) handles;
+  parent
+
+let column children tx = container Kaya_wire.kind_column children tx
+let row children tx = container Kaya_wire.kind_row children tx
+
+
 let collection tx =
   tx.app.c_collection <- Int64.add tx.app.c_collection 1L;
   let id = tx.app.c_collection in
@@ -359,6 +429,10 @@ let for_each c body tx =
   emit tx (Kaya_wire.tx_template_end ());
   (Widget id, result)
 
+(* A For as a child: for_each whose body keeps no handles — the
+   common case once handlers co-locate at their constructors. *)
+let each c body tx = fst (for_each c body tx)
+
 (* A When over a Bool signal: stamps on true, unstamps on false. *)
 let when_ (Signal sid) body tx =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
@@ -407,6 +481,7 @@ module Tpl = struct
   let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) t =
     emit t.tpl_tx (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
 
+
   let add_child (Node parent) (Node child) t =
     emit t.tpl_tx (Kaya_wire.tx_add_child parent child)
 
@@ -428,6 +503,43 @@ module Tpl = struct
     let result = body { tpl_tx = t.tpl_tx } in
     emit t.tpl_tx (Kaya_wire.tx_template_end ());
     (Node id, result)
+
+  (* The construction sugar, template flavor: bindings take fields, and
+     handlers receive the stamped copy's keys first. *)
+  let button ?text ?on_click () t =
+    let n = widget Kaya_wire.kind_button t in
+    Option.iter (fun x -> set_text n x t) text;
+    (match on_click with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace t.tpl_tx.app.node_handlers id handler
+    | None -> ());
+    n
+
+  let label ?text ?bind_field ?(level = 0) () t =
+    let n = widget Kaya_wire.kind_label t in
+    Option.iter (fun x -> set_text n x t) text;
+    Option.iter (fun fd -> bind_text_field ~level n fd t) bind_field;
+    n
+
+  let checkbox ?checked_field ?(level = 0) ?on_toggle () t =
+    let n = widget Kaya_wire.kind_checkbox t in
+    Option.iter (fun fd -> bind_checked_field ~level n fd t) checked_field;
+    (match on_toggle with
+    | Some handler ->
+        let (Node id) = n in
+        Hashtbl.replace t.tpl_tx.app.node_toggles id handler
+    | None -> ());
+    n
+
+  let container kind children t =
+    let handles = List.map (fun child -> child t) children in
+    let parent = widget kind t in
+    List.iter (fun child -> add_child parent child t) handles;
+    parent
+
+  let column children t = container Kaya_wire.kind_column children t
+  let row children t = container Kaya_wire.kind_row children t
 end
 
 (* Register a click handler for a live widget: a unit decl, run as one

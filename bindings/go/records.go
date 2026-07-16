@@ -10,6 +10,7 @@ package kaya
 import (
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // Field is a typed projection: one field of a record type, by wire
@@ -19,17 +20,27 @@ import (
 // setters at write).
 type Field[V any] struct{ index uint32 }
 
-// RecordCollection is a Collection whose entries are T records. The
+// Key is the collection-key constraint: the protocol admits string and
+// int64 identities (a float is not an identity; a bool key is a When
+// in disguise).
+type Key interface {
+	~string | ~int64
+}
+
+// RecordCollection is a Collection whose entries are T records keyed
+// by K — the key type rides the handle, so inserts, reads, and handler
+// keys are typed end to end (methods lean on the receiver's type
+// parameters; Go still has no parameterized methods as of 1.26). The
 // plain Collection rides along embedded, so ForEach and At take it
 // unchanged.
-type RecordCollection[T any] struct {
+type RecordCollection[K Key, T any] struct {
 	Collection
 	info *recordInfo
 }
 
 // RecordEntry is one (key, record) pair of the typed model.
-type RecordEntry[T any] struct {
-	Key   any
+type RecordEntry[K Key, T any] struct {
+	Key   K
 	Value T
 }
 
@@ -52,8 +63,16 @@ func wireTag(t reflect.Type) (uint32, bool) {
 	return 0, false
 }
 
+// One reflection walk per record type, ever — UpdateField and the
+// template constructors resolve projections per event, so the walk
+// must not re-run there.
+var recordInfos sync.Map // reflect.Type -> *recordInfo
+
 func recordInfoOf[T any]() *recordInfo {
 	t := reflect.TypeFor[T]()
+	if cached, ok := recordInfos.Load(t); ok {
+		return cached.(*recordInfo)
+	}
 	if t.Kind() != reflect.Struct {
 		panic(fmt.Sprintf("kaya: %v is not a struct", t))
 	}
@@ -73,39 +92,39 @@ func recordInfoOf[T any]() *recordInfo {
 	if len(info.schema) == 0 {
 		panic(fmt.Sprintf("kaya: %v has no wire-typed fields", t))
 	}
+	recordInfos.Store(t, info)
 	return info
 }
 
-// CollectionOf declares a collection of T records; the struct is the
-// schema. Returns the typed root handle.
-func CollectionOf[T any](tx *Tx) RecordCollection[T] {
+// CollectionOf declares a collection of T records keyed by K; the
+// struct is the schema. Returns the typed root handle.
+func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	info := recordInfoOf[T]()
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
 	tx.records = append(tx.records, TxCreateCollection(c.id, info.schema))
-	return RecordCollection[T]{c, info}
+	return RecordCollection[K, T]{c, info}
 }
 
-// FieldOf is the field token for T's field `name`, checked against V
-// at declaration time (a wrong name or type panics at startup, not in
-// a handler). Bind it or update through it.
-func FieldOf[T any, V any](name string) Field[V] {
-	t := reflect.TypeFor[T]()
-	sf, ok := t.FieldByName(name)
-	if !ok {
-		panic(fmt.Sprintf("kaya: %v has no field %q", t, name))
-	}
-	if sf.Type != reflect.TypeFor[V]() {
-		panic(fmt.Sprintf("kaya: %v.%s is %v, not %v", t, name, sf.Type, reflect.TypeFor[V]()))
-	}
+// FieldBy is the field token for the field a projection selects:
+// kaya.FieldBy(func(t *Todo) *bool { return &t.Done }). The projection
+// is a real field access, so the name and type are compiler-checked
+// and renames refactor with the code — no strings restating what the
+// struct already declares. Resolution compares the projected address
+// against each field's on a prototype, once, at declaration.
+func FieldBy[T any, V any](project func(*T) *V) Field[V] {
+	prototype := new(T)
+	target := reflect.ValueOf(project(prototype)).Pointer()
+	rv := reflect.ValueOf(prototype).Elem()
 	info := recordInfoOf[T]()
 	for wire, idx := range info.indexes {
-		if t.Field(idx).Name == name {
+		if rv.Field(idx).Addr().Pointer() == target {
 			return Field[V]{uint32(wire)}
 		}
 	}
-	panic(fmt.Sprintf("kaya: %v.%s is not a wire field", t, name))
+	panic(fmt.Sprintf("kaya: projection does not select a wire field of %v",
+		reflect.TypeFor[T]()))
 }
 
 func (info *recordInfo) values(value any) []any {
@@ -119,33 +138,41 @@ func (info *recordInfo) values(value any) []any {
 
 // Insert a record; the model keeps the T itself, the wire carries its
 // fields positionally.
-func (c RecordCollection[T]) Insert(tx *Tx, key any, value T) {
+func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, c.info.values(value)))
 }
 
 // Update replaces a record wholesale; UpdateField is the one-field way.
-func (c RecordCollection[T]) Update(tx *Tx, key any, value T) {
+func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
 	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, c.info.values(value)))
 }
 
 // Items is the typed model: what this guest wrote, in insertion order.
-func (c RecordCollection[T]) Items(tx *Tx) []RecordEntry[T] {
+func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	in := tx.app.instanceOf(c.id, c.path)
 	if in == nil {
 		return nil
 	}
-	out := make([]RecordEntry[T], len(in.entries))
+	out := make([]RecordEntry[K, T], len(in.entries))
 	for i, e := range in.entries {
-		out[i] = RecordEntry[T]{e.Key, e.Value.(T)}
+		out[i] = RecordEntry[K, T]{e.Key.(K), e.Value.(T)}
 	}
 	return out
 }
 
 // UpdateField sends one field's delta — the rest of the record never
-// travels — and mutates the same field of the model's copy.
-func UpdateField[T any, V any](tx *Tx, c RecordCollection[T], key any, f Field[V], value V) {
+// travels — and mutates the same field of the model's copy. A generic
+// method (Go 1.27): V comes from the projection, K and T from the
+// receiver. The projection is the field reference — no token to
+// declare; hoist one with FieldBy if you prefer a name.
+func (c RecordCollection[K, T]) UpdateField[V any](tx *Tx, key K, project func(*T) *V, value V) {
+	c.UpdateFieldAt(tx, key, FieldBy(project), value)
+}
+
+// UpdateFieldAt is UpdateField over a pre-resolved token.
+func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], value V) {
 	in := tx.app.instanceOf(c.id, c.path)
 	if in == nil {
 		panic("kaya: update of a missing instance")
@@ -164,10 +191,83 @@ func UpdateField[T any, V any](tx *Tx, c RecordCollection[T], key any, f Field[V
 	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, value))
 }
 
+// RecordPatch is typed field writes with the key spelled once:
+// todos.Patch(tx, key).Set(done, true).Set(title, "x"). Each Set
+// records one update_field — a patch is recorded writes, never a diff.
+type RecordPatch[K Key, T any] struct {
+	c   RecordCollection[K, T]
+	tx  *Tx
+	key K
+}
+
+// Patch opens a patch on one entry.
+func (c RecordCollection[K, T]) Patch(tx *Tx, key K) RecordPatch[K, T] {
+	return RecordPatch[K, T]{c, tx, key}
+}
+
+// Set writes the field the projection selects; chainable.
+func (p RecordPatch[K, T]) Set[V any](project func(*T) *V, value V) RecordPatch[K, T] {
+	p.c.UpdateField(p.tx, p.key, project, value)
+	return p
+}
+
+// SetAt is Set over a pre-resolved token.
+func (p RecordPatch[K, T]) SetAt[V any](f Field[V], value V) RecordPatch[K, T] {
+	p.c.UpdateFieldAt(p.tx, p.key, f, value)
+	return p
+}
+
 // BindTextField binds a label's text to one field of the element of
 // the enclosing For; Field[string] only.
 func (t *Tpl) BindTextField(n Node, level uint32, f Field[string]) {
 	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level, f.index))
+}
+
+// Label creates a label bound to any addressable source: a constant,
+// a signal, a field projection, or a pre-resolved token — the
+// protocol's whole binding universe as one union-constrained argument
+// (a Go 1.27 generic method; the type switch discriminates).
+func (c RecordCollection[K, T]) Label[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S) Node {
+	n := t.Widget(KindLabel)
+	switch v := any(src).(type) {
+	case string:
+		t.SetText(n, v)
+	case Signal[string]:
+		t.tx.records = append(t.tx.records, TxBindText(n.id, v.id))
+	case func(*T) *string:
+		t.BindTextField(n, 0, FieldBy(v))
+	case Field[string]:
+		t.BindTextField(n, 0, v)
+	}
+	return n
+}
+
+// Checkbox creates a checkbox bound to any addressable source, with
+// its toggle handler (nil for none). The receiver's K types the
+// handler's key — the copy the toggle came from (the depth-1 case;
+// deeper nestings keep the []any path via OnToggleNode).
+func (c RecordCollection[K, T]) Checkbox[S interface {
+	~bool | Signal[bool] | func(*T) *bool | Field[bool]
+}](t *Tpl, src S, onToggle func(*Tx, K, bool)) Node {
+	n := t.Widget(KindCheckbox)
+	switch v := any(src).(type) {
+	case bool:
+		t.tx.records = append(t.tx.records, TxSetChecked(n.id, v))
+	case Signal[bool]:
+		t.tx.records = append(t.tx.records, TxBindChecked(n.id, v.id))
+	case func(*T) *bool:
+		t.BindCheckedField(n, 0, FieldBy(v))
+	case Field[bool]:
+		t.BindCheckedField(n, 0, v)
+	}
+	if onToggle != nil {
+		t.tx.app.OnToggleNode(n, func(tx *Tx, keys []any, checked bool) {
+			onToggle(tx, keys[0].(K), checked)
+		})
+	}
+	return n
 }
 
 // BindCheckedField binds a checkbox's state to one field of the

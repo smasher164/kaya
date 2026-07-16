@@ -4,4 +4,4 @@
 // it), so the same import path resolves in both places.
 module dev.kaya
 
-go 1.22
+go 1.27

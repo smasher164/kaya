@@ -9,6 +9,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 
 /// A typed projection: one field of a record type, by wire position.
@@ -38,7 +39,14 @@ sealed class RecordInfo
         : t == typeof(double) ? KayaWire.ValueF64
         : (uint?)null;
 
-    internal static RecordInfo Of(Type t)
+    // One reflection walk per record type, ever — FieldOf runs per
+    // event in handlers, so the walk must not re-run there.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, RecordInfo> Cache =
+        new System.Collections.Concurrent.ConcurrentDictionary<Type, RecordInfo>();
+
+    internal static RecordInfo Of(Type t) => Cache.GetOrAdd(t, Build);
+
+    static RecordInfo Build(Type t)
     {
         var ctors = t.GetConstructors();
         if (ctors.Length != 1)
@@ -110,8 +118,13 @@ sealed class RecordCollection<T>
     public void Update(Tx tx, object key, T value) =>
         tx.UpdateRecordRaw(Collection, key, value, Info.WireFields(value));
 
-    /// One field's delta: the rest of the record never travels; the
-    /// model's copy is reconstructed with the new value.
+    /// One field's delta by selector: the rest of the record never
+    /// travels; the model's copy is reconstructed with the new value.
+    /// The expression is the field reference — no token to declare.
+    public void UpdateField<V>(Tx tx, object key, Expression<Func<T, V>> selector, V value) =>
+        UpdateField(tx, key, KayaRecords.FieldOf(selector), value);
+
+    /// UpdateField over a pre-resolved token.
     public void UpdateField<V>(Tx tx, object key, Field<V> f, V value)
     {
         object current = null;
@@ -123,6 +136,24 @@ sealed class RecordCollection<T>
         tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), f.Index, value);
     }
 
+    /// Typed field writes with the key spelled once:
+    /// todos.Patch(tx, key).Set(x => x.Done, true).Set(x => x.Title, "x").
+    /// Each Set records one update_field — a patch is recorded writes,
+    /// never a diff.
+    public RecordPatch<T> Patch(Tx tx, object key) => new RecordPatch<T>(this, tx, key);
+
+    /// A label bound to the field the selector names (the argument's
+    /// type picks the source; constants and signals go through the
+    /// Tpl overloads).
+    public Node Label(Tpl t, Expression<Func<T, string>> selector) =>
+        t.Label(KayaRecords.FieldOf(selector));
+
+    /// A checkbox bound to the field the selector names, with its
+    /// toggle handler co-located.
+    public Node Checkbox(Tpl t, Expression<Func<T, bool>> selector,
+        Action<Tx, List<object>, bool> onToggle = null) =>
+        t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
+
     /// The typed model: what this guest wrote, in insertion order.
     public List<KeyValuePair<object, T>> Items(Tx tx)
     {
@@ -130,6 +161,28 @@ sealed class RecordCollection<T>
         foreach (var entry in tx.Items(Collection))
             items.Add(new KeyValuePair<object, T>(entry.Key, (T)entry.Value));
         return items;
+    }
+}
+
+/// An open patch on one entry; Set chains.
+sealed class RecordPatch<T>
+{
+    readonly RecordCollection<T> c;
+    readonly Tx tx;
+    readonly object key;
+
+    internal RecordPatch(RecordCollection<T> c, Tx tx, object key)
+    {
+        this.c = c;
+        this.tx = tx;
+        this.key = key;
+    }
+
+    /// Writes the field the selector names; chainable.
+    public RecordPatch<T> Set<V>(Expression<Func<T, V>> selector, V value)
+    {
+        c.UpdateField(tx, key, selector, value);
+        return this;
     }
 }
 
@@ -143,23 +196,22 @@ static class KayaRecords
         return new RecordCollection<T>(tx.CollectionWithSchema(info.Schema), info);
     }
 
-    /// The field token for T's field `name`, checked against V at
-    /// declaration time (a wrong name or type throws at startup, not
-    /// in a handler).
-    public static Field<V> FieldOf<T, V>(string name)
+    /// The field token for the property a selector expression names:
+    /// FieldOf((Todo t) => t.Done). The name and type are the record's
+    /// own, compiler-checked — no strings restating the declaration
+    /// (the EF Core shape).
+    public static Field<V> FieldOf<T, V>(Expression<Func<T, V>> selector)
     {
+        if (selector.Body is not MemberExpression member)
+            throw new ArgumentException("kaya: selector must be a plain property access");
+        var name = member.Member.Name;
         var info = RecordInfo.Of(typeof(T));
         var parameters = info.Ctor.GetParameters();
         for (uint wire = 0; wire < info.WireToCtor.Length; wire++)
         {
             var p = parameters[info.WireToCtor[wire]];
             if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
-            {
-                if (p.ParameterType != typeof(V))
-                    throw new ArgumentException(
-                        $"kaya: {typeof(T).Name}.{name} is {p.ParameterType.Name}, not {typeof(V).Name}");
                 return new Field<V>(wire);
-            }
         }
         throw new ArgumentException($"kaya: {typeof(T).Name} has no wire field {name}");
     }

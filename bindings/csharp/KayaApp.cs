@@ -367,6 +367,64 @@ sealed class Tx
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
 
+    // --- Construction sugar: the tree reads as a tree ----------------
+    //
+    // Co-located constructors (props and handlers at the declaration
+    // site) and params-array containers. Everything lowers eagerly to
+    // the same records — children first, then the container, then the
+    // AddChilds; never a scene value interpreted later.
+
+    public Widget Button(string text = null, Action<Tx> onClick = null)
+    {
+        var w = Widget(KayaWire.KindButton);
+        if (text != null) SetText(w, text);
+        if (onClick != null) App.OnClick(w, onClick);
+        return w;
+    }
+
+    public Widget Entry(Action<Tx, string> onChange = null)
+    {
+        var w = Widget(KayaWire.KindEntry);
+        if (onChange != null) App.OnChange(w, onChange);
+        return w;
+    }
+
+    public Widget Label(string text = null, Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindLabel);
+        if (text != null) SetText(w, text);
+        if (bind is Signal s) BindText(w, s);
+        return w;
+    }
+
+    public Widget Checkbox(string text = null, bool? isChecked = null,
+        Action<Tx, bool> onToggle = null)
+    {
+        var w = Widget(KayaWire.KindCheckbox);
+        if (text != null) SetText(w, text);
+        if (isChecked is bool c) SetChecked(w, c);
+        if (onToggle != null) App.OnToggle(w, onToggle);
+        return w;
+    }
+
+    public Widget Column(params Widget[] children) =>
+        ContainerOf(KayaWire.KindColumn, children);
+
+    public Widget Row(params Widget[] children) =>
+        ContainerOf(KayaWire.KindRow, children);
+
+    Widget ContainerOf(uint kind, Widget[] children)
+    {
+        var parent = Widget(kind);
+        foreach (var child in children)
+            AddChild(parent, child);
+        return parent;
+    }
+
+    /// A For as a child: ForEach whose body keeps no handles — the
+    /// common case once handlers co-locate at their constructors.
+    public Widget Each(Collection c, Action<Tpl> body) => ForEach(c, body);
+
     public Collection Collection()
     {
         var c = App.NextCollection();
@@ -493,6 +551,51 @@ sealed class Tpl
     /// Field<bool> only.
     public void BindCheckedField(Node n, uint level, Field<bool> f) =>
         tx.Records.Add(KayaWire.TxBindCheckedElement(n.Id, level, f.Index));
+
+    // Construction sugar, template flavor: one name per widget, the
+    // argument's type picks the addressable source (constant, signal,
+    // or element field); handlers receive the stamped copy's keys
+    // first.
+    public Node Label(string text)
+    {
+        var n = Widget(KayaWire.KindLabel);
+        tx.Records.Add(KayaWire.TxSetText(n.Id, text));
+        return n;
+    }
+
+    public Node Label(Signal s)
+    {
+        var n = Widget(KayaWire.KindLabel);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, s.Id));
+        return n;
+    }
+
+    public Node Label(Field<string> f)
+    {
+        var n = Widget(KayaWire.KindLabel);
+        BindTextField(n, 0, f);
+        return n;
+    }
+
+    public Node Checkbox(Field<bool> f, Action<Tx, List<object>, bool> onToggle = null)
+    {
+        var n = Widget(KayaWire.KindCheckbox);
+        BindCheckedField(n, 0, f);
+        if (onToggle != null) tx.App.OnToggle(n, onToggle);
+        return n;
+    }
+
+    public Node Column(params Node[] children) => ContainerOf(KayaWire.KindColumn, children);
+
+    public Node Row(params Node[] children) => ContainerOf(KayaWire.KindRow, children);
+
+    Node ContainerOf(uint kind, Node[] children)
+    {
+        var parent = Widget(kind);
+        foreach (var child in children)
+            AddChild(parent, child);
+        return parent;
+    }
 
     public void AddChild(Node parent, Node child) =>
         tx.Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));

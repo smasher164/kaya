@@ -12,6 +12,9 @@ repository = "https://github.com/smasher164/kaya"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+# Compile-time only (proc-macro): ident concatenation for the record!
+# macro's generated patch builder (TodoPatch from Todo).
+paste = "1"
 
 [build-dependencies]
 # Emits msvc linker directives at build time; no-op for other targets.

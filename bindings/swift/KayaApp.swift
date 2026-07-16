@@ -279,6 +279,22 @@ final class KayaApp {
 
 /// One transaction: everything queued inside build (or a handler)
 /// applies atomically when it returns.
+/// The container builder: collects child handles from a block; the
+/// block runs eagerly like any closure.
+@resultBuilder
+enum KayaChildren {
+    static func buildBlock(_ children: KayaWidget...) -> [KayaWidget] {
+        Array(children)
+    }
+}
+
+@resultBuilder
+enum KayaNodeChildren {
+    static func buildBlock(_ children: KayaNodeHandle...) -> [KayaNodeHandle] {
+        Array(children)
+    }
+}
+
 final class KayaAppTx {
     let app: KayaApp
     var tx = KayaTx()
@@ -323,6 +339,66 @@ final class KayaAppTx {
 
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
+    }
+
+    // --- Construction sugar: the tree reads as a tree ----------------
+    //
+    // Co-located constructors (props and handlers at the declaration
+    // site) and result-builder containers, so the build closure is the
+    // scene's shape. Everything lowers eagerly to the same records —
+    // the builder block runs like any closure, children first, then
+    // the container and its addChilds. Sugar over the record calls,
+    // never a scene value interpreted later.
+
+    func button(_ text: String? = nil, onClick: ((KayaAppTx) -> Void)? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_BUTTON))
+        if let text { setText(w, text) }
+        if let onClick { app.onClick(w, onClick) }
+        return w
+    }
+
+    func entry(onChange: ((KayaAppTx, String) -> Void)? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_ENTRY))
+        if let onChange { app.onChange(w, onChange) }
+        return w
+    }
+
+    func label(_ text: String? = nil, bind: KayaSignal? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_LABEL))
+        if let text { setText(w, text) }
+        if let bind { bindText(w, bind) }
+        return w
+    }
+
+    func checkbox(
+        _ text: String? = nil, checked: Bool? = nil,
+        onToggle: ((KayaAppTx, Bool) -> Void)? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_CHECKBOX))
+        if let text { setText(w, text) }
+        if let checked { setChecked(w, checked) }
+        if let onToggle { app.onToggle(w, onToggle) }
+        return w
+    }
+
+    func column(@KayaChildren _ children: () -> [KayaWidget]) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_COLUMN), children())
+    }
+
+    func row(@KayaChildren _ children: () -> [KayaWidget]) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_ROW), children())
+    }
+
+    private func containerOf(_ kind: UInt32, _ children: [KayaWidget]) -> KayaWidget {
+        let parent = widget(kind)
+        for child in children { addChild(parent, child) }
+        return parent
+    }
+
+    /// A For as a child: forEach whose body keeps no handles — the
+    /// common case once handlers co-locate at their constructors.
+    func each(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaWidget {
+        forEach(c) { body($0) }.0
     }
 
     func addChild(_ parent: KayaWidget, _ child: KayaWidget) {
@@ -455,6 +531,52 @@ final class KayaTpl {
     /// KayaField<Bool> only.
     func bindCheckedField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
         tx.tx.bindCheckedElement(n.id, level: level, field: f.index)
+    }
+
+    // Construction sugar, template flavor: one name per widget, the
+    // argument's type picks the addressable source (constant, signal,
+    // or element field); handlers receive the stamped copy's keys
+    // first.
+    func label(_ text: String) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_LABEL))
+        setText(n, text)
+        return n
+    }
+
+    func label(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_LABEL))
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    func label(_ f: KayaField<String>) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_LABEL))
+        bindTextField(n, f)
+        return n
+    }
+
+    func checkbox(
+        _ f: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_CHECKBOX))
+        bindCheckedField(n, f)
+        if let onToggle { tx.app.onToggle(n, onToggle) }
+        return n
+    }
+
+    func row(@KayaNodeChildren _ children: () -> [KayaNodeHandle]) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_ROW), children())
+    }
+
+    func column(@KayaNodeChildren _ children: () -> [KayaNodeHandle]) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_COLUMN), children())
+    }
+
+    private func nodeContainerOf(_ kind: UInt32, _ children: [KayaNodeHandle]) -> KayaNodeHandle {
+        let parent = widget(kind)
+        for child in children { addChild(parent, child) }
+        return parent
     }
 
     func addChild(_ parent: KayaNodeHandle, _ child: KayaNodeHandle) {

@@ -26,7 +26,7 @@ func main() {
 	app := kaya.NewApp()
 
 	var (
-		status       kaya.Signal
+		status       kaya.Signal[string]
 		field, add   kaya.Widget
 		todos        kaya.Collection
 	)

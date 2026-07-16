@@ -1,3 +1,5 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -56,13 +58,25 @@ module KayaApp
     RecordCollection,
     recordHandle,
     collectionOf,
-    fieldOf,
+    field,
     insertRecord,
     updateRecord,
     updateField,
+    FieldSet,
+    set,
+    patch,
     recordItems,
     bindTextField,
     bindCheckedField,
+    buttonOn,
+    entryOn,
+    labelText,
+    labelBound,
+    TplTextSource (..),
+    TplBoolSource (..),
+    label,
+    checkbox,
+    each,
   )
 where
 
@@ -71,6 +85,8 @@ import Data.ByteString.Builder (Builder)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (elemIndex)
+import GHC.Records (HasField)
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import Data.Word (Word32, Word64)
@@ -133,8 +149,18 @@ data BuildState = BuildState
     bRecords :: Builder,
     bModel :: !Model,
     bChildren :: !(Map.Map Word64 [Word64]),
-    bOpenFors :: ![Word64]
+    bOpenFors :: ![Word64],
+    -- Handlers declared at their constructors (buttonOn, entryOn,
+    -- checkbox ...): pure data until buildTx registers them with
+    -- the app alongside the submit — an abandoned Build abandons its
+    -- handlers with its records.
+    bPending :: ![Pending]
   }
+
+data Pending
+  = PClick !Word64 (IO ())
+  | PChange !Word64 (String -> IO ())
+  | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
 modelSet cid path key value model = Map.insert cid (go (Map.findWithDefault [] cid model)) model
@@ -262,6 +288,14 @@ class Monad m => Declare m where
   -- | A When over a Bool signal: stamps on true, unstamps on false.
   when_ :: Signal -> Tpl a -> m (El m, a)
 
+  -- | Construction sugar: a container from its children, so the
+  -- do-block reads as the tree. Lowers to the same records — children
+  -- first, then the container, then the add_childs.
+  row :: [m (El m)] -> m (El m)
+  row = containerOf W.kindRow
+  column :: [m (El m)] -> m (El m)
+  column = containerOf W.kindColumn
+
 instance Declare Build where
   type El Build = Widget
   widget kind = do
@@ -361,6 +395,94 @@ bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
+containerOf :: (Declare m) => Word32 -> [m (El m)] -> m (El m)
+containerOf kind children = do
+  handles <- sequence children
+  parent <- widget kind
+  mapM_ (addChild parent) handles
+  return parent
+
+-- Construction sugar, live zone: props and handlers at the
+-- constructor. The handler is pure state until buildTx registers it.
+pendB :: Pending -> Build ()
+pendB pending = Build $ \s -> ((), s {bPending = pending : bPending s})
+
+buttonOn :: String -> IO () -> Build Widget
+buttonOn text handler = do
+  w@(Widget n) <- widget W.kindButton
+  setText w text
+  pendB (PClick n handler)
+  return w
+
+entryOn :: (String -> IO ()) -> Build Widget
+entryOn handler = do
+  w@(Widget n) <- widget W.kindEntry
+  pendB (PChange n handler)
+  return w
+
+labelText :: String -> Build Widget
+labelText text = do
+  w <- widget W.kindLabel
+  setText w text
+  return w
+
+labelBound :: Signal -> Build Widget
+labelBound sig = do
+  w <- widget W.kindLabel
+  bindText w sig
+  return w
+
+-- Construction sugar, template flavor: one name per widget, and the
+-- argument's type picks the addressable source — a constant, a signal,
+-- or an element field. The protocol's closed union, as a class per
+-- prop type; handlers receive the stamped copy's keys first.
+pendT :: Pending -> Tpl ()
+pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
+
+-- | What a template label's text can bind to.
+class TplTextSource s where
+  bindLabelSource :: Node -> s -> Tpl ()
+
+instance TplTextSource String where
+  bindLabelSource (Node n) text = emitT (W.txSetText n text)
+
+instance TplTextSource Signal where
+  bindLabelSource (Node n) (Signal s) = emitT (W.txBindText n s)
+
+instance TplTextSource (KField String) where
+  bindLabelSource n fd = bindTextField n 0 fd
+
+-- | What a template checkbox's state can bind to.
+class TplBoolSource s where
+  bindCheckedSource :: Node -> s -> Tpl ()
+
+instance TplBoolSource Bool where
+  bindCheckedSource (Node n) checked = emitT (W.txSetChecked n checked)
+
+instance TplBoolSource Signal where
+  bindCheckedSource (Node n) (Signal s) = emitT (W.txBindChecked n s)
+
+instance TplBoolSource (KField Bool) where
+  bindCheckedSource n fd = bindCheckedField n 0 fd
+
+label :: TplTextSource s => s -> Tpl Node
+label src = do
+  n <- widget W.kindLabel
+  bindLabelSource n src
+  return n
+
+checkbox :: TplBoolSource s => s -> ([W.Value] -> Bool -> IO ()) -> Tpl Node
+checkbox src handler = do
+  n@(Node i) <- widget W.kindCheckbox
+  bindCheckedSource n src
+  pendT (PToggleNode i handler)
+  return n
+
+-- | A For as a child: forEach whose body keeps no handles — the common
+-- case once handlers co-locate at their constructors.
+each :: Collection -> Tpl a -> Build Widget
+each c body = fst <$> forEach c body
+
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
 
@@ -457,16 +579,20 @@ class KayaRecord a where
 -- KField String at compile time.
 newtype KField v = KField Word32
 
--- | The field token for a's field `name`, checked at declaration time
--- (a wrong name or type errors at startup, not in a handler):
--- `fieldOf (Proxy :: Proxy Todo) "done" :: KField Bool`.
-fieldOf :: forall a v. (KayaRecord a, KayaFieldType v) => Proxy a -> String -> KField v
-fieldOf p name = case elemIndex name (kayaFieldNames p) of
-  Nothing -> error ("kaya: no field " ++ name)
-  Just i
-    | kayaSchema p !! i /= fieldTag (Proxy :: Proxy v) ->
-        error ("kaya: field " ++ name ++ " has a different wire type")
-    | otherwise -> KField (fromIntegral i)
+-- | The field token for a's field, by type-level name:
+-- `field @"done" @Todo`. GHC's HasField constraint makes both the
+-- membership and the field's type a compile-time fact (its functional
+-- dependency pins v), so a wrong name or type is a type error at the
+-- use site — no strings restating what the record already declares.
+field ::
+  forall name a v.
+  (KayaRecord a, KayaFieldType v, HasField name a v, KnownSymbol name) =>
+  KField v
+field = case elemIndex (symbolVal (Proxy :: Proxy name)) (kayaFieldNames (Proxy :: Proxy a)) of
+  Just i -> KField (fromIntegral i)
+  -- Unreachable: HasField holds and every KayaRecord field is
+  -- wire-typed, so the name is always in the derived list.
+  Nothing -> error ("kaya: field " ++ symbolVal (Proxy :: Proxy name) ++ " has no wire slot")
 
 -- | A Collection whose entries are a-records.
 newtype RecordCollection a = RecordCollection Collection
@@ -498,16 +624,32 @@ updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
 -- | One field's delta: the rest of the record never travels; the
 -- model's copy updates the same slot.
 updateField ::
-  (KayaRecord a, KayaFieldType v) =>
+  KayaFieldType v =>
   RecordCollection a -> W.Value -> KField v -> v -> Build ()
-updateField (RecordCollection (Collection n path)) key (KField i) value = Build $ \s ->
-  let wire = toFieldValue value
-      current = case lookup key (lookupEntries n path (bModel s)) of
+updateField c key (KField i) value = updateFieldWire c key i (toFieldValue value)
+
+updateFieldWire :: RecordCollection a -> W.Value -> Word32 -> W.Value -> Build ()
+updateFieldWire (RecordCollection (Collection n path)) key i wire = Build $ \s ->
+  let current = case lookup key (lookupEntries n path (bModel s)) of
         Just vs -> vs
         Nothing -> error "kaya: update of missing key"
       updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
    in ((), s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i wire,
               bModel = modelSet n path key updated (bModel s)})
+
+-- | One recorded field write of an a-record: the value's type checks
+-- against the field's at the use site, then the pair travels as
+-- (index, wire value).
+data FieldSet a = FieldSet !Word32 !W.Value
+
+set :: KayaFieldType v => KField v -> v -> FieldSet a
+set (KField i) v = FieldSet i (toFieldValue v)
+
+-- | Typed field writes with the key spelled once:
+-- @patch todos key [set (field \@"done" \@Todo) True]@. Each entry
+-- records one update_field — a patch is recorded writes, never a diff.
+patch :: RecordCollection a -> W.Value -> [FieldSet a] -> Build ()
+patch c key = mapM_ (\(FieldSet i v) -> updateFieldWire c key i v)
 
 -- | The typed model: what this guest wrote, in insertion order.
 recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
@@ -547,11 +689,21 @@ buildTx :: App -> Build a -> IO a
 buildTx app (Build f) = do
   counters <- readIORef (appCounters app)
   (model, children) <- readIORef (appModel app)
-  let (a, s) = f (BuildState counters mempty model children [])
+  let (a, s) = f (BuildState counters mempty model children [] [])
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
+  -- Handlers declared at their constructors register alongside the
+  -- submit; a Build that threw never reaches here, abandoning them
+  -- with its records.
+  mapM_ (register app) (reverse (bPending s))
   kayaSubmit [bRecords s]
   return a
+
+register :: App -> Pending -> IO ()
+register app pending = case pending of
+  PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
+  PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
+  PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
 -- | buildTx for handlers that keep no handles.
 submitTx :: App -> Build () -> IO ()

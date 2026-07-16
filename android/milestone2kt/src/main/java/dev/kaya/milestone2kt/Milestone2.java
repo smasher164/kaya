@@ -18,16 +18,16 @@ final class Milestone2 {
      * nothing escapes through static fields.
      */
     private static final class Scene {
-        final KayaApp.Signal status;
-        final KayaApp.Signal extras;
+        final KayaApp.Signal<String> status;
+        final KayaApp.Signal<Boolean> extras;
         final KayaApp.Widget step;
         final KayaApp.Collection groups;
         final KayaApp.Collection items;
         final KayaApp.Node removeButton;
 
         Scene(
-                KayaApp.Signal status,
-                KayaApp.Signal extras,
+                KayaApp.Signal<String> status,
+                KayaApp.Signal<Boolean> extras,
                 KayaApp.Widget step,
                 KayaApp.Collection groups,
                 KayaApp.Collection items,
@@ -47,8 +47,8 @@ final class Milestone2 {
         KayaApp app = new KayaApp();
 
         Scene scene = app.build(tx -> {
-            KayaApp.Signal status = tx.signal("step 0");
-            KayaApp.Signal extras = tx.signal(false);
+            KayaApp.Signal<String> status = tx.signal("step 0");
+            KayaApp.Signal<Boolean> extras = tx.signal(false);
 
             KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);
             KayaApp.Widget step = tx.widget(KayaWire.KIND_BUTTON);

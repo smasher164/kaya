@@ -26,7 +26,8 @@ func main() {
 	app := kaya.NewApp()
 
 	var (
-		status, extras kaya.Signal
+		status kaya.Signal[string]
+		extras kaya.Signal[bool]
 		step           kaya.Widget
 		groups, items  kaya.Collection
 		removeButton   kaya.Node

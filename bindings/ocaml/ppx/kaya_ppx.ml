@@ -4,18 +4,25 @@
 
      type todo = { title : string; done_ : bool } [@@deriving kaya]
 
-   this emits the descriptor and one typed field token per field:
+   this emits the descriptor, one typed field token per field, and the
+   patch function — typed field writes with the key spelled once, one
+   optional labelled argument per field (Python's kwargs patch, but
+   static):
 
      val todo_record : todo Kaya_app.record_type
      val todo_title : (todo, string) Kaya_app.field
      val todo_done_ : (todo, bool) Kaya_app.field
+     val todo_patch :
+       ?title:string -> ?done_:bool ->
+       todo Kaya_app.record_collection -> Kaya_wire.value -> tx -> unit
 
-   — the schema, both conversions, and the indexes all derive from the
-   one declaration, so none can drift (the same single-source move as
-   record! in Rust and the dataclass reader in Python). Every field
-   must be wire-typed (string, bool, int64, float); OCaml keeps
-   handlers out of records by idiom, so there is no guest-only
-   skipping. *)
+   Each supplied argument records one update_field — a patch is
+   recorded writes, never a diff. The schema, both conversions, the
+   indexes, and the patch all derive from the one declaration, so none
+   can drift (the same single-source move as record! in Rust and the
+   dataclass reader in Python). Every field must be wire-typed (string,
+   bool, int64, float); OCaml keeps handlers out of records by idiom,
+   so there is no guest-only skipping. *)
 
 open Ppxlib
 
@@ -134,7 +141,37 @@ let generate ~ctxt (_rec_flag, type_decls) =
                   [%e Ast_builder.Default.eint ~loc i]])
           fields
       in
-      descriptor :: tokens
+      (* <t>_patch ?f1 ?f2 rc key tx: each supplied argument is one
+         update_field. Internal names carry the __kaya_ prefix so a
+         field named rc/key/tx cannot capture them. *)
+      let patch =
+        let write_one (name, _) =
+          [%expr
+            match [%e evar name] with
+            | Some __kaya_v ->
+                Kaya_app.update_field __kaya_rc __kaya_key
+                  [%e evar (tname ^ "_" ^ name)]
+                  __kaya_v __kaya_tx
+            | None -> ()]
+        in
+        let body =
+          match List.map write_one fields with
+          | [] -> assert false
+          | first :: rest ->
+              List.fold_left
+                (fun acc e -> Ast_builder.Default.pexp_sequence ~loc acc e)
+                first rest
+        in
+        let inner = [%expr fun __kaya_rc __kaya_key __kaya_tx -> [%e body]] in
+        let with_optionals =
+          List.fold_right
+            (fun (name, _) acc ->
+              Ast_builder.Default.pexp_fun ~loc (Optional name) None (pvar name) acc)
+            fields inner
+        in
+        [%stri let [%p pvar (tname ^ "_patch")] = [%e with_optionals]]
+      in
+      (descriptor :: tokens) @ [ patch ]
   | _ ->
       Location.raise_errorf ~loc
         "kaya: [@@deriving kaya] applies to a single record type"

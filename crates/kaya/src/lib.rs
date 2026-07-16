@@ -41,8 +41,14 @@ mod swiftui_host;
 pub mod capi;
 
 pub use app::{
-    AppCtx, Collection, Field, KayaField, KayaRecord, PropToken, Tpl, Tx, ValueKind, props,
+    AppCtx, Collection, Field, KayaField, KayaPatch, KayaRecord, PropToken, Tpl, TplSource, Tx,
+    ValueKind, props,
 };
+
+// The record! macro expands paste! for its generated builder's name;
+// the re-export keeps guests free of the dependency.
+#[doc(hidden)]
+pub use paste::paste as __paste;
 pub use protocol::{
     CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, ValueType,
     WidgetId, WidgetKind, WindowId,

@@ -60,7 +60,27 @@
             cargo-ndk
             # Validation-suite languages (function floor + direct ring tier).
             python3
-            go
+            # Go 1.27rc2, pinned binary distribution: generic methods
+            # (type parameters on methods) are foundational for the Go
+            # binding's typed surface, and 1.27 is pre-release until
+            # August 2026. Swap back to nixpkgs go when it catches up.
+            (pkgs.stdenvNoCC.mkDerivation {
+              pname = "go";
+              version = "1.27rc2";
+              src = pkgs.fetchurl {
+                url = "https://go.dev/dl/go1.27rc2.darwin-arm64.tar.gz";
+                sha256 = "b543bf435ed266d66b275efba433dbe64904be607fe365494cf72f7ad4e91b63";
+              };
+              sourceRoot = "go";
+              dontBuild = true;
+              dontFixup = true;
+              installPhase = ''
+                mkdir -p $out
+                cp -R . $out/
+                mkdir -p $out/bin
+                ln -sf $out/bin/go $out/bin/go || true
+              '';
+            })
             dotnet-sdk_10
             # OCaml guest (direct ring over ocaml-ctypes + cursor stubs);
             # findlib's setup hook wires OCAMLPATH for the shell.

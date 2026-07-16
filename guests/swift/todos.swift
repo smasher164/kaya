@@ -1,13 +1,12 @@
-// The todos scene from Swift: records and field projection. The struct
-// is the schema — Mirror walks a prototype once at declaration — the
-// template binds each field to its own widget through typed field
-// tokens, and toggling a row sends one field's delta through
-// updateField: the title never travels.
+// The todos scene from Swift, on the construction sugar: the struct is
+// the schema (Mirror walks a prototype), constructors carry their
+// props and handlers, and result-builder containers make the build
+// closure the scene's shape. The sugar lowers eagerly to the same
+// records as the explicit floor — milestone2.swift keeps that style on
+// purpose.
 
 import Foundation
 
-// The record is the schema; init(values:) is the one hand-written
-// member (Mirror cannot construct), everything else derives.
 struct Todo: KayaRecord {
     var title: String
     var done: Bool
@@ -27,64 +26,42 @@ struct Todo: KayaRecord {
     }
 }
 
-// The field tokens, checked against the struct at startup.
-let fieldTitle = Todo.field("title", String.self)
-let fieldDone = Todo.field("done", Bool.self)
-
 let app = KayaApp()
-
-func itemsLeftText(_ tx: KayaAppTx, _ todos: KayaRecordCollection<Todo>) -> String {
-    let n = todos.items(tx).filter { !$0.value.done }.count
-    return n == 1 ? "1 item left" : "\(n) items left"
-}
-
-let (itemsLeft, field, add, todos, check) = app.build {
-    tx -> (KayaSignal, KayaWidget, KayaWidget, KayaRecordCollection<Todo>, KayaNodeHandle) in
-    let itemsLeft = tx.signal(.str("0 items left"))
-
-    let column = tx.widget(UInt32(KAYA_KIND_COLUMN))
-    let field = tx.widget(UInt32(KAYA_KIND_ENTRY))
-    let add = tx.widget(UInt32(KAYA_KIND_BUTTON))
-    tx.setText(add, "Add")
-    let status = tx.widget(UInt32(KAYA_KIND_LABEL))
-    tx.bindText(status, itemsLeft)
-
-    let todos = tx.collection(of: Todo.self)
-    let (todoList, check) = tx.forEach(todos.collection) { t -> KayaNodeHandle in
-        let row = t.widget(UInt32(KAYA_KIND_ROW))
-        let check = t.widget(UInt32(KAYA_KIND_CHECKBOX))
-        t.bindCheckedField(check, fieldDone)
-        let title = t.widget(UInt32(KAYA_KIND_LABEL))
-        t.bindTextField(title, fieldTitle)
-        t.addChild(row, check)
-        t.addChild(row, title)
-        return check
-    }
-
-    tx.addChild(column, field)
-    tx.addChild(column, add)
-    tx.addChild(column, status)
-    tx.addChild(column, todoList)
-    tx.mount(column)
-    return (itemsLeft, field, add, todos, check)
-}
 
 // The fold: widget-owned state arrives as occurrences; the app's copy
 // is this variable, not a widget read.
 var draft = ""
 var nextKey = 0
-app.onChange(field) { _, text in
-    draft = text
-}
-app.onClick(add) { tx in
-    nextKey += 1
-    todos.insert(tx, .str("t\(nextKey)"), Todo(title: draft, done: false))
-    tx.write(itemsLeft, .str(itemsLeftText(tx, todos)))
-}
-app.onToggle(check) { tx, keys, checked in
-    // One field's delta: the title never travels.
-    todos.updateField(tx, keys[0], fieldDone, checked)
-    tx.write(itemsLeft, .str(itemsLeftText(tx, todos)))
+
+app.build { tx in
+    let itemsLeft = tx.signal(.str("0 items left"))
+    let todos = tx.collection(of: Todo.self)
+
+    func itemsLeftText(_ tx: KayaAppTx) -> String {
+        let n = todos.items(tx).filter { !$0.value.done }.count
+        return n == 1 ? "1 item left" : "\(n) items left"
+    }
+
+    let root = tx.column {
+        tx.entry { _, text in draft = text }
+        tx.button("Add") { tx in
+            nextKey += 1
+            todos.insert(tx, .str("t\(nextKey)"), Todo(title: draft, done: false))
+            tx.write(itemsLeft, .str(itemsLeftText(tx)))
+        }
+        tx.label(bind: itemsLeft)
+        tx.each(todos.collection) { t in
+            _ = t.row {
+                todos.checkbox(t, \.done) { tx, keys, checked in
+                    // One field's delta: the title never travels.
+                    todos.patch(tx, keys[0]).set(\.done, checked)
+                    tx.write(itemsLeft, .str(itemsLeftText(tx)))
+                }
+                todos.label(t, \.title)
+            }
+        }
+    }
+    tx.mount(root)
 }
 
 app.run()

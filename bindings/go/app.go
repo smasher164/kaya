@@ -19,7 +19,16 @@
 package kaya
 
 // Typed handles over the id spaces.
-type Signal struct{ id uint64 }
+// Scalar is the signal-value constraint: the wire's scalar types.
+type Scalar interface {
+	~string | ~bool | ~int64 | ~float64
+}
+
+// Signal carries its value type: writes are checked at compile time,
+// and When demands a Signal[bool] instead of panicking in the scene.
+// (Generic methods — Go 1.27 — are what let Tx.Signal and Tx.Write
+// mint and consume these without free-function detours.)
+type Signal[V Scalar] struct{ id uint64 }
 
 // Widget is a live widget: exactly one thing on screen.
 type Widget struct{ id uint64 }
@@ -194,14 +203,14 @@ func (a *App) Build(fn func(*Tx)) {
 	}
 }
 
-func (tx *Tx) Signal(initial any) Signal {
+func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
 	tx.app.c.signal++
-	s := Signal{tx.app.c.signal}
+	s := Signal[V]{tx.app.c.signal}
 	tx.records = append(tx.records, TxCreateSignal(s.id, initial))
 	return s
 }
 
-func (tx *Tx) Write(s Signal, value any) {
+func (tx *Tx) Write[V Scalar](s Signal[V], value V) {
 	tx.records = append(tx.records, TxWriteSignal(s.id, value))
 }
 
@@ -216,7 +225,7 @@ func (tx *Tx) SetText(w Widget, text string) {
 	tx.records = append(tx.records, TxSetText(w.id, text))
 }
 
-func (tx *Tx) BindText(w Widget, s Signal) {
+func (tx *Tx) BindText(w Widget, s Signal[string]) {
 	tx.records = append(tx.records, TxBindText(w.id, s.id))
 }
 
@@ -224,12 +233,74 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 	tx.records = append(tx.records, TxSetChecked(w.id, checked))
 }
 
-func (tx *Tx) BindChecked(w Widget, s Signal) {
+func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }
 
 func (tx *Tx) AddChild(parent, child Widget) {
 	tx.records = append(tx.records, TxAddChild(parent.id, child.id))
+}
+
+// Construction sugar: containers take their children (varargs), and
+// constructors carry their props and handlers — the Fyne shape
+// (widget.NewButton("Add", tapped)); nil means no handler. Everything
+// lowers eagerly to the same records; never a scene value interpreted
+// later.
+
+func (tx *Tx) Column(children ...Widget) Widget {
+	return tx.containerOf(KindColumn, children)
+}
+
+func (tx *Tx) Row(children ...Widget) Widget {
+	return tx.containerOf(KindRow, children)
+}
+
+func (tx *Tx) containerOf(kind uint32, children []Widget) Widget {
+	parent := tx.Widget(kind)
+	for _, child := range children {
+		tx.AddChild(parent, child)
+	}
+	return parent
+}
+
+// Button creates a button with its caption and click handler (nil for
+// none).
+func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
+	w := tx.Widget(KindButton)
+	tx.SetText(w, text)
+	if onClick != nil {
+		tx.app.OnClick(w, onClick)
+	}
+	return w
+}
+
+// Label creates a label bound to a signal.
+func (tx *Tx) Label(s Signal[string]) Widget {
+	w := tx.Widget(KindLabel)
+	tx.BindText(w, s)
+	return w
+}
+
+// Entry creates a text field with its change handler (nil for none).
+func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
+	w := tx.Widget(KindEntry)
+	if onChange != nil {
+		tx.app.OnChange(w, onChange)
+	}
+	return w
+}
+
+// Checkbox creates a labeled box with its toggle handler (nil for
+// none).
+func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
+	w := tx.Widget(KindCheckbox)
+	if text != "" {
+		tx.SetText(w, text)
+	}
+	if onToggle != nil {
+		tx.app.OnToggle(w, onToggle)
+	}
+	return w
 }
 
 func (tx *Tx) Collection() Collection {
@@ -256,7 +327,7 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 
 // When declares a When over a Bool signal: stamps on true, unstamps on
 // false.
-func (tx *Tx) When(s Signal, fn func(*Tpl)) Widget {
+func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
 	tx.records = append(tx.records, TxCreateWhen(w.id, s.id))
@@ -325,6 +396,23 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level, 0))
 }
 
+// The template flavor of the containers.
+func (t *Tpl) Row(children ...Node) Node {
+	return t.containerOf(KindRow, children)
+}
+
+func (t *Tpl) Column(children ...Node) Node {
+	return t.containerOf(KindColumn, children)
+}
+
+func (t *Tpl) containerOf(kind uint32, children []Node) Node {
+	parent := t.Widget(kind)
+	for _, child := range children {
+		t.AddChild(parent, child)
+	}
+	return parent
+}
+
 func (t *Tpl) AddChild(parent, child Node) {
 	t.tx.records = append(t.tx.records, TxAddChild(parent.id, child.id))
 }
@@ -345,7 +433,7 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	return n
 }
 
-func (t *Tpl) When(s Signal, fn func(*Tpl)) Node {
+func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	t.tx.records = append(t.tx.records, TxCreateWhen(n.id, s.id))

@@ -297,6 +297,38 @@ rules so far:
 - Pick one property-configuration style per language (functional options
   or config structs; Go UI DSLs have gone both ways) and do not mix them
   within a binding.
+- One constructor name per widget; the argument's type picks the source.
+  A property binds to an *addressable source* — the protocol's closed
+  union of constant, signal, and (in template position) element field.
+  That union is a protocol fact, not binding sugar, so the binding
+  surfaces it as one name rather than a name per source:
+  `label("hi")`, `label(count_text)`, `label(Todo::title())` are the
+  same constructor, and a name like `label_field` would wrongly imply
+  field binding is a different operation instead of a different address.
+  Each language reaches for its own mechanism — trait-bounded
+  conversions in Rust (`impl Into<TplSource<K>>`), overloads in C#,
+  Java, and Swift, a union type-set constraint on a generic method in
+  Go, a type class per prop type in Haskell, labelled optional
+  arguments in OCaml — and the mechanism stays compile-checked: a bool
+  source on a text prop is a type error everywhere, matching the
+  scene's own validation. The union does not grow a guest-variable arm;
+  by the no-reads doctrine a plain guest value is a constant at record
+  time, and anything live must be a signal or a field.
+- A patch is recorded writes, never a diff. The multi-field mutation
+  surface (`todos.patch(tx, key).done(true).title("x")`) lowers each
+  setter call to one update_field — the guest's calls are already the
+  exact list of changed fields, so no binding ever clones the current
+  record and compares (a diff pays a copy plus per-field comparisons —
+  Mirror walks in Swift, deep string clones in Rust — to infer what the
+  call sites stated). Where the binding owns code generation the
+  setters are per-field and named (the record! builder in Rust, the
+  ppx's optional labelled arguments in OCaml — Python's kwargs patch
+  with static types); elsewhere a set-chain over the selector vocabulary
+  (`.Set(x => x.Done, true)`, `.set(\.done, checked)`,
+  `patch todos key [set (field @"done" @Todo) checked]`). Selector
+  resolution is cached per field — reflection walks, key-path probes,
+  and lambda probes run once per declaration site, never per event —
+  and update_field remains the explicit single-write floor.
 
 ## Layout
 

@@ -65,6 +65,47 @@ pub struct Field<K> {
     _kind: PhantomData<K>,
 }
 
+/// One of the addressable sources a template property binds to: a
+/// constant, a signal, or a field of the enclosing For's element —
+/// the protocol's whole binding universe, as one argument. The kind
+/// parameter keeps constants and fields honest at compile time;
+/// signals stay runtime-checked (Rust signals carry no value type
+/// yet).
+pub struct TplSource<K> {
+    inner: SourceInner,
+    _kind: PhantomData<K>,
+}
+
+enum SourceInner {
+    Const(Value),
+    Signal(SignalId),
+    Field(u32),
+}
+
+impl From<&str> for TplSource<StrKind> {
+    fn from(s: &str) -> Self {
+        TplSource { inner: SourceInner::Const(Value::Str(s.to_owned())), _kind: PhantomData }
+    }
+}
+
+impl From<bool> for TplSource<BoolKind> {
+    fn from(b: bool) -> Self {
+        TplSource { inner: SourceInner::Const(Value::Bool(b)), _kind: PhantomData }
+    }
+}
+
+impl<K> From<SignalId> for TplSource<K> {
+    fn from(s: SignalId) -> Self {
+        TplSource { inner: SourceInner::Signal(s), _kind: PhantomData }
+    }
+}
+
+impl<K> From<Field<K>> for TplSource<K> {
+    fn from(f: Field<K>) -> Self {
+        TplSource { inner: SourceInner::Field(f.index), _kind: PhantomData }
+    }
+}
+
 impl<K> Field<K> {
     pub const fn new(index: u32) -> Self {
         Field {
@@ -223,6 +264,40 @@ macro_rules! record {
         impl $name {
             $crate::__record_fields!(0u32; $($fvis $field : $ty),+);
         }
+
+        $crate::__paste! {
+            /// Typed field writes with the key spelled once; each
+            /// setter records one update_field. A patch is recorded
+            /// writes, never a diff — no clone, no comparison.
+            #[allow(dead_code)]
+            $vis struct [<$name Patch>]<'t, 'c> {
+                tx: &'t mut $crate::Tx<'c>,
+                instance: $crate::Collection<$name>,
+                key: $crate::Value,
+            }
+
+            #[allow(dead_code)]
+            impl<'t, 'c> [<$name Patch>]<'t, 'c> {
+                $(
+                    $fvis fn $field(self, value: impl Into<$ty>) -> Self {
+                        let Self { tx, instance, key } = self;
+                        tx.update_field(&instance, key.clone(), $name::$field(), value.into());
+                        Self { tx, instance, key }
+                    }
+                )+
+            }
+
+            impl $crate::KayaPatch for $name {
+                type Builder<'t, 'c> = [<$name Patch>]<'t, 'c> where 'c: 't;
+                fn patch_builder<'t, 'c>(
+                    tx: &'t mut $crate::Tx<'c>,
+                    instance: &$crate::Collection<$name>,
+                    key: $crate::Value,
+                ) -> Self::Builder<'t, 'c> {
+                    [<$name Patch>] { tx, instance: instance.clone(), key }
+                }
+            }
+        }
     };
 }
 
@@ -237,6 +312,30 @@ macro_rules! __record_fields {
         }
         $crate::__record_fields!($idx + 1; $($rvis $rfield : $rty),*);
     };
+}
+
+/// A record type with a generated patch builder — one typed setter per
+/// field, each lowering to update_field. Derived by record!; the
+/// builder type is the record's name plus `Patch`.
+pub trait KayaPatch: KayaRecord {
+    /// The generated builder, holding the transaction borrow.
+    type Builder<'t, 'c>
+    where
+        'c: 't;
+    #[doc(hidden)]
+    fn patch_builder<'t, 'c>(
+        tx: &'t mut Tx<'c>,
+        instance: &Collection<Self>,
+        key: Value,
+    ) -> Self::Builder<'t, 'c>;
+}
+
+impl<T: KayaPatch> Collection<T> {
+    /// Typed field writes with the key spelled once:
+    /// `todos.patch(tx, key).done(true).title("x")`.
+    pub fn patch<'t, 'c>(&self, tx: &'t mut Tx<'c>, key: impl Into<Value>) -> T::Builder<'t, 'c> {
+        T::patch_builder(tx, self, key.into())
+    }
 }
 
 /// One instance of a collection: the table inside the stamped copy
@@ -563,6 +662,41 @@ impl Tx<'_> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
+    /// Construction sugar: a container from its children, so the build
+    /// body reads as the tree. Lowers to the same records — children
+    /// were created by the caller, then the container, then the
+    /// add_childs. Handlers stay in the occurrence loop, the Rust
+    /// idiom; milestone2 keeps the fully explicit floor on purpose.
+    pub fn column(&mut self, children: &[WidgetId]) -> WidgetId {
+        self.container_of(WidgetKind::Column, children)
+    }
+
+    pub fn row(&mut self, children: &[WidgetId]) -> WidgetId {
+        self.container_of(WidgetKind::Row, children)
+    }
+
+    fn container_of(&mut self, kind: WidgetKind, children: &[WidgetId]) -> WidgetId {
+        let parent = self.widget(kind);
+        for child in children {
+            self.add_child(parent, *child);
+        }
+        parent
+    }
+
+    /// A button with its caption.
+    pub fn button(&mut self, text: &str) -> WidgetId {
+        let w = self.widget(WidgetKind::Button);
+        self.set(w, Prop::Text, text);
+        w
+    }
+
+    /// A label bound to a signal.
+    pub fn label(&mut self, signal: SignalId) -> WidgetId {
+        let w = self.widget(WidgetKind::Label);
+        self.bind(w, Prop::Text, signal);
+        w
+    }
+
     /// Declare a collection of `T` records: a core-side keyed table a
     /// For renders. The element type is the schema — `T::SCHEMA` goes
     /// on the wire here, and every field access derives from the same
@@ -786,6 +920,51 @@ impl Tpl<'_, '_> {
         });
     }
 
+    /// The template flavor of the container sugar.
+    pub fn row(&mut self, children: &[TemplateNodeId]) -> TemplateNodeId {
+        self.container_of(WidgetKind::Row, children)
+    }
+
+    pub fn column(&mut self, children: &[TemplateNodeId]) -> TemplateNodeId {
+        self.container_of(WidgetKind::Column, children)
+    }
+
+    fn container_of(&mut self, kind: WidgetKind, children: &[TemplateNodeId]) -> TemplateNodeId {
+        let parent = self.widget(kind);
+        for child in children {
+            self.add_child(parent, *child);
+        }
+        parent
+    }
+
+    /// A label bound to any addressable source: a constant, a signal,
+    /// or a field of the enclosing element.
+    pub fn label(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Label);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A checkbox bound to any addressable source.
+    pub fn checkbox(&mut self, src: impl Into<TplSource<BoolKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Checkbox);
+        self.apply_source(n, Prop::Checked, src.into().inner);
+        n
+    }
+
+    fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {
+        let value = match src {
+            SourceInner::Const(v) => PropValue::Const(v),
+            SourceInner::Signal(s) => PropValue::Signal(s),
+            SourceInner::Field(field) => PropValue::Element { level: 0, field },
+        };
+        self.tx.ops.push(TxOp::SetProperty {
+            widget: WidgetId(node.0),
+            prop,
+            value,
+        });
+    }
+
     /// Declare a collection inside the template: each stamped copy gets
     /// its own instance, addressed via `at(key)` on the returned root
     /// handle. Return it from the template body so handlers can reach
@@ -862,6 +1041,42 @@ mod tests {
         assert_eq!(Todo::from_values(&values), todo);
         assert_eq!(Todo::title().index, 0);
         assert_eq!(Todo::done().index, 1);
+    }
+
+    /// A patch is recorded writes: each setter emits exactly one
+    /// update_field op and mutates one model slot — no whole-record
+    /// travel, no diff.
+    #[test]
+    fn patch_records_typed_field_writes() {
+        use crate::protocol::TxOp;
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        tx.insert(&todos, "a", Todo { title: "milk".into(), done: false });
+        let ops_before = tx.ops.len();
+
+        todos.patch(&mut tx, "a").done(true).title("oat milk");
+
+        let field_writes: Vec<_> = tx.ops[ops_before..]
+            .iter()
+            .map(|op| match op {
+                TxOp::CollectionUpdateField { field, value, .. } => (*field, value.clone()),
+                other => panic!("patch lowered to {other:?}, not update_field"),
+            })
+            .collect();
+        assert_eq!(
+            field_writes,
+            vec![(1, Value::Bool(true)), (0, Value::from("oat milk"))]
+        );
+        assert_eq!(
+            tx.items(&todos),
+            vec![(Value::from("a"), Todo { title: "oat milk".into(), done: true })]
+        );
     }
 
     use crate::protocol::{Occurrence, Prop, WidgetId, WidgetKind};

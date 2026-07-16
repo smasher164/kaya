@@ -25,7 +25,7 @@ func main() {
 	app := kaya.NewApp()
 
 	var (
-		status kaya.Signal
+		status kaya.Signal[string]
 		urgent kaya.Widget
 	)
 

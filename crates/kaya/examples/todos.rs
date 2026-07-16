@@ -2,14 +2,14 @@
 //! design appendix's app on the structural core. The record! macro
 //! derives the schema, the conversions, and the field tokens from one
 //! struct; bind_field unifies each field's type with its property's at
-//! compile time; and toggling a row sends one field's delta through
-//! update_field — the title never travels.
+//! compile time; and toggling a row records one field's delta through
+//! the generated patch builder — the title never travels.
 //!
 //! The backend selftest (KAYA_SELFTEST=todos) types "buy milk", clicks
 //! Add, toggles the stamped row's checkbox, and expects the status
 //! label to read exactly "0 items left".
 
-use kaya::{Occurrence, Prop, WidgetKind, props};
+use kaya::{Occurrence, WidgetKind};
 
 kaya::record! {
     struct Todo {
@@ -28,33 +28,25 @@ fn items_left_text(tx: &kaya::Tx<'_>, todos: &kaya::Collection<Todo>) -> String 
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
+    // The construction sugar: containers take their children, and the
+    // build body reads as the tree (milestone2 keeps the fully
+    // explicit floor on purpose). Handlers stay in the occurrence
+    // loop, the Rust idiom.
     let mut tx = ctx.begin();
     let items_left = tx.signal("0 items left");
-
-    let column = tx.widget(WidgetKind::Column);
-    let field = tx.widget(WidgetKind::Entry);
-    let add = tx.widget(WidgetKind::Button);
-    tx.set(add, Prop::Text, "Add");
-    let status = tx.widget(WidgetKind::Label);
-    tx.bind(status, Prop::Text, items_left);
-
     let todos = tx.collection::<Todo>();
+
+    let field = tx.widget(WidgetKind::Entry);
+    let add = tx.button("Add");
+    let status = tx.label(items_left);
     let (todo_list, check) = tx.for_each(&todos, |t| {
-        let row = t.widget(WidgetKind::Row);
-        let check = t.widget(WidgetKind::Checkbox);
-        t.bind_field(check, props::CHECKED, 0, Todo::done());
-        let title = t.widget(WidgetKind::Label);
-        t.bind_field(title, props::TEXT, 0, Todo::title());
-        t.add_child(row, check);
-        t.add_child(row, title);
+        let check = t.checkbox(Todo::done());
+        let title = t.label(Todo::title());
+        t.row(&[check, title]);
         check
     });
-
-    tx.add_child(column, field);
-    tx.add_child(column, add);
-    tx.add_child(column, status);
-    tx.add_child(column, todo_list);
-    tx.mount(column);
+    let root = tx.column(&[field, add, status, todo_list]);
+    tx.mount(root);
     tx.commit();
 
     // The fold: widget-owned state arrives as occurrences; the app's
@@ -77,9 +69,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.commit();
             }
             Occurrence::InstanceToggled { node, path, checked } if node == check => {
-                // One field's delta: the title never travels.
+                // One field's delta: the title never travels. The
+                // patch builder is record!-generated — each setter is
+                // one update_field.
                 let mut tx = ctx.begin();
-                tx.update_field(&todos, path[0].clone(), Todo::done(), checked);
+                todos.patch(&mut tx, path[0].clone()).done(checked);
                 let status_text = items_left_text(&tx, &todos);
                 tx.write(items_left, status_text);
                 tx.commit();

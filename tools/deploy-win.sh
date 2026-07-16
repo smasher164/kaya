@@ -113,6 +113,11 @@ if [ "$PROVISION" = 1 ]; then
     run_ssh 'C:\kaya\WindowsAppRuntimeInstall-arm64.exe --quiet --force'
 fi
 
+# Go 1.27rc2 on the VM (generic methods; pre-release until August
+# 2026): fetched once, idempotently; the go guest scripts prepend
+# C:\kaya\go127\go\bin so it wins over any stable install.
+run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (powershell -Command "Invoke-WebRequest -Uri https://go.dev/dl/go1.27rc2.windows-arm64.zip -OutFile C:\kaya\go127.zip; Expand-Archive -Path C:\kaya\go127.zip -DestinationPath C:\kaya\go127 -Force; Remove-Item C:\kaya\go127.zip")'
+
 # A hung or leftover guest keeps kaya.dll locked: the next deploy's
 # copy fails under set -e, or a fresh suite runs beside a zombie. This
 # is a dedicated test VM — python/go/dotnet processes are always kaya

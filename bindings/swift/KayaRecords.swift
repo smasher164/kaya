@@ -53,25 +53,39 @@ extension KayaRecord {
         Mirror(reflecting: self).children.compactMap { wireValue($0.value) }
     }
 
-    /// The field token for the property `name`, checked against V at
-    /// declaration time (a wrong name or type traps at startup, not in
-    /// a handler).
-    static func field<V>(_ name: String, _: V.Type) -> KayaField<V> {
-        var index: UInt32 = 0
-        for child in Mirror(reflecting: prototype).children {
-            guard let value = wireValue(child.value) else { continue }
-            if child.label == name {
-                precondition(
-                    type(of: child.value) == V.self,
-                    "kaya: \(Self.self).\(name) is \(type(of: child.value)), not \(V.self)")
-                _ = value
-                return KayaField<V>(index: index)
-            }
-            index += 1
+    /// The field token for the field a key path selects:
+    /// Todo.field(\.done). The name and type are the struct's own,
+    /// compiler-checked — no strings restating the declaration (the
+    /// SwiftUI shape). Resolution writes a sentinel through the key
+    /// path on a probe copy and diffs the wire values — once per key
+    /// path: handlers resolve per event, so the Mirror walks must not
+    /// re-run there. Key paths of distinct record types are distinct
+    /// keys, so one cache serves all.
+    static func field<V>(_ keyPath: WritableKeyPath<Self, V>) -> KayaField<V> {
+        if let cached = kayaFieldIndexes[keyPath] {
+            return KayaField<V>(index: cached)
         }
-        preconditionFailure("kaya: \(Self.self) has no wire field \(name)")
+        var probe = prototype
+        switch probe[keyPath: keyPath] {
+        case let s as String: probe[keyPath: keyPath] = (s + "\u{0}kaya") as! V
+        case let b as Bool: probe[keyPath: keyPath] = (!b) as! V
+        case let n as Int64: probe[keyPath: keyPath] = (n &+ 0x5eed) as! V
+        case let x as Double: probe[keyPath: keyPath] = (x.isNaN ? 0 : x + 1) as! V
+        default: preconditionFailure("kaya: \(V.self) is not a wire type")
+        }
+        for (i, (a, b)) in zip(prototype.kayaValues, probe.kayaValues).enumerated()
+        where a != b {
+            kayaFieldIndexes[keyPath] = UInt32(i)
+            return KayaField<V>(index: UInt32(i))
+        }
+        preconditionFailure("kaya: key path does not select a wire field of \(Self.self)")
     }
 }
+
+/// Key path -> wire index, all record types together (key paths carry
+/// their root type, so entries cannot collide). App-thread only, like
+/// every guest-side structure.
+private var kayaFieldIndexes: [AnyKeyPath: UInt32] = [:]
 
 /// A collection whose entries are T records; the plain handle rides
 /// along for forEach and at.
@@ -86,8 +100,16 @@ struct KayaRecordCollection<T: KayaRecord> {
         tx.updateRecordRaw(collection, key, value, value.kayaValues)
     }
 
-    /// One field's delta: the rest of the record never travels; the
-    /// model's copy is rebuilt from its updated wire fields.
+    /// One field's delta by key path: the rest of the record never
+    /// travels. The key path is the field reference — no token to
+    /// declare.
+    func updateField<V>(
+        _ tx: KayaAppTx, _ key: KayaValue, _ keyPath: WritableKeyPath<T, V>, _ value: V
+    ) {
+        updateField(tx, key, T.field(keyPath), value)
+    }
+
+    /// updateField over a pre-resolved token.
     func updateField<V>(_ tx: KayaAppTx, _ key: KayaValue, _ f: KayaField<V>, _ value: V) {
         guard let current = tx.recordEntries(collection).first(where: { $0.key == key })?.value as? T
         else {
@@ -101,9 +123,45 @@ struct KayaRecordCollection<T: KayaRecord> {
         tx.updateFieldRaw(collection, key, T(values: fields), f.index, wire)
     }
 
+    /// A label bound to the field the key path selects.
+    func label(_ t: KayaTpl, _ keyPath: WritableKeyPath<T, String>) -> KayaNodeHandle {
+        t.label(T.field(keyPath))
+    }
+
+    /// A checkbox bound to the field the key path selects, with its
+    /// toggle handler co-located.
+    func checkbox(
+        _ t: KayaTpl, _ keyPath: WritableKeyPath<T, Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.checkbox(T.field(keyPath), onToggle: onToggle)
+    }
+
     /// The typed model: what this guest wrote, in insertion order.
     func items(_ tx: KayaAppTx) -> [(key: KayaValue, value: T)] {
         tx.recordEntries(collection).map { (key: $0.key, value: $0.value as! T) }
+    }
+
+    /// Typed field writes with the key spelled once:
+    /// todos.patch(tx, key).set(\.done, true).set(\.title, "x").
+    /// Each set records one update_field — a patch is recorded writes,
+    /// never a diff.
+    func patch(_ tx: KayaAppTx, _ key: KayaValue) -> KayaRecordPatch<T> {
+        KayaRecordPatch(c: self, tx: tx, key: key)
+    }
+}
+
+/// An open patch on one entry; set chains.
+struct KayaRecordPatch<T: KayaRecord> {
+    let c: KayaRecordCollection<T>
+    let tx: KayaAppTx
+    let key: KayaValue
+
+    /// Writes the field the key path selects; chainable.
+    @discardableResult
+    func set<V>(_ keyPath: WritableKeyPath<T, V>, _ value: V) -> KayaRecordPatch<T> {
+        c.updateField(tx, key, keyPath, value)
+        return self
     }
 }
 

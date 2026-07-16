@@ -53,6 +53,16 @@ public final class KayaRecords {
             return null;
         }
 
+        // One reflection walk per record type, ever — selectors
+        // resolve per event in handlers, so the walk must not re-run
+        // there.
+        static final java.util.concurrent.ConcurrentHashMap<Class<?>, Info> CACHE =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        static Info of(Class<?> type) {
+            return CACHE.computeIfAbsent(type, Info::build);
+        }
+
         /** Component (name, type) pairs in declaration order, plus the
          * canonical constructor. Real record metadata when the runtime
          * has it; on Android, D8 desugars records — ART never sees
@@ -61,7 +71,7 @@ public final class KayaRecords {
          * name the components, and each accessor is the zero-argument
          * method with the component's name. Both roads describe the
          * same canonical shape. */
-        static Info of(Class<?> type) {
+        static Info build(Class<?> type) {
             String[] names;
             Class<?>[] types;
             Constructor<?> ctor;
@@ -154,21 +164,23 @@ public final class KayaRecords {
     }
 
     /** One (key, record) pair of the typed model. */
-    public static final class Entry<T> {
-        public final Object key;
+    public static final class Entry<K, T> {
+        public final K key;
         public final T value;
 
-        Entry(Object key, T value) {
+        Entry(K key, T value) {
             this.key = key;
             this.value = value;
         }
     }
 
     /**
-     * A collection whose entries are T records; the plain handle rides
-     * along for forEach and at.
+     * A collection whose entries are T records keyed by K — String or
+     * Long, the protocol's identity types (Java has no union bound to
+     * say so; the wire validates). The plain handle rides along for
+     * forEach and at.
      */
-    public static final class Collection<T> {
+    public static final class Collection<K, T> {
         public final KayaApp.Collection handle;
         final Info info;
 
@@ -177,19 +189,26 @@ public final class KayaRecords {
             this.info = info;
         }
 
-        public void insert(KayaApp.Tx tx, Object key, T value) {
+        public void insert(KayaApp.Tx tx, K key, T value) {
             tx.insertRecordRaw(handle, key, value, info.wireFields(value));
         }
 
-        public void update(KayaApp.Tx tx, Object key, T value) {
+        public void update(KayaApp.Tx tx, K key, T value) {
             tx.updateRecordRaw(handle, key, value, info.wireFields(value));
         }
 
         /**
-         * One field's delta: the rest of the record never travels; the
-         * model's copy is reconstructed with the new value.
+         * One field's delta by selector: the rest of the record never
+         * travels. The accessor reference is the field — no token to
+         * declare ({@code todos.updateField(tx, key, Todo::done, true)}).
          */
-        public <V> void updateField(KayaApp.Tx tx, Object key, Field<V> f, V value) {
+        public <V> void updateField(KayaApp.Tx tx, K key,
+                java.util.function.Function<T, V> selector, V value) {
+            updateField(tx, key, resolve(selector), value);
+        }
+
+        /** updateField over a pre-resolved token. */
+        public <V> void updateField(KayaApp.Tx tx, K key, Field<V> f, V value) {
             Object current = null;
             for (KayaApp.Entry entry : tx.items(handle)) {
                 if (entry.key.equals(key)) {
@@ -204,12 +223,75 @@ public final class KayaRecords {
 
         /** The typed model: what this guest wrote, in insertion order. */
         @SuppressWarnings("unchecked")
-        public List<Entry<T>> items(KayaApp.Tx tx) {
-            List<Entry<T>> out = new ArrayList<>();
+        public List<Entry<K, T>> items(KayaApp.Tx tx) {
+            List<Entry<K, T>> out = new ArrayList<>();
             for (KayaApp.Entry entry : tx.items(handle)) {
-                out.add(new Entry<>(entry.key, (T) entry.value));
+                out.add(new Entry<>((K) entry.key, (T) entry.value));
             }
             return out;
+        }
+
+        /** A template checkbox's typed toggle handler: the stamped
+         * copy's key (this collection's K), then the new state. */
+        public interface ToggleHandler<K> {
+            void accept(KayaApp.Tx tx, K key, boolean checked);
+        }
+
+        /**
+         * A checkbox bound to the field the selector reads, with its
+         * toggle handler co-located — the receiver's K types the
+         * handler's key (the depth-1 case; deeper nestings keep the
+         * List path via app.onToggle on the node).
+         */
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node checkbox(KayaApp.Tpl t,
+                java.util.function.Function<T, Boolean> selector, ToggleHandler<K> onToggle) {
+            KayaApp.Node n = t.checkbox(resolve(selector));
+            if (onToggle != null) {
+                t.onToggleNode(n, (tx, keys, checked) ->
+                        onToggle.accept(tx, (K) keys.get(0), checked));
+            }
+            return n;
+        }
+
+        /** A label bound to the field the selector reads. */
+        public KayaApp.Node label(KayaApp.Tpl t,
+                java.util.function.Function<T, String> selector) {
+            return t.label(this.<String>resolve(selector));
+        }
+
+        @SuppressWarnings("unchecked")
+        private <V> Field<V> resolve(java.util.function.Function<T, V> selector) {
+            return fieldOf((Class<T>) info.ctor.getDeclaringClass(), selector);
+        }
+
+        /**
+         * Typed field writes with the key spelled once:
+         * {@code todos.patch(tx, key).set(Todo::done, true)}. Each set
+         * records one update_field — a patch is recorded writes, never
+         * a diff.
+         */
+        public Patch<K, T> patch(KayaApp.Tx tx, K key) {
+            return new Patch<>(this, tx, key);
+        }
+    }
+
+    /** An open patch on one entry; set chains. */
+    public static final class Patch<K, T> {
+        final Collection<K, T> c;
+        final KayaApp.Tx tx;
+        final K key;
+
+        Patch(Collection<K, T> c, KayaApp.Tx tx, K key) {
+            this.c = c;
+            this.tx = tx;
+            this.key = key;
+        }
+
+        /** Writes the field the selector reads; chainable. */
+        public <V> Patch<K, T> set(java.util.function.Function<T, V> selector, V value) {
+            c.updateField(tx, key, selector, value);
+            return this;
         }
     }
 
@@ -217,39 +299,89 @@ public final class KayaRecords {
      * Declare a collection of T records; the record type is the
      * schema. Returns the typed root handle.
      */
-    public static <T> Collection<T> collectionOf(KayaApp.Tx tx, Class<T> type) {
+    public static <K, T> Collection<K, T> collectionOf(KayaApp.Tx tx, Class<T> type) {
         Info info = Info.of(type);
         return new Collection<>(tx.collectionWithSchema(info.schema), info);
     }
 
     /**
-     * The field token for T's component {@code name}, checked against
-     * V at declaration time (a wrong name or type throws at startup,
-     * not in a handler). Primitive components use their boxed class
-     * ({@code fieldOf(Todo.class, "done", Boolean.class)}).
+     * The field token for the component a selector reads:
+     * {@code fieldOf(Todo.class, Todo::done)}. The name and type are
+     * the record's own, compiler-checked and rename-safe — no strings
+     * restating the declaration. Resolution probes: it builds a
+     * default-valued prototype, then one variant per wire field with a
+     * sentinel in that field, and the probe whose selector result
+     * changes names the field. (SerializedLambda would read the method
+     * name directly, but D8-desugared lambdas carry no writeReplace on
+     * Android, where this code actually runs.)
      */
-    public static <T, V> Field<V> fieldOf(Class<T> type, String name, Class<V> valueType) {
+    @SuppressWarnings("unchecked")
+    public static <T, V> Field<V> fieldOf(Class<T> type, java.util.function.Function<T, V> selector) {
+        // Non-capturing selectors (Todo::done at a call site) are
+        // per-site singletons under invokedynamic, so identity hits.
+        Field<V> cached = (Field<V>) SELECTORS.get(selector);
+        if (cached != null) {
+            return cached;
+        }
         Info info = Info.of(type);
+        T prototype = instantiate(type, info, -1);
+        V base = selector.apply(prototype);
         for (int wire = 0; wire < info.wireToComponent.length; wire++) {
-            Method accessor = info.accessors[info.wireToComponent[wire]];
-            if (accessor.getName().equals(name)) {
-                Class<?> boxed = box(accessor.getReturnType());
-                if (boxed != valueType) {
-                    throw new IllegalArgumentException("kaya: " + type.getName() + "." + name
-                            + " is " + boxed.getName() + ", not " + valueType.getName());
+            T probe = instantiate(type, info, wire);
+            if (!java.util.Objects.equals(selector.apply(probe), base)) {
+                Field<V> f = new Field<>(wire);
+                // A capturing selector is a fresh object per event and
+                // would grow the map without bound; resetting keeps
+                // the cache a cache.
+                if (SELECTORS.size() > 1024) {
+                    SELECTORS.clear();
                 }
-                return new Field<>(wire);
+                SELECTORS.put(selector, f);
+                return f;
             }
         }
         throw new IllegalArgumentException(
-                "kaya: " + type.getName() + " has no wire field " + name);
+                "kaya: selector does not read a wire field of " + type.getName());
     }
 
-    private static Class<?> box(Class<?> t) {
-        if (t == boolean.class) return Boolean.class;
-        if (t == long.class) return Long.class;
-        if (t == double.class) return Double.class;
-        return t;
+    /** Selector instance -> resolved token, by identity (a selector's
+     * probe run is the expensive path; handlers resolve per event). */
+    private static final java.util.Map<Object, Field<?>> SELECTORS =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    @SuppressWarnings("unchecked")
+    private static <T> T instantiate(Class<T> type, Info info, int sentinelWire) {
+        Parameter[] parameters = info.ctor.getParameters();
+        Object[] args = new Object[parameters.length];
+        for (int i = 0; i < parameters.length; i++) {
+            args[i] = defaultValue(parameters[i].getType());
+        }
+        if (sentinelWire >= 0) {
+            int at = info.wireToComponent[sentinelWire];
+            args[at] = sentinelValue(parameters[at].getType());
+        }
+        try {
+            return (T) info.ctor.newInstance(args);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("kaya: cannot instantiate " + type.getName(), e);
+        }
+    }
+
+    private static Object defaultValue(Class<?> t) {
+        if (t == String.class) return "";
+        if (t == boolean.class || t == Boolean.class) return false;
+        if (t == long.class || t == Long.class) return 0L;
+        if (t == double.class || t == Double.class) return 0.0;
+        if (t == int.class) return 0;
+        return null; // guest-only reference fields
+    }
+
+    private static Object sentinelValue(Class<?> t) {
+        if (t == String.class) return "\u0000kaya";
+        if (t == boolean.class || t == Boolean.class) return true;
+        if (t == long.class || t == Long.class) return 0x5eedL;
+        if (t == double.class || t == Double.class) return 1.0;
+        throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 
     private KayaRecords() {}

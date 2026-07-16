@@ -113,7 +113,10 @@ public final class KayaApp {
         }
     }
 
-    public static final class Signal {
+    /** A signal carrying its value type: writes are checked at compile
+     * time, and when() demands a {@code Signal<Boolean>} instead of
+     * panicking in the scene. */
+    public static final class Signal<V> {
         final long id;
 
         Signal(long id) {
@@ -271,13 +274,13 @@ public final class KayaApp {
             }
         }
 
-        public Signal signal(Object initial) {
-            Signal s = new Signal(++signals);
+        public <V> Signal<V> signal(V initial) {
+            Signal s = new Signal<>(++signals);
             records.add(KayaWire.txCreateSignal(s.id, initial));
             return s;
         }
 
-        public void write(Signal s, Object value) {
+        public <V> void write(Signal<V> s, V value) {
             records.add(KayaWire.txWriteSignal(s.id, value));
         }
 
@@ -295,12 +298,66 @@ public final class KayaApp {
             records.add(KayaWire.txSetChecked(w.id, checked));
         }
 
-        public void bindChecked(Widget w, Signal s) {
+        public void bindChecked(Widget w, Signal<Boolean> s) {
             records.add(KayaWire.txBindChecked(w.id, s.id));
         }
 
-        public void bindText(Widget w, Signal s) {
+        public void bindText(Widget w, Signal<String> s) {
             records.add(KayaWire.txBindText(w.id, s.id));
+        }
+
+        // Construction sugar: containers take their children
+        // (varargs), and the common constructors carry their essential
+        // prop, so the build body reads as the tree. Handler
+        // registration stays explicit (app.onClick), the Java idiom.
+        public Widget column(Widget... children) {
+            return containerOf(KayaWire.KIND_COLUMN, children);
+        }
+
+        public Widget row(Widget... children) {
+            return containerOf(KayaWire.KIND_ROW, children);
+        }
+
+        private Widget containerOf(int kind, Widget[] children) {
+            Widget parent = widget(kind);
+            for (Widget child : children) {
+                addChild(parent, child);
+            }
+            return parent;
+        }
+
+        /** A button with its caption. */
+        public Widget button(String text) {
+            Widget w = widget(KayaWire.KIND_BUTTON);
+            setText(w, text);
+            return w;
+        }
+
+        /** A button with its caption and click handler — the Swing
+         * JButton(Action) shape. */
+        public Widget button(String text, Consumer<Tx> onClick) {
+            Widget w = button(text);
+            KayaApp.this.onClick(w, onClick);
+            return w;
+        }
+
+        /** A label bound to a signal. */
+        public Widget label(Signal<String> s) {
+            Widget w = widget(KayaWire.KIND_LABEL);
+            bindText(w, s);
+            return w;
+        }
+
+        /** A text field; register its handler with app.onChange. */
+        public Widget entry() {
+            return widget(KayaWire.KIND_ENTRY);
+        }
+
+        /** A text field with its change handler. */
+        public Widget entry(BiConsumer<Tx, String> onChange) {
+            Widget w = entry();
+            KayaApp.this.onChange(w, onChange);
+            return w;
         }
 
         public void addChild(Widget parent, Widget child) {
@@ -342,7 +399,7 @@ public final class KayaApp {
         }
 
         /** A When over a Bool signal: stamps on true, unstamps on false. */
-        public Widget when(Signal s, Consumer<Tpl> body) {
+        public Widget when(Signal<Boolean> s, Consumer<Tpl> body) {
             return when(s, t -> {
                 body.accept(t);
                 return null;
@@ -463,6 +520,57 @@ public final class KayaApp {
             tx.records.add(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
 
+        // The template flavor of the sugar: bindings take field tokens.
+        public Node row(Node... children) {
+            return containerOf(KayaWire.KIND_ROW, children);
+        }
+
+        public Node column(Node... children) {
+            return containerOf(KayaWire.KIND_COLUMN, children);
+        }
+
+        private Node containerOf(int kind, Node[] children) {
+            Node parent = widget(kind);
+            for (Node child : children) {
+                addChild(parent, child);
+            }
+            return parent;
+        }
+
+        // One name per widget; the argument's type picks the
+        // addressable source (constant, signal, or element field).
+        public Node label(String text) {
+            Node n = widget(KayaWire.KIND_LABEL);
+            setText(n, text);
+            return n;
+        }
+
+        public Node label(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_LABEL);
+            tx.records.add(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        public Node label(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_LABEL);
+            bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** Register a toggle handler on a template node — the bridge
+         * the typed record sugar routes through. */
+        public void onToggleNode(Node n, ToggleHandler handler) {
+            KayaApp.this.onToggle(n, handler);
+        }
+
+        /** A checkbox bound to one field; register its handler with
+         * app.onToggle. */
+        public Node checkbox(KayaRecords.Field<Boolean> f) {
+            Node n = widget(KayaWire.KIND_CHECKBOX);
+            bindCheckedField(n, 0, f);
+            return n;
+        }
+
         public void addChild(Node parent, Node child) {
             tx.records.add(KayaWire.txAddChild(parent.id, child.id));
         }
@@ -490,7 +598,7 @@ public final class KayaApp {
             return new Stamped<>(n, out);
         }
 
-        public Node when(Signal s, Consumer<Tpl> body) {
+        public Node when(Signal<Boolean> s, Consumer<Tpl> body) {
             return when(s, t -> {
                 body.accept(t);
                 return null;

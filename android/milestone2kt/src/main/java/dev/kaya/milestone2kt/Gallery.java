@@ -13,10 +13,10 @@ import dev.kaya.KayaWire;
 final class Gallery {
     /** The scene's handles, returned by the build body. */
     private static final class Scene {
-        final KayaApp.Signal status;
+        final KayaApp.Signal<String> status;
         final KayaApp.Widget urgent;
 
-        Scene(KayaApp.Signal status, KayaApp.Widget urgent) {
+        Scene(KayaApp.Signal<String> status, KayaApp.Widget urgent) {
             this.status = status;
             this.urgent = urgent;
         }
@@ -26,7 +26,7 @@ final class Gallery {
         KayaApp app = new KayaApp();
 
         Scene scene = app.build(tx -> {
-            KayaApp.Signal status = tx.signal("urgent: false");
+            KayaApp.Signal<String> status = tx.signal("urgent: false");
 
             KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);
             KayaApp.Widget row = tx.widget(KayaWire.KIND_ROW);
