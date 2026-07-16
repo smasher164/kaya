@@ -23,3 +23,10 @@ guests/csharp/obj/
 /_build/
 /_build-linux/
 guests/haskell/dist-newstyle/
+# go build without -o (and friends) drop a binary named after the
+# package in the cwd; a stray one at the root almost reached a commit
+# once. One entry per guest scene name.
+/todos
+/entry
+/gallery
+/milestone2
