@@ -112,6 +112,13 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
 /// helper trio (set/bind/bind-element) from this.
 pub(crate) use kaya::spec::PropKind;
 
+/// The protocol fingerprint, baked into every generated file; runtimes
+/// assert the loaded core's kaya_spec_hash() agrees before any bytes
+/// flow (the stale-artifact guard).
+pub(crate) fn spec_hash() -> u64 {
+    kaya::spec::hash()
+}
+
 /// Properties with their value kinds, driving typed setter generation:
 /// set_text takes a string, set_checked a bool, in every language.
 /// (The spec pins PROPS to the "prop" enum, so constants and setters

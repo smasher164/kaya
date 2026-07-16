@@ -20,6 +20,10 @@ mod entry;
 #[path = "gallery.rs"]
 mod gallery;
 
+#[cfg(target_os = "android")]
+#[path = "todos.rs"]
+mod todos;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -28,6 +32,7 @@ fn app(ctx: kaya::AppCtx) {
     match std::env::var("KAYA_SELFTEST").as_deref() {
         Ok("entry") => entry::app(ctx),
         Ok("gallery") => gallery::app(ctx),
+        Ok("todos") => todos::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

@@ -95,6 +95,16 @@ pub const KAYA_TX_CREATE_FOR: u16 = 11;
 pub const KAYA_TX_CREATE_WHEN: u16 = 12;
 pub const KAYA_TX_TEMPLATE_END: u16 = 13;
 pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
+
+/// The protocol fingerprint this core was built from. Bindings carry
+/// the same value baked in at generation (KAYA_SPEC_HASH and friends)
+/// and assert agreement at load: a stale library and a fresh guest —
+/// or the reverse — fail loudly at startup instead of decoding each
+/// other's bytes as garbage.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_spec_hash() -> u64 {
+    crate::spec::hash()
+}
 const _: () = assert!(
     KAYA_TX_CREATE_SIGNAL == wire::TX_CREATE_SIGNAL
         && KAYA_TX_WRITE_SIGNAL == wire::TX_WRITE_SIGNAL

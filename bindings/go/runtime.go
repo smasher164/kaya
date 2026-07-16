@@ -20,6 +20,7 @@ package kaya
 import "C"
 
 import (
+	"fmt"
 	"sync/atomic"
 	"unsafe"
 )
@@ -34,7 +35,19 @@ func Init() {
 // Run enters the core on the calling thread (which must be the process
 // main thread; use runtime.LockOSThread in an init function). Returns
 // the exit code when the app ends.
+// The stale-artifact guard, run once before the core takes the thread:
+// this binding was generated from one spec revision; the loaded library
+// must speak the same one.
+func checkSpec() {
+	if got := uint64(C.kaya_spec_hash()); got != SpecHash {
+		panic(fmt.Sprintf(
+			"kaya: library speaks spec %#016x, this binding was generated from %#016x — rebuild the library or regenerate bindings",
+			got, SpecHash))
+	}
+}
+
 func Run() int {
+	checkSpec()
 	return int(C.kaya_run())
 }
 

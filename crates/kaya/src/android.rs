@@ -602,6 +602,20 @@ fn spawn_selftest() {
 
     std::thread::spawn(|| {
         let Some(g) = GLOBALS.get() else { return };
+        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("todos") {
+            // The todos scene: type (setText fires the watcher), Add,
+            // toggle the stamped row's box — a field-level update —
+            // then the verdict.
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            post(&g.selftest_set_text);
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            post(&g.selftest_click);
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            post(&g.selftest_toggle);
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            post(&g.selftest_check);
+            return;
+        }
         if std::env::var("KAYA_SELFTEST").as_deref() == Ok("gallery") {
             // The gallery scene: setChecked fires the listener — the
             // same path a tap takes — then the verdict.
@@ -710,6 +724,7 @@ fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let expected = match std::env::var("KAYA_SELFTEST").as_deref() {
         Ok("entry") => "added milk, 1 total",
         Ok("gallery") => "urgent: true",
+        Ok("todos") => "0 items left",
         _ => "removed g2/a, 0 left",
     };
     let code = if text == expected {
@@ -767,6 +782,11 @@ fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: ring_wait as *mut _,
             },
             NativeMethod {
+                name: "specHash".into(),
+                sig: "()J".into(),
+                fn_ptr: ring_spec_hash as *mut _,
+            },
+            NativeMethod {
                 name: "submit".into(),
                 sig: "([B)V".into(),
                 fn_ptr: ring_submit as *mut _,
@@ -797,6 +817,10 @@ extern "system" fn ring_wait(_env: JNIEnv, _class: JClass) -> jni::sys::jboolean
 
 /// KayaRing.submit: one transaction as a byte array, kaya_submit's JNI
 /// spelling (JVM guests cannot call C directly).
+extern "system" fn ring_spec_hash(_env: JNIEnv, _class: JClass) -> jni::sys::jlong {
+    crate::spec::hash() as jni::sys::jlong
+}
+
 extern "system" fn ring_submit(mut env: JNIEnv, _class: JClass, records: JByteArray) {
     let bytes = env
         .convert_byte_array(&records)

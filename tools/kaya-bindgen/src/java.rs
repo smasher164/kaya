@@ -54,6 +54,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("import java.util.List;");
     c.line("");
     c.line("public final class KayaWire {");
+    c.line(&format!("    /** SPEC_HASH: {}. */", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
+    c.line(&format!("    public static final long SPEC_HASH = 0x{:016x}L;", crate::spec_hash()));
+    c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {
             c.line(&format!(

@@ -417,6 +417,34 @@ sealed class Tx
         Records.Add(KayaWire.TxCollectionRemove(c.Id, c.Path, key));
     }
 
+    // The raw record paths KayaRecords builds on: the model keeps the
+    // record object itself; only the wire fields travel.
+    internal Collection CollectionWithSchema(uint[] schema)
+    {
+        var c = App.NextCollection();
+        App.RegisterCollection(c.Id);
+        Records.Add(KayaWire.TxCreateCollection(c.Id, schema));
+        return c;
+    }
+
+    internal void InsertRecordRaw(Collection c, object key, object model, object[] fields)
+    {
+        ModelSet(c.Id, c.Path, key, model);
+        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, fields));
+    }
+
+    internal void UpdateRecordRaw(Collection c, object key, object model, object[] fields)
+    {
+        ModelSet(c.Id, c.Path, key, model);
+        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, fields));
+    }
+
+    internal void UpdateFieldRaw(Collection c, object key, object model, uint field, object value)
+    {
+        ModelSet(c.Id, c.Path, key, model);
+        Records.Add(KayaWire.TxCollectionUpdateField(c.Id, c.Path, key, field, value));
+    }
+
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
     public List<KeyValuePair<object, object>> Items(Collection c)
@@ -455,6 +483,16 @@ sealed class Tpl
     /// (0 = nearest).
     public void BindTextElement(Node n, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindTextElement(n.Id, level));
+
+    /// Bind a label's text to one field of the element; Field<string>
+    /// only — the token pins the type at compile time.
+    public void BindTextField(Node n, uint level, Field<string> f) =>
+        tx.Records.Add(KayaWire.TxBindTextElement(n.Id, level, f.Index));
+
+    /// Bind a checkbox's state to one field of the element;
+    /// Field<bool> only.
+    public void BindCheckedField(Node n, uint level, Field<bool> f) =>
+        tx.Records.Add(KayaWire.TxBindCheckedElement(n.Id, level, f.Index));
 
     public void AddChild(Node parent, Node child) =>
         tx.Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));

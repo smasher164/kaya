@@ -23,3 +23,5 @@ crates/kaya/examples/bin-entry/
 crates/kaya/examples/obj-entry/
 crates/kaya/examples/bin-gallery/
 crates/kaya/examples/obj-gallery/
+crates/kaya/examples/bin-todos/
+crates/kaya/examples/obj-todos/

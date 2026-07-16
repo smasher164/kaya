@@ -42,7 +42,7 @@ type collection = { cid : int64; cpath : Kaya_wire.value list }
    Entries keep insertion order, matching the core's rendering. *)
 type instance = {
   path : Kaya_wire.value list;
-  entries : (Kaya_wire.value * Kaya_wire.value) list;
+  entries : (Kaya_wire.value * Kaya_wire.value list) list;
 }
 
 type app = {
@@ -105,6 +105,8 @@ let touch tx cid =
   if not (List.mem_assoc cid tx.journal) then
     tx.journal <- (cid, instances_of tx.app cid) :: tx.journal
 
+(* One [value list] per entry: the record's wire fields (a scalar
+   collection is the one-field case). *)
 let model_set tx cid path key value =
   touch tx cid;
   let upsert i =
@@ -221,12 +223,12 @@ let assert_root c =
     invalid_arg "kaya: for_each binds the collection itself, not an instance — drop the at"
 
 let insert c key value tx =
-  model_set tx c.cid c.cpath key value;
-  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [value])
+  model_set tx c.cid c.cpath key [ value ];
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [ value ])
 
 let update c key value tx =
-  model_set tx c.cid c.cpath key value;
-  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [value])
+  model_set tx c.cid c.cpath key [ value ];
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [ value ])
 
 let remove c key tx =
   model_remove tx c.cid c.cpath key;
@@ -236,10 +238,101 @@ let remove c key tx =
    so far (this transaction's included), in insertion order. *)
 let items c tx =
   match List.find_opt (fun i -> i.path = c.cpath) (instances_of tx.app c.cid) with
-  | Some i -> i.entries
+  | Some i -> List.map (fun (k, vs) -> (k, List.hd vs)) i.entries
   | None -> []
 
 let count c tx = List.length (items c tx)
+
+(* Records: a first-class descriptor is the schema — the honest floor
+   a future ppx deriver ([@@deriving kaya]) will generate. One
+   descriptor drives the schema, the conversions, and the field tokens,
+   so keeping them adjacent is the discipline; the deriver will delete
+   even that. *)
+type 'a record_type = {
+  rt_schema : int list;
+  rt_to_values : 'a -> Kaya_wire.value list;
+  rt_of_values : Kaya_wire.value list -> 'a;
+}
+
+(* A typed projection: one field of a record type, by wire position.
+   The phantom pins the OCaml type, so bind_checked_field rejects a
+   (_, string) field at compile time. *)
+type ('a, 'v) field = {
+  fd_index : int;
+  fd_to_value : 'v -> Kaya_wire.value;
+}
+
+let str_field index : ('a, string) field =
+  { fd_index = index; fd_to_value = (fun s -> Kaya_wire.Str s) }
+
+let bool_field index : ('a, bool) field =
+  { fd_index = index; fd_to_value = (fun b -> Kaya_wire.Bool b) }
+
+let i64_field index : ('a, int64) field =
+  { fd_index = index; fd_to_value = (fun n -> Kaya_wire.I64 n) }
+
+let f64_field index : ('a, float) field =
+  { fd_index = index; fd_to_value = (fun x -> Kaya_wire.F64 x) }
+
+type 'a record_collection = {
+  rc_handle : collection;
+  rc_type : 'a record_type;
+}
+
+(* The plain handle, for for_each. *)
+let record_handle rc = rc.rc_handle
+
+(* Declare a collection of records; the descriptor is the schema. *)
+let collection_of rt tx =
+  tx.app.c_collection <- Int64.add tx.app.c_collection 1L;
+  let id = tx.app.c_collection in
+  (match tx.app.open_fors with
+  | parent :: _ ->
+      Hashtbl.replace tx.app.children parent
+        (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
+  | [] -> ());
+  emit tx (Kaya_wire.tx_create_collection id rt.rt_schema);
+  { rc_handle = { cid = id; cpath = [] }; rc_type = rt }
+
+let insert_record rc key value tx =
+  let fields = rc.rc_type.rt_to_values value in
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
+  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key fields)
+
+let update_record rc key value tx =
+  let fields = rc.rc_type.rt_to_values value in
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
+  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key fields)
+
+(* One field's delta: the rest of the record never travels; the
+   model's copy updates the same slot. *)
+let update_field rc key fd value tx =
+  let wire = fd.fd_to_value value in
+  let current =
+    match
+      List.find_opt
+        (fun i -> i.path = rc.rc_handle.cpath)
+        (instances_of tx.app rc.rc_handle.cid)
+    with
+    | Some i -> (
+        match List.assoc_opt key i.entries with
+        | Some vs -> vs
+        | None -> invalid_arg "kaya: update of missing key")
+    | None -> invalid_arg "kaya: update of missing instance"
+  in
+  let updated = List.mapi (fun i v -> if i = fd.fd_index then wire else v) current in
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key updated;
+  emit tx
+    (Kaya_wire.tx_collection_update_field rc.rc_handle.cid rc.rc_handle.cpath key
+       fd.fd_index wire)
+
+(* The typed model: what this guest wrote, in insertion order. *)
+let record_items rc tx =
+  match
+    List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
+  with
+  | Some i -> List.map (fun (k, vs) -> (k, rc.rc_type.rt_of_values vs)) i.entries
+  | None -> []
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)
@@ -303,6 +396,16 @@ module Tpl = struct
      (0 = nearest). *)
   let bind_text_element ?(level = 0) (Node id) t =
     emit t.tpl_tx (Kaya_wire.tx_bind_text_element ~level id)
+
+  (* Bind a label's text to one field of the element; a (_, string)
+     field only — the phantom pins it at compile time. *)
+  let bind_text_field ?(level = 0) (Node id) (fd : (_, string) field) t =
+    emit t.tpl_tx (Kaya_wire.tx_bind_text_element ~level ~field:fd.fd_index id)
+
+  (* Bind a checkbox's state to one field of the element; a (_, bool)
+     field only. *)
+  let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) t =
+    emit t.tpl_tx (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
 
   let add_child (Node parent) (Node child) t =
     emit t.tpl_tx (Kaya_wire.tx_add_child parent child)

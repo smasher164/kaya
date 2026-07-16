@@ -20,6 +20,10 @@ import Data.Char (chr)
 data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
   deriving (Eq, Show)
 
+-- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
+specHash :: Word64
+specHash = 0xe43514ac23c5f1c5
+
 valueBool :: Word32
 valueBool = 1
 valueI64 :: Word32

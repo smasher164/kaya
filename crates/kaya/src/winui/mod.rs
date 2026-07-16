@@ -734,6 +734,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             eprintln!("kaya: winui selftest armed (gallery)");
             spawn_gallery_selftest();
         }
+        Ok(script) if script.trim() == "todos" => {
+            eprintln!("kaya: winui selftest armed (todos)");
+            spawn_todos_selftest();
+        }
         Ok(script) => {
             eprintln!("kaya: winui selftest armed ({script:?})");
             spawn_selftest();
@@ -871,6 +875,77 @@ fn spawn_gallery_selftest() {
                     .Text()?
                     .to_string();
                 if text == "urgent: true" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+                Ok(())
+            })
+        });
+    });
+}
+
+/// The todos scene's round trip (KAYA_SELFTEST=todos): SetText raises
+/// TextChanged, click Add, SetIsChecked raises Checked on the stamped
+/// row's box — a field-level update — then read the items-left label.
+fn spawn_todos_selftest() {
+    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
+        if let Some(dispatcher) = DISPATCHER.get() {
+            let handler = DispatcherQueueHandler::new(move || f());
+            let _ = dispatcher.0.TryEnqueue(&handler);
+        }
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                core.selftest_entry
+                    .as_ref()
+                    .expect("the scene has an entry")
+                    .SetText(&HSTRING::from("buy milk"))?;
+                Ok(())
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                core.occurrences.send_click_tag(
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button"),
+                );
+            });
+            Ok(())
+        });
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let check = core
+                    .selftest_checkbox
+                    .as_ref()
+                    .expect("the scene has stamped a checkbox");
+                let boxed: IReference<bool> = PropertyValue::CreateBoolean(true)?.cast()?;
+                check.SetIsChecked(&boxed)?;
+                Ok(())
+            })
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_ui(|| {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .Text()?
+                    .to_string();
+                if text == "0 items left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

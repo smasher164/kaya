@@ -56,6 +56,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("/// A transaction under construction: packed records accumulate in");
     c.line("/// `bytes`; submit with kaya_submit.");
+    c.line("/// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.");
+    c.line(&format!("let kayaSpecHash: UInt64 = 0x{:016x}", crate::spec_hash()));
+    c.line("");
     c.line("struct KayaTx {");
     c.line("    var bytes = Data()");
     c.line("");

@@ -26,7 +26,7 @@ import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import System.IO.Unsafe (unsafePerformIO)
 
-import KayaWire (Value, parseOccurrence)
+import KayaWire (Value, parseOccurrence, specHash)
 
 foreign import ccall safe "kaya_run"
   c_kaya_run :: IO Int32
@@ -36,6 +36,9 @@ foreign import ccall unsafe "kaya_occurrence_ring"
 
 foreign import ccall safe "kaya_wait_occurrences"
   c_kaya_wait_occurrences :: IO CBool
+
+foreign import ccall unsafe "kaya_spec_hash"
+  c_kaya_spec_hash :: IO Word64
 
 foreign import ccall unsafe "kaya_submit"
   c_kaya_submit :: Ptr Word8 -> CSize -> IO ()
@@ -49,8 +52,21 @@ foreign import ccall unsafe "kaya_hs_store_release_u32"
 
 -- | Enter the core on the calling thread (which must be the process
 -- main thread); returns the exit code when the app ends.
+-- The stale-artifact guard: this binding was generated from one spec
+-- revision; the loaded library must speak the same one.
+checkSpec :: IO ()
+checkSpec = do
+  got <- c_kaya_spec_hash
+  if got == specHash
+    then return ()
+    else
+      error
+        ("kaya: library speaks spec " ++ show got
+           ++ ", this binding was generated from " ++ show specHash
+           ++ " — rebuild the library or regenerate bindings")
+
 kayaRun :: IO Int32
-kayaRun = c_kaya_run
+kayaRun = checkSpec >> c_kaya_run
 
 -- | Submit one transaction: the concatenation of packed records (tx*
 -- results from KayaWire), applied atomically.

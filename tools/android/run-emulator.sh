@@ -70,6 +70,10 @@ run_apk() {
         echo "$name: PASS"
     else
         echo "$name: FAIL"
+        # A guest that never printed a verdict crashed before dispatch;
+        # the kaya-tag filter above cannot see that, so surface the
+        # runtime's own crash log.
+        adb logcat -d -s AndroidRuntime:E | tail -30
         status=1
     fi
 }
@@ -89,6 +93,9 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     run_apk gallery-rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity gallery
+    run_apk todos-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity todos
 fi
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
@@ -110,6 +117,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity gallery \
         --es KAYA_BACKEND compose
+    run_apk todos-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity todos \
+        --es KAYA_BACKEND compose
 fi
 
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
@@ -127,6 +138,9 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk gallery-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity gallery
+    run_apk todos-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity todos
 fi
 
 exit "$status"

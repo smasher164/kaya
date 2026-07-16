@@ -61,6 +61,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String");
     c.line("  deriving (Eq, Show)");
     c.line("");
+    c.line(&format!("-- | specHash: {}.", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
+    c.line("specHash :: Word64");
+    c.line(&format!("specHash = 0x{:016x}", crate::spec_hash()));
+    c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {
             let ident = format!("{}{}", e.name, pascal(name));

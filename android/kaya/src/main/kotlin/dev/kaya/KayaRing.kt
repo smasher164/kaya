@@ -28,4 +28,5 @@ object KayaRing {
     @JvmStatic external fun headAddress(): Long
     @JvmStatic external fun tailAddress(): Long
     @JvmStatic external fun waitOccurrences(): Boolean
+    @JvmStatic external fun specHash(): Long
 }

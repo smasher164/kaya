@@ -62,7 +62,25 @@ external store_release_u32 : nativeint -> int -> unit
 
 (* Enter the core on the calling thread (which must be the process main
    thread); returns the exit code when the app ends. *)
-let run () = Int32.to_int (kaya_run ())
+(* ~from:lib like every other binding: the default handle is the
+   process image, which finds dlopened symbols on macOS but not on
+   Linux — exactly the kind of platform split the guard exists for. *)
+let kaya_spec_hash = foreign ~from:lib "kaya_spec_hash" (void @-> returning int64_t)
+
+(* The stale-artifact guard: this binding was generated from one spec
+   revision; the loaded library must speak the same one. *)
+let check_spec () =
+  let got = kaya_spec_hash () in
+  if got <> Kaya_wire.spec_hash then
+    failwith
+      (Printf.sprintf
+         "kaya: library speaks spec %Lx, this binding was generated from %Lx — \
+          rebuild the library or regenerate bindings"
+         got Kaya_wire.spec_hash)
+
+let run () =
+  check_spec ();
+  Int32.to_int (kaya_run ())
 
 (* Submit one transaction: the concatenation of packed records (tx_*
    results from Kaya_wire), applied atomically. *)

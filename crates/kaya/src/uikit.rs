@@ -120,6 +120,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     let tag = tag.expect("entries carry a tag");
                     let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
                     let field = UITextField::new(mtm);
+                    debug_assert!(target.respondsToSelector(sel!(textChanged:)));
                     let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
                     unsafe {
                         field.addTarget_action_forControlEvents(
@@ -157,6 +158,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     // reports each flip with the box's identity tag.
                     let tag = tag.expect("checkboxes carry a tag");
                     let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    debug_assert!(target.respondsToSelector(sel!(toggled:)));
                     let toggle = UISwitch::new(mtm);
                     let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
                     unsafe {
@@ -187,6 +189,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     // this backend never learns what it means.
                     let tag = tag.expect("buttons carry a click tag");
                     let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    debug_assert!(target.respondsToSelector(sel!(clicked:)));
                     let button = UIButton::buttonWithType(UIButtonType::System, mtm);
                     let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
                     unsafe {
@@ -367,6 +370,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
     match std::env::var("KAYA_SELFTEST") {
         Ok(script) if script == "entry" => spawn_entry_selftest(),
         Ok(script) if script == "gallery" => spawn_gallery_selftest(),
+        Ok(script) if script == "todos" => spawn_todos_selftest(),
         Ok(_) => spawn_selftest(),
         Err(_) => {}
     }
@@ -517,6 +521,75 @@ fn spawn_gallery_selftest() {
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 if text == "urgent: true" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    std::process::exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    std::process::exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
+/// the control's own action path, tap Add, flip the stamped row's
+/// switch — a field-level update — and read the items-left label.
+fn spawn_todos_selftest() {
+    fn on_main(f: impl FnOnce() + Send + 'static) {
+        DispatchQueue::main().exec_async(f);
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    let field = core
+                        .selftest_entry
+                        .as_ref()
+                        .expect("the scene has an entry");
+                    unsafe { field.setText(Some(&NSString::from_str("buy milk"))) };
+                    field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button")
+                        .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    let toggle = core
+                        .selftest_checkbox
+                        .as_ref()
+                        .expect("the scene has stamped a checkbox");
+                    unsafe { toggle.setOn(true) };
+                    toggle.sendActionsForControlEvents(UIControlEvents::ValueChanged);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                if text == "0 items left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     std::process::exit(0);
                 } else {

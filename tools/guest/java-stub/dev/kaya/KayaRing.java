@@ -26,6 +26,10 @@ public final class KayaRing {
         return 0;
     }
 
+    public static long specHash() {
+        return 0;
+    }
+
     public static boolean waitOccurrences() {
         return false;
     }

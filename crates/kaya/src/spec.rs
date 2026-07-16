@@ -100,6 +100,51 @@ pub const SET_PROPERTY_NOTE: &str =
      | u32 level, u32 field (SOURCE_ELEMENT — which field of the element's \
      record; 0 for a scalar collection)";
 
+/// A deterministic fingerprint of the whole vocabulary: every record
+/// kind, field name and type, enum variant, and prop. The core exports
+/// it (capi::kaya_spec_hash), the generator bakes it into every wire
+/// file, and every runtime asserts the two agree at load — so a guest
+/// generated from one spec revision can never talk silently past a
+/// core built from another (the stale-artifact bug class: an old
+/// dylib/DLL decoding new bytes as garbage).
+pub fn hash() -> u64 {
+    // FNV-1a, over a canonical walk. Stable across platforms and
+    // builds by construction; any spec edit changes it.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h ^= 0xff; // separator
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for (channel, records) in [("tx", SPEC.tx), ("apply", SPEC.apply), ("occ", SPEC.occurrence)] {
+        eat(channel.as_bytes());
+        for r in records {
+            eat(&r.kind.to_le_bytes());
+            eat(r.name.as_bytes());
+            for f in r.fields {
+                eat(f.name.as_bytes());
+                eat(format!("{:?}", f.ty).as_bytes());
+            }
+        }
+    }
+    for e in SPEC.enums {
+        eat(e.name.as_bytes());
+        for (name, value) in e.variants {
+            eat(name.as_bytes());
+            eat(&value.to_le_bytes());
+        }
+    }
+    for (name, id, kind) in PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    h
+}
+
 pub const SPEC: ProtocolSpec = ProtocolSpec {
     tx: &[
         Record {
@@ -420,6 +465,15 @@ mod tests {
 
     fn tx_record(name: &str) -> &'static Record {
         SPEC.tx.iter().find(|r| r.name == name).unwrap()
+    }
+
+    /// The fingerprint is stable and nonzero; a spec edit that fails
+    /// to change it would let revisions collide, so eat() separates
+    /// every component.
+    #[test]
+    fn spec_hash_is_stable() {
+        assert_ne!(hash(), 0);
+        assert_eq!(hash(), hash());
     }
 
     /// Every tx record kind pins to wire.rs's constants.

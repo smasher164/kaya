@@ -14,6 +14,7 @@ import pathlib
 import sys
 
 from kaya_wire import OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, parse_occurrence
+from kaya_wire import SPEC_HASH
 
 
 def _find_library():
@@ -31,6 +32,16 @@ def _find_library():
 
 
 _lib = ctypes.CDLL(_find_library())
+
+# The stale-artifact guard: this binding was generated from one spec
+# revision; the loaded core must speak the same one, or bytes would
+# decode as garbage somewhere much harder to diagnose than here.
+_lib.kaya_spec_hash.restype = ctypes.c_uint64
+if _lib.kaya_spec_hash() != SPEC_HASH:
+    raise RuntimeError(
+        f"kaya: library speaks spec {_lib.kaya_spec_hash():#018x}, this binding was "
+        f"generated from {SPEC_HASH:#018x} — rebuild the library or regenerate bindings"
+    )
 _lib.kaya_next_occurrence.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 _lib.kaya_next_occurrence.restype = ctypes.c_size_t
 _lib.kaya_submit.argtypes = [ctypes.c_char_p, ctypes.c_size_t]

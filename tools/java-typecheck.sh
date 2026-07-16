@@ -23,10 +23,12 @@ trap 'rm -rf "$TMP"' EXIT
 if run_javac -d "$TMP" \
     tools/guest/java-stub/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/KayaApp.java \
+    bindings/java/dev/kaya/KayaRecords.java \
     bindings/java/dev/kaya/KayaWire.java \
     android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Milestone2.java \
     android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Entry.java \
-    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Gallery.java; then
+    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Gallery.java \
+    android/milestone2kt/src/main/java/dev/kaya/milestone2kt/Todos.java; then
     echo "java-typecheck: OK"
 else
     echo "java-typecheck: FAIL"

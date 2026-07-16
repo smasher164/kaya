@@ -29,11 +29,11 @@ fi
 # each example program typechecks in its own pass.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-for example in tools/ios/milestone2.swift tools/ios/entry.swift tools/ios/gallery.swift; do
+for example in tools/ios/milestone2.swift tools/ios/entry.swift tools/ios/gallery.swift tools/ios/todos.swift; do
     cp "$example" "$TMP/main.swift"
     if ! env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift "$TMP/main.swift"; then
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$TMP/main.swift"; then
         echo "swift-typecheck: FAIL ($example)"
         exit 1
     fi

@@ -1,4 +1,8 @@
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- kaya's idiomatic surface for Haskell: the structural core, and the
 -- monad-sugar experiment the roster promised — scene declaration as a
@@ -46,14 +50,31 @@ module KayaApp
     bindText,
     bindChecked,
     bindTextElement,
+    KayaFieldType (..),
+    KayaRecord (..),
+    KField,
+    RecordCollection,
+    recordHandle,
+    collectionOf,
+    fieldOf,
+    insertRecord,
+    updateRecord,
+    updateField,
+    recordItems,
+    bindTextField,
+    bindCheckedField,
   )
 where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Data.ByteString.Builder (Builder)
+import Data.Int (Int64)
 import Data.IORef
+import Data.List (elemIndex)
 import qualified Data.Map.Strict as Map
+import Data.Proxy (Proxy (..))
 import Data.Word (Word32, Word64)
+import GHC.Generics
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
 import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence)
@@ -95,7 +116,9 @@ data Counters = Counters
 -- Entries keep insertion order, matching the core's rendering.
 data Instance = Instance
   { iPath :: ![W.Value],
-    iEntries :: ![(W.Value, W.Value)]
+    -- One [W.Value] per entry: the record's wire fields (a scalar
+    -- collection is the one-field case).
+    iEntries :: ![(W.Value, [W.Value])]
   }
 
 -- The collection is the model — the only copy: every mutation op edits
@@ -113,7 +136,7 @@ data BuildState = BuildState
     bOpenFors :: ![Word64]
   }
 
-modelSet :: Word64 -> [W.Value] -> W.Value -> W.Value -> Model -> Model
+modelSet :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
 modelSet cid path key value model = Map.insert cid (go (Map.findWithDefault [] cid model)) model
   where
     go [] = [Instance path [(key, value)]]
@@ -142,7 +165,7 @@ modelRemove children cid path key model =
         (Map.findWithDefault [] c children)
     startsWith pre p = take (length pre) p == pre
 
-lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, W.Value)]
+lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, [W.Value])]
 lookupEntries cid path model =
   case filter ((== path) . iPath) (Map.findWithDefault [] cid model) of
     (i : _) -> iEntries i
@@ -306,12 +329,12 @@ writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
   ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key [value],
-          bModel = modelSet n path key value (bModel s)})
+          bModel = modelSet n path key [value] (bModel s)})
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
   ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key [value],
-          bModel = modelSet n path key value (bModel s)})
+          bModel = modelSet n path key [value] (bModel s)})
 
 remove :: Collection -> W.Value -> Build ()
 remove (Collection n path) key = Build $ \s ->
@@ -321,7 +344,8 @@ remove (Collection n path) key = Build $ \s ->
 -- | The model: what this guest wrote, exactly — the fold of every
 -- patch so far (this transaction's included), in insertion order.
 items :: Collection -> Build [(W.Value, W.Value)]
-items (Collection n path) = Build $ \s -> (lookupEntries n path (bModel s), s)
+items (Collection n path) = Build $ \s ->
+  (map (\(k, vs) -> (k, head vs)) (lookupEntries n path (bModel s)), s)
 
 count :: Collection -> Build Int
 count c = length <$> items c
@@ -339,6 +363,166 @@ bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
+
+-- Records: the type is the schema. KayaRecord derives everything from
+-- the Generic representation — one field tag, one conversion each way,
+-- and the selector names for field tokens — so schema, insert order,
+-- and indexes cannot drift from the data declaration. Every field must
+-- be wire-typed (String, Bool, Int64, Double); Haskell keeps handlers
+-- out of records by idiom, so there is no guest-only skipping here.
+
+-- | A Haskell type that can be one record field.
+class KayaFieldType v where
+  fieldTag :: proxy v -> Word32
+  toFieldValue :: v -> W.Value
+  fromFieldValue :: W.Value -> v
+
+instance KayaFieldType String where
+  fieldTag _ = W.valueStr
+  toFieldValue = W.VStr
+  fromFieldValue v = case v of W.VStr s -> s; _ -> error "kaya: field is not a Str"
+
+instance KayaFieldType Bool where
+  fieldTag _ = W.valueBool
+  toFieldValue = W.VBool
+  fromFieldValue v = case v of W.VBool b -> b; _ -> error "kaya: field is not a Bool"
+
+instance KayaFieldType Int64 where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64
+  fromFieldValue v = case v of W.VI64 n -> n; _ -> error "kaya: field is not an I64"
+
+instance KayaFieldType Double where
+  fieldTag _ = W.valueF64
+  toFieldValue = W.VF64
+  fromFieldValue v = case v of W.VF64 x -> x; _ -> error "kaya: field is not an F64"
+
+-- The Generic walker: one pass shape for schema, names, and both
+-- conversions, over the product of selectors.
+class GRecord f where
+  gSchema :: proxy f -> [Word32]
+  gNames :: proxy f -> [String]
+  gTo :: f p -> [W.Value]
+  gFrom :: [W.Value] -> (f p, [W.Value])
+
+instance GRecord f => GRecord (M1 D c f) where
+  gSchema _ = gSchema (Proxy :: Proxy f)
+  gNames _ = gNames (Proxy :: Proxy f)
+  gTo (M1 x) = gTo x
+  gFrom vs = let (x, rest) = gFrom vs in (M1 x, rest)
+
+instance GRecord f => GRecord (M1 C c f) where
+  gSchema _ = gSchema (Proxy :: Proxy f)
+  gNames _ = gNames (Proxy :: Proxy f)
+  gTo (M1 x) = gTo x
+  gFrom vs = let (x, rest) = gFrom vs in (M1 x, rest)
+
+instance (GRecord a, GRecord b) => GRecord (a :*: b) where
+  gSchema _ = gSchema (Proxy :: Proxy a) ++ gSchema (Proxy :: Proxy b)
+  gNames _ = gNames (Proxy :: Proxy a) ++ gNames (Proxy :: Proxy b)
+  gTo (a :*: b) = gTo a ++ gTo b
+  gFrom vs =
+    let (a, rest) = gFrom vs
+        (b, rest') = gFrom rest
+     in (a :*: b, rest')
+
+instance (Selector c, KayaFieldType v) => GRecord (M1 S c (K1 R v)) where
+  gSchema _ = [fieldTag (Proxy :: Proxy v)]
+  gNames _ = [selName (undefined :: M1 S c (K1 R v) p)]
+  gTo (M1 (K1 v)) = [toFieldValue v]
+  gFrom (v : rest) = (M1 (K1 (fromFieldValue v)), rest)
+  gFrom [] = error "kaya: record arity mismatch"
+
+-- | A collection element type; `deriving Generic` is the whole
+-- obligation.
+class KayaRecord a where
+  kayaSchema :: proxy a -> [Word32]
+  default kayaSchema :: (Generic a, GRecord (Rep a)) => proxy a -> [Word32]
+  kayaSchema _ = gSchema (Proxy :: Proxy (Rep a))
+
+  kayaFieldNames :: proxy a -> [String]
+  default kayaFieldNames :: (Generic a, GRecord (Rep a)) => proxy a -> [String]
+  kayaFieldNames _ = gNames (Proxy :: Proxy (Rep a))
+
+  toValues :: a -> [W.Value]
+  default toValues :: (Generic a, GRecord (Rep a)) => a -> [W.Value]
+  toValues = gTo . from
+
+  fromValues :: [W.Value] -> a
+  default fromValues :: (Generic a, GRecord (Rep a)) => [W.Value] -> a
+  fromValues = to . fst . gFrom
+
+-- | A typed projection: one field of a record type, by wire position.
+-- The phantom pins the Haskell type, so bindCheckedField rejects a
+-- KField String at compile time.
+newtype KField v = KField Word32
+
+-- | The field token for a's field `name`, checked at declaration time
+-- (a wrong name or type errors at startup, not in a handler):
+-- `fieldOf (Proxy :: Proxy Todo) "done" :: KField Bool`.
+fieldOf :: forall a v. (KayaRecord a, KayaFieldType v) => Proxy a -> String -> KField v
+fieldOf p name = case elemIndex name (kayaFieldNames p) of
+  Nothing -> error ("kaya: no field " ++ name)
+  Just i
+    | kayaSchema p !! i /= fieldTag (Proxy :: Proxy v) ->
+        error ("kaya: field " ++ name ++ " has a different wire type")
+    | otherwise -> KField (fromIntegral i)
+
+-- | A Collection whose entries are a-records.
+newtype RecordCollection a = RecordCollection Collection
+
+-- | The plain handle, for forEach.
+recordHandle :: RecordCollection a -> Collection
+recordHandle (RecordCollection c) = c
+
+-- | Declare a collection of a-records; the type is the schema.
+collectionOf :: forall a. KayaRecord a => Proxy a -> Build (RecordCollection a)
+collectionOf p = Build $ \s ->
+  let c = bCounters s
+      n = cCollection c + 1
+      s' = registerCollection n s {bCounters = c {cCollection = n}}
+   in ( RecordCollection (Collection n []),
+        s' {bRecords = bRecords s' <> W.txCreateCollection n (kayaSchema p)}
+      )
+
+insertRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
+insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
+  ((), s {bRecords = bRecords s <> W.txCollectionInsert n path key (toValues value),
+          bModel = modelSet n path key (toValues value) (bModel s)})
+
+updateRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
+updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
+  ((), s {bRecords = bRecords s <> W.txCollectionUpdate n path key (toValues value),
+          bModel = modelSet n path key (toValues value) (bModel s)})
+
+-- | One field's delta: the rest of the record never travels; the
+-- model's copy updates the same slot.
+updateField ::
+  (KayaRecord a, KayaFieldType v) =>
+  RecordCollection a -> W.Value -> KField v -> v -> Build ()
+updateField (RecordCollection (Collection n path)) key (KField i) value = Build $ \s ->
+  let wire = toFieldValue value
+      current = case lookup key (lookupEntries n path (bModel s)) of
+        Just vs -> vs
+        Nothing -> error "kaya: update of missing key"
+      updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
+   in ((), s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i wire,
+              bModel = modelSet n path key updated (bModel s)})
+
+-- | The typed model: what this guest wrote, in insertion order.
+recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
+recordItems (RecordCollection (Collection n path)) = Build $ \s ->
+  (map (\(k, vs) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
+
+-- | Bind a label's text to one field of the element; KField String
+-- only — the phantom pins it at compile time.
+bindTextField :: Node -> Word32 -> KField String -> Tpl ()
+bindTextField (Node n) level (KField i) = emitT (W.txBindTextElement n level i)
+
+-- | Bind a checkbox's state to one field of the element; KField Bool
+-- only.
+bindCheckedField :: Node -> Word32 -> KField Bool -> Tpl ()
+bindCheckedField (Node n) level (KField i) = emitT (W.txBindCheckedElement n level i)
 
 -- The app: id counters that outlive any one transaction, and the
 -- dispatch tables.

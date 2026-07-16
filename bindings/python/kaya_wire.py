@@ -8,6 +8,9 @@ Python bool, int, float, and str, mapped to the kaya value types.
 
 import struct
 
+# SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
+SPEC_HASH = 0xe43514ac23c5f1c5
+
 VALUE_BOOL = 1
 VALUE_I64 = 2
 VALUE_F64 = 3

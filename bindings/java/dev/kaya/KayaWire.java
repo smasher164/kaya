@@ -12,6 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class KayaWire {
+    /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
+    public static final long SPEC_HASH = 0xe43514ac23c5f1c5L;
+
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
     public static final int VALUE_F64 = 3;

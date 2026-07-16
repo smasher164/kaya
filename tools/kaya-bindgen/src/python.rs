@@ -28,6 +28,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("import struct");
     c.line("");
 
+    c.line(&format!("# SPEC_HASH: {}.", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
+    c.line(&format!("SPEC_HASH = 0x{:016x}", crate::spec_hash()));
+    c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {
             c.line(&format!(

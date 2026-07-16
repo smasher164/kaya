@@ -68,7 +68,10 @@ struct KayaCollection {
 /// Entries keep insertion order, matching the core's rendering.
 private struct KayaInstance {
     let path: [KayaValue]
-    var entries: [(key: KayaValue, value: KayaValue)]
+    // Any: a KayaValue for scalar collections, the record struct itself
+    // for record collections — the model is guest-owned, so it keeps
+    // native values and only wire fields ever encode.
+    var entries: [(key: KayaValue, value: Any)]
 }
 
 final class KayaApp {
@@ -100,7 +103,7 @@ final class KayaApp {
         }
     }
 
-    fileprivate func modelSet(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: KayaValue) {
+    fileprivate func modelSet(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: Any) {
         var instances = model[coll, default: []]
         let at = instances.firstIndex { $0.path == path } ?? {
             instances.append(KayaInstance(path: path, entries: []))
@@ -135,7 +138,7 @@ final class KayaApp {
     }
 
     fileprivate func instanceEntries(_ coll: UInt64, _ path: [KayaValue])
-        -> [(key: KayaValue, value: KayaValue)]
+        -> [(key: KayaValue, value: Any)]
     {
         model[coll]?.first { $0.path == path }?.entries ?? []
     }
@@ -261,6 +264,13 @@ final class KayaApp {
     /// thread), dispatching occurrences on the app thread. Never
     /// returns on iOS; the exit code path is the self-test's.
     func run() -> Never {
+        // The stale-artifact guard: this binding was generated from one
+        // spec revision; the loaded library must speak the same one.
+        precondition(
+            kaya_spec_hash() == kayaSpecHash,
+            "kaya: library speaks spec \(String(kaya_spec_hash(), radix: 16)), this binding "
+                + "was generated from \(String(kayaSpecHash, radix: 16)) — rebuild the "
+                + "library or regenerate bindings")
         let thread = Thread { self.dispatchLoop() }
         thread.start()
         exit(kaya_run())
@@ -368,6 +378,34 @@ final class KayaAppTx {
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
     func items(_ c: KayaCollection) -> [(key: KayaValue, value: KayaValue)] {
+        app.instanceEntries(c.id, c.path).map { (key: $0.key, value: $0.value as! KayaValue) }
+    }
+
+    // The raw record paths KayaRecords builds on: the model keeps the
+    // record struct itself; only the wire fields travel.
+    func collectionWithSchema(_ schema: [UInt32]) -> KayaCollection {
+        let c = app.nextCollection()
+        app.registerCollection(c.id)
+        tx.createCollection(c.id, schema)
+        return c
+    }
+
+    func insertRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
+        app.modelSet(c.id, c.path, key, model)
+        tx.collectionInsert(c.id, c.path, key, fields)
+    }
+
+    func updateRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
+        app.modelSet(c.id, c.path, key, model)
+        tx.collectionUpdate(c.id, c.path, key, fields)
+    }
+
+    func updateFieldRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ field: UInt32, _ value: KayaValue) {
+        app.modelSet(c.id, c.path, key, model)
+        tx.collectionUpdateField(c.id, c.path, key, field, value)
+    }
+
+    func recordEntries(_ c: KayaCollection) -> [(key: KayaValue, value: Any)] {
         app.instanceEntries(c.id, c.path)
     }
 
@@ -405,6 +443,18 @@ final class KayaTpl {
     /// (0 = nearest).
     func bindTextElement(_ n: KayaNodeHandle, level: UInt32 = 0) {
         tx.tx.bindTextElement(n.id, level: level)
+    }
+
+    /// Bind a label's text to one field of the element; KayaField<String>
+    /// only — the token pins the type at compile time.
+    func bindTextField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindTextElement(n.id, level: level, field: f.index)
+    }
+
+    /// Bind a checkbox's state to one field of the element;
+    /// KayaField<Bool> only.
+    func bindCheckedField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
+        tx.tx.bindCheckedElement(n.id, level: level, field: f.index)
     }
 
     func addChild(_ parent: KayaNodeHandle, _ child: KayaNodeHandle) {

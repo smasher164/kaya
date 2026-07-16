@@ -126,6 +126,10 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     // this backend never learns what it means.
                     let tag = tag.expect("buttons carry a click tag");
                     let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    // Selector/method pairs are stringly; a missing
+                    // method is otherwise an unrecognized-selector
+                    // crash at first click, not at build.
+                    debug_assert!(target.respondsToSelector(sel!(clicked:)));
                     let button = unsafe {
                         NSButton::buttonWithTitle_target_action(
                             &NSString::from_str(""),
@@ -154,6 +158,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     // entry owns its text.
                     let tag = tag.expect("checkboxes carry a tag");
                     let target = ButtonTarget::new(mtm, core.occurrences.clone(), tag);
+                    debug_assert!(target.respondsToSelector(sel!(toggled:)));
                     let target_obj: &objc2::runtime::AnyObject = (*target).as_ref();
                     let boxed = unsafe {
                         NSButton::checkboxWithTitle_target_action(

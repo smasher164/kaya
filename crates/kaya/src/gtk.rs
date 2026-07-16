@@ -257,6 +257,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         match std::env::var("KAYA_SELFTEST") {
             Ok(script) if script == "entry" => spawn_entry_selftest(),
             Ok(script) if script == "gallery" => spawn_gallery_selftest(),
+            Ok(script) if script == "todos" => spawn_todos_selftest(),
             Ok(_) => spawn_selftest(),
             Err(_) => {}
         }
@@ -392,6 +393,72 @@ fn spawn_gallery_selftest() {
                     .expect("the scene has a label")
                     .text();
                 if text == "urgent: true" {
+                    println!("KAYA_SELFTEST: OK ({text})");
+                    request_exit(0);
+                } else {
+                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
+                    request_exit(1);
+                }
+            });
+        });
+    });
+}
+
+/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
+/// set_text (GTK fires `changed`), click Add, toggle the stamped row's
+/// checkbox — a field-level update — and read the items-left label.
+fn spawn_todos_selftest() {
+    fn on_main(f: impl Fn() + Send + 'static) {
+        glib::idle_add(move || {
+            f();
+            glib::ControlFlow::Break
+        });
+    }
+
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_entry
+                        .as_ref()
+                        .expect("the scene has an entry")
+                        .set_text("buy milk");
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_button
+                        .as_ref()
+                        .expect("the scene has a button")
+                        .emit_clicked();
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    core.selftest_checkbox
+                        .as_ref()
+                        .expect("the scene has stamped a checkbox")
+                        .set_active(true);
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        on_main(|| {
+            CORE.with_borrow(|core| {
+                let Some(core) = core.as_ref() else { return };
+                let text = core
+                    .selftest_label
+                    .as_ref()
+                    .expect("the scene has a label")
+                    .text();
+                if text == "0 items left" {
                     println!("KAYA_SELFTEST: OK ({text})");
                     request_exit(0);
                 } else {

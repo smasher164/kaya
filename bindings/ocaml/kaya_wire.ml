@@ -6,6 +6,9 @@
 
 type value = Bool of bool | I64 of int64 | F64 of float | Str of string
 
+(* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
+let spec_hash = 0xe43514ac23c5f1c5L
+
 let value_bool = 1
 let value_i64 = 2
 let value_f64 = 3

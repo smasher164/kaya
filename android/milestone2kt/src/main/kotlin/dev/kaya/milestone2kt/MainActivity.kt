@@ -29,6 +29,7 @@ class MainActivity : Activity() {
         val scene = when (System.getenv("KAYA_SELFTEST")) {
             "entry" -> Entry::app
             "gallery" -> Gallery::app
+            "todos" -> Todos::app
             else -> Milestone2::app
         }
         Thread(scene, "kaya-app").start()

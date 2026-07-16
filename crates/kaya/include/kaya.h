@@ -298,6 +298,15 @@ extern void *dlopen(const char *path, int flag);
 extern void *dlsym(void *handle, const char *symbol);
 
 /**
+ * The protocol fingerprint this core was built from. Bindings carry
+ * the same value baked in at generation (KAYA_SPEC_HASH and friends)
+ * and assert agreement at load: a stale library and a fresh guest —
+ * or the reverse — fail loudly at startup instead of decoding each
+ * other's bytes as garbage.
+ */
+uint64_t kaya_spec_hash(void);
+
+/**
  * Take over the calling thread, which must be the process main thread,
  * and run the core. Returns when the app exits, with the exit code; the
  * host decides how to terminate its own process.

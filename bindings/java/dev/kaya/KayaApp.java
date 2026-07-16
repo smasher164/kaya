@@ -367,6 +367,30 @@ public final class KayaApp {
             records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, new Object[] { value }));
         }
 
+        // The raw record paths KayaRecords builds on: the model keeps
+        // the record object itself; only the wire fields travel.
+        Collection collectionWithSchema(int[] schema) {
+            Collection c = new Collection(++collections, java.util.Collections.emptyList());
+            registerCollection(c.id);
+            records.add(KayaWire.txCreateCollection(c.id, schema));
+            return c;
+        }
+
+        void insertRecordRaw(Collection c, Object key, Object model, Object[] fields) {
+            modelSet(c.id, c.path, key, model);
+            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, fields));
+        }
+
+        void updateRecordRaw(Collection c, Object key, Object model, Object[] fields) {
+            modelSet(c.id, c.path, key, model);
+            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, fields));
+        }
+
+        void updateFieldRaw(Collection c, Object key, Object model, int field, Object value) {
+            modelSet(c.id, c.path, key, model);
+            records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, value));
+        }
+
         public void remove(Collection c, Object key) {
             modelRemove(c.id, c.path, key);
             records.add(KayaWire.txCollectionRemove(c.id, c.path.toArray(), key));
@@ -425,6 +449,18 @@ public final class KayaApp {
          */
         public void bindTextElement(Node n, int level) {
             tx.records.add(KayaWire.txBindTextElement(n.id, level, 0));
+        }
+
+        /** Bind a label's text to one field of the element; a String
+         * field token only — the type pins it at compile time. */
+        public void bindTextField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.records.add(KayaWire.txBindTextElement(n.id, level, f.index));
+        }
+
+        /** Bind a checkbox's state to one field of the element; a
+         * Boolean field token only. */
+        public void bindCheckedField(Node n, int level, KayaRecords.Field<Boolean> f) {
+            tx.records.add(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
 
         public void addChild(Node parent, Node child) {
@@ -584,6 +620,14 @@ public final class KayaApp {
      * Android, after KayaRing.attach set the core up).
      */
     public void dispatchLoop() {
+        // The stale-artifact guard: this binding was generated from one
+        // spec revision; the loaded library must speak the same one.
+        if (KayaRing.specHash() != KayaWire.SPEC_HASH) {
+            throw new IllegalStateException(String.format(
+                    "kaya: library speaks spec %#x, this binding was generated from %#x"
+                            + " — rebuild the library or regenerate bindings",
+                    KayaRing.specHash(), KayaWire.SPEC_HASH));
+        }
         try {
             loop();
         } catch (Throwable t) {

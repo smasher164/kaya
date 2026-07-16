@@ -55,7 +55,20 @@ static class Kaya
 
     /// Enter the core on the calling thread (which must be the process
     /// main thread); returns the exit code when the app ends.
-    public static int Run() => kaya_run();
+    [DllImport("kaya")]
+    static extern ulong kaya_spec_hash();
+
+    public static int Run()
+    {
+        // The stale-artifact guard: this binding was generated from one
+        // spec revision; the loaded library must speak the same one.
+        if (kaya_spec_hash() != KayaWire.SpecHash)
+            throw new InvalidOperationException(
+                $"kaya: library speaks spec 0x{kaya_spec_hash():x16}, this binding was " +
+                $"generated from 0x{KayaWire.SpecHash:x16} — rebuild the library or " +
+                "regenerate bindings");
+        return kaya_run();
+    }
 
     /// Submit one transaction: the concatenation of packed records
     /// (KayaWire.Tx* results), applied atomically.

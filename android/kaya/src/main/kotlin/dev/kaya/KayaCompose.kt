@@ -199,6 +199,10 @@ object KayaCompose {
             startGallerySelftest(activity)
             return
         }
+        if (System.getenv("KAYA_SELFTEST") == "todos") {
+            startTodosSelftest(activity)
+            return
+        }
         thread(name = "kaya-selftest") {
             Thread.sleep(1500)
             KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
@@ -242,6 +246,45 @@ object KayaCompose {
             activity.runOnUiThread {
                 val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
                 val code = if (text == "added milk, 1 total") {
+                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
+                    0
+                } else {
+                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
+                    1
+                }
+                activity.finishAndRemoveTask()
+                Runtime.getRuntime().halt(code)
+            }
+        }
+    }
+
+    /**
+     * The todos scene's round trip (KAYA_SELFTEST=todos): type through
+     * the emission path, add, toggle the stamped row's box — a
+     * field-level update — and read the items-left label.
+     */
+    private fun startTodosSelftest(activity: ComponentActivity) {
+        thread(name = "kaya-selftest") {
+            Thread.sleep(1500)
+            activity.runOnUiThread {
+                KayaSceneModel.firstEntry?.let { entry ->
+                    entry.text = "buy milk"
+                    KayaPresent.emitTextChanged(entry.tag, "buy milk")
+                }
+            }
+            Thread.sleep(400)
+            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
+            Thread.sleep(400)
+            activity.runOnUiThread {
+                KayaSceneModel.firstCheckbox?.let { box ->
+                    box.checked = true
+                    KayaPresent.emitToggled(box.tag, true)
+                }
+            }
+            Thread.sleep(700)
+            activity.runOnUiThread {
+                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
+                val code = if (text == "0 items left") {
                     Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
                     0
                 } else {

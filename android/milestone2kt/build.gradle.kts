@@ -29,6 +29,13 @@ android {
     }
 }
 
+// KayaRecords reflects the canonical constructor when record metadata
+// is unavailable (D8 desugars records on Android, so ART never sees
+// record components); -parameters keeps the component names it needs.
+tasks.withType<JavaCompile> {
+    options.compilerArgs.add("-parameters")
+}
+
 dependencies {
     implementation(project(":kaya"))
 }

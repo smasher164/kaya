@@ -142,6 +142,12 @@ static void *app(void *arg) {
 }
 
 int main(void) {
+    /* The stale-artifact guard: this guest compiled against one spec
+     * revision; the loaded library must speak the same one. */
+    if (kaya_spec_hash() != KAYA_SPEC_HASH) {
+        fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
+        return 1;
+    }
     pthread_t app_thread;
     pthread_create(&app_thread, NULL, app, NULL);
     return kaya_run(); /* takes over the main thread until the app exits */
