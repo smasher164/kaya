@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ocaml-nox opam libffi-dev \
     ghc cabal-install \
     xvfb xauth imagemagick x11-utils \
-    weston \
+    weston ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ctypes-foreign via opam on the system compiler: Debian's ctypes deb

@@ -154,6 +154,7 @@ scp -q \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
+    "$ROOT"/tools/guest/*.vbs \
     "$ROOT/tools/guest/minimal-resources.pri" \
     "$ROOT/tools/guest/shot.ps1" \
     "$HOST:C:/kaya/"
@@ -187,6 +188,127 @@ verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
 verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
 verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
 timing deploy
+
+# Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
+# record-win, built on the VM) films kaya windows for the whole run,
+# saving frames named by VM-clock epoch ms. GDI-family capture shows
+# WinUI's DirectComposition content as blank; WGC reads the compositor
+# and is window-scoped, so nothing else on the desktop enters the
+# film. Anchoring never crosses machines: frame names and harness
+# epochs share the VM clock. Per-leg films are assembled host-side
+# from each leg's frame range, so extraction reuses harness-extract
+# unchanged.
+rec_suite_start() {
+    [ -n "${KAYA_RECORD:-}" ] || return 0
+    command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
+        || { echo "recording mode needs ffmpeg/ffprobe — run inside nix develop"; exit 1; }
+    "$ROOT/tools/harness-extract.sh" --selftest || exit 1
+    # Build the capturer on the VM, once per source version (the
+    # marker carries the content hash).
+    local rw_hash
+    rw_hash=$(cat "$ROOT/tools/guest/record-win/Program.cs" \
+        "$ROOT/tools/guest/record-win/record-win.csproj" | shasum | cut -c1-12)
+    run_ssh 'cmd /c if not exist C:\kaya\record-win mkdir C:\kaya\record-win' || true
+    scp -q "$ROOT/tools/guest/record-win/Program.cs" \
+        "$ROOT/tools/guest/record-win/record-win.csproj" "$HOST:C:/kaya/record-win/"
+    if ! run_ssh "cmd /c dir C:\\kaya\\record-win\\.built-$rw_hash >nul 2>nul"; then
+        echo "== building record-win on the VM =="
+        run_ssh 'cmd /c "cd /d C:\kaya\record-win && dotnet build -c Release -v q"' \
+            || { echo "recording: record-win build failed on the VM"; exit 1; }
+        run_ssh "cmd /c del C:\\kaya\\record-win\\.built-* 2>nul & cmd /c echo built > C:\\kaya\\record-win\\.built-$rw_hash" || true
+    fi
+    # A recorder left over from an aborted run would fight this one.
+    run_ssh 'cmd /c "taskkill /f /im record-win.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "if exist C:\kaya\frames rmdir /s /q C:\kaya\frames & mkdir C:\kaya\frames"' || true
+    run_ssh "schtasks /create /tn kaya_record /tr \"wscript C:\\kaya\\run-hidden.vbs record.cmd\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_record >nul"
+    # Hold the suites until the capturer is up; per-window capture
+    # attaches in well under the scenes' opening settle.
+    local tries=0
+    until run_ssh 'type C:\kaya\out_record.txt 2>nul' 2>/dev/null \
+        | grep -q RECORDER_READY; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 60 ]; then
+            echo "recording: record-win never came up:" >&2
+            run_ssh 'type C:\kaya\out_record.txt' >&2 || true
+            exit 1
+        fi
+        sleep 1
+    done
+}
+
+rec_suite_stop() {
+    [ -n "${KAYA_RECORD:-}" ] || return 0
+    # The stop file is the recorder's own shutdown protocol; the
+    # taskkill is the bound on it never noticing.
+    run_ssh 'cmd /c echo stop > C:\kaya\frames\stop' || true
+    sleep 3
+    run_ssh 'cmd /c "taskkill /f /im record-win.exe 2>nul & exit /b 0"' || true
+    local recdir="$ROOT/target/recordings/windows"
+    rm -rf "$recdir"
+    mkdir -p "$recdir"
+    # Plain tar: the VM's bsdtar would write real zip for a .zip name
+    # (-a), which the host's GNU tar refuses to read.
+    run_ssh 'cmd /c "cd /d C:\kaya && tar -c -f frames.tar frames"' \
+        || { echo "recording: could not pack frames"; return 1; }
+    scp -q "$HOST:C:/kaya/frames.tar" "$recdir/" \
+        || { echo "recording: could not pull frames"; return 1; }
+    (cd "$recdir" && tar -xf frames.tar && rm frames.tar)
+    local count
+    count=$(find "$recdir/frames" -name '*.png' | wc -l | tr -d ' ')
+    if [ "$count" = 0 ]; then
+        echo "recording: the capturer produced no frames"
+        run_ssh 'type C:\kaya\out_record.txt' || true
+        return 1
+    fi
+    # Per leg: transcript from the VM, then a film assembled from the
+    # leg's own frame range (concat with real inter-frame durations),
+    # anchored at its first frame's epoch. Same window per leg, so
+    # frame sizes agree within each film.
+    local name failed=0
+    local pids=()
+    for name in "${SUITES_RUN[@]}"; do
+        local dir="$recdir/$name"
+        mkdir -p "$dir"
+        run_ssh "type C:\\kaya\\out_$name.txt" | tr -d '\r' >"$dir/leg.log" 2>/dev/null
+        (
+            epoch=$(grep -m1 -o 'KAYA_HARNESS: epoch [0-9]*' "$dir/leg.log" | grep -o '[0-9]*$')
+            last_off=$(grep -o 'KAYA_HARNESS: +[0-9]*ms' "$dir/leg.log" \
+                | grep -o '[0-9]*' | sort -n | tail -1)
+            if [ -z "$epoch" ]; then
+                echo "$name: no harness epoch in transcript"
+                exit 1
+            fi
+            lo=$((epoch - 1500))
+            hi=$((epoch + last_off + 2000))
+            find "$recdir/frames" -name '*.png' \
+                | awk -F'[/.]' -v lo="$lo" -v hi="$hi" \
+                    '{ts=$(NF-1); if (ts+0 >= lo && ts+0 <= hi) print ts}' \
+                | sort -n >"$dir/frames.txt"
+            if [ ! -s "$dir/frames.txt" ]; then
+                echo "$name: no frames overlap the leg's transcript"
+                exit 1
+            fi
+            anchor=$(head -1 "$dir/frames.txt")
+            awk -v dir="$recdir/frames" 'NR>1 {print "file \x27" dir "/" prev ".png\x27"; print "duration " ($1 - prev) / 1000}
+                {prev=$1}
+                END {print "file \x27" dir "/" prev ".png\x27"; print "duration 0.2"}' \
+                "$dir/frames.txt" >"$dir/concat.txt"
+            ffmpeg -loglevel error -f concat -safe 0 -i "$dir/concat.txt" \
+                -fps_mode vfr -pix_fmt yuv420p -c:v libx264 -preset ultrafast \
+                -y "$dir/video.mkv"
+            "$ROOT/tools/harness-extract.sh" "$dir/video.mkv" "$dir/leg.log" \
+                "$anchor" "$dir/steps"
+        ) >"$dir/extract.log" 2>&1 || : >"$dir/extract-failed" &
+        pids+=($!)
+    done
+    [ ${#pids[@]} -eq 0 ] || wait "${pids[@]}" 2>/dev/null || true
+    for name in "${SUITES_RUN[@]}"; do
+        cat "$recdir/$name/extract.log" 2>/dev/null
+        [ ! -e "$recdir/$name/extract-failed" ] || failed=1
+    done
+    [ "$failed" = 0 ] || { echo "recording: extraction failures above"; return 1; }
+}
+SUITES_RUN=()
 
 # Run a shipped one-shot guest script via schtasks and print the file
 # it writes once its done-marker appears.
@@ -227,7 +349,11 @@ run_probe() {
 
 run_suite() {
     local name="$1"
-    run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr C:\\kaya\\run_$name.cmd /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
+    SUITES_RUN+=("$name")
+    # The hidden-window shim keeps the task's console off the desktop
+    # — recording mode films the desktop, and a console on top of the
+    # guest window is all the film would show.
+    run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr \"wscript C:\\kaya\\run-hidden.vbs run_$name.cmd\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
     local tries=0
     # 1s polls: scenes run ~4s, and 5s polls added a quantization tax
     # of up to half the leg's real cost.
@@ -253,6 +379,7 @@ run_suite() {
 }
 
 status=0
+rec_suite_start
 case "$SUITE" in
     all)
         run_suite rust || status=1
@@ -279,4 +406,6 @@ case "$SUITE" in
     *) run_suite "$SUITE" || status=1 ;;
 esac
 timing suites
+rec_suite_stop || status=1
+[ -z "${KAYA_RECORD:-}" ] || timing recording-pull+stills
 exit "$status"

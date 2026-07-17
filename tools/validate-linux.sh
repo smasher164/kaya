@@ -13,6 +13,8 @@ T0=$SECONDS
 # hanging the caller forever. Generous — a cold container compiles
 # everything from scratch.
 rc=0
-timeout 1800 docker run --rm -v "$ROOT:/work" kaya-linux bash /work/tools/linux/run-suites.sh || rc=$?
+timeout 1800 docker run --rm -v "$ROOT:/work" \
+    -e KAYA_RECORD="${KAYA_RECORD:-}" -e KAYA_JOBS="${KAYA_JOBS:-}" \
+    kaya-linux bash /work/tools/linux/run-suites.sh || rc=$?
 echo "TIMING container-suites $((SECONDS - T0))s"
 exit "$rc"

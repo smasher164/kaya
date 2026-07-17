@@ -23,7 +23,7 @@ if shellcheck -S warning "$T/bad.sh" >/dev/null 2>&1; then
 fi
 
 status=0
-for f in tools/*.sh tools/ios/*.sh tools/android/*.sh tools/swiftui/*.sh; do
+for f in tools/*.sh tools/ios/*.sh tools/android/*.sh tools/swiftui/*.sh tools/linux/*.sh; do
     [ -f "$f" ] || continue
     if ! shellcheck -S warning "$f"; then
         status=1

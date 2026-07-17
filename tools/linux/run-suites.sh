@@ -6,7 +6,7 @@
 # they never collide with the host's target directory.
 set -uo pipefail
 
-cd /work
+cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
 # Dune resolves external libraries through OCAMLPATH, which only opam
 # env provides — the image's bare PATH export is enough for ocamlfind
@@ -46,7 +46,7 @@ run() {
     shift 2
     if [ "$JOBS" = 1 ]; then
         echo "== $name ($proto) =="
-        if run_one "$proto" "$@"; then
+        if run_one "$proto" "$name" "$@"; then
             echo "$name ($proto): PASS"
         else
             echo "$name ($proto): FAIL"
@@ -55,7 +55,7 @@ run() {
         return
     fi
     (
-        if run_one "$proto" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
+        if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
             echo PASS >"$LEGS_DIR/$name-$proto.verdict"
         else
             echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
@@ -68,12 +68,35 @@ run() {
     done
 }
 
+# Recording mode (KAYA_RECORD=1): every leg — both protocols — runs
+# inside its own Xvfb and is filmed there by record-leg.sh (wayland
+# via a nested per-leg Weston on the X11 backend). One window per
+# private display: the film is the leg, no crops or tiling needed.
+# 24-bit screens either way; x11grab cannot encode the 8-bit default.
 run_one() {
-    local proto="$1"
-    shift
+    local proto="$1" name="$2"
+    shift 2
+    if [ -n "${KAYA_RECORD:-}" ]; then
+        local dir="/work/target-linux/recordings/$name-$proto"
+        rm -rf "$dir"
+        case "$proto" in
+            x11)
+                KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
+                    xvfb-run -a -s "-screen 0 1024x768x24" \
+                    /work/tools/linux/record-leg.sh x11 "$dir" "$@"
+                ;;
+            wayland)
+                KAYA_SELFTEST=1 GDK_BACKEND=wayland timeout 180 \
+                    xvfb-run -a -s "-screen 0 1024x768x24" \
+                    /work/tools/linux/record-leg.sh wayland "$dir" "$@"
+                ;;
+        esac
+        return
+    fi
     case "$proto" in
         x11)
-            KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 xvfb-run -a "$@"
+            KAYA_SELFTEST=1 GDK_BACKEND=x11 timeout 180 \
+                xvfb-run -a -s "-screen 0 1024x768x24" "$@"
             ;;
         wayland)
             KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY=kaya-wayland \
