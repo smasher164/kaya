@@ -38,14 +38,49 @@ if ! avdmanager list avd -c 2>/dev/null | grep -qx "$AVD"; then
     echo "no" | avdmanager create avd -n "$AVD" -k "$IMAGE" >/dev/null
 fi
 
-# Boot headless; screenshots still work because the GPU renders host-side.
-emulator -avd "$AVD" -no-window -no-audio -no-boot-anim \
-    -gpu swiftshader_indirect >/dev/null 2>&1 &
-EMULATOR_PID=$!
-trap 'adb emu kill >/dev/null 2>&1 || kill "$EMULATOR_PID" 2>/dev/null || true' EXIT
-
-adb wait-for-device
-adb shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
+# A pool of emulators (KAYA_ANDROID_EMUS wide) runs the legs in
+# parallel. All pool instances share the one AVD READ-ONLY — the
+# sharing rule is all-or-nothing, a read-write instance locks every
+# sibling out — and read-only instances quickboot from the snapshot in
+# ~2-4s. The snapshot itself can only be written by a read-write
+# instance, so it is created once here. Pool instances stay warm
+# across runs on purpose; nothing kills them at exit.
+POOL="${KAYA_ANDROID_EMUS:-2}"
+boot_wait() { # serial
+    local serial="$1" tries=0
+    until adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 120 ]; then
+            echo "$serial did not boot; emulator log tail:" >&2
+            tail -5 "$ROOT/target/emu-${serial#emulator-}.log" >&2 || true
+            exit 1
+        fi
+        sleep 1
+    done
+}
+if [ ! -d "$ANDROID_AVD_HOME/$AVD.avd/snapshots/default_boot" ]; then
+    echo "== creating quickboot snapshot (one-time) =="
+    emulator -avd "$AVD" -no-window -no-audio -no-boot-anim \
+        -gpu swiftshader_indirect -port 5554 >"$ROOT/target/emu-5554.log" 2>&1 &
+    boot_wait emulator-5554
+    adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
+    sleep 5
+fi
+SERIALS=()
+i=0
+while [ "$i" -lt "$POOL" ]; do
+    port=$((5554 + 2 * i))
+    serial="emulator-$port"
+    SERIALS+=("$serial")
+    if ! adb -s "$serial" get-state 2>/dev/null | grep -q device; then
+        emulator -avd "$AVD" -read-only -no-window -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect -port "$port" >"$ROOT/target/emu-$port.log" 2>&1 &
+    fi
+    i=$((i + 1))
+done
+for serial in "${SERIALS[@]}"; do
+    boot_wait "$serial"
+done
 
 status=0
 KAYA_T0=$SECONDS
@@ -61,33 +96,112 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     "$ROOT/tools/harness-extract.sh" --selftest || exit 1
 fi
 
+# Legs run in a pool as wide as the device pool: each claims an
+# emulator, runs against it with adb -s, and reports through a verdict
+# file; drain() prints in submission order and doubles as the barrier
+# before the next gradle build rewrites the APK a queued leg would
+# install.
+LEGS_DIR="$(mktemp -d)"
+trap 'rm -rf "$LEGS_DIR"' EXIT
+leg_names=()
+leg_pids=()
+
+drain() {
+    if [ ${#leg_pids[@]} -gt 0 ]; then
+        wait "${leg_pids[@]}" 2>/dev/null || true
+    fi
+    leg_pids=()
+    local name verdict
+    for name in "${leg_names[@]}"; do
+        verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
+        echo "== $name =="
+        cat "$LEGS_DIR/$name.log" 2>/dev/null
+        [ "$verdict" = PASS ] || status=1
+        echo "$name: $verdict"
+    done
+    leg_names=()
+}
+
+# Count live leg subshells only: recorders and emulators are
+# background jobs of this same shell, and a jobs-based gate counts
+# them too — with enough of them it deadlocks the queue outright.
+running_legs() {
+    local n=0 p
+    for p in "${leg_pids[@]}"; do
+        kill -0 "$p" 2>/dev/null && n=$((n + 1))
+    done
+    echo "$n"
+}
+
 run_apk() {
+    local name="$1"
+    leg_names+=("$name")
+    (
+        local serial='' slot='' i
+        while [ -z "$serial" ]; do
+            i=0
+            while [ "$i" -lt "${#SERIALS[@]}" ]; do
+                if mkdir "$LEGS_DIR/.dev-$i" 2>/dev/null; then
+                    serial="${SERIALS[$i]}"
+                    slot=$i
+                    break
+                fi
+                i=$((i + 1))
+            done
+            [ -n "$serial" ] || sleep 0.2
+        done
+        local verdict=FAIL
+        if run_apk_on "$serial" "$@"; then
+            verdict=PASS
+        fi
+        rmdir "$LEGS_DIR/.dev-$slot" 2>/dev/null
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
+    ) >"$LEGS_DIR/$name.log" 2>&1 &
+    leg_pids+=($!)
+    # Watchdog: a wedged pool must die loudly in minutes, not
+    # silently absorb tens of them (the deadlock class this gate once
+    # had). No slot freeing for 3 minutes is never legitimate — legs
+    # are bounded far tighter.
+    local spins=0
+    while [ "$(running_legs)" -ge "${#SERIALS[@]}" ]; do
+        spins=$((spins + 1))
+        if [ "$spins" -gt 900 ]; then
+            echo "pool wedged: $(running_legs) legs running, none finishing; queued=${#leg_names[@]}" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+}
+
+run_apk_on() {
     # Selftest scripts double as scene selectors on Android (one APK
     # hosts every scene); pass the script as a string extra.
-    local name="$1" apk="$2" component="$3" script="$4"
-    shift 4
-    adb install -r "$apk" >/dev/null
-    adb shell am force-stop "${component%%/*}"
-    adb logcat -c
-    echo "== $name =="
+    local serial="$1" name="$2" apk="$3" component="$4" script="$5"
+    shift 5
+    local failed=0
+    adb -s "$serial" install -r "$apk" >/dev/null
+    adb -s "$serial" shell am force-stop "${component%%:*}" >/dev/null 2>&1 || true
+    adb -s "$serial" shell am force-stop "${component%%/*}"
+    adb -s "$serial" logcat -c
     # Recording mode (KAYA_RECORD=1): the emulator display is its own
     # isolated surface; screenrecord runs on-device, stopped with
     # SIGINT so the file finalizes, then pulled and mined for stills at
     # the harness transcript's offsets.
     local rec_pid=
     if [ -n "${KAYA_RECORD:-}" ]; then
-        adb shell rm -f "/data/local/tmp/kaya-rec.mp4"
-        adb shell screenrecord "/data/local/tmp/kaya-rec.mp4" &
+        adb -s "$serial" shell rm -f "/data/local/tmp/kaya-rec.mp4"
+        adb -s "$serial" shell screenrecord "/data/local/tmp/kaya-rec.mp4" &
         rec_pid=$!
     fi
-    adb shell am start -W -n "$component" --es KAYA_SELFTEST "$script" "$@" >/dev/null
+    adb -s "$serial" shell am start -W -n "$component" --es KAYA_SELFTEST "$script" "$@" >/dev/null
     # The selftest exits the app at ~2.5s; grab the scene while it is
     # still up. logcat then reads the verdict from the buffer even if it
     # was emitted before the watch attached.
     sleep 2
-    adb exec-out screencap -p > "$ROOT/target/android-shot-$name.png" 2>/dev/null || true
+    adb -s "$serial" exec-out screencap -p > "$ROOT/target/android-shot-$name.png" 2>/dev/null || true
     local out
-    out=$(timeout 60 adb logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1 | tee /dev/stderr) || true
+    out=$(timeout 60 adb -s "$serial" logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1) || true
+    printf '%s\n' "$out"
     if [ -n "${KAYA_RECORD:-}" ]; then
         local dir="$ROOT/target/recordings/android/$name"
         mkdir -p "$dir"
@@ -97,32 +211,30 @@ run_apk() {
         # time minus video duration.
         local t_kill
         t_kill=$(date +%s%3N)
-        adb shell "kill -2 \$(pidof screenrecord)" 2>/dev/null || true
+        adb -s "$serial" shell "kill -2 \$(pidof screenrecord)" 2>/dev/null || true
         wait "$rec_pid" 2>/dev/null
         sleep 1
-        adb pull "/data/local/tmp/kaya-rec.mp4" "$dir/video.mp4" >/dev/null 2>&1 || true
-        adb logcat -d -s kaya:* >"$dir/leg.log" 2>/dev/null || true
+        adb -s "$serial" pull "/data/local/tmp/kaya-rec.mp4" "$dir/video.mp4" >/dev/null 2>&1 || true
+        adb -s "$serial" logcat -d -s kaya:* >"$dir/leg.log" 2>/dev/null || true
         local dur_ms
         dur_ms=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 \
             "$dir/video.mp4" 2>/dev/null | awk '{printf "%d", $1 * 1000}')
         if [ -z "$dur_ms" ]; then
             echo "$name: recording produced no readable video"
-            status=1
+            failed=1
         elif ! "$ROOT/tools/harness-extract.sh" "$dir/video.mp4" "$dir/leg.log" \
             "$((t_kill - dur_ms))" "$dir/steps"; then
-            status=1
+            failed=1
         fi
     fi
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "$name: PASS"
-    else
-        echo "$name: FAIL"
+    if ! grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
         # A guest that never printed a verdict crashed before dispatch;
         # the kaya-tag filter above cannot see that, so surface the
         # runtime's own crash log.
-        adb logcat -d -s AndroidRuntime:E | tail -30
-        status=1
+        adb -s "$serial" logcat -d -s AndroidRuntime:E | tail -30
+        failed=1
     fi
+    [ "$failed" = 0 ]
 }
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
@@ -144,6 +256,7 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     run_apk todos-rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity todos
+    drain
     timing legs-rust
 fi
 
@@ -179,6 +292,7 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2/.MainActivity todos \
         --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    drain
     timing legs-compose
 fi
 
@@ -201,6 +315,7 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk todos-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity todos
+    drain
     timing legs-jvm
 fi
 

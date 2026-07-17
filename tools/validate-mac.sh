@@ -216,6 +216,17 @@ rec_suite_stop() {
     done
 }
 
+# Count live leg subshells only: recorders and emulators are
+# background jobs of this same shell, and a jobs-based gate counts
+# them too — with enough of them it deadlocks the queue outright.
+running_legs() {
+    local n=0 p
+    for p in "${leg_pids[@]}"; do
+        kill -0 "$p" 2>/dev/null && n=$((n + 1))
+    done
+    echo "$n"
+}
+
 run() {
     local name="$1"
     shift
@@ -253,8 +264,18 @@ run() {
     ) &
     leg_pids+=($!)
     leg_names+=("$name")
-    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do
-        wait -n || true
+    # Watchdog: a wedged pool must die loudly in minutes, not
+    # silently absorb tens of them (the deadlock class this gate once
+    # had). No slot freeing for 3 minutes is never legitimate — legs
+    # are bounded far tighter.
+    local spins=0
+    while [ "$(running_legs)" -ge "$JOBS" ]; do
+        spins=$((spins + 1))
+        if [ "$spins" -gt 900 ]; then
+            echo "pool wedged: $(running_legs) legs running, none finishing; queued=${#leg_names[@]}" >&2
+            exit 1
+        fi
+        sleep 0.2
     done
 }
 

@@ -58,13 +58,36 @@ make_bundle() {
     echo "$app"
 }
 
-boot_simulator() {
-    local udid
-    udid=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone[^(]*\(([0-9A-F-]{36})\)' | grep -oE '[0-9A-F-]{36}' || true)
-    [ -n "$udid" ] || { echo "no available iPhone simulator; install a runtime in Xcode" >&2; exit 1; }
-    xcrun simctl boot "$udid" 2>/dev/null || true
-    xcrun simctl bootstatus "$udid" -b >/dev/null
-    echo "$udid"
+# A pool of dedicated simulators (kaya-sim-0..N-1, KAYA_IOS_SIMS wide)
+# runs the legs in parallel. Devices are created on first use from the
+# newest iPhone device type + iOS runtime, stay booted across runs
+# (second and later boots ride shared caches, ~15s), and never touch
+# the user's own simulators.
+POOL="${KAYA_IOS_SIMS:-2}"
+UDIDS=()
+boot_pool() {
+    local dtype runtime i udid
+    dtype=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro \(" \
+        | tail -1 | grep -oE 'com.apple.CoreSimulator.SimDeviceType[^)]*')
+    runtime=$(xcrun simctl list runtimes | grep -m1 -oE 'com.apple.CoreSimulator.SimRuntime.iOS[0-9-]+')
+    [ -n "$dtype" ] && [ -n "$runtime" ] \
+        || { echo "no iPhone device type / iOS runtime; install one in Xcode" >&2; exit 1; }
+    i=0
+    while [ "$i" -lt "$POOL" ]; do
+        udid=$(xcrun simctl list devices | grep -m1 "kaya-sim-$i (" \
+            | grep -oE '[0-9A-F-]{36}' || true)
+        if [ -z "$udid" ]; then
+            udid=$(xcrun simctl create "kaya-sim-$i" "$dtype" "$runtime")
+        fi
+        xcrun simctl boot "$udid" 2>/dev/null || true
+        UDIDS+=("$udid")
+        i=$((i + 1))
+    done
+    for udid in "${UDIDS[@]}"; do
+        # Bounded: bootstatus blocks forever on a wedged device.
+        timeout 180 xcrun simctl bootstatus "$udid" -b >/dev/null \
+            || { echo "simulator $udid did not boot within 180s" >&2; exit 1; }
+    done
 }
 
 # Recording mode (KAYA_RECORD=1): the simulator is its own isolated
@@ -81,70 +104,134 @@ rec_suite_start() {
     "$ROOT/tools/harness-extract.sh" --selftest || exit 1
     REC_ROOT="$ROOT/target/recordings/ios"
     mkdir -p "$REC_ROOT"
-    xcrun simctl io "$UDID" recordVideo --codec h264 --force "$REC_ROOT/suite.mov" \
-        >"$REC_ROOT/rec.log" 2>&1 &
-    REC_PID=$!
+    # One suite-long recording PER SIMULATOR (concurrent sessions on
+    # different udids coexist; same-device sessions are what wedge).
+    REC_PIDS=()
+    T_MARKS=()
+    local i udid
+    i=0
+    for udid in "${UDIDS[@]}"; do
+        xcrun simctl io "$udid" recordVideo --codec h264 --force \
+            "$REC_ROOT/suite-$i.mov" >"$REC_ROOT/rec-$i.log" 2>&1 &
+        REC_PIDS+=($!)
+        i=$((i + 1))
+    done
     # A lingering host-side session (a previously killed recorder)
-    # blocks every future recording with this message; fail fast with
-    # the remedy instead of producing an empty video and dead stills.
+    # blocks future recordings; fail fast with the remedy instead of
+    # producing an empty video and dead stills.
     sleep 2
-    if grep -q "already in progress" "$REC_ROOT/rec.log" 2>/dev/null; then
-        echo "recording: a stale simctl recording session is wedged;"
-        echo "run: killall -9 com.apple.CoreSimulator.CoreSimulatorService  (and rerun)"
+    i=0
+    local wedged=0
+    for udid in "${UDIDS[@]}"; do
+        if grep -q "already in progress" "$REC_ROOT/rec-$i.log" 2>/dev/null; then
+            wedged=1
+        fi
+        i=$((i + 1))
+    done
+    if [ "$wedged" = 1 ] && [ "${KAYA_REC_RETRY:-0}" = 0 ]; then
+        # A killed prior run orphans host-side recording sessions; the
+        # remedy is known and mechanical, so apply it: reset the
+        # simulator service, reboot the pool, try once more.
+        echo "recording: stale simctl sessions; resetting CoreSimulatorService and retrying"
+        local pid
+        for pid in "${REC_PIDS[@]}"; do
+            pkill -INT -P "$pid" 2>/dev/null || true
+            kill -9 "$pid" 2>/dev/null || true
+        done
+        killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
+        sleep 3
+        UDIDS=()
+        boot_pool
+        KAYA_REC_RETRY=1 rec_suite_start
+        return
+    elif [ "$wedged" = 1 ]; then
+        echo "recording: sessions still wedged after a service reset; giving up"
         exit 1
     fi
     # recordVideo's own clock is unrecoverable from either end: it
     # starts capturing at an unknown moment after launch AND drops its
-    # buffered tail when stopped. So plant a fiducial instead: once
-    # capture is up, flip the UI appearance dark and back at a measured
-    # wall time. The video's first big scene change is that flip.
+    # buffered tail when stopped. So plant a fiducial per device: flip
+    # the UI appearance dark and stamp the wall time when the flip is
+    # actually VISIBLE — the ui command returns seconds before the
+    # render lands on a busy, freshly booted simulator, and stamping
+    # the command time skews every still by that latency. The
+    # screenshot poll pins the stamp to the render within ~300ms.
     sleep 1
-    T_MARK=$(date +%s%3N)
-    echo "$T_MARK" >"$REC_ROOT/t_mark"
-    xcrun simctl ui "$UDID" appearance dark
+    i=0
+    local luma
+    for udid in "${UDIDS[@]}"; do
+        xcrun simctl ui "$udid" appearance dark
+        for _ in $(seq 1 25); do
+            xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
+            luma=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
+                -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
+                | awk -F. 'NR==1{print $1}')
+            if [ -n "$luma" ] && [ "$luma" -lt 100 ]; then
+                break
+            fi
+            sleep 0.2
+        done
+        T_MARKS[i]=$(date +%s%3N)
+        echo "${T_MARKS[$i]}" >"$REC_ROOT/t_mark-$i"
+        i=$((i + 1))
+    done
+    for udid in "${UDIDS[@]}"; do
+        xcrun simctl ui "$udid" appearance light
+    done
     sleep 1
-    xcrun simctl ui "$UDID" appearance light
-    sleep 1
+    rm -f "$REC_ROOT/.flip-probe.png"
 }
 
 rec_suite_stop() {
     [ -n "${KAYA_RECORD:-}" ] || return 0
-    # simctl itself must receive the SIGINT to finalize the file, and
+    # simctl itself must receive the SIGINT to finalize each file, and
     # the xcrun wrapper does not forward signals — hit the children
     # first, then the wrapper, bounded.
-    pkill -INT -P "$REC_PID" 2>/dev/null || true
-    kill -INT "$REC_PID" 2>/dev/null || true
-    for _ in $(seq 1 40); do
-        kill -0 "$REC_PID" 2>/dev/null || break
-        sleep 0.5
+    local pid i
+    for pid in "${REC_PIDS[@]}"; do
+        pkill -INT -P "$pid" 2>/dev/null || true
+        kill -INT "$pid" 2>/dev/null || true
     done
-    wait "$REC_PID" 2>/dev/null || true
-    # Locate the appearance-flip fiducial: the first big scene change
-    # (everything before it is the static home screen), sanity-checked
-    # against the second (the flip back, ~1s later). awk takes what it
-    # needs but reads the whole stream: head -1 would SIGPIPE ffprobe,
-    # which set -o pipefail turns fatal.
-    local flips t_flip gap
-    flips=$(ffprobe -v quiet -f lavfi \
-        "movie=$REC_ROOT/suite.mov,select=gt(scene\,0.3)" \
-        -show_entries frame=pts_time -of csv=p=0 2>/dev/null \
-        | awk 'NR<=2{printf "%d ", $1 * 1000}')
-    t_flip=${flips%% *}
-    [ -n "$t_flip" ] || { echo "recording: no fiducial found in suite.mov"; return 1; }
-    gap=$(( $(awk '{print $2}' <<<"$flips 0") - t_flip ))
-    if [ "$gap" -lt 600 ] || [ "$gap" -gt 2000 ]; then
-        echo "recording: fiducial suspect (flip pair ${gap}ms apart, expected ~1000ms)"
-        return 1
-    fi
-    # Legs share one video; extractions are independent — run them all
-    # at once and collect verdicts after.
-    local dir failed=0
+    for pid in "${REC_PIDS[@]}"; do
+        for _ in $(seq 1 40); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+        done
+        wait "$pid" 2>/dev/null || true
+    done
+    # Locate each device's appearance-flip fiducial: the first big
+    # scene change (everything before it is the static home screen),
+    # sanity-checked against the second (the flip back, ~1s later).
+    # awk takes what it needs but reads the whole stream: head -1
+    # would SIGPIPE ffprobe, which set -o pipefail turns fatal.
+    local ANCHORS=()
+    local t_flip
+    i=0
+    while [ "$i" -lt "${#UDIDS[@]}" ]; do
+        # The fiducial is the first scene change that is DARK (the
+        # appearance flip, YAVG ~76): a freshly booted simulator's
+        # home screen churns with boot and install animations, all
+        # bright (~157), and "first change" alone picks those up.
+        t_flip=$(ffprobe -v quiet -f lavfi \
+            "movie=$REC_ROOT/suite-$i.mov,select=gt(scene\,0.3),signalstats" \
+            -show_entries frame=pts_time:frame_tags=lavfi.signalstats.YAVG \
+            -of csv=p=0 2>/dev/null \
+            | awk -F, '$2 + 0 < 100 {printf "%d", $1 * 1000; exit}')
+        [ -n "$t_flip" ] || { echo "recording: no dark fiducial in suite-$i.mov"; return 1; }
+        ANCHORS[i]=$(( ${T_MARKS[$i]} - t_flip ))
+        echo "${ANCHORS[$i]}" >"$REC_ROOT/anchor-$i"
+        i=$((i + 1))
+    done
+    # Each leg extracts from the film of the simulator it ran on.
+    local dir failed=0 slot
     local pids=()
     for dir in "$REC_ROOT"/*/; do
         [ -f "$dir/leg.log" ] || continue
+        slot=$(cat "$dir/sim" 2>/dev/null || echo 0)
         (
-            "$ROOT/tools/harness-extract.sh" "$REC_ROOT/suite.mov" "$dir/leg.log" \
-                "$((T_MARK - t_flip))" "$dir/steps" >"$dir/extract.log" 2>&1 \
+            "$ROOT/tools/harness-extract.sh" "$REC_ROOT/suite-$slot.mov" \
+                "$dir/leg.log" "${ANCHORS[$slot]}" "$dir/steps" \
+                >"$dir/extract.log" 2>&1 \
                 || : >"$dir/extract-failed"
         ) &
         pids+=($!)
@@ -162,31 +249,125 @@ rec_start() {
     [ -n "${KAYA_RECORD:-}" ] || return 0
     REC_DIR="$ROOT/target/recordings/ios/$1"
     mkdir -p "$REC_DIR"
+    # Which simulator's film covers this leg.
+    echo "${2:-0}" >"$REC_DIR/sim"
 }
 
 rec_finish() {
     [ -n "${KAYA_RECORD:-}" ] || return 0
-    # The transcript's own epoch line anchors the leg inside the
-    # suite recording; nothing to measure here.
+    # The transcript's own epoch line anchors the leg inside its
+    # simulator's recording; nothing to measure here.
     printf '%s\n' "$1" >"$REC_DIR/leg.log"
 }
 
-run_bundle() {
-    local udid="$1" app="$2" bundle_id="$3" name="$4" script="${5:-1}"
+run_bundle_on() {
+    local udid="$1" slot="$2" app="$3" bundle_id="$4" name="$5" script="${6:-1}"
     xcrun simctl install "$udid" "$app"
-    echo "== $name =="
-    rec_start "$name"
+    rec_start "$name" "$slot"
     local out
     out=$(SIMCTL_CHILD_KAYA_SELFTEST="$script" timeout 120 \
-        xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1 | tee /dev/stderr) || true
+        xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
+    printf '%s\n' "$out"
     rec_finish "$out"
     xcrun simctl io "$udid" screenshot "$ROOT/target/ios-shot-$name.png" >/dev/null 2>&1 || true
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "$name: PASS"
-    else
-        echo "$name: FAIL"
-        return 1
+    grep -q "KAYA_SELFTEST: OK" <<<"$out"
+}
+
+# Rust entrypoint + SwiftUI backend legs: install the bundle (with the
+# embedded dylib) on the claimed simulator and launch with the scene
+# script from the environment.
+run_swiftui_on() {
+    local udid="$1" slot="$2" app="$3" bundle_id="$4" name="$5" selftest="$6" scene="$7"
+    xcrun simctl install "$udid" "$app"
+    local container
+    container=$(xcrun simctl get_app_container "$udid" "$bundle_id" app)
+    rec_start "$name" "$slot"
+    local out
+    out=$(SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")" \
+        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
+        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
+        timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
+    printf '%s\n' "$out"
+    rec_finish "$out"
+    xcrun simctl io "$udid" screenshot "$ROOT/target/ios-shot-$name.png" >/dev/null 2>&1 || true
+    grep -q "KAYA_SELFTEST: OK" <<<"$out"
+}
+
+# Legs run in a pool as wide as the simulator pool: each claims a
+# device, runs against it, and reports through a verdict file; drain()
+# prints in submission order and is the barrier between flavor blocks
+# (their builds overwrite shared scratch files a queued leg reads).
+LEGS_DIR="$(mktemp -d)"
+trap 'rm -rf "$LEGS_DIR"' EXIT
+leg_names=()
+leg_pids=()
+
+# Count live leg subshells only: recorders and emulators are
+# background jobs of this same shell, and a jobs-based gate counts
+# them too — with enough of them it deadlocks the queue outright.
+running_legs() {
+    local n=0 p
+    for p in "${leg_pids[@]}"; do
+        kill -0 "$p" 2>/dev/null && n=$((n + 1))
+    done
+    echo "$n"
+}
+
+queue_leg() { # fn name args...
+    local fn="$1" name="$2"
+    shift 2
+    leg_names+=("$name")
+    (
+        local slot='' i
+        while [ -z "$slot" ]; do
+            i=0
+            while [ "$i" -lt "${#UDIDS[@]}" ]; do
+                if mkdir "$LEGS_DIR/.dev-$i" 2>/dev/null; then
+                    slot=$i
+                    break
+                fi
+                i=$((i + 1))
+            done
+            [ -n "$slot" ] || sleep 0.2
+        done
+        local verdict=FAIL
+        if "$fn" "${UDIDS[$slot]}" "$slot" "$@"; then
+            verdict=PASS
+        fi
+        rmdir "$LEGS_DIR/.dev-$slot" 2>/dev/null
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
+    ) >"$LEGS_DIR/$name.log" 2>&1 &
+    leg_pids+=($!)
+    # Watchdog: a wedged pool must die loudly in minutes, not
+    # silently absorb tens of them (the deadlock class this gate once
+    # had). No slot freeing for 3 minutes is never legitimate — legs
+    # are bounded far tighter.
+    local spins=0
+    while [ "$(running_legs)" -ge "${#UDIDS[@]}" ]; do
+        spins=$((spins + 1))
+        if [ "$spins" -gt 900 ]; then
+            echo "pool wedged: $(running_legs) legs running, none finishing; queued=${#leg_names[@]}" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+}
+
+drain() {
+    if [ ${#leg_pids[@]} -gt 0 ]; then
+        wait "${leg_pids[@]}" 2>/dev/null || true
     fi
+    leg_pids=()
+    local name verdict
+    for name in "${leg_names[@]}"; do
+        verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
+        echo "== $name =="
+        cat "$LEGS_DIR/$name.log" 2>/dev/null
+        [ "$verdict" = PASS ] || status=1
+        echo "$name: $verdict"
+    done
+    leg_names=()
 }
 
 status=0
@@ -195,7 +376,7 @@ timing() {
     echo "TIMING $1 $((SECONDS - KAYA_T0))s"
     KAYA_T0=$SECONDS
 }
-UDID=$(boot_simulator)
+boot_pool
 rec_suite_start
 timing boot
 
@@ -206,13 +387,14 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
         --example milestone2 --example entry --example gallery --example todos
     timing build-rust
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
-    run_bundle "$UDID" "$APP" dev.kaya.milestone2 rust || status=1
+    queue_leg run_bundle_on rust "$APP" dev.kaya.milestone2 rust
     APP=$(make_bundle entry dev.kaya.entry "$TARGET_DIR/examples/entry")
-    run_bundle "$UDID" "$APP" dev.kaya.entry entry-rust entry || status=1
+    queue_leg run_bundle_on entry-rust "$APP" dev.kaya.entry entry-rust entry
     APP=$(make_bundle gallery dev.kaya.gallery "$TARGET_DIR/examples/gallery")
-    run_bundle "$UDID" "$APP" dev.kaya.gallery gallery-rust gallery || status=1
+    queue_leg run_bundle_on gallery-rust "$APP" dev.kaya.gallery gallery-rust gallery
     APP=$(make_bundle todos dev.kaya.todos "$TARGET_DIR/examples/todos")
-    run_bundle "$UDID" "$APP" dev.kaya.todos todos-rust todos || status=1
+    queue_leg run_bundle_on todos-rust "$APP" dev.kaya.todos todos-rust todos
+    drain
     timing legs-rust
 fi
 
@@ -231,7 +413,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/milestone2swift-bin"
     APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
-    run_bundle "$UDID" "$APP" dev.kaya.milestone2swift swift || status=1
+    queue_leg run_bundle_on swift "$APP" dev.kaya.milestone2swift swift
 
     cp guests/swift/entry.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -243,7 +425,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/entryswift-bin"
     APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
-    run_bundle "$UDID" "$APP" dev.kaya.entryswift entry-swift entry || status=1
+    queue_leg run_bundle_on entry-swift "$APP" dev.kaya.entryswift entry-swift entry
 
     cp guests/swift/gallery.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -255,7 +437,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/galleryswift-bin"
     APP=$(make_bundle galleryswift dev.kaya.galleryswift "$BUNDLES/galleryswift-bin")
-    run_bundle "$UDID" "$APP" dev.kaya.galleryswift gallery-swift gallery || status=1
+    queue_leg run_bundle_on gallery-swift "$APP" dev.kaya.galleryswift gallery-swift gallery
 
     cp guests/swift/todos.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -267,7 +449,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/todosswift-bin"
     APP=$(make_bundle todosswift dev.kaya.todosswift "$BUNDLES/todosswift-bin")
-    run_bundle "$UDID" "$APP" dev.kaya.todosswift todos-swift todos || status=1
+    queue_leg run_bundle_on todos-swift "$APP" dev.kaya.todosswift todos-swift todos
+    drain
     timing swift-build+legs
 fi
 
@@ -286,89 +469,26 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/libkaya_swiftui_ios.dylib"
     APP=$(make_bundle milestone2rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone2")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    xcrun simctl install "$UDID" "$APP"
-    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.rustswiftui app)
-    echo "== rust-swiftui =="
-    rec_start "rust-swiftui"
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST=1 \
-        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/milestone2.steps")" \
-        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
-        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
-        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.rustswiftui 2>&1 | tee /dev/stderr) || true
-    rec_finish "$out"
-    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-rust-swiftui.png" >/dev/null 2>&1 || true
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "rust-swiftui: PASS"
-    else
-        echo "rust-swiftui: FAIL"
-        status=1
-    fi
+    queue_leg run_swiftui_on rust-swiftui "$APP" dev.kaya.rustswiftui rust-swiftui 1 milestone2
 
     # The entry scene against the SwiftUI backend, same embedded dylib.
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example entry
     APP=$(make_bundle entryrs-swiftui dev.kaya.entryswiftui "$TARGET_DIR/examples/entry")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    xcrun simctl install "$UDID" "$APP"
-    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.entryswiftui app)
-    echo "== entry-swiftui =="
-    rec_start "entry-swiftui"
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST=entry \
-        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/entry.steps")" \
-        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
-        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
-        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.entryswiftui 2>&1 | tee /dev/stderr) || true
-    rec_finish "$out"
-    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-entry-swiftui.png" >/dev/null 2>&1 || true
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "entry-swiftui: PASS"
-    else
-        echo "entry-swiftui: FAIL"
-        status=1
-    fi
+    queue_leg run_swiftui_on entry-swiftui "$APP" dev.kaya.entryswiftui entry-swiftui entry entry
 
     # The todos scene against the SwiftUI backend, same embedded dylib.
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example todos
     APP=$(make_bundle todosrs-swiftui dev.kaya.todosswiftui "$TARGET_DIR/examples/todos")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    xcrun simctl install "$UDID" "$APP"
-    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.todosswiftui app)
-    echo "== todos-swiftui =="
-    rec_start "todos-swiftui"
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST=todos \
-        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/todos.steps")" \
-        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
-        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
-        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.todosswiftui 2>&1 | tee /dev/stderr) || true
-    rec_finish "$out"
-    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-todos-swiftui.png" >/dev/null 2>&1 || true
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "todos-swiftui: PASS"
-    else
-        echo "todos-swiftui: FAIL"
-        status=1
-    fi
+    queue_leg run_swiftui_on todos-swiftui "$APP" dev.kaya.todosswiftui todos-swiftui todos todos
 
     # The gallery scene against the SwiftUI backend, same embedded dylib.
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example gallery
     APP=$(make_bundle galleryrs-swiftui dev.kaya.galleryswiftui "$TARGET_DIR/examples/gallery")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    xcrun simctl install "$UDID" "$APP"
-    CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.galleryswiftui app)
-    echo "== gallery-swiftui =="
-    rec_start "gallery-swiftui"
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST=gallery \
-        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/gallery.steps")" \
-        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
-        SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
-        timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.galleryswiftui 2>&1 | tee /dev/stderr) || true
-    rec_finish "$out"
-    xcrun simctl io "$UDID" screenshot "$ROOT/target/ios-shot-gallery-swiftui.png" >/dev/null 2>&1 || true
-    if grep -q "KAYA_SELFTEST: OK" <<<"$out"; then
-        echo "gallery-swiftui: PASS"
-    else
-        echo "gallery-swiftui: FAIL"
-        status=1
-    fi
+    queue_leg run_swiftui_on gallery-swiftui "$APP" dev.kaya.galleryswiftui gallery-swiftui gallery gallery
+    drain
     timing swiftui-build+legs
 fi
 

@@ -59,31 +59,57 @@ if ! xcrun simctl help >/dev/null 2>&1; then
         fi
     done
 fi
-if sims=$(xcrun simctl list devices booted 2>/dev/null); then
-    if grep -q "(Booted)" <<<"$sims"; then
-        report ios OK "simulator booted: $(grep -m1 -oE 'iPhone[^(]*' <<<"$sims" | sed 's/ *$//')"
+IOS_POOL="${KAYA_IOS_SIMS:-2}"
+if xcrun simctl list devices >/dev/null 2>&1; then
+    booted=$(xcrun simctl list devices booted 2>/dev/null | grep -c "kaya-sim-.*Booted" || true)
+    if [ "$booted" -ge "$IOS_POOL" ]; then
+        report ios OK "sim pool warm ($booted/$IOS_POOL kaya-sims booted)"
     elif [ "$WARM" = 1 ]; then
-        udid=$(xcrun simctl list devices available \
-            | grep -m1 -oE 'iPhone[^(]*\(([0-9A-F-]{36})\)' | grep -oE '[0-9A-F-]{36}' || true)
-        if [ -n "$udid" ] && xcrun simctl boot "$udid" 2>/dev/null \
-            && xcrun simctl bootstatus "$udid" -b >/dev/null 2>&1; then
-            report ios OK "simulator booted (warmed now)"
-        else
-            report ios DOWN "could not boot a simulator"
-        fi
+        # Same creation logic run-sim.sh uses.
+        dtype=$(xcrun simctl list devicetypes 2>/dev/null | grep -E "iPhone [0-9]+ Pro \(" \
+            | tail -1 | grep -oE 'com.apple.CoreSimulator.SimDeviceType[^)]*')
+        runtime=$(xcrun simctl list runtimes 2>/dev/null | grep -m1 -oE 'com.apple.CoreSimulator.SimRuntime.iOS[0-9-]+')
+        i=0
+        while [ "$i" -lt "$IOS_POOL" ]; do
+            udid=$(xcrun simctl list devices 2>/dev/null | grep -m1 "kaya-sim-$i (" \
+                | grep -oE '[0-9A-F-]{36}' || true)
+            [ -n "$udid" ] || udid=$(xcrun simctl create 2>/dev/null "kaya-sim-$i" "$dtype" "$runtime")
+            xcrun simctl boot "$udid" 2>/dev/null || true
+            i=$((i + 1))
+        done
+        for u in $(xcrun simctl list devices 2>/dev/null | grep "kaya-sim-" | grep -oE '[0-9A-F-]{36}'); do
+            timeout 180 xcrun simctl bootstatus "$u" -b >/dev/null 2>&1 || true
+        done
+        report ios OK "sim pool booted (warmed now)"
     else
-        report ios COLD "no simulator booted (~60-90s on first run, or --warm)"
+        report ios COLD "sim pool cold ($booted/$IOS_POOL booted; --warm boots it)"
     fi
 else
     report ios DOWN "simctl unavailable — run inside nix develop (xcrun stub/CLT trap)"
 fi
 
 # --- Android emulator ------------------------------------------------
+ANDROID_POOL="${KAYA_ANDROID_EMUS:-2}"
 if command -v adb >/dev/null; then
-    if adb devices 2>/dev/null | grep -q "emulator-.*device$"; then
-        report android OK "emulator running"
+    up=$(adb devices 2>/dev/null | grep -c "emulator-.*device$" || true)
+    if [ "$up" -ge "$ANDROID_POOL" ]; then
+        report android OK "emulator pool warm ($up/$ANDROID_POOL)"
+    elif [ "$WARM" = 1 ] && command -v emulator >/dev/null; then
+        # Read-only instances of the shared AVD, like run-emulator.
+        export ANDROID_AVD_HOME="$ROOT/target/avd"
+        i=0
+        while [ "$i" -lt "$ANDROID_POOL" ]; do
+            port=$((5554 + 2 * i))
+            if ! adb -s "emulator-$port" get-state 2>/dev/null | grep -q device; then
+                emulator -avd kaya -read-only -no-window -no-audio -no-boot-anim \
+                    -gpu swiftshader_indirect -port "$port" \
+                    >"$ROOT/target/emu-$port.log" 2>&1 &
+            fi
+            i=$((i + 1))
+        done
+        report android OK "emulator pool booting ($ANDROID_POOL instances; quickboot ~5s)"
     else
-        report android COLD "no emulator running (run-emulator boots one)"
+        report android COLD "emulator pool cold ($up/$ANDROID_POOL; --warm or run-emulator boots it)"
     fi
 else
     report android DOWN "adb unavailable — run inside nix develop"
