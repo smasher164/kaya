@@ -745,9 +745,80 @@ fn tx_rx_take() -> Receiver<Transaction> {
         .expect("transaction receiver already taken")
 }
 
+// WinUI 3's interop interface for reaching a Window's HWND
+// (IWindowNative, one method past IUnknown). The generated bindings
+// do not project AppWindow, and Win32 placement via the HWND is all
+// recording mode needs.
+windows_core::imp::define_interface!(
+    IWindowNative,
+    IWindowNative_Vtbl,
+    0xeecdbf0e_bae9_4cb6_a68e_9598e1cb57bb
+);
+windows_core::imp::interface_hierarchy!(IWindowNative, windows_core::IUnknown);
+#[repr(C)]
+#[doc(hidden)]
+pub struct IWindowNative_Vtbl {
+    pub base__: windows_core::IUnknown_Vtbl,
+    pub WindowHandle:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut isize) -> windows_core::HRESULT,
+}
+impl IWindowNative {
+    fn window_handle(&self) -> windows_core::Result<isize> {
+        unsafe {
+            let mut hwnd = 0isize;
+            (windows_core::Interface::vtable(self).WindowHandle)(
+                windows_core::Interface::as_raw(self),
+                &mut hwnd,
+            )
+            .ok()?;
+            Ok(hwnd)
+        }
+    }
+}
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn SetWindowPos(
+        hwnd: isize,
+        insert_after: isize,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> i32;
+}
+
 fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
     let window = Window::new()?;
-    window.SetTitle(&HSTRING::from("kaya milestone 2"))?;
+    // Recording mode tiles parallel legs so per-window captures never
+    // overlap, and the slot rides the TITLE so the recorder can name
+    // each window's frames unambiguously.
+    let slot = std::env::var("KAYA_WIN_SLOT")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok());
+    let title = match slot {
+        Some(n) => format!("kaya milestone 2 [{n}]"),
+        None => "kaya milestone 2".to_owned(),
+    };
+    window.SetTitle(&HSTRING::from(&*title))?;
+    if let Some(n) = slot {
+        let native: IWindowNative = windows_core::Interface::cast(&window)?;
+        let hwnd = native.window_handle()?;
+        const SWP_NOZORDER: u32 = 0x4;
+        const SWP_NOACTIVATE: u32 = 0x10;
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                0,
+                6 + (n % 2) * 512,
+                6 + (n / 2) * 372,
+                500,
+                360,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
 
     // Closing the window exits the app, matching the AppKit backend's
     // terminate-after-last-window-closed behavior.

@@ -80,22 +80,34 @@ internal static class Program
         IntPtr GetInterface([In] ref Guid iid);
     }
 
-    private static IntPtr FindKayaWindow()
+    private static List<IntPtr> FindKayaWindows()
     {
-        var found = IntPtr.Zero;
+        var found = new List<IntPtr>();
         EnumWindows((h, l) =>
         {
             if (!IsWindowVisible(h)) return true;
             var sb = new System.Text.StringBuilder(256);
             GetWindowText(h, sb, 256);
             if (sb.ToString().StartsWith("kaya", StringComparison.OrdinalIgnoreCase))
-            {
-                found = h;
-                return false;
-            }
+                found.Add(h);
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+
+    // Parallel legs tile into slots, and the slot rides the window
+    // TITLE ("kaya milestone 2 [3]") so each window's frames carry an
+    // unambiguous leg identity. Untiled legs fall back to slot 0.
+    private static string WindowSlot(IntPtr hwnd)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        GetWindowText(hwnd, sb, 256);
+        var t = sb.ToString();
+        var open = t.LastIndexOf('[');
+        var close = t.LastIndexOf(']');
+        if (open >= 0 && close > open)
+            return t.Substring(open + 1, close - open - 1);
+        return "0";
     }
 
     private static int Main(string[] args)
@@ -138,24 +150,34 @@ internal static class Program
         Marshal.Release(inspPtr);
 
         Console.WriteLine("RECORDER_READY");
+        // One worker per live kaya window: parallel legs each get
+        // their own capture loop; the worker retires when its window
+        // closes.
+        var workers = new Dictionary<IntPtr, Thread>();
         while (!File.Exists(stopFile))
         {
-            var hwnd = FindKayaWindow();
-            if (hwnd == IntPtr.Zero)
+            foreach (var hwnd in FindKayaWindows())
             {
-                Thread.Sleep(100);
-                continue;
+                if (workers.TryGetValue(hwnd, out var t) && t.IsAlive) continue;
+                var thread = new Thread(() =>
+                {
+                    try
+                    {
+                        CaptureWindow(d3d, device, hwnd, outdir, stopFile);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.Error.WriteLine($"record-win: capture cycle: {e.Message}");
+                    }
+                });
+                thread.IsBackground = true;
+                thread.Start();
+                workers[hwnd] = thread;
             }
-            try
-            {
-                CaptureWindow(d3d, device, hwnd, outdir, stopFile);
-            }
-            catch (Exception e)
-            {
-                Console.Error.WriteLine($"record-win: capture cycle: {e.Message}");
-                Thread.Sleep(250);
-            }
+            Thread.Sleep(100);
         }
+        foreach (var t in workers.Values)
+            t.Join(2000);
         return 0;
     }
 
@@ -169,14 +191,15 @@ internal static class Program
         // session each cycle reliably yields one frame of the CURRENT
         // composited content, so the recorder polls sessions at ~3fps
         // of true pixels.
-        Console.WriteLine($"CAPTURING {hwnd:x}");
+        var slot = WindowSlot(hwnd);
+        Console.WriteLine($"CAPTURING {hwnd:x} slot={slot}");
         var t0 = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         long saved = 0;
         while (IsWindow(hwnd) && !File.Exists(stopFile))
         {
             try
             {
-                if (CaptureOneFrame(d3d, device, hwnd, outdir))
+                if (CaptureOneFrame(d3d, device, hwnd, outdir, slot))
                     saved++;
             }
             catch (Exception e)
@@ -189,7 +212,7 @@ internal static class Program
     }
 
     private static bool CaptureOneFrame(ID3D11Device d3d, IDirect3DDevice device,
-        IntPtr hwnd, string outdir)
+        IntPtr hwnd, string outdir, string slot)
     {
         GraphicsCaptureItem item;
         try
@@ -230,7 +253,7 @@ internal static class Program
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         try
         {
-            SaveFrame(d3d, frame, Path.Combine(outdir, $"{now}.png"));
+            SaveFrame(d3d, frame, Path.Combine(outdir, $"{slot}-{now}.png"));
         }
         finally
         {
@@ -238,6 +261,10 @@ internal static class Program
         }
         return true;
     }
+
+    // ID3D11Device is thread-safe; its ImmediateContext is NOT — the
+    // per-window workers serialize the copy/map/encode section.
+    private static readonly object CtxLock = new();
 
     private static void SaveFrame(ID3D11Device d3d, Direct3D11CaptureFrame frame, string path)
     {
@@ -267,6 +294,8 @@ internal static class Program
             CPUAccessFlags = CpuAccessFlags.Read,
             MiscFlags = ResourceOptionFlags.None,
         });
+        lock (CtxLock)
+        {
         var ctx = d3d.ImmediateContext;
         ctx.CopyResource(staging, tex);
         var mapped = ctx.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
@@ -291,6 +320,7 @@ internal static class Program
         finally
         {
             ctx.Unmap(staging, 0);
+        }
         }
     }
 }

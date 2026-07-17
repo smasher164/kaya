@@ -44,7 +44,7 @@ if [ "$proto" = wayland ]; then
     export WAYLAND_DISPLAY="kaya-w-$$"
 fi
 
-ffmpeg -loglevel error -f x11grab -framerate 15 -video_size 1024x768 \
+ffmpeg -loglevel error -y -f x11grab -framerate 15 -video_size 1024x768 \
     -i "$DISPLAY" -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
     "$dir/video.mkv" &>"$dir/rec.log" &
 rec_pid=$!

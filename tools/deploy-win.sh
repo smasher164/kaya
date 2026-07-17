@@ -136,7 +136,12 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 kill_guests() {
     run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
-trap kill_guests EXIT
+LEGS_DIR="$(mktemp -d)"
+cleanup() {
+    kill_guests
+    rm -rf "$LEGS_DIR"
+}
+trap cleanup EXIT
 kill_guests
 
 echo "== deploying artifacts =="
@@ -217,6 +222,17 @@ rec_suite_start() {
             || { echo "recording: record-win build failed on the VM"; exit 1; }
         run_ssh "cmd /c del C:\\kaya\\record-win\\.built-* 2>nul & cmd /c echo built > C:\\kaya\\record-win\\.built-$rw_hash" || true
     fi
+    # The guest display must never sleep: a slept display stops DWM
+    # composition and every window is GENUINELY white on screen — the
+    # stills pass the count guard while showing nothing. The fix
+    # (powercfg monitor-timeout 0) lives in VM state, so assert it
+    # here rather than remember it.
+    if ! run_ssh 'powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE' 2>/dev/null \
+        | grep -q 'AC Power Setting Index: 0x00000000'; then
+        echo "recording: the VM display can sleep, which blanks every window."
+        echo "run on the VM:  powercfg /change monitor-timeout-ac 0"
+        exit 1
+    fi
     # A recorder left over from an aborted run would fight this one.
     run_ssh 'cmd /c "taskkill /f /im record-win.exe 2>nul & exit /b 0"' || true
     run_ssh 'cmd /c "if exist C:\kaya\frames rmdir /s /q C:\kaya\frames & mkdir C:\kaya\frames"' || true
@@ -278,23 +294,27 @@ rec_suite_stop() {
                 echo "$name: no harness epoch in transcript"
                 exit 1
             fi
+            slot=$(cat "$LEGS_DIR/$name.slot" 2>/dev/null || echo 0)
+            echo "$slot" >"$dir/slot"
             lo=$((epoch - 1500))
             hi=$((epoch + last_off + 2000))
-            find "$recdir/frames" -name '*.png' \
+            find "$recdir/frames" -name "${slot}-*.png" \
                 | awk -F'[/.]' -v lo="$lo" -v hi="$hi" \
-                    '{ts=$(NF-1); if (ts+0 >= lo && ts+0 <= hi) print ts}' \
+                    '{n = split($(NF-1), a, "-"); ts = a[n]; if (ts+0 >= lo && ts+0 <= hi) print ts}' \
                 | sort -n >"$dir/frames.txt"
             if [ ! -s "$dir/frames.txt" ]; then
                 echo "$name: no frames overlap the leg's transcript"
                 exit 1
             fi
             anchor=$(head -1 "$dir/frames.txt")
-            awk -v dir="$recdir/frames" 'NR>1 {print "file \x27" dir "/" prev ".png\x27"; print "duration " ($1 - prev) / 1000}
+            awk -v dir="$recdir/frames" -v slot="$slot" 'NR>1 {print "file \x27" dir "/" slot "-" prev ".png\x27"; print "duration " ($1 - prev) / 1000}
                 {prev=$1}
-                END {print "file \x27" dir "/" prev ".png\x27"; print "duration 0.2"}' \
+                END {print "file \x27" dir "/" slot "-" prev ".png\x27"; print "duration 0.2"}' \
                 "$dir/frames.txt" >"$dir/concat.txt"
+            # Tiled windows have odd content sizes; h264 wants even.
             ffmpeg -loglevel error -f concat -safe 0 -i "$dir/concat.txt" \
-                -fps_mode vfr -pix_fmt yuv420p -c:v libx264 -preset ultrafast \
+                -fps_mode vfr -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
+                -pix_fmt yuv420p -c:v libx264 -preset ultrafast \
                 -y "$dir/video.mkv"
             "$ROOT/tools/harness-extract.sh" "$dir/video.mkv" "$dir/leg.log" \
                 "$anchor" "$dir/steps"
@@ -347,16 +367,21 @@ run_probe() {
     run_ssh "type C:\\kaya\\out_probe.txt"
 }
 
-run_suite() {
-    local name="$1"
-    SUITES_RUN+=("$name")
-    # The hidden-window shim keeps the task's console off the desktop
-    # — recording mode films the desktop, and a console on top of the
-    # guest window is all the film would show.
-    run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr \"wscript C:\\kaya\\run-hidden.vbs run_$name.cmd\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
+# Suites run in a pool KAYA_WIN_JOBS wide (default 4): each leg claims
+# a tile slot, launches its scheduled task through the hidden-window
+# shim with the slot argument (windows tile; titles carry the slot for
+# the recorder), and polls its own output file. Verdicts print in
+# submission order at drain. Note: a timed-out leg's kill_guests sweep
+# is VM-wide and takes concurrent legs with it — acceptable, since a
+# hung guest already means the run has failed.
+WIDTH="${KAYA_WIN_JOBS:-4}"
+leg_names=()
+leg_pids=()
+
+run_one_suite() {
+    local name="$1" slot="$2"
+    run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr \"wscript C:\\kaya\\run-hidden.vbs run_$name.cmd $slot\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
     local tries=0
-    # 1s polls: scenes run ~4s, and 5s polls added a quantization tax
-    # of up to half the leg's real cost.
     until run_ssh "type C:\\kaya\\out_$name.txt" 2>/dev/null | grep -q "EXIT="; do
         tries=$((tries + 1))
         if [ "$tries" -gt 300 ]; then
@@ -369,7 +394,6 @@ run_suite() {
         fi
         sleep 1
     done
-    echo "== $name =="
     local out
     out=$(run_ssh "type C:\\kaya\\out_$name.txt")
     printf '%s\n' "$out"
@@ -378,33 +402,82 @@ run_suite() {
     grep -q "EXIT=0" <<<"$out"
 }
 
+run_suite() {
+    local name="$1"
+    SUITES_RUN+=("$name")
+    leg_names+=("$name")
+    (
+        local slot=
+        local i
+        while [ -z "$slot" ]; do
+            i=0
+            while [ "$i" -lt "$WIDTH" ]; do
+                if mkdir "$LEGS_DIR/.slot-$i" 2>/dev/null; then
+                    slot=$i
+                    break
+                fi
+                i=$((i + 1))
+            done
+            [ -n "$slot" ] || sleep 0.2
+        done
+        echo "$slot" >"$LEGS_DIR/$name.slot"
+        local verdict=FAIL
+        if run_one_suite "$name" "$slot"; then
+            verdict=PASS
+        fi
+        rmdir "$LEGS_DIR/.slot-$slot" 2>/dev/null
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
+    ) >"$LEGS_DIR/$name.log" 2>&1 &
+    leg_pids+=($!)
+    while [ "$(jobs -rp | wc -l)" -ge "$WIDTH" ]; do
+        wait -n || true
+    done
+}
+
+drain_suites() {
+    if [ ${#leg_pids[@]} -gt 0 ]; then
+        wait "${leg_pids[@]}" 2>/dev/null || true
+    fi
+    leg_pids=()
+    local name verdict
+    for name in "${leg_names[@]}"; do
+        verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
+        echo "== $name =="
+        cat "$LEGS_DIR/$name.log" 2>/dev/null
+        [ "$verdict" = PASS ] || status=1
+        echo "$name: $verdict"
+    done
+    leg_names=()
+}
+
 status=0
 rec_suite_start
 case "$SUITE" in
     all)
-        run_suite rust || status=1
-        run_suite python || status=1
-        run_suite go || status=1
-        run_suite csharp || status=1
-        run_suite entry_rust || status=1
-        run_suite entry_python || status=1
-        run_suite entry_go || status=1
-        run_suite entry_csharp || status=1
-        run_suite gallery_rust || status=1
-        run_suite gallery_python || status=1
-        run_suite gallery_go || status=1
-        run_suite gallery_csharp || status=1
-        run_suite todos_rust || status=1
-        run_suite todos_python || status=1
-        run_suite todos_go || status=1
-        run_suite todos_csharp || status=1
+        run_suite rust
+        run_suite python
+        run_suite go
+        run_suite csharp
+        run_suite entry_rust
+        run_suite entry_python
+        run_suite entry_go
+        run_suite entry_csharp
+        run_suite gallery_rust
+        run_suite gallery_python
+        run_suite gallery_go
+        run_suite gallery_csharp
+        run_suite todos_rust
+        run_suite todos_python
+        run_suite todos_go
+        run_suite todos_csharp
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;
     crash-report) run_guest_oneshot crash-report.cmd out_crash_report.txt "REPORTDONE" || status=1 ;;
     analyze-dump) run_guest_oneshot analyze-dump.cmd out_analyze.txt "ANALYZEDONE" || status=1 ;;
-    *) run_suite "$SUITE" || status=1 ;;
+    *) run_suite "$SUITE" ;;
 esac
+drain_suites
 timing suites
 rec_suite_stop || status=1
 [ -z "${KAYA_RECORD:-}" ] || timing recording-pull+stills

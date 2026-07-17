@@ -105,7 +105,14 @@ fi
 # --- Windows VM ------------------------------------------------------
 WIN_HOST="${KAYA_WIN_HOST:-akhil@192.168.64.2}"
 if ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$WIN_HOST" 'exit 0' 2>/dev/null; then
-    report windows OK "$WIN_HOST answering (ssh — never probe with ping)"
+    # Display sleep blanks every window while suites keep passing;
+    # recorded runs assert this too, but say it early here.
+    if ssh -n -o BatchMode=yes "$WIN_HOST" 'powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE' 2>/dev/null \
+        | grep -q 'AC Power Setting Index: 0x00000000'; then
+        report windows OK "$WIN_HOST answering; display never sleeps"
+    else
+        report windows DOWN "$WIN_HOST answering but display CAN sleep — run: powercfg /change monitor-timeout-ac 0"
+    fi
 elif [ "$WARM" = 1 ]; then
     # deploy-win auto-starts the VM the same way; doing it here just
     # front-loads the wait.
