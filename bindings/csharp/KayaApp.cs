@@ -353,6 +353,36 @@ sealed class Tx
         PurgeChildren(coll, prefix);
     }
 
+    void ModelMove(ulong coll, IReadOnlyList<object> path, object key, object[] before)
+    {
+        Touch(coll);
+        var instance = App.InstanceOf(coll, path);
+        // The same checks the scene makes, made where the guest can
+        // see the stack: a missing key or anchor is a guest bug, never
+        // a fallback. Both validated before anything mutates.
+        int pos = instance == null ? -1 : instance.Entries.FindIndex(e => Equals(e.Key, key));
+        if (pos < 0)
+            throw new InvalidOperationException($"kaya: move of missing key {key}");
+        if (before.Length > 0 && !instance.Entries.Exists(e => Equals(e.Key, before[0])))
+            throw new InvalidOperationException($"kaya: move before missing key {before[0]}");
+        var entry = instance.Entries[pos];
+        instance.Entries.RemoveAt(pos);
+        int at = before.Length > 0
+            ? instance.Entries.FindIndex(e => Equals(e.Key, before[0]))
+            : instance.Entries.Count;
+        instance.Entries.Insert(at, entry);
+    }
+
+    List<object> KeysOf(Collection c)
+    {
+        var keys = new List<object>();
+        var instance = App.InstanceOf(c.Id, c.Path);
+        if (instance != null)
+            foreach (var entry in instance.Entries)
+                keys.Add(entry.Key);
+        return keys;
+    }
+
     void PurgeChildren(ulong coll, IReadOnlyList<object> prefix)
     {
         if (!App.Children.TryGetValue(coll, out var kids))
@@ -516,6 +546,68 @@ sealed class Tx
     {
         ModelRemove(c.Id, c.Path, key);
         Records.Add(KayaWire.TxCollectionRemove(c.Id, c.Path, key));
+        RecomputeDerived(c);
+    }
+
+    /// MoveBefore repositions an entry before another's: order is
+    /// collection data, so the model reorders and the wire carries the
+    /// same keys-only delta. Keys, never indices. A missing key or
+    /// anchor throws here, at the call site — the same check the scene
+    /// makes; moving an entry before itself is a no-op, and nothing
+    /// travels.
+    public void MoveBefore(Collection c, object key, object anchor) =>
+        MoveEntry(c, key, new[] { anchor });
+
+    /// MoveToEnd repositions an entry at the end of its collection.
+    public void MoveToEnd(Collection c, object key) =>
+        MoveEntry(c, key, System.Array.Empty<object>());
+
+    /// MoveToFront repositions an entry at the front: sugar for
+    /// MoveBefore the current first key, lowering to the same wire op.
+    public void MoveToFront(Collection c, object key)
+    {
+        var keys = KeysOf(c);
+        if (keys.Count == 0)
+            throw new InvalidOperationException($"kaya: move of missing key {key}");
+        MoveEntry(c, key, new[] { keys[0] });
+    }
+
+    /// MoveAfter repositions an entry directly after another's: sugar
+    /// for MoveBefore the anchor's successor (MoveToEnd when the
+    /// anchor is last), lowering to the same wire op.
+    public void MoveAfter(Collection c, object key, object anchor)
+    {
+        var keys = KeysOf(c);
+        if (!keys.Exists(k => Equals(k, key)))
+            throw new InvalidOperationException($"kaya: move of missing key {key}");
+        int at = keys.FindIndex(k => Equals(k, anchor));
+        if (at < 0)
+            throw new InvalidOperationException($"kaya: move after missing key {anchor}");
+        if (Equals(key, anchor))
+            return;
+        if (at + 1 == keys.Count)
+        {
+            MoveEntry(c, key, System.Array.Empty<object>());
+            return;
+        }
+        if (Equals(keys[at + 1], key))
+            return; // already directly after the anchor
+        MoveEntry(c, key, new[] { keys[at + 1] });
+    }
+
+    void MoveEntry(Collection c, object key, object[] before)
+    {
+        if (before.Length > 0 && Equals(before[0], key))
+        {
+            // Moving before itself: order unchanged and nothing
+            // travels — but the key must exist, the check the scene
+            // would make.
+            if (!KeysOf(c).Exists(k => Equals(k, key)))
+                throw new InvalidOperationException($"kaya: move of missing key {key}");
+            return;
+        }
+        ModelMove(c.Id, c.Path, key, before);
+        Records.Add(KayaWire.TxCollectionMove(c.Id, c.Path, key, before));
         RecomputeDerived(c);
     }
 

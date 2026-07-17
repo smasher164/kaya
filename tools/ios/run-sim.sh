@@ -400,7 +400,7 @@ SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
-        --example milestone2 --example entry --example gallery --example todos
+        --example milestone2 --example entry --example gallery --example todos --example reorder
     timing build-rust
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
     queue_leg run_bundle_on rust "$APP" dev.kaya.milestone2 rust
@@ -410,6 +410,8 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     queue_leg run_bundle_on gallery-rust "$APP" dev.kaya.gallery gallery-rust gallery
     APP=$(make_bundle todos dev.kaya.todos "$TARGET_DIR/examples/todos")
     queue_leg run_bundle_on todos-rust "$APP" dev.kaya.todos todos-rust todos
+    APP=$(make_bundle reorder dev.kaya.reorder "$TARGET_DIR/examples/reorder")
+    queue_leg run_bundle_on reorder-rust "$APP" dev.kaya.reorder reorder-rust reorder
     drain
     timing legs-rust
 fi
@@ -466,6 +468,18 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/todosswift-bin"
     APP=$(make_bundle todosswift dev.kaya.todosswift "$BUNDLES/todosswift-bin")
     queue_leg run_bundle_on todos-swift "$APP" dev.kaya.todosswift todos-swift todos
+
+    cp guests/swift/reorder.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/reorderswift-bin"
+    APP=$(make_bundle reorderswift dev.kaya.reorderswift "$BUNDLES/reorderswift-bin")
+    queue_leg run_bundle_on reorder-swift "$APP" dev.kaya.reorderswift reorder-swift reorder
     drain
     timing swift-build+legs
 fi
@@ -504,6 +518,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle galleryrs-swiftui dev.kaya.galleryswiftui "$TARGET_DIR/examples/gallery")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on gallery-swiftui "$APP" dev.kaya.galleryswiftui gallery-swiftui gallery gallery
+
+    # The reorder scene against the SwiftUI backend, same embedded dylib.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example reorder
+    APP=$(make_bundle reorderrs-swiftui dev.kaya.reorderswiftui "$TARGET_DIR/examples/reorder")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on reorder-swiftui "$APP" dev.kaya.reorderswiftui reorder-swiftui reorder reorder
     drain
     timing swiftui-build+legs
 fi

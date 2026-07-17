@@ -62,6 +62,7 @@ object KayaSceneModel {
     val labels = ArrayList<KayaNode>()
     val entries = ArrayList<KayaNode>()
     val sliders = ArrayList<KayaNode>()
+    val columns = ArrayList<KayaNode>()
 }
 
 object KayaCompose {
@@ -134,6 +135,7 @@ object KayaCompose {
                         KIND_SLIDER -> KayaSceneModel.sliders.add(node)
                         KIND_ENTRY -> KayaSceneModel.entries.add(node)
                         KIND_CHECKBOX -> KayaSceneModel.checkboxes.add(node)
+                        KIND_COLUMN -> KayaSceneModel.columns.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -291,6 +293,22 @@ object KayaCompose {
                             observed.add(got)
                         } else {
                             failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_order" -> {
+                        // Child order as the interpreter's tree holds
+                        // it — the registries are creation-ordered and
+                        // cannot observe a move.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], KayaSceneModel.columns).children
+                                .filter { it.kind == KIND_LABEL }
+                                .joinToString("|") { it.text }
+                        }
+                        if (got == want) {
+                            observed.add(got)
+                        } else {
+                            failures.add("${parts[1]} children read \"$got\", wanted \"$want\"")
                         }
                     }
                     else -> failures.add("unknown step $line")

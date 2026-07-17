@@ -74,6 +74,7 @@ struct CoreState {
     labels: Vec<Retained<UILabel>>,
     entries: Vec<Retained<UITextField>>,
     sliders: Vec<Retained<UISlider>>,
+    columns: Vec<Retained<UIStackView>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -145,6 +146,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
                         stack.setSpacing(8.0);
                     }
+                    core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Row => {
@@ -457,6 +459,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            columns: Vec::new(),
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -559,6 +562,28 @@ impl crate::harness::Stage for UiKitStage {
                 .text()
                 .map(|t| t.to_string())
                 .unwrap_or_default()
+        })
+    }
+
+    fn child_texts(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let stack = &core.columns[i];
+            // Child order as the toolkit holds it — the registries are
+            // creation-ordered and cannot observe a move.
+            let mut texts = Vec::new();
+            for child in unsafe { stack.arrangedSubviews() } {
+                if let Some(label) = child.downcast_ref::<UILabel>() {
+                    let is_label = core
+                        .labels
+                        .iter()
+                        .any(|l| std::ptr::eq::<UILabel>(&**l, label));
+                    if is_label {
+                        texts.push(label.text().map(|t| t.to_string()).unwrap_or_default());
+                    }
+                }
+            }
+            texts.join("|")
         })
     }
 

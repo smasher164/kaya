@@ -336,6 +336,23 @@ rules so far:
   resolution is cached per field — reflection walks, key-path probes,
   and lambda probes run once per declaration site, never per event —
   and update_field remains the explicit single-write floor.
+- Reordering is a mutation, not widget surgery: every binding surfaces
+  collection_move as four verbs on the collection handle —
+  `move_before(key, anchor)` and `move_to_end(key)` mirror the wire
+  op's two forms, and `move_to_front(key)` / `move_after(key, anchor)`
+  are sugar the binding lowers to the same op through its own model
+  (the current first key; the anchor's successor, or the end when the
+  anchor is last). The DOM shipped `insertBefore`-only and every layer
+  above it grew `after()` — the binding tier is where that belongs,
+  because the model answers the successor query without a protocol or
+  backend surface change. The model's copy reorders in the same call,
+  so `items()` reads the new order back and first/last queries stay
+  honest across moves. Semantics are the scene's, enforced at the call
+  site (the earliest check in the system): a missing key or anchor
+  fails loudly — never a fallback — and an order-preserving move
+  (before itself, after itself, already in place) is a no-op that
+  ships nothing. Handlers ask the model which key is first or last —
+  they never count widgets — and the wire delta stays keys-only.
 
 ## Layout
 

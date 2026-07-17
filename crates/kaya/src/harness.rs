@@ -86,11 +86,11 @@ pub trait Stage: Send + 'static {
     fn set_text(&self, target: Target, text: &str);
     fn read_label(&self, target: Target) -> String;
     /// The texts of the container's label children, in child order,
-    /// joined with `|`. Only backends with a reorder scene implement
-    /// it; the default dies loudly rather than silently passing.
-    fn child_texts(&self, target: Target) -> String {
-        panic!("kaya: child_texts unimplemented on this backend ({target:?})");
-    }
+    /// joined with `|` — the observation expect_order verifies. No
+    /// default: a backend that forgets it must fail to compile, not
+    /// panic on the first reorder leg (which is how the GTK gap
+    /// reached the Linux suite).
+    fn child_texts(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).

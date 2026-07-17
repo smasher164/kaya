@@ -157,6 +157,29 @@ let model_remove tx cid path key =
      instances with it; the model follows. *)
   purge_children tx cid (path @ [ key ])
 
+(* The mechanical reorder; move_entry validates key and anchor first,
+   so the anchor is always present here when given. *)
+let model_move tx cid path key before =
+  touch tx cid;
+  Hashtbl.replace tx.app.model cid
+    (List.map
+       (fun i ->
+         if i.path <> path || not (List.mem_assoc key i.entries) then i
+         else begin
+           let entry = (key, List.assoc key i.entries) in
+           let rest = List.filter (fun (k, _) -> k <> key) i.entries in
+           let entries =
+             match before with
+             | Some anchor ->
+                 List.concat_map
+                   (fun (k, v) -> if k = anchor then [ entry; (k, v) ] else [ (k, v) ])
+                   rest
+             | None -> rest @ [ entry ]
+           in
+           { i with entries }
+         end)
+       (instances_of tx.app cid))
+
 (* Every derived signal rooted at this collection, recomputed and
    written into this transaction. Deriveds hang off root handles, so
    nested-instance mutations cannot change their input. *)
@@ -346,6 +369,63 @@ let remove c key tx =
   model_remove tx c.cid c.cpath key;
   emit tx (Kaya_wire.tx_collection_remove c.cid c.cpath key);
   recompute_derived tx c.cid c.cpath
+
+let entry_keys tx cid path =
+  match List.find_opt (fun i -> i.path = path) (instances_of tx.app cid) with
+  | Some i -> List.map fst i.entries
+  | None -> []
+
+(* The same checks the scene makes, made where the guest can see the
+   stack: a missing key or anchor is a guest bug, never a fallback.
+   Moving an entry before itself is a no-op, and nothing travels. *)
+let move_entry c key before tx =
+  let keys = entry_keys tx c.cid c.cpath in
+  if not (List.mem key keys) then invalid_arg "kaya: move of missing key";
+  (match before with
+  | Some anchor when not (List.mem anchor keys) ->
+      invalid_arg "kaya: move before missing key"
+  | _ -> ());
+  if before = Some key then ()
+  else begin
+    model_move tx c.cid c.cpath key before;
+    emit tx (Kaya_wire.tx_collection_move c.cid c.cpath key (Option.to_list before));
+    recompute_derived tx c.cid c.cpath
+  end
+
+(* Reposition an entry before another's: order is collection data, so
+   the model reorders and the wire carries the same keys-only delta.
+   Keys, never indices. *)
+let move_before c key anchor tx = move_entry c key (Some anchor) tx
+
+(* Reposition an entry at the end of its collection. *)
+let move_to_end c key tx = move_entry c key None tx
+
+(* Reposition an entry at the front: sugar for move_before the current
+   first key, lowering to the same wire op. *)
+let move_to_front c key tx =
+  match entry_keys tx c.cid c.cpath with
+  | [] -> invalid_arg "kaya: move of missing key"
+  | first :: _ -> move_entry c key (Some first) tx
+
+(* Reposition an entry directly after another's: sugar for move_before
+   the anchor's successor (move_to_end when the anchor is last),
+   lowering to the same wire op. *)
+let move_after c key anchor tx =
+  let keys = entry_keys tx c.cid c.cpath in
+  if not (List.mem key keys) then invalid_arg "kaya: move of missing key";
+  if not (List.mem anchor keys) then invalid_arg "kaya: move after missing key";
+  if key = anchor then ()
+  else begin
+    let rec succ_of = function
+      | a :: b :: _ when a = anchor -> Some b
+      | _ :: rest -> succ_of rest
+      | [] -> None
+    in
+    match succ_of keys with
+    | Some s when s = key -> () (* already directly after the anchor *)
+    | Some s -> move_entry c key (Some s) tx
+    | None -> move_entry c key None tx
+  end
 
 (* The model: what this guest wrote, exactly — the fold of every patch
    so far (this transaction's included), in insertion order. *)

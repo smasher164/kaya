@@ -45,7 +45,7 @@ fi
 # each example program typechecks in its own pass.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swift/gallery.swift guests/swift/todos.swift; do
+for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swift/gallery.swift guests/swift/todos.swift guests/swift/reorder.swift; do
     cp "$example" "$TMP/main.swift"
     if ! env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
         -import-objc-header crates/kaya/include/kaya.h \

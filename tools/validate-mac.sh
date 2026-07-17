@@ -346,7 +346,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos encodebench; do
+for guest in milestone2 entry gallery todos reorder encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -400,9 +400,15 @@ run todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dyl
 run todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
 
 # The reorder scene (order as collection data; expect_order reads the
-# toolkit's child order). Rust-only for now: the depth slice — the
-# other languages gain a move surface in the breadth pass.
+# toolkit's child order), every language against AppKit.
 run reorder-rust env KAYA_SELFTEST=reorder target/debug/examples/reorder
+run reorder-python env KAYA_SELFTEST=reorder python3 guests/python/reorder.py
+run reorder-go env KAYA_SELFTEST=reorder target/go-guests/reorder
+run reorder-csharp env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/reorder.exe
+run reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
 
 drain
 
@@ -459,6 +465,13 @@ run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
 KAYA_SELFTEST_SCRIPT="$(scene_script reorder)"
 export KAYA_SELFTEST_SCRIPT
 run reorder-rust-swiftui env KAYA_SELFTEST=reorder target/debug/examples/reorder
+run reorder-python-swiftui env KAYA_SELFTEST=reorder python3 guests/python/reorder.py
+run reorder-go-swiftui env KAYA_SELFTEST=reorder target/go-guests/reorder
+run reorder-csharp-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run reorder-ocaml-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/reorder.exe
+run reorder-haskell-swiftui env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs

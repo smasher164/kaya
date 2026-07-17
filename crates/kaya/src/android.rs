@@ -100,6 +100,7 @@ struct CoreState {
     labels: Vec<GlobalRef>,
     entries: Vec<GlobalRef>,
     sliders: Vec<(GlobalRef, u64)>,
+    columns: Vec<GlobalRef>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -291,6 +292,7 @@ fn setup(
         labels: Vec::new(),
         entries: Vec::new(),
         sliders: Vec::new(),
+        columns: Vec::new(),
     });
 
     if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -457,6 +459,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 WidgetKind::Slider => core
                     .sliders
                     .push((view.clone(), tag_key.expect("sliders carry a tag"))),
+                WidgetKind::Column => core.columns.push(view.clone()),
                 _ => {}
             }
             core.widgets.insert(id, NativeWidget { view, kind, tag_key });
@@ -829,6 +832,54 @@ impl crate::harness::Stage for AndroidStage {
             env.get_string(&JString::from(string))
                 .expect("kaya: label decode failed")
                 .into()
+        })
+    }
+
+    fn child_texts(&self, t: crate::harness::Target) -> String {
+        let (column, labels) = {
+            let core = CORE.lock().unwrap();
+            let core = core.as_ref().expect("core set up");
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            (core.columns[i].clone(), core.labels.clone())
+        };
+        Self::on_ui(move |env| {
+            // Child order as the toolkit holds it — the registries are
+            // creation-ordered and cannot observe a move.
+            let count = env
+                .call_method(column.as_obj(), "getChildCount", "()I", &[])
+                .and_then(|v| v.i())
+                .expect("kaya: child count read failed");
+            let mut texts = Vec::new();
+            for at in 0..count {
+                let child = env
+                    .call_method(
+                        column.as_obj(),
+                        "getChildAt",
+                        "(I)Landroid/view/View;",
+                        &[JValue::Int(at)],
+                    )
+                    .and_then(|v| v.l())
+                    .expect("kaya: child read failed");
+                let is_label = labels.iter().any(|l| {
+                    env.is_same_object(&child, l.as_obj()).unwrap_or(false)
+                });
+                if !is_label {
+                    continue;
+                }
+                let chars = env
+                    .call_method(&child, "getText", "()Ljava/lang/CharSequence;", &[])
+                    .and_then(|v| v.l())
+                    .expect("kaya: child text read failed");
+                let string = env
+                    .call_method(&chars, "toString", "()Ljava/lang/String;", &[])
+                    .and_then(|v| v.l())
+                    .expect("kaya: child text toString failed");
+                texts.push(String::from(
+                    env.get_string(&JString::from(string))
+                        .expect("kaya: child text decode failed"),
+                ));
+            }
+            texts.join("|")
         })
     }
 

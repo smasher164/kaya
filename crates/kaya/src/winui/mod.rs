@@ -89,6 +89,7 @@ struct CoreState {
     labels: Vec<TextBlock>,
     entries: Vec<TextBox>,
     sliders: Vec<Slider>,
+    columns: Vec<StackPanel>,
     window: Window,
 }
 
@@ -386,7 +387,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.entries.push(field.clone());
                     NativeWidget::Entry(field)
                 }
-                WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
+                WidgetKind::Column => {
+                    let panel = StackPanel::new()?;
+                    core.columns.push(panel.clone());
+                    NativeWidget::Column(panel)
+                }
                 WidgetKind::Row => {
                     let panel = StackPanel::new()?;
                     panel.SetOrientation(Orientation::Horizontal)?;
@@ -896,6 +901,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            columns: Vec::new(),
             window,
         });
     });
@@ -973,6 +979,24 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             Ok(core.labels[i].Text()?.to_string())
+        })
+    }
+
+    fn child_texts(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let children = core.columns[i].Children()?;
+            // Child order as the toolkit holds it — the registries are
+            // creation-ordered and cannot observe a move.
+            let mut texts = Vec::new();
+            for at in 0..children.Size()? {
+                if let Ok(block) = children.GetAt(at)?.cast::<TextBlock>() {
+                    if core.labels.iter().any(|l| l == &block) {
+                        texts.push(block.Text()?.to_string());
+                    }
+                }
+            }
+            Ok(texts.join("|"))
         })
     }
 

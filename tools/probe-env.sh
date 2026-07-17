@@ -52,6 +52,29 @@ else
     report devshell DOWN "no ffmpeg/ffprobe — run inside nix develop"
 fi
 
+# --- toolchain provenance --------------------------------------------
+# The dev-shell marker proves the env was exported, not that the PATH
+# still leads with it: a login profile's `brew shellenv` can re-prepend
+# /opt/homebrew on top of an inherited dev-shell PATH (Claude Code's
+# shell snapshots do exactly this), and any formula shadowing a pinned
+# tool then wins by order. A homebrew ocaml — same "5.4.1" version
+# string, different build — once drove nix dune/ppxlib into
+# "inconsistent assumptions over implementation Location". swiftc is
+# exempt: the flake reaches it through Apple's /usr/bin shim.
+shadowed=""
+for tool in cargo rustc dune ocamlopt ocamlfind go python3 dotnet ghc cabal clang ffmpeg gradle; do
+    tool_path=$(command -v "$tool" 2>/dev/null) || continue
+    case "$tool_path" in
+        /nix/store/*) ;;
+        *) shadowed="$shadowed $tool:$tool_path" ;;
+    esac
+done
+if [ -z "$shadowed" ]; then
+    report toolchain OK "pinned tools resolve into /nix/store"
+else
+    report toolchain DOWN "PATH-shadowed:$shadowed — re-enter nix develop (or prefix nix develop -c)"
+fi
+
 # --- macOS capture ---------------------------------------------------
 REC_BIN="target/tools/record-suite-$(shasum tools/record-suite/main.swift | cut -c1-12)"
 if [ -x "$REC_BIN" ]; then

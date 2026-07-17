@@ -889,6 +889,9 @@ impl Tx<'_> {
     /// Reposition an entry before another's: order is collection data,
     /// so the model reorders and the wire carries the same keys-only
     /// delta. Anchor semantics match the protocol: keys, never indices.
+    /// A missing key or anchor fails here, at the call site — the same
+    /// check the scene applies; moving an entry before itself is a
+    /// no-op, and nothing travels.
     pub fn move_before<T: KayaRecord>(
         &mut self,
         instance: &Collection<T>,
@@ -907,12 +910,67 @@ impl Tx<'_> {
         self.move_entry(instance, key.into(), None);
     }
 
+    /// Reposition an entry at the front: sugar for move_before the
+    /// current first key, lowering to the same wire op.
+    pub fn move_to_front<T: KayaRecord>(
+        &mut self,
+        instance: &Collection<T>,
+        key: impl Into<Value>,
+    ) {
+        let key = key.into();
+        match self.keys_of(instance.id, &instance.path).into_iter().next() {
+            Some(anchor) => self.move_entry(instance, key, Some(anchor)),
+            None => panic!("kaya: move of missing key {key:?}"),
+        }
+    }
+
+    /// Reposition an entry directly after another's: sugar for
+    /// move_before the anchor's successor (move_to_end when the anchor
+    /// is last), lowering to the same wire op.
+    pub fn move_after<T: KayaRecord>(
+        &mut self,
+        instance: &Collection<T>,
+        key: impl Into<Value>,
+        anchor: impl Into<Value>,
+    ) {
+        let key = key.into();
+        let anchor = anchor.into();
+        let keys = self.keys_of(instance.id, &instance.path);
+        assert!(keys.contains(&key), "kaya: move of missing key {key:?}");
+        let at = keys
+            .iter()
+            .position(|k| k == &anchor)
+            .unwrap_or_else(|| panic!("kaya: move after missing key {anchor:?}"));
+        if key == anchor {
+            return;
+        }
+        match keys.get(at + 1) {
+            // Already directly after the anchor: order unchanged.
+            Some(succ) if *succ == key => {}
+            Some(succ) => {
+                let succ = succ.clone();
+                self.move_entry(instance, key, Some(succ));
+            }
+            None => self.move_entry(instance, key, None),
+        }
+    }
+
     fn move_entry<T: KayaRecord>(
         &mut self,
         instance: &Collection<T>,
         key: Value,
         before: Option<Value>,
     ) {
+        if before.as_ref() == Some(&key) {
+            // Moving before itself: order unchanged and nothing
+            // travels — but the key must exist, the check the scene
+            // would make.
+            assert!(
+                self.keys_of(instance.id, &instance.path).contains(&key),
+                "kaya: move of missing key {key:?}"
+            );
+            return;
+        }
         self.model_move(instance.id, &instance.path, &key, before.as_ref());
         self.ops.push(TxOp::CollectionMove {
             id: instance.id,
@@ -925,6 +983,16 @@ impl Tx<'_> {
         }
     }
 
+    fn keys_of(&self, collection: CollectionId, path: &[Value]) -> Vec<Value> {
+        self.ctx
+            .model
+            .borrow()
+            .get(&collection)
+            .and_then(|instances| instances.iter().find(|i| i.path == path))
+            .map(|i| i.entries.iter().map(|(k, _)| k.clone()).collect())
+            .unwrap_or_default()
+    }
+
     fn model_move(
         &mut self,
         collection: CollectionId,
@@ -933,26 +1001,35 @@ impl Tx<'_> {
         before: Option<&Value>,
     ) {
         self.touch(collection);
-        if let Some(instance) = self
-            .ctx
-            .model
-            .borrow_mut()
+        let mut model = self.ctx.model.borrow_mut();
+        let instance = model
             .get_mut(&collection)
             .and_then(|instances| instances.iter_mut().find(|i| i.path == path))
-        {
-            if let Some(pos) = instance.entries.iter().position(|(k, _)| k == key) {
-                let entry = instance.entries.remove(pos);
-                let at = match before {
-                    Some(anchor) => instance
-                        .entries
-                        .iter()
-                        .position(|(k, _)| k == anchor)
-                        .unwrap_or(instance.entries.len()),
-                    None => instance.entries.len(),
-                };
-                instance.entries.insert(at, entry);
-            }
+            .unwrap_or_else(|| panic!("kaya: move of missing key {key:?}"));
+        // The same checks the scene makes, made where the guest can
+        // see the stack: a missing key or anchor is a guest bug, never
+        // a fallback. Both validated before anything mutates.
+        let pos = instance
+            .entries
+            .iter()
+            .position(|(k, _)| k == key)
+            .unwrap_or_else(|| panic!("kaya: move of missing key {key:?}"));
+        if let Some(anchor) = before {
+            assert!(
+                instance.entries.iter().any(|(k, _)| k == anchor),
+                "kaya: move before missing key {anchor:?}"
+            );
         }
+        let entry = instance.entries.remove(pos);
+        let at = match before {
+            Some(anchor) => instance
+                .entries
+                .iter()
+                .position(|(k, _)| k == anchor)
+                .expect("anchor presence checked above"),
+            None => instance.entries.len(),
+        };
+        instance.entries.insert(at, entry);
     }
 
     pub fn remove<T: KayaRecord>(&mut self, instance: &Collection<T>, key: impl Into<Value>) {
@@ -1267,6 +1344,86 @@ mod tests {
             tx.items(&todos),
             vec![(Value::from("a"), Todo { title: "oat milk".into(), done: true })]
         );
+    }
+
+    /// A move is a keyed reposition: the model reorders (items reads
+    /// the new order back) and the wire carries the same keys-only
+    /// delta. The sugar verbs (front, after) lower to the same op, and
+    /// order-preserving calls are no-ops that ship nothing — mirroring
+    /// the scene's own semantics exactly.
+    #[test]
+    fn move_reorders_model_and_records_keys() {
+        use crate::protocol::TxOp;
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        for key in ["a", "b", "c"] {
+            tx.insert(&todos, key, Todo { title: key.into(), done: false });
+        }
+        let keys = |tx: &Tx<'_>| -> Vec<Value> {
+            tx.items(&todos).iter().map(|(k, _)| k.clone()).collect()
+        };
+
+        tx.move_to_end(&todos, "a");
+        assert_eq!(keys(&tx), vec![Value::from("b"), Value::from("c"), Value::from("a")]);
+        tx.move_before(&todos, "a", "b");
+        assert_eq!(keys(&tx), vec![Value::from("a"), Value::from("b"), Value::from("c")]);
+        tx.move_to_front(&todos, "c");
+        assert_eq!(keys(&tx), vec![Value::from("c"), Value::from("a"), Value::from("b")]);
+        match tx.ops.last() {
+            // move_to_front is sugar: the wire carries the same
+            // anchored move_before.
+            Some(TxOp::CollectionMove { key, before, .. }) => {
+                assert_eq!(key, &Value::from("c"));
+                assert_eq!(before, &Some(Value::from("a")));
+            }
+            other => panic!("expected a collection_move, got {other:?}"),
+        }
+        tx.move_after(&todos, "c", "a");
+        assert_eq!(keys(&tx), vec![Value::from("a"), Value::from("c"), Value::from("b")]);
+        tx.move_after(&todos, "b", "c");
+        assert_eq!(keys(&tx), vec![Value::from("a"), Value::from("c"), Value::from("b")]);
+        tx.move_after(&todos, "b", "b");
+
+        // Order-preserving calls are no-ops that emit nothing: the two
+        // trailing move_after calls (already directly after, after
+        // itself) shipped no records, and neither does moving before
+        // itself or fronting the current first.
+        let ops = tx.ops.len();
+        tx.move_before(&todos, "a", "a");
+        tx.move_to_front(&todos, "a");
+        assert_eq!(tx.ops.len(), ops);
+    }
+
+    #[test]
+    #[should_panic(expected = "move of missing key")]
+    fn move_of_missing_key_panics() {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        tx.insert(&todos, "a", Todo { title: "a".into(), done: false });
+        tx.move_to_end(&todos, "missing");
+    }
+
+    #[test]
+    #[should_panic(expected = "move before missing key")]
+    fn move_before_missing_anchor_panics() {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        tx.insert(&todos, "a", Todo { title: "a".into(), done: false });
+        tx.move_before(&todos, "a", "missing");
     }
 
     /// A derived signal recomputes from the collection after every

@@ -297,6 +297,61 @@ public final class KayaApp {
             purgeChildren(coll, prefix);
         }
 
+        private void modelMove(long coll, List<Object> path, Object key, Object[] before) {
+            touch(coll);
+            Instance instance = instanceOf(coll, path);
+            // The same checks the scene makes, made where the guest
+            // can see the stack: a missing key or anchor is a guest
+            // bug, never a fallback. Both validated before anything
+            // mutates.
+            int pos = -1;
+            if (instance != null) {
+                for (int i = 0; i < instance.entries.size(); i++) {
+                    if (java.util.Objects.equals(instance.entries.get(i).key, key)) {
+                        pos = i;
+                        break;
+                    }
+                }
+            }
+            if (pos < 0) {
+                throw new IllegalStateException("kaya: move of missing key " + key);
+            }
+            if (before.length > 0) {
+                boolean found = false;
+                for (Entry entry : instance.entries) {
+                    if (java.util.Objects.equals(entry.key, before[0])) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    throw new IllegalStateException("kaya: move before missing key " + before[0]);
+                }
+            }
+            Entry entry = instance.entries.remove(pos);
+            int at = instance.entries.size();
+            if (before.length > 0) {
+                for (int i = 0; i < instance.entries.size(); i++) {
+                    if (java.util.Objects.equals(instance.entries.get(i).key, before[0])) {
+                        at = i;
+                        break;
+                    }
+                }
+            }
+            instance.entries.add(at, entry);
+        }
+
+        private List<Object> keysOf(Collection c) {
+            List<Object> keys = new ArrayList<>();
+            Instance instance = instanceOf(c.id, c.path);
+            if (instance != null) {
+                for (Entry entry : instance.entries) {
+                    keys.add(entry.key);
+                }
+            }
+            return keys;
+        }
+
         private void purgeChildren(long coll, List<Object> prefix) {
             for (long kid : childCollections.getOrDefault(coll, java.util.Collections.emptyList())) {
                 touch(kid);
@@ -510,6 +565,77 @@ public final class KayaApp {
         void updateFieldRaw(Collection c, Object key, Object model, int field, Object value) {
             modelSet(c.id, c.path, key, model);
             records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, value));
+            recomputeDerived(c);
+        }
+
+        /**
+         * Repositions an entry before another's: order is collection
+         * data, so the model reorders and the wire carries the same
+         * keys-only delta. Keys, never indices. A missing key or
+         * anchor throws here, at the call site — the same check the
+         * scene makes; moving an entry before itself is a no-op, and
+         * nothing travels.
+         */
+        public void moveBefore(Collection c, Object key, Object anchor) {
+            moveEntry(c, key, new Object[] { anchor });
+        }
+
+        /** Repositions an entry at the end of its collection. */
+        public void moveToEnd(Collection c, Object key) {
+            moveEntry(c, key, new Object[0]);
+        }
+
+        /**
+         * Repositions an entry at the front: sugar for moveBefore the
+         * current first key, lowering to the same wire op.
+         */
+        public void moveToFront(Collection c, Object key) {
+            List<Object> keys = keysOf(c);
+            if (keys.isEmpty()) {
+                throw new IllegalStateException("kaya: move of missing key " + key);
+            }
+            moveEntry(c, key, new Object[] { keys.get(0) });
+        }
+
+        /**
+         * Repositions an entry directly after another's: sugar for
+         * moveBefore the anchor's successor (moveToEnd when the anchor
+         * is last), lowering to the same wire op.
+         */
+        public void moveAfter(Collection c, Object key, Object anchor) {
+            List<Object> keys = keysOf(c);
+            if (!keys.contains(key)) {
+                throw new IllegalStateException("kaya: move of missing key " + key);
+            }
+            int at = keys.indexOf(anchor);
+            if (at < 0) {
+                throw new IllegalStateException("kaya: move after missing key " + anchor);
+            }
+            if (java.util.Objects.equals(key, anchor)) {
+                return;
+            }
+            if (at + 1 == keys.size()) {
+                moveEntry(c, key, new Object[0]);
+                return;
+            }
+            if (java.util.Objects.equals(keys.get(at + 1), key)) {
+                return; // already directly after the anchor
+            }
+            moveEntry(c, key, new Object[] { keys.get(at + 1) });
+        }
+
+        private void moveEntry(Collection c, Object key, Object[] before) {
+            if (before.length > 0 && java.util.Objects.equals(before[0], key)) {
+                // Moving before itself: order unchanged and nothing
+                // travels — but the key must exist, the check the
+                // scene would make.
+                if (!keysOf(c).contains(key)) {
+                    throw new IllegalStateException("kaya: move of missing key " + key);
+                }
+                return;
+            }
+            modelMove(c.id, c.path, key, before);
+            records.add(KayaWire.txCollectionMove(c.id, c.path.toArray(), key, before));
             recomputeDerived(c);
         }
 

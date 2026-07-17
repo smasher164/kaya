@@ -136,6 +136,27 @@ sealed class RecordCollection<T>
         tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), f.Index, value);
     }
 
+    /// MoveBefore repositions an entry before another's: order is
+    /// collection data, so the model reorders and the wire carries the
+    /// same keys-only delta. Keys, never indices. A missing key or
+    /// anchor throws at the call site — the same check the scene
+    /// makes; moving an entry before itself is a no-op.
+    public void MoveBefore(Tx tx, object key, object anchor) =>
+        tx.MoveBefore(Collection, key, anchor);
+
+    /// MoveToEnd repositions an entry at the end of its collection.
+    public void MoveToEnd(Tx tx, object key) => tx.MoveToEnd(Collection, key);
+
+    /// MoveToFront repositions an entry at the front: sugar for
+    /// MoveBefore the current first key, lowering to the same wire op.
+    public void MoveToFront(Tx tx, object key) => tx.MoveToFront(Collection, key);
+
+    /// MoveAfter repositions an entry directly after another's: sugar
+    /// for MoveBefore the anchor's successor (MoveToEnd when the
+    /// anchor is last), lowering to the same wire op.
+    public void MoveAfter(Tx tx, object key, object anchor) =>
+        tx.MoveAfter(Collection, key, anchor);
+
     /// A signal the binding recomputes from this collection's entries
     /// after every mutation, written into the same transaction — the
     /// items-left label with no handler remembering to update it. The

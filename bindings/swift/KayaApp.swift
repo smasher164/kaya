@@ -131,6 +131,32 @@ final class KayaApp {
         purgeChildren(coll, prefix: path + [key])
     }
 
+    fileprivate func keysOf(_ coll: UInt64, _ path: [KayaValue]) -> [KayaValue] {
+        model[coll]?.first { $0.path == path }?.entries.map { $0.key } ?? []
+    }
+
+    fileprivate func modelMove(
+        _ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ before: [KayaValue]
+    ) {
+        // The same checks the scene makes, made where the guest can
+        // see the stack: a missing key or anchor is a guest bug, never
+        // a fallback. Both validated before anything mutates.
+        guard var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }),
+            let pos = instances[at].entries.firstIndex(where: { $0.key == key })
+        else { preconditionFailure("kaya: move of missing key \(key)") }
+        if let anchor = before.first {
+            precondition(
+                instances[at].entries.contains { $0.key == anchor },
+                "kaya: move before missing key \(anchor)")
+        }
+        let entry = instances[at].entries.remove(at: pos)
+        let slot = before.first.flatMap { anchor in
+            instances[at].entries.firstIndex { $0.key == anchor }
+        } ?? instances[at].entries.count
+        instances[at].entries.insert(entry, at: slot)
+        model[coll] = instances
+    }
+
     private func purgeChildren(_ coll: UInt64, prefix: [KayaValue]) {
         for kid in childCollections[coll, default: []] {
             model[kid]?.removeAll { instance in
@@ -492,6 +518,62 @@ final class KayaAppTx {
     func remove(_ c: KayaCollection, _ key: KayaValue) {
         app.modelRemove(c.id, c.path, key)
         tx.collectionRemove(c.id, c.path, key)
+        recomputeDerived(c)
+    }
+
+    /// Repositions an entry before another's: order is collection
+    /// data, so the model reorders and the wire carries the same
+    /// keys-only delta. Keys, never indices. A missing key or anchor
+    /// traps here, at the call site — the same check the scene makes;
+    /// moving an entry before itself is a no-op, and nothing travels.
+    func moveBefore(_ c: KayaCollection, _ key: KayaValue, _ anchor: KayaValue) {
+        moveEntry(c, key, [anchor])
+    }
+
+    /// Repositions an entry at the end of its collection.
+    func moveToEnd(_ c: KayaCollection, _ key: KayaValue) {
+        moveEntry(c, key, [])
+    }
+
+    /// Repositions an entry at the front: sugar for moveBefore the
+    /// current first key, lowering to the same wire op.
+    func moveToFront(_ c: KayaCollection, _ key: KayaValue) {
+        guard let first = app.keysOf(c.id, c.path).first else {
+            preconditionFailure("kaya: move of missing key \(key)")
+        }
+        moveEntry(c, key, [first])
+    }
+
+    /// Repositions an entry directly after another's: sugar for
+    /// moveBefore the anchor's successor (moveToEnd when the anchor is
+    /// last), lowering to the same wire op.
+    func moveAfter(_ c: KayaCollection, _ key: KayaValue, _ anchor: KayaValue) {
+        let keys = app.keysOf(c.id, c.path)
+        precondition(keys.contains(key), "kaya: move of missing key \(key)")
+        guard let at = keys.firstIndex(of: anchor) else {
+            preconditionFailure("kaya: move after missing key \(anchor)")
+        }
+        if key == anchor { return }
+        if at + 1 == keys.count {
+            moveEntry(c, key, [])
+            return
+        }
+        if keys[at + 1] == key { return }  // already directly after the anchor
+        moveEntry(c, key, [keys[at + 1]])
+    }
+
+    private func moveEntry(_ c: KayaCollection, _ key: KayaValue, _ before: [KayaValue]) {
+        if before.first == key {
+            // Moving before itself: order unchanged and nothing
+            // travels — but the key must exist, the check the scene
+            // would make.
+            precondition(
+                app.keysOf(c.id, c.path).contains(key),
+                "kaya: move of missing key \(key)")
+            return
+        }
+        app.modelMove(c.id, c.path, key, before)
+        tx.collectionMove(c.id, c.path, key, before)
         recomputeDerived(c)
     }
 

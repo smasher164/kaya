@@ -18,6 +18,8 @@
 //     runs on the app goroutine after it pulls from the ring.
 package kaya
 
+import "fmt"
+
 // Typed handles over the id spaces.
 // Scalar is the signal-value constraint: the wire's scalar types.
 type Scalar interface {
@@ -169,6 +171,63 @@ func (a *App) modelRemove(coll uint64, path []any, key any) {
 	// The core tears down the copy, taking descendant collection
 	// instances with it; the model follows.
 	a.purgeChildren(coll, append(append([]any(nil), path...), key))
+}
+
+func (a *App) keysOf(coll uint64, path []any) []any {
+	in := a.instanceOf(coll, path)
+	if in == nil {
+		return nil
+	}
+	keys := make([]any, len(in.entries))
+	for i := range in.entries {
+		keys[i] = in.entries[i].Key
+	}
+	return keys
+}
+
+func (a *App) modelMove(coll uint64, path []any, key any, before []any) {
+	in := a.instanceOf(coll, path)
+	pos := -1
+	if in != nil {
+		for i := range in.entries {
+			if in.entries[i].Key == key {
+				pos = i
+				break
+			}
+		}
+	}
+	// The same checks the scene makes, made where the guest can see
+	// the stack: a missing key or anchor is a guest bug, never a
+	// fallback. Both validated before anything mutates.
+	if pos < 0 {
+		panic(fmt.Sprintf("kaya: move of missing key %v", key))
+	}
+	if len(before) > 0 {
+		found := false
+		for i := range in.entries {
+			if in.entries[i].Key == before[0] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			panic(fmt.Sprintf("kaya: move before missing key %v", before[0]))
+		}
+	}
+	entry := in.entries[pos]
+	in.entries = append(in.entries[:pos], in.entries[pos+1:]...)
+	at := len(in.entries)
+	if len(before) > 0 {
+		for i := range in.entries {
+			if in.entries[i].Key == before[0] {
+				at = i
+				break
+			}
+		}
+	}
+	in.entries = append(in.entries, Entry{})
+	copy(in.entries[at+1:], in.entries[at:])
+	in.entries[at] = entry
 }
 
 func (a *App) purgeChildren(coll uint64, prefix []any) {
@@ -370,6 +429,79 @@ func (tx *Tx) Update(c Collection, key, value any) {
 func (tx *Tx) Remove(c Collection, key any) {
 	tx.app.modelRemove(c.id, c.path, key)
 	tx.records = append(tx.records, TxCollectionRemove(c.id, c.path, key))
+	tx.recomputeDerived(c.id, c.path)
+}
+
+// MoveBefore repositions an entry before another's: order is
+// collection data, so the model reorders and the wire carries the
+// same keys-only delta. Keys, never indices. A missing key or anchor
+// panics here, at the call site — the same check the scene makes;
+// moving an entry before itself is a no-op, and nothing travels.
+func (tx *Tx) MoveBefore(c Collection, key, anchor any) {
+	tx.moveEntry(c, key, []any{anchor})
+}
+
+// MoveToEnd repositions an entry at the end of its collection.
+func (tx *Tx) MoveToEnd(c Collection, key any) {
+	tx.moveEntry(c, key, nil)
+}
+
+// MoveToFront repositions an entry at the front: sugar for MoveBefore
+// the current first key, lowering to the same wire op.
+func (tx *Tx) MoveToFront(c Collection, key any) {
+	keys := tx.app.keysOf(c.id, c.path)
+	if len(keys) == 0 {
+		panic(fmt.Sprintf("kaya: move of missing key %v", key))
+	}
+	tx.moveEntry(c, key, []any{keys[0]})
+}
+
+// MoveAfter repositions an entry directly after another's: sugar for
+// MoveBefore the anchor's successor (MoveToEnd when the anchor is
+// last), lowering to the same wire op.
+func (tx *Tx) MoveAfter(c Collection, key, anchor any) {
+	keys := tx.app.keysOf(c.id, c.path)
+	has, at := false, -1
+	for i, k := range keys {
+		if k == key {
+			has = true
+		}
+		if k == anchor {
+			at = i
+		}
+	}
+	if !has {
+		panic(fmt.Sprintf("kaya: move of missing key %v", key))
+	}
+	if at < 0 {
+		panic(fmt.Sprintf("kaya: move after missing key %v", anchor))
+	}
+	if key == anchor {
+		return
+	}
+	if at+1 == len(keys) {
+		tx.moveEntry(c, key, nil)
+		return
+	}
+	if keys[at+1] == key {
+		return // already directly after the anchor
+	}
+	tx.moveEntry(c, key, []any{keys[at+1]})
+}
+
+func (tx *Tx) moveEntry(c Collection, key any, before []any) {
+	if len(before) > 0 && before[0] == key {
+		// Moving before itself: order unchanged and nothing travels —
+		// but the key must exist, the check the scene would make.
+		for _, k := range tx.app.keysOf(c.id, c.path) {
+			if k == key {
+				return
+			}
+		}
+		panic(fmt.Sprintf("kaya: move of missing key %v", key))
+	}
+	tx.app.modelMove(c.id, c.path, key, before)
+	tx.records = append(tx.records, TxCollectionMove(c.id, c.path, key, before))
 	tx.recomputeDerived(c.id, c.path)
 }
 

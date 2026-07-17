@@ -123,6 +123,33 @@ struct KayaRecordCollection<T: KayaRecord> {
         tx.updateFieldRaw(collection, key, T(values: fields), f.index, wire)
     }
 
+    /// Repositions an entry before another's: order is collection
+    /// data, so the model reorders and the wire carries the same
+    /// keys-only delta. Keys, never indices. A missing key or anchor
+    /// traps at the call site — the same check the scene makes; moving
+    /// an entry before itself is a no-op.
+    func moveBefore(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
+        tx.moveBefore(collection, key, anchor)
+    }
+
+    /// Repositions an entry at the end of its collection.
+    func moveToEnd(_ tx: KayaAppTx, _ key: KayaValue) {
+        tx.moveToEnd(collection, key)
+    }
+
+    /// Repositions an entry at the front: sugar for moveBefore the
+    /// current first key, lowering to the same wire op.
+    func moveToFront(_ tx: KayaAppTx, _ key: KayaValue) {
+        tx.moveToFront(collection, key)
+    }
+
+    /// Repositions an entry directly after another's: sugar for
+    /// moveBefore the anchor's successor (moveToEnd when the anchor is
+    /// last), lowering to the same wire op.
+    func moveAfter(_ tx: KayaAppTx, _ key: KayaValue, _ anchor: KayaValue) {
+        tx.moveAfter(collection, key, anchor)
+    }
+
     /// A label bound to the field the key path selects.
     func label(_ t: KayaTpl, _ keyPath: WritableKeyPath<T, String>) -> KayaNodeHandle {
         t.label(T.field(keyPath))

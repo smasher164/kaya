@@ -47,6 +47,10 @@ module KayaApp
     insert,
     update,
     remove,
+    moveBefore,
+    moveToEnd,
+    moveToFront,
+    moveAfter,
     items,
     count,
     mount,
@@ -202,6 +206,24 @@ modelRemove children cid path key model =
         m
         (Map.findWithDefault [] c children)
     startsWith pre p = take (length pre) p == pre
+
+-- The mechanical reorder; moveEntry validates key and anchor first,
+-- so the anchor is always present here when given.
+modelMove :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
+modelMove cid path key before = Map.adjust (map go) cid
+  where
+    go i
+      | iPath i == path,
+        Just value <- lookup key (iEntries i) =
+          i {iEntries = place (key, value) (filter ((/= key) . fst) (iEntries i))}
+      | otherwise = i
+    place entry rest = case before of
+      (anchor : _) -> insertAt anchor entry rest
+      [] -> rest ++ [entry]
+    insertAt anchor entry ((k, v) : rest)
+      | k == anchor = entry : (k, v) : rest
+      | otherwise = (k, v) : insertAt anchor entry rest
+    insertAt _ entry [] = [entry]
 
 lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, [W.Value])]
 lookupEntries cid path model =
@@ -404,6 +426,59 @@ remove (Collection n path) key = Build $ \s ->
   ((), recomputeDerived n path
     s {bRecords = bRecords s <> W.txCollectionRemove n path key,
        bModel = modelRemove (bChildren s) n path key (bModel s)})
+
+-- | Reposition an entry before another's: order is collection data,
+-- so the model reorders and the wire carries the same keys-only
+-- delta. Keys, never indices. A missing key or anchor fails here, at
+-- the call site — the same check the scene makes; moving an entry
+-- before itself is a no-op, and nothing travels.
+moveBefore :: Collection -> W.Value -> W.Value -> Build ()
+moveBefore c key anchor = moveEntry c key [anchor]
+
+-- | Reposition an entry at the end of its collection.
+moveToEnd :: Collection -> W.Value -> Build ()
+moveToEnd c key = moveEntry c key []
+
+-- | Reposition an entry at the front: sugar for moveBefore the
+-- current first key, lowering to the same wire op.
+moveToFront :: Collection -> W.Value -> Build ()
+moveToFront c@(Collection n path) key = Build $ \s ->
+  case map fst (lookupEntries n path (bModel s)) of
+    [] -> error ("kaya: move of missing key " ++ show key)
+    (first : _) -> unBuild (moveEntry c key [first]) s
+
+-- | Reposition an entry directly after another's: sugar for
+-- moveBefore the anchor's successor (moveToEnd when the anchor is
+-- last), lowering to the same wire op.
+moveAfter :: Collection -> W.Value -> W.Value -> Build ()
+moveAfter c@(Collection n path) key anchor = Build $ \s ->
+  let keys = map fst (lookupEntries n path (bModel s))
+   in if key `notElem` keys
+        then error ("kaya: move of missing key " ++ show key)
+        else case dropWhile (/= anchor) keys of
+          [] -> error ("kaya: move after missing key " ++ show anchor)
+          _ | key == anchor -> ((), s)
+          [_] -> unBuild (moveEntry c key []) s
+          (_ : succKey : _)
+            | succKey == key -> ((), s) -- already directly after the anchor
+            | otherwise -> unBuild (moveEntry c key [succKey]) s
+
+-- The same checks the scene makes, made where the guest can see the
+-- stack: a missing key or anchor is a guest bug, never a fallback.
+moveEntry :: Collection -> W.Value -> [W.Value] -> Build ()
+moveEntry (Collection n path) key before = Build $ \s ->
+  let keys = map fst (lookupEntries n path (bModel s))
+   in if key `notElem` keys
+        then error ("kaya: move of missing key " ++ show key)
+        else case before of
+          (anchor : _)
+            | anchor `notElem` keys ->
+                error ("kaya: move before missing key " ++ show anchor)
+            | anchor == key -> ((), s) -- moving before itself: no-op
+          _ ->
+            ((), recomputeDerived n path
+              s {bRecords = bRecords s <> W.txCollectionMove n path key before,
+                 bModel = modelMove n path key before (bModel s)})
 
 -- | The model: what this guest wrote, exactly — the fold of every
 -- patch so far (this transaction's included), in insertion order.

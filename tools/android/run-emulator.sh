@@ -272,6 +272,9 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     run_apk todos-rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity todos
+    run_apk reorder-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity reorder
     drain
     timing legs-rust
 fi
@@ -308,6 +311,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2/.MainActivity todos \
         --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    run_apk reorder-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity reorder \
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
     drain
     timing legs-compose
 fi
@@ -331,6 +339,9 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk todos-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity todos
+    run_apk reorder-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity reorder
     drain
     timing legs-jvm
 fi

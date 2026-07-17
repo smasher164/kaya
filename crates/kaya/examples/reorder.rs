@@ -25,7 +25,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let (list, ()) = tx.for_each(&items, |t| {
         t.label(Item::title());
     });
-    let root = tx.column(&[rotate, lift, list]);
+    // The root is a row so the For's container is the scene's only
+    // column-kind widget: guests differ in whether containers are
+    // created before or after their children (call-time vs close-time),
+    // and column#0 must name the same widget in every language.
+    let root = tx.row(&[rotate, lift, list]);
     tx.mount(root);
     for key in ["a", "b", "c"] {
         tx.insert(&items, key, Item { title: key.to_string() });
@@ -45,13 +49,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.commit();
             }
             Occurrence::ButtonClicked { id } if id == lift => {
-                // Last entry to the front, anchored by key: keys,
-                // never indices.
+                // Last entry to the front: move_to_front is sugar for
+                // move_before the current first key — the same wire
+                // op, keys never indices.
                 let mut tx = ctx.begin();
                 let entries = tx.items(&items);
                 let (last, _) = entries.last().expect("reorder scene has entries").clone();
-                let (first, _) = entries.first().expect("reorder scene has entries").clone();
-                tx.move_before(&items, last, first);
+                tx.move_to_front(&items, last);
                 tx.commit();
             }
             Occurrence::Shutdown => break,

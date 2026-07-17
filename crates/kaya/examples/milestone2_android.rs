@@ -24,6 +24,10 @@ mod gallery;
 #[path = "todos.rs"]
 mod todos;
 
+#[cfg(target_os = "android")]
+#[path = "reorder.rs"]
+mod reorder;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -33,6 +37,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("entry") => entry::app(ctx),
         Ok("gallery") => gallery::app(ctx),
         Ok("todos") => todos::app(ctx),
+        Ok("reorder") => reorder::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

@@ -151,6 +151,33 @@ func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.recomputeDerived(c.id, c.path)
 }
 
+// MoveBefore repositions an entry before another's: order is
+// collection data, so the model reorders and the wire carries the
+// same keys-only delta. Keys, never indices. A missing key or anchor
+// panics at the call site — the same check the scene makes; moving an
+// entry before itself is a no-op, and nothing travels.
+func (c RecordCollection[K, T]) MoveBefore(tx *Tx, key, anchor K) {
+	tx.MoveBefore(c.Collection, key, anchor)
+}
+
+// MoveToEnd repositions an entry at the end of its collection.
+func (c RecordCollection[K, T]) MoveToEnd(tx *Tx, key K) {
+	tx.MoveToEnd(c.Collection, key)
+}
+
+// MoveToFront repositions an entry at the front: sugar for MoveBefore
+// the current first key, lowering to the same wire op.
+func (c RecordCollection[K, T]) MoveToFront(tx *Tx, key K) {
+	tx.MoveToFront(c.Collection, key)
+}
+
+// MoveAfter repositions an entry directly after another's: sugar for
+// MoveBefore the anchor's successor (MoveToEnd when the anchor is
+// last), lowering to the same wire op.
+func (c RecordCollection[K, T]) MoveAfter(tx *Tx, key, anchor K) {
+	tx.MoveAfter(c.Collection, key, anchor)
+}
+
 // Items is the typed model: what this guest wrote, in insertion order.
 func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	in := tx.app.instanceOf(c.id, c.path)

@@ -221,6 +221,39 @@ public final class KayaRecords {
             tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), f.index, value);
         }
 
+        /**
+         * Repositions an entry before another's: order is collection
+         * data, so the model reorders and the wire carries the same
+         * keys-only delta. Keys, never indices. A missing key or
+         * anchor throws at the call site — the same check the scene
+         * makes; moving an entry before itself is a no-op.
+         */
+        public void moveBefore(KayaApp.Tx tx, K key, K anchor) {
+            tx.moveBefore(handle, key, anchor);
+        }
+
+        /** Repositions an entry at the end of its collection. */
+        public void moveToEnd(KayaApp.Tx tx, K key) {
+            tx.moveToEnd(handle, key);
+        }
+
+        /**
+         * Repositions an entry at the front: sugar for moveBefore the
+         * current first key, lowering to the same wire op.
+         */
+        public void moveToFront(KayaApp.Tx tx, K key) {
+            tx.moveToFront(handle, key);
+        }
+
+        /**
+         * Repositions an entry directly after another's: sugar for
+         * moveBefore the anchor's successor (moveToEnd when the anchor
+         * is last), lowering to the same wire op.
+         */
+        public void moveAfter(KayaApp.Tx tx, K key, K anchor) {
+            tx.moveAfter(handle, key, anchor);
+        }
+
         /** The typed model: what this guest wrote, in insertion order. */
         @SuppressWarnings("unchecked")
         public List<Entry<K, T>> items(KayaApp.Tx tx) {

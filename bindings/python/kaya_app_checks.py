@@ -68,6 +68,48 @@ with app.build():
     c.remove("g1")
     check("parent removal purges child mirror", len(child.at("g1")) == 0)
 
+# Moves reorder the mirror the way the core reorders the table: by
+# key, before an anchor or to the end; front/after are sugar over the
+# same wire op; missing keys raise the scene's own checks at the call
+# site, and order-preserving calls are no-ops.
+with app.build():
+    c.insert("g1", "Work")
+    inst = child.at("g1")
+    inst.insert("a", "one")
+    inst.insert("b", "two")
+    inst.insert("c", "three")
+    inst.move_to_end("a")
+    check("move_to_end reorders mirror", inst.keys() == ["b", "c", "a"])
+    inst.move_before("a", "b")
+    check("move_before reorders mirror", inst.keys() == ["a", "b", "c"])
+    inst.move_to_front("c")
+    check("move_to_front reorders mirror", inst.keys() == ["c", "a", "b"])
+    inst.move_after("c", "a")
+    check("move_after reorders mirror", inst.keys() == ["a", "c", "b"])
+    inst.move_after("b", "b")
+    inst.move_before("a", "a")
+    inst.move_to_front("a")
+    check("order-preserving moves are no-ops", inst.keys() == ["a", "c", "b"])
+    try:
+        inst.move_to_end("missing")
+        check("move of missing key raises", False)
+    except KeyError:
+        check("move of missing key raises", True)
+    try:
+        inst.move_before("a", "missing")
+        check("move before missing anchor raises", False)
+    except KeyError:
+        check("move before missing anchor raises", True)
+try:
+    with app.build():
+        child.at("g1").move_before("b", "a")
+        raise ValueError("handler failed")
+except ValueError:
+    pass
+with app.build():
+    check("abandoned tx rolls back move", child.at("g1").keys() == ["a", "c", "b"])
+    c.remove("g1")
+
 # Draft scopes: natural mutations record patches in order, resolve
 # insert-vs-update from the model, and roll back with the transaction.
 with app.build():

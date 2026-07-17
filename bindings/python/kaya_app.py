@@ -334,6 +334,73 @@ class _BoundCollection:
             setattr(entry, name, value)
         self._recompute_derived()
 
+    def move_before(self, key, anchor):
+        """Reposition an entry before another's key: order is collection
+        data, so the model reorders and the wire carries the same
+        keys-only delta. Keys, never indices. A missing key or anchor
+        raises here, at the call site — the same check the scene makes;
+        moving an entry before itself is a no-op, and nothing travels."""
+        self._move(key, [anchor])
+
+    def move_to_end(self, key):
+        """Reposition an entry at the end of its collection."""
+        self._move(key, [])
+
+    def move_to_front(self, key):
+        """Reposition an entry at the front: sugar for move_before the
+        current first key, lowering to the same wire op."""
+        keys = list(self._mirror())
+        if not keys:
+            raise KeyError(f"kaya: move of missing key {key!r}")
+        self._move(key, [keys[0]])
+
+    def move_after(self, key, anchor):
+        """Reposition an entry directly after another's: sugar for
+        move_before the anchor's successor (move_to_end when the anchor
+        is last), lowering to the same wire op."""
+        keys = list(self._mirror())
+        if key not in keys:
+            raise KeyError(f"kaya: move of missing key {key!r}")
+        if anchor not in keys:
+            raise KeyError(f"kaya: move after missing key {anchor!r}")
+        if key == anchor:
+            return
+        at = keys.index(anchor)
+        succ = keys[at + 1] if at + 1 < len(keys) else None
+        if succ == key:
+            return  # already directly after the anchor
+        self._move(key, [] if succ is None else [succ])
+
+    def _move(self, key, before):
+        mirror = self._mirror()
+        # The same checks the scene makes, made where the guest can see
+        # the stack: a missing key or anchor is a guest bug, never a
+        # fallback.
+        if key not in mirror:
+            raise KeyError(f"kaya: move of missing key {key!r}")
+        if before and before[0] not in mirror:
+            raise KeyError(f"kaya: move before missing key {before[0]!r}")
+        if before and before[0] == key:
+            return  # moving before itself: order unchanged, nothing travels
+        _records().append(
+            wire.tx_collection_move(self._owner._id, self._path, key, before)
+        )
+        value = mirror.pop(key)
+        if before:
+            # Insertion-ordered dicts have no insert-at; rebuild the
+            # tail from the anchor on.
+            anchor = before[0]
+            tail = list(mirror.items())
+            cut = next(i for i, (k, _) in enumerate(tail) if k == anchor)
+            for k, _ in tail[cut:]:
+                del mirror[k]
+            mirror[key] = value
+            for k, v in tail[cut:]:
+                mirror[k] = v
+        else:
+            mirror[key] = value
+        self._recompute_derived()
+
     def remove(self, key):
         _records().append(wire.tx_collection_remove(self._owner._id, self._path, key))
         self._mirror().pop(key, None)

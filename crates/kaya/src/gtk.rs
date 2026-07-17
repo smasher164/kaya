@@ -59,6 +59,7 @@ struct CoreState {
     labels: Vec<gtk4::Label>,
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
+    columns: Vec<gtk4::Box>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -119,6 +120,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                     column.set_valign(gtk4::Align::Center);
                     column.set_halign(gtk4::Align::Center);
+                    core.columns.push(column.clone());
                     NativeWidget::Column(column)
                 }
                 WidgetKind::Row => {
@@ -322,6 +324,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 labels: Vec::new(),
                 entries: Vec::new(),
                 sliders: Vec::new(),
+                columns: Vec::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -399,6 +402,26 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             core.labels[i].text().to_string()
+        })
+    }
+
+    fn child_texts(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            // Child order as the toolkit holds it — the registries are
+            // creation-ordered and cannot observe a move.
+            let mut texts = Vec::new();
+            let mut child = core.columns[i].first_child();
+            while let Some(widget) = child {
+                if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+                    if core.labels.iter().any(|l| l == label) {
+                        texts.push(label.text().to_string());
+                    }
+                }
+                child = widget.next_sibling();
+            }
+            texts.join("|")
         })
     }
 

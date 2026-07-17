@@ -15,7 +15,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -155,7 +155,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos; do
+for guest in milestone2 entry gallery todos reorder; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -199,6 +199,17 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/todos.exe
     run "$proto" todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
+    # The reorder scene (order as collection data): expect_order reads
+    # the toolkit's actual child order back after each keyed move.
+    run "$proto" reorder-rust env KAYA_SELFTEST=reorder "$CARGO_TARGET_DIR/debug/examples/reorder"
+    run "$proto" reorder-c env KAYA_SELFTEST=reorder /tmp/c-guests/reorder
+    run "$proto" reorder-python env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
+        python3 guests/python/reorder.py
+    run "$proto" reorder-go env KAYA_SELFTEST=reorder /tmp/go-guests/reorder
+    run "$proto" reorder-csharp env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/reorder.exe
+    run "$proto" reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
 done
 drain
 

@@ -781,6 +781,18 @@ mod tests {
                 path: vec![Value::from("g1")],
                 key: Value::from("a"),
             },
+            TxOp::CollectionMove {
+                id: CollectionId(7),
+                path: vec![Value::from("g1")],
+                key: Value::from("c"),
+                before: Some(Value::from("a")),
+            },
+            TxOp::CollectionMove {
+                id: CollectionId(7),
+                path: vec![],
+                key: Value::from("a"),
+                before: None,
+            },
         ];
         let mut w = Writer::new();
         for op in &ops {
