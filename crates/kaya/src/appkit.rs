@@ -400,14 +400,30 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // Recording mode tiles parallel legs so one display-scoped capture
     // sees every window unoccluded: the runner assigns a slot, the
     // window places itself (its own window — no permissions involved).
+    // The grid adapts to the actual screen: cells sized for the
+    // largest selftest window any backend places (SwiftUI's 540x330;
+    // this backend's windows are smaller and share the same slots), a
+    // partial last cell counting when the window itself still fits.
     let origin = match std::env::var("KAYA_WIN_SLOT")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
     {
-        Some(slot) => NSPoint::new(
-            20.0 + f64::from(slot % 2) * 700.0,
-            80.0 + f64::from(slot / 2) * 450.0,
-        ),
+        Some(slot) => {
+            let (sw, sh) = objc2_app_kit::NSScreen::mainScreen(mtm)
+                .map(|s| {
+                    let f = s.visibleFrame();
+                    (f.size.width, f.size.height)
+                })
+                .unwrap_or((1440.0, 900.0));
+            let cols = (((sw - 20.0 - 540.0) / 570.0).floor() as u32 + 1).max(1);
+            let rows = (((sh - 40.0 - 330.0) / 345.0).floor() as u32 + 1).max(1);
+            let capacity = cols * rows;
+            let slot = slot % capacity;
+            NSPoint::new(
+                20.0 + f64::from(slot % cols) * 570.0,
+                40.0 + f64::from(slot / cols) * 345.0,
+            )
+        }
         None => NSPoint::new(200.0, 200.0),
     };
     let content_rect = NSRect::new(origin, NSSize::new(320.0, 160.0));

@@ -59,7 +59,7 @@ leg_pids=()
 # is reliable; parallelism scales by adding tiles, not streams.
 # Per-leg videos and stills are derived from the suite film by crop.
 if [ -n "${KAYA_RECORD:-}" ]; then
-    JOBS="${KAYA_JOBS:-4}"
+    JOBS="${KAYA_JOBS:-8}"
     command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
         || { echo "recording mode needs ffmpeg/ffprobe — run inside nix develop"; exit 1; }
     tools/harness-extract.sh --selftest || exit 1
@@ -187,14 +187,18 @@ rec_suite_stop() {
         return
     fi
     # Legs share the one film; extractions are independent — run them
-    # all at once and collect verdicts after.
+    # all at once and collect verdicts after. The packet index is
+    # scanned once here, not 48 times in the workers.
+    ffprobe -v quiet -select_streams v -show_entries packet=pts_time -of csv=p=0 \
+        "$RECORDINGS/suite.mov" 2>/dev/null | sort -n >"$RECORDINGS/.pts"
+    export KAYA_PTS_INDEX="$RECORDINGS/.pts"
     local dir
     local pids=()
     for dir in "$RECORDINGS"/*/; do
         [ -f "$dir/pid" ] || continue
         (
             pid=$(cat "$dir/pid")
-            line=$(grep -m1 "^WINDOW $pid " "$RECORDINGS/rec.log" || true)
+            line=$(grep "^WINDOW $pid " "$RECORDINGS/rec.log" | tail -1 || true)
             if [ -z "$line" ]; then
                 echo "$(basename "$dir"): never tracked by the recorder"
                 exit 1
@@ -209,6 +213,7 @@ rec_suite_stop() {
         pids+=($!)
     done
     [ ${#pids[@]} -eq 0 ] || wait "${pids[@]}" 2>/dev/null || true
+    unset KAYA_PTS_INDEX
     for dir in "$RECORDINGS"/*/; do
         [ -f "$dir/extract.log" ] || continue
         cat "$dir/extract.log"

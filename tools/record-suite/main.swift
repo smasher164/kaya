@@ -230,6 +230,22 @@ Task {
                 tracked[pid] = nil
                 changed = true
             }
+            // Windows move after they first appear (SwiftUI places
+            // itself in onAppear, a beat after showing): re-sample
+            // rects and reprint, and let extraction use the LAST
+            // WINDOW line — crops must reflect where the window
+            // settled, not where it flashed.
+            for (pid, win) in tracked {
+                if let now = content.windows.first(where: { $0.windowID == win.windowID }),
+                    now.frame != win.frame
+                {
+                    tracked[pid] = now
+                    let f = now.frame
+                    print("WINDOW \(pid) \(Int(f.origin.x)) \(Int(f.origin.y)) \(Int(f.width)) \(Int(f.height))")
+                    fflush(stdout)
+                    changed = true
+                }
+            }
             if changed {
                 let filter = SCContentFilter(display: display, including: Array(tracked.values))
                 if let stream {

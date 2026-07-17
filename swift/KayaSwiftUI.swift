@@ -414,8 +414,15 @@ private func kayaPlaceWindow() {
         let slot = Int(raw),
         let window = NSApplication.shared.windows.first
     else { return }
-    let x = 20.0 + Double(slot % 2) * 700.0
-    let y = 80.0 + Double(slot / 2) * 450.0
-    window.setFrame(NSRect(x: x, y: y, width: 640, height: 400), display: true)
+    // Same screen-derived grid as the AppKit backend: shared cells
+    // sized for this backend's 540x330 windows, partial last cell
+    // counting when the window still fits.
+    let vis = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    let cols = max(1, Int((vis.width - 20 - 540) / 570) + 1)
+    let rows = max(1, Int((vis.height - 40 - 330) / 345) + 1)
+    let bounded = slot % (cols * rows)
+    let x = 20.0 + Double(bounded % cols) * 570.0
+    let y = 40.0 + Double(bounded / cols) * 345.0
+    window.setFrame(NSRect(x: x, y: y, width: 540, height: 330), display: true)
     #endif
 }

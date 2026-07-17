@@ -91,12 +91,19 @@ LEAD_MS=$((EPOCH - ANCHOR_MS))
 
 mkdir -p "$OUT"
 
+# Legs sharing one suite film each rescan the same packets; a caller
+# that pre-builds the index once (sorted pts_time, one per line) can
+# share it via KAYA_PTS_INDEX.
 PTS="$OUT/.pts"
-ffprobe -v quiet -select_streams v -show_entries packet=pts_time -of csv=p=0 \
-    "$VIDEO" 2>/dev/null | sort -n >"$PTS"
+if [ -n "${KAYA_PTS_INDEX:-}" ] && [ -s "${KAYA_PTS_INDEX:-}" ]; then
+    PTS="$KAYA_PTS_INDEX"
+else
+    ffprobe -v quiet -select_streams v -show_entries packet=pts_time -of csv=p=0 \
+        "$VIDEO" 2>/dev/null | sort -n >"$PTS"
+fi
 if [ ! -s "$PTS" ]; then
     echo "harness-extract: no frames in $VIDEO"
-    rm -f "$PTS"
+    [ "$PTS" = "${KAYA_PTS_INDEX:-}" ] || rm -f "$PTS"
     exit 1
 fi
 FIRST_MS=$(awk 'NR==1{printf "%d", $1 * 1000}' "$PTS")
@@ -114,7 +121,7 @@ END_MS=$((LEAD_MS + LAST_OFF - 50))
 if [ "$LEAD_MS" -gt $((LAST_MS + 5000)) ] \
     || [ $((LEAD_MS + LAST_OFF)) -lt $((FIRST_MS - 5000)) ]; then
     echo "harness-extract: anchor implausible (leg spans $LEAD_MS..$((LEAD_MS + LAST_OFF))ms, video $FIRST_MS..${LAST_MS}ms)"
-    rm -f "$PTS"
+    [ "$PTS" = "${KAYA_PTS_INDEX:-}" ] || rm -f "$PTS"
     exit 1
 fi
 
@@ -137,7 +144,7 @@ grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT" | while IFS= read -r line; do
         -i "$VIDEO" -frames:v 1 ${CROP:+-vf "$CROP"} -y \
         "$OUT/$(printf 'step-%02d' "$n")-$step.png" 2>/dev/null || true
 done
-rm -f "$PTS"
+[ "$PTS" = "${KAYA_PTS_INDEX:-}" ] || rm -f "$PTS"
 
 count=$(find "$OUT" -name 'step-*.png' | wc -l | tr -d ' ')
 echo "harness-extract: $count/$WANT stills in $OUT"
