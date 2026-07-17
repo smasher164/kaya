@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xe22da1c95f74a5a4;
+    public const ulong SpecHash = 0x378d164e75be3006;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -51,11 +51,13 @@ static class KayaWire
     public const ushort TxKindCreateFor = 11;
     public const ushort TxKindCreateWhen = 12;
     public const ushort TxKindTemplateEnd = 13;
+    public const ushort TxKindCollectionMove = 15;
     public const ushort TxKindCollectionUpdateField = 14;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
     public const ushort ApplyKindMount = 4;
+    public const ushort ApplyKindMoveChild = 6;
     public const ushort ApplyKindDestroy = 5;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
@@ -243,6 +245,17 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         return Finish(stream, w, TxKindTemplateEnd);
+    }
+
+    /// Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them.
+    public static byte[] TxCollectionMove(ulong collectionId, object[] path, object key, object[] before)
+    {
+        var w = Begin(out var stream);
+        w.Write(collectionId);
+        EncodeValues(w, path);
+        EncodeValue(w, key);
+        EncodeValues(w, before);
+        return Finish(stream, w, TxKindCollectionMove);
     }
 
     /// Set one field of an entry's record; only bindings on that field re-resolve.

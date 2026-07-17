@@ -15,7 +15,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xe22da1c95f74a5a4
+let kayaSpecHash: UInt64 = 0x378d164e75be3006
 
 struct KayaTx {
     var bytes = Data()
@@ -189,6 +189,16 @@ struct KayaTx {
     /// Close the innermost template scope.
     mutating func templateEnd() {
         let start = self.begin(UInt16(KAYA_TX_TEMPLATE_END))
+        self.end(start)
+    }
+
+    /// Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them.
+    mutating func collectionMove(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ before: [KayaValue]) {
+        let start = self.begin(UInt16(KAYA_TX_COLLECTION_MOVE))
+        self.u64(collectionId)
+        self.values(path)
+        self.value(key)
+        self.values(before)
         self.end(start)
     }
 

@@ -48,6 +48,8 @@
 
 #define TX_COLLECTION_UPDATE_FIELD 14
 
+#define TX_COLLECTION_MOVE 15
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -57,6 +59,8 @@
 #define APPLY_MOUNT 4
 
 #define APPLY_DESTROY 5
+
+#define APPLY_MOVE_CHILD 6
 
 #define VALUE_BOOL 1
 
@@ -171,6 +175,8 @@
 
 #define KAYA_TX_COLLECTION_UPDATE_FIELD 14
 
+#define KAYA_TX_COLLECTION_MOVE 15
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
@@ -184,6 +190,9 @@
  *   MOUNT:     u64 window, u64 root
  *   DESTROY:   u64 widget_id — remove from its parent and forget it.
  *              Teardown arrives children-first; never walk anything.
+ *   MOVE_CHILD: u64 parent, u64 child, u64 before — reposition child
+ *              among parent's children so it sits before `before`;
+ *              0 means the end (widget ids start at 1).
  */
 #define KAYA_APPLY_CREATE 1
 
@@ -194,6 +203,8 @@
 #define KAYA_APPLY_MOUNT 4
 
 #define KAYA_APPLY_DESTROY 5
+
+#define KAYA_APPLY_MOVE_CHILD 6
 
 /**
  * Value types.

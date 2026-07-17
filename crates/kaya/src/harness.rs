@@ -38,6 +38,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "entry" => Some(include_str!("../../../tools/scenes/entry.steps")),
         "gallery" => Some(include_str!("../../../tools/scenes/gallery.steps")),
         "todos" => Some(include_str!("../../../tools/scenes/todos.steps")),
+        "reorder" => Some(include_str!("../../../tools/scenes/reorder.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -58,6 +59,7 @@ pub enum TargetKind {
     Slider,
     Entry,
     Label,
+    Column,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +70,10 @@ pub enum Step {
     SetValue(Target, f64),
     SetText(Target, String),
     Expect(Target, String),
+    /// Expect the container's label children to read, in child order,
+    /// the given `|`-joined texts — the observation reorder ops are
+    /// verified by (creation-order registries cannot see a move).
+    ExpectOrder(Target, String),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -79,6 +85,12 @@ pub trait Stage: Send + 'static {
     fn set_value(&self, target: Target, value: f64);
     fn set_text(&self, target: Target, text: &str);
     fn read_label(&self, target: Target) -> String;
+    /// The texts of the container's label children, in child order,
+    /// joined with `|`. Only backends with a reorder scene implement
+    /// it; the default dies loudly rather than silently passing.
+    fn child_texts(&self, target: Target) -> String {
+        panic!("kaya: child_texts unimplemented on this backend ({target:?})");
+    }
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -145,6 +157,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .ok_or_else(|| format!("expect wants a target and a string: {line:?}"))?;
                 Step::Expect(parse_target(target)?, parse_string(text)?)
             }
+            "expect_order" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_order wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectOrder(parse_target(target)?, parse_string(text)?)
+            }
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -163,6 +181,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "slider" => TargetKind::Slider,
         "entry" => TargetKind::Entry,
         "label" => TargetKind::Label,
+        "column" => TargetKind::Column,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -244,7 +263,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     }
     // A script with no expects proves nothing; a transport that
     // mangled the text into a comment must fail, not pass.
-    if !steps.iter().any(|s| matches!(s, Step::Expect(..))) {
+    if !steps
+        .iter()
+        .any(|s| matches!(s, Step::Expect(..) | Step::ExpectOrder(..)))
+    {
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
         return;
     }
@@ -270,6 +292,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     observed.push(got);
                 } else {
                     failures.push(format!("{t:?} reads {got:?}, wanted {want:?}"));
+                }
+            }
+            Step::ExpectOrder(t, want) => {
+                let got = stage.child_texts(*t);
+                if got == *want {
+                    observed.push(got);
+                } else {
+                    failures.push(format!("{t:?} ordered {got:?}, wanted {want:?}"));
                 }
             }
         }
@@ -302,7 +332,7 @@ mod tests {
 
     #[test]
     fn scripts_parse_and_grammar_round_trips() {
-        for scene in ["entry", "gallery", "todos", "1"] {
+        for scene in ["entry", "gallery", "todos", "reorder", "1"] {
             parse(script(scene).unwrap()).unwrap();
         }
         let steps = parse(
@@ -346,6 +376,9 @@ mod tests {
         fn read_label(&self, _: Target) -> String {
             "ok-text".into()
         }
+        fn child_texts(&self, _: Target) -> String {
+            "a|b".into()
+        }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -365,6 +398,30 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("no expects"), "{verdict}");
+    }
+
+    /// expect_order parses like expect, counts as an expect for the
+    /// zero-expect guard, and compares against the stage's child_texts.
+    #[test]
+    fn expect_order_is_an_expect() {
+        let steps = parse("expect_order column#0 \"a|b\"").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectOrder(Target { kind: TargetKind::Column, index: 0 }, "a|b".into())
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (a|b)");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_order column#0 \"b|a\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("ordered"), "{verdict}");
     }
 
     /// The verdict format is load-bearing: the suites grep

@@ -236,6 +236,9 @@ pub enum TxOp {
     /// title, and only bindings on that field re-resolve.
     CollectionUpdateField { id: CollectionId, path: Path, key: Value, field: u32, value: Value },
     CollectionRemove { id: CollectionId, path: Path, key: Value },
+    /// Reposition an entry in the ordered table: before the entry at
+    /// `before`, or to the end when None. Keys, never indices.
+    CollectionMove { id: CollectionId, path: Path, key: Value, before: Option<Value> },
     /// Opens a template scope; records until TemplateEnd are the
     /// blueprint. The For itself lives where it was declared (live
     /// widget at top level, template node inside another template).
@@ -267,6 +270,9 @@ pub enum ApplyOp {
     SetProp { id: WidgetId, prop: Prop, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
+    /// Reposition `child` among `parent`'s children: before the
+    /// sibling `before`, or to the end when None.
+    MoveChild { parent: WidgetId, child: WidgetId, before: Option<WidgetId> },
     /// Remove the widget from its parent and forget it. The core emits
     /// one Destroy per widget of a torn-down instance, children before
     /// parents, so backends never walk anything.

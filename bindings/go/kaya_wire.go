@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xe22da1c95f74a5a4
+	SpecHash uint64 = 0x378d164e75be3006
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -51,11 +51,13 @@ const (
 	txCreateFor = 11
 	txCreateWhen = 12
 	txTemplateEnd = 13
+	txCollectionMove = 15
 	txCollectionUpdateField = 14
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
 	applyMount = 4
+	applyMoveChild = 6
 	applyDestroy = 5
 	occButtonClicked = 1
 	occTextChanged = 2
@@ -237,6 +239,16 @@ func TxCreateWhen(id uint64, signalId uint64) []byte {
 // TxTemplateEnd: Close the innermost template scope.
 func TxTemplateEnd() []byte {
 	b := beginRecord(txTemplateEnd)
+	return endRecord(b)
+}
+
+// TxCollectionMove: Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them.
+func TxCollectionMove(collectionId uint64, path []any, key any, before []any) []byte {
+	b := beginRecord(txCollectionMove)
+	b = binary.LittleEndian.AppendUint64(b, collectionId)
+	b = encodeValues(b, path)
+	b = encodeValue(b, key)
+	b = encodeValues(b, before)
 	return endRecord(b)
 }
 

@@ -461,6 +461,56 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             }
             core.widgets.insert(id, NativeWidget { view, kind, tag_key });
         }
+        ApplyOp::MoveChild {
+            parent,
+            child,
+            before,
+        } => {
+            let (parent_view, parent_kind) = with_widget(parent, |w| (w.view.clone(), w.kind));
+            assert!(
+                matches!(parent_kind, WidgetKind::Column | WidgetKind::Row),
+                "kaya: move_child parent is not a container"
+            );
+            let child_view = with_widget(child, |w| w.view.clone());
+            env.call_method(
+                parent_view.as_obj(),
+                "removeView",
+                "(Landroid/view/View;)V",
+                &[(&child_view).into()],
+            )
+            .expect("removeView");
+            match before {
+                Some(anchor) => {
+                    let anchor_view = with_widget(anchor, |w| w.view.clone());
+                    let index = env
+                        .call_method(
+                            parent_view.as_obj(),
+                            "indexOfChild",
+                            "(Landroid/view/View;)I",
+                            &[(&anchor_view).into()],
+                        )
+                        .expect("indexOfChild")
+                        .i()
+                        .expect("int");
+                    env.call_method(
+                        parent_view.as_obj(),
+                        "addView",
+                        "(Landroid/view/View;I)V",
+                        &[(&child_view).into(), index.into()],
+                    )
+                    .expect("addView at index");
+                }
+                None => {
+                    env.call_method(
+                        parent_view.as_obj(),
+                        "addView",
+                        "(Landroid/view/View;)V",
+                        &[(&child_view).into()],
+                    )
+                    .expect("addView");
+                }
+            }
+        }
         ApplyOp::Destroy { id } => {
             let widget = {
                 let mut core = CORE.lock().unwrap();

@@ -469,6 +469,55 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             };
             core.widgets.insert(id, native);
         }
+        ApplyOp::MoveChild {
+            parent,
+            child,
+            before,
+        } => {
+            use bindings::Microsoft::UI::Xaml::UIElement;
+            let panel = match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
+                _ => panic!("kaya: move_child parent is not a container"),
+            };
+            let as_element = |core: &CoreState, id: WidgetId| -> UIElement {
+                match core.widgets.get(&id).expect("scene validated the id") {
+                    NativeWidget::Column(p) | NativeWidget::Row(p) => {
+                        windows_core::Interface::cast(p).expect("panel is a UIElement")
+                    }
+                    NativeWidget::Button { button, .. } => {
+                        windows_core::Interface::cast(button).expect("button is a UIElement")
+                    }
+                    NativeWidget::Label(label) => {
+                        windows_core::Interface::cast(label).expect("label is a UIElement")
+                    }
+                    NativeWidget::Entry(field) => {
+                        windows_core::Interface::cast(field).expect("entry is a UIElement")
+                    }
+                    NativeWidget::Checkbox { check, .. } => {
+                        windows_core::Interface::cast(check).expect("checkbox is a UIElement")
+                    }
+                    NativeWidget::Slider(slider) => {
+                        windows_core::Interface::cast(slider).expect("slider is a UIElement")
+                    }
+                }
+            };
+            let children = panel.Children()?;
+            let child_elem = as_element(core, child);
+            let mut at = 0u32;
+            if children.IndexOf(&child_elem, &mut at)?.into() {
+                children.RemoveAt(at)?;
+            }
+            match before {
+                Some(anchor) => {
+                    let anchor_elem = as_element(core, anchor);
+                    let mut idx = 0u32;
+                    let found: bool = children.IndexOf(&anchor_elem, &mut idx)?.into();
+                    assert!(found, "kaya: move_child anchor not among siblings");
+                    children.InsertAt(idx, &child_elem)?;
+                }
+                None => children.Append(&child_elem)?,
+            }
+        }
         ApplyOp::Destroy { id } => {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             if let Some(panel) = core.parents.remove(&id) {

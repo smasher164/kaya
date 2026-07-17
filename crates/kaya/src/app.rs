@@ -886,6 +886,75 @@ impl Tx<'_> {
         }
     }
 
+    /// Reposition an entry before another's: order is collection data,
+    /// so the model reorders and the wire carries the same keys-only
+    /// delta. Anchor semantics match the protocol: keys, never indices.
+    pub fn move_before<T: KayaRecord>(
+        &mut self,
+        instance: &Collection<T>,
+        key: impl Into<Value>,
+        anchor: impl Into<Value>,
+    ) {
+        self.move_entry(instance, key.into(), Some(anchor.into()));
+    }
+
+    /// Reposition an entry at the end of its collection.
+    pub fn move_to_end<T: KayaRecord>(
+        &mut self,
+        instance: &Collection<T>,
+        key: impl Into<Value>,
+    ) {
+        self.move_entry(instance, key.into(), None);
+    }
+
+    fn move_entry<T: KayaRecord>(
+        &mut self,
+        instance: &Collection<T>,
+        key: Value,
+        before: Option<Value>,
+    ) {
+        self.model_move(instance.id, &instance.path, &key, before.as_ref());
+        self.ops.push(TxOp::CollectionMove {
+            id: instance.id,
+            path: instance.path.clone(),
+            key,
+            before,
+        });
+        if instance.path.is_empty() {
+            self.recompute_derived(instance.id);
+        }
+    }
+
+    fn model_move(
+        &mut self,
+        collection: CollectionId,
+        path: &[Value],
+        key: &Value,
+        before: Option<&Value>,
+    ) {
+        self.touch(collection);
+        if let Some(instance) = self
+            .ctx
+            .model
+            .borrow_mut()
+            .get_mut(&collection)
+            .and_then(|instances| instances.iter_mut().find(|i| i.path == path))
+        {
+            if let Some(pos) = instance.entries.iter().position(|(k, _)| k == key) {
+                let entry = instance.entries.remove(pos);
+                let at = match before {
+                    Some(anchor) => instance
+                        .entries
+                        .iter()
+                        .position(|(k, _)| k == anchor)
+                        .unwrap_or(instance.entries.len()),
+                    None => instance.entries.len(),
+                };
+                instance.entries.insert(at, entry);
+            }
+        }
+    }
+
     pub fn remove<T: KayaRecord>(&mut self, instance: &Collection<T>, key: impl Into<Value>) {
         let key = key.into();
         self.model_remove(instance.id, &instance.path, &key);

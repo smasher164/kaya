@@ -178,6 +178,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             };
             core.widgets.insert(id, native);
         }
+        ApplyOp::MoveChild {
+            parent,
+            child,
+            before,
+        } => {
+            use gtk4::prelude::WidgetExt;
+            let parent_box = match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(b) | NativeWidget::Row(b) => b.clone(),
+                _ => panic!("kaya: move_child parent is not a container"),
+            };
+            let child_widget = core
+                .widgets
+                .get(&child)
+                .expect("scene validated the id")
+                .widget();
+            // gtk speaks after-semantics; before(anchor) = after(anchor's
+            // previous sibling), and None (end) = after the last child.
+            let after = match before {
+                Some(anchor) => core
+                    .widgets
+                    .get(&anchor)
+                    .expect("scene validated the id")
+                    .widget()
+                    .prev_sibling(),
+                None => parent_box.last_child(),
+            };
+            if after.as_ref() != Some(&child_widget) {
+                parent_box.reorder_child_after(&child_widget, after.as_ref());
+            }
+        }
         ApplyOp::Destroy { id } => {
             let widget = core
                 .widgets

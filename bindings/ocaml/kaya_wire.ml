@@ -7,7 +7,7 @@
 type value = Bool of bool | I64 of int64 | F64 of float | Str of string
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xe22da1c95f74a5a4L
+let spec_hash = 0x378d164e75be3006L
 
 let value_bool = 1
 let value_i64 = 2
@@ -46,11 +46,13 @@ let tx_kind_collection_remove = 10
 let tx_kind_create_for = 11
 let tx_kind_create_when = 12
 let tx_kind_template_end = 13
+let tx_kind_collection_move = 15
 let tx_kind_collection_update_field = 14
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
 let apply_kind_mount = 4
+let apply_kind_move_child = 6
 let apply_kind_destroy = 5
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
@@ -184,6 +186,14 @@ let tx_create_when id signal_id =
 let tx_template_end () =
   finish tx_kind_template_end (fun b ->
       ignore b)
+
+(* Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. *)
+let tx_collection_move collection_id path key before =
+  finish tx_kind_collection_move (fun b ->
+      Buffer.add_int64_le b collection_id;
+      encode_values b path;
+      encode_value b key;
+      encode_values b before)
 
 (* Set one field of an entry's record; only bindings on that field re-resolve. *)
 let tx_collection_update_field collection_id path key field value =

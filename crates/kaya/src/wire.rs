@@ -35,6 +35,7 @@ pub const TX_CREATE_FOR: u16 = 11;
 pub const TX_CREATE_WHEN: u16 = 12;
 pub const TX_TEMPLATE_END: u16 = 13;
 pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
+pub const TX_COLLECTION_MOVE: u16 = 15;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -42,6 +43,7 @@ pub const APPLY_SET_PROP: u16 = 2;
 pub const APPLY_ADD_CHILD: u16 = 3;
 pub const APPLY_MOUNT: u16 = 4;
 pub const APPLY_DESTROY: u16 = 5;
+pub const APPLY_MOVE_CHILD: u16 = 6;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -271,6 +273,19 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                 },
                 value: r.value(),
             },
+            TX_COLLECTION_MOVE => TxOp::CollectionMove {
+                id: CollectionId(r.u64()),
+                path: r.path(),
+                key: r.value(),
+                before: {
+                    let mut anchors = r.path();
+                    assert!(
+                        anchors.len() <= 1,
+                        "kaya: collection_move carries at most one anchor key"
+                    );
+                    anchors.pop()
+                },
+            },
             TX_COLLECTION_REMOVE => TxOp::CollectionRemove {
                 id: CollectionId(r.u64()),
                 path: r.path(),
@@ -460,6 +475,13 @@ impl Writer {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
+            ApplyOp::MoveChild { parent, child, before } => {
+                self.record(APPLY_MOVE_CHILD, |b| {
+                    b.extend_from_slice(&parent.0.to_le_bytes());
+                    b.extend_from_slice(&child.0.to_le_bytes());
+                    b.extend_from_slice(&before.map_or(0, |w| w.0).to_le_bytes());
+                })
+            }
             ApplyOp::Destroy { id } => self.record(APPLY_DESTROY, |b| {
                 b.extend_from_slice(&id.0.to_le_bytes());
             }),
@@ -552,6 +574,15 @@ impl Writer {
                     b.extend_from_slice(&field.to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     write_value(b, value);
+                })
+            }
+            TxOp::CollectionMove { id, path, key, before } => {
+                self.record(TX_COLLECTION_MOVE, |b| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    write_path(b, path);
+                    write_value(b, key);
+                    let anchors: Path = before.iter().cloned().collect();
+                    write_path(b, &anchors);
                 })
             }
             TxOp::CollectionRemove { id, path, key } => {

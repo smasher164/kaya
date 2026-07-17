@@ -985,7 +985,11 @@ feature rather than reconstructed per backend afterward.
   projection, and sum-typed elements dispatching per-variant templates,
   wait for milestone 3, where multi-field rows make them real; there is
   no list value ever (a sequence as content is a collection); order is
-  insertion order, reorder ops are future vocabulary. Definition of
+  insertion order until a move says otherwise: collection_move
+  repositions an entry before an anchor entry (or at the end), keys,
+  never indices — order is data, and an index would race the very
+  deltas that change it. On the apply side it lands as move_child, the
+  one structural op that edits a container's child order in place. Definition of
   done, as always: a scene exercising both operators — a nested For with
   per-group items and a When toggle — green on the full matrix from
   every guest.

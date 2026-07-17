@@ -23,6 +23,7 @@ private let applySetProp: UInt16 = 2
 private let applyAddChild: UInt16 = 3
 private let applyMount: UInt16 = 4
 private let applyDestroy: UInt16 = 5
+private let applyMoveChild: UInt16 = 6
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
@@ -70,6 +71,7 @@ final class KayaSceneModel {
     var labels: [KayaNode] = []
     var entries: [KayaNode] = []
     var sliders: [KayaNode] = []
+    var columns: [KayaNode] = []
 }
 
 let kayaScene = KayaSceneModel()
@@ -151,6 +153,7 @@ private func kayaApply(_ batch: Data) {
                 case kindSlider: kayaScene.sliders.append(node)
                 case kindEntry: kayaScene.entries.append(node)
                 case kindCheckbox: kayaScene.checkboxes.append(node)
+                case kindColumn: kayaScene.columns.append(node)
                 default: break
                 }
             case applySetProp:
@@ -186,6 +189,19 @@ private func kayaApply(_ batch: Data) {
                 // window (u64) is the default until the window vocabulary.
                 let root = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.root = kayaScene.nodes[root]
+            case applyMoveChild:
+                let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let before = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self)
+                let parentNode = kayaScene.nodes[parent]!
+                let childNode = kayaScene.nodes[child]!
+                parentNode.children.removeAll { $0.id == child }
+                // before == 0: the end sentinel (widget ids start at 1).
+                if before != 0, let at = parentNode.children.firstIndex(where: { $0.id == before }) {
+                    parentNode.children.insert(childNode, at: at)
+                } else {
+                    parentNode.children.append(childNode)
+                }
             case applyDestroy:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 if let parent = kayaScene.parents.removeValue(forKey: id),
@@ -204,7 +220,8 @@ private func kayaApply(_ batch: Data) {
 
 /// The interaction harness's Swift interpreter: the same line-oriented
 /// grammar the Rust backends embed from tools/scenes (settle / click /
-/// toggle / set_value / set_text / expect, targets as kind#index,
+/// toggle / set_value / set_text / expect / expect_order, targets as
+/// kind#index,
 /// `;` accepted as a newline stand-in). The suites hand the script in
 /// through KAYA_SELFTEST_SCRIPT; steps drive the node tree exactly as
 /// a gesture would — flip the observable, emit through the host API.
@@ -290,6 +307,22 @@ private func kayaRunScript(_ script: String) {
                     observed.append(got)
                 } else {
                     failures.append("\(parts[1]) reads \"\(got)\", wanted \"\(want)\"")
+                }
+            case "expect_order":
+                // The container's label children in child order, joined
+                // with `|` — reads the tree the moves actually edited,
+                // which the creation-ordered registries cannot see.
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync {
+                    kayaTarget(parts[1], kayaScene.columns).children
+                        .filter { $0.kind == kindLabel }
+                        .map { $0.text }
+                        .joined(separator: "|")
+                }
+                if got == want {
+                    observed.append(got)
+                } else {
+                    failures.append("\(parts[1]) ordered \"\(got)\", wanted \"\(want)\"")
                 }
             default:
                 failures.append("unknown step \(line)")

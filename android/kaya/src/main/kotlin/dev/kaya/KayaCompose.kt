@@ -72,6 +72,7 @@ object KayaCompose {
     private const val APPLY_ADD_CHILD = 3
     private const val APPLY_MOUNT = 4
     private const val APPLY_DESTROY = 5
+    private const val APPLY_MOVE_CHILD = 6
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -159,6 +160,19 @@ object KayaCompose {
                     b.long // window: the default until the window vocabulary
                     val root = b.long
                     KayaSceneModel.root = KayaSceneModel.nodes[root]
+                }
+                APPLY_MOVE_CHILD -> {
+                    val parent = b.long
+                    val child = b.long
+                    val before = b.long
+                    val parentNode = KayaSceneModel.nodes[parent]!!
+                    val childNode = KayaSceneModel.nodes[child]!!
+                    parentNode.children.removeAll { it.id == child }
+                    // before == 0L: the end sentinel (widget ids start at 1).
+                    val at = if (before != 0L)
+                        parentNode.children.indexOfFirst { it.id == before } else -1
+                    if (at >= 0) parentNode.children.add(at, childNode)
+                    else parentNode.children.add(childNode)
                 }
                 APPLY_DESTROY -> {
                     val id = b.long

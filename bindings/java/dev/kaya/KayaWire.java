@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xe22da1c95f74a5a4L;
+    public static final long SPEC_HASH = 0x378d164e75be3006L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -52,11 +52,13 @@ public final class KayaWire {
     public static final short TX_KIND_CREATE_FOR = 11;
     public static final short TX_KIND_CREATE_WHEN = 12;
     public static final short TX_KIND_TEMPLATE_END = 13;
+    public static final short TX_KIND_COLLECTION_MOVE = 15;
     public static final short TX_KIND_COLLECTION_UPDATE_FIELD = 14;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
     public static final short APPLY_KIND_MOUNT = 4;
+    public static final short APPLY_KIND_MOVE_CHILD = 6;
     public static final short APPLY_KIND_DESTROY = 5;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
@@ -211,6 +213,16 @@ public final class KayaWire {
     /** Close the innermost template scope. */
     public static byte[] txTemplateEnd() {
         ByteBuffer b = begin(TX_KIND_TEMPLATE_END);
+        return finish(b);
+    }
+
+    /** Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. */
+    public static byte[] txCollectionMove(long collectionId, Object[] path, Object key, Object[] before) {
+        ByteBuffer b = begin(TX_KIND_COLLECTION_MOVE);
+        b.putLong(collectionId);
+        encodeValues(b, path);
+        encodeValue(b, key);
+        encodeValues(b, before);
         return finish(b);
     }
 

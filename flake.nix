@@ -105,6 +105,13 @@
             gradle
           ];
           shellHook = ''
+            # The tools/ scripts refuse to run unless this marker
+            # matches the flake they sit next to: everything runs against
+            # the flake's pinned toolchains, never a bystander rustc or a
+            # dev shell entered before the flake last changed. The value
+            # fingerprints flake.nix+flake.lock (the scripts recompute it
+            # with `cat flake.nix flake.lock | shasum -a 256`).
+            export KAYA_DEV_SHELL=${builtins.substring 0 12 (builtins.hashString "sha256" (builtins.readFile ./flake.nix + builtins.readFile ./flake.lock))}
             export ANDROID_HOME="${androidSdk}/libexec/android-sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk-bundle"

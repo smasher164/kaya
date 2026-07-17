@@ -97,6 +97,7 @@ pub const KAYA_TX_CREATE_FOR: u16 = 11;
 pub const KAYA_TX_CREATE_WHEN: u16 = 12;
 pub const KAYA_TX_TEMPLATE_END: u16 = 13;
 pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
+pub const KAYA_TX_COLLECTION_MOVE: u16 = 15;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -122,6 +123,7 @@ const _: () = assert!(
         && KAYA_TX_CREATE_WHEN == wire::TX_CREATE_WHEN
         && KAYA_TX_TEMPLATE_END == wire::TX_TEMPLATE_END
         && KAYA_TX_COLLECTION_UPDATE_FIELD == wire::TX_COLLECTION_UPDATE_FIELD
+        && KAYA_TX_COLLECTION_MOVE == wire::TX_COLLECTION_MOVE
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -136,17 +138,22 @@ const _: () = assert!(
 ///   MOUNT:     u64 window, u64 root
 ///   DESTROY:   u64 widget_id — remove from its parent and forget it.
 ///              Teardown arrives children-first; never walk anything.
+///   MOVE_CHILD: u64 parent, u64 child, u64 before — reposition child
+///              among parent's children so it sits before `before`;
+///              0 means the end (widget ids start at 1).
 pub const KAYA_APPLY_CREATE: u16 = 1;
 pub const KAYA_APPLY_SET_PROP: u16 = 2;
 pub const KAYA_APPLY_ADD_CHILD: u16 = 3;
 pub const KAYA_APPLY_MOUNT: u16 = 4;
 pub const KAYA_APPLY_DESTROY: u16 = 5;
+pub const KAYA_APPLY_MOVE_CHILD: u16 = 6;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
         && KAYA_APPLY_ADD_CHILD == wire::APPLY_ADD_CHILD
         && KAYA_APPLY_MOUNT == wire::APPLY_MOUNT
         && KAYA_APPLY_DESTROY == wire::APPLY_DESTROY
+        && KAYA_APPLY_MOVE_CHILD == wire::APPLY_MOVE_CHILD
 );
 
 /// Value types.
@@ -475,4 +482,58 @@ pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
     );
     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, bytes.len()) };
     bytes.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The KAYA_-prefixed constants are the C ABI's copy of the spec's
+    /// record kinds — the one table the generator does not write. This
+    /// pins it to the spec both ways: every row has its constant (the
+    /// count catches a row added without one — the failure that once
+    /// surfaced as a Swift guest typecheck error, five tools
+    /// downstream) and every constant matches its row's kind.
+    #[test]
+    fn c_abi_constants_cover_the_spec() {
+        let tx = [
+            ("create_signal", KAYA_TX_CREATE_SIGNAL),
+            ("write_signal", KAYA_TX_WRITE_SIGNAL),
+            ("create_widget", KAYA_TX_CREATE_WIDGET),
+            ("set_property", KAYA_TX_SET_PROPERTY),
+            ("add_child", KAYA_TX_ADD_CHILD),
+            ("mount", KAYA_TX_MOUNT),
+            ("create_collection", KAYA_TX_CREATE_COLLECTION),
+            ("collection_insert", KAYA_TX_COLLECTION_INSERT),
+            ("collection_update", KAYA_TX_COLLECTION_UPDATE),
+            ("collection_remove", KAYA_TX_COLLECTION_REMOVE),
+            ("create_for", KAYA_TX_CREATE_FOR),
+            ("create_when", KAYA_TX_CREATE_WHEN),
+            ("template_end", KAYA_TX_TEMPLATE_END),
+            ("collection_update_field", KAYA_TX_COLLECTION_UPDATE_FIELD),
+            ("collection_move", KAYA_TX_COLLECTION_MOVE),
+        ];
+        let apply = [
+            ("create", KAYA_APPLY_CREATE),
+            ("set_prop", KAYA_APPLY_SET_PROP),
+            ("add_child", KAYA_APPLY_ADD_CHILD),
+            ("mount", KAYA_APPLY_MOUNT),
+            ("destroy", KAYA_APPLY_DESTROY),
+            ("move_child", KAYA_APPLY_MOVE_CHILD),
+        ];
+        for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
+            assert_eq!(
+                spec.len(),
+                consts.len(),
+                "a spec row has no KAYA_ constant (or the reverse)"
+            );
+            for row in spec {
+                let (_, value) = consts
+                    .iter()
+                    .find(|(name, _)| *name == row.name)
+                    .unwrap_or_else(|| panic!("no KAYA_ constant for spec row {:?}", row.name));
+                assert_eq!(*value, row.kind, "kind mismatch for {:?}", row.name);
+            }
+        }
+    }
 }

@@ -9,7 +9,7 @@ Python bool, int, float, and str, mapped to the kaya value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xe22da1c95f74a5a4
+SPEC_HASH = 0x378d164e75be3006
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -49,11 +49,13 @@ TX_COLLECTION_REMOVE = 10
 TX_CREATE_FOR = 11
 TX_CREATE_WHEN = 12
 TX_TEMPLATE_END = 13
+TX_COLLECTION_MOVE = 15
 TX_COLLECTION_UPDATE_FIELD = 14
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
 APPLY_MOUNT = 4
+APPLY_MOVE_CHILD = 6
 APPLY_DESTROY = 5
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
@@ -146,6 +148,10 @@ def tx_create_when(id, signal_id):
 def tx_template_end():
     """Close the innermost template scope."""
     return record(TX_TEMPLATE_END, b"")
+
+def tx_collection_move(collection_id, path, key, before):
+    """Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them."""
+    return record(TX_COLLECTION_MOVE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(before))
 
 def tx_collection_update_field(collection_id, path, key, field, value):
     """Set one field of an entry's record; only bindings on that field re-resolve."""

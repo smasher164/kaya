@@ -279,6 +279,21 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Close the innermost template scope.",
         },
         Record {
+            kind: 15,
+            name: "collection_move",
+            fields: &[
+                f("collection_id", FieldTy::U64),
+                f("path", FieldTy::Values),
+                f("key", FieldTy::Value),
+                f("before", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Move an entry so it sits before the entry whose key is the \
+                  one value in `before`, or to the end when `before` is \
+                  empty. Keys, never indices: order is data, and indices \
+                  would race the very deltas that change them.",
+        },
+        Record {
             kind: 14,
             name: "collection_update_field",
             fields: &[
@@ -332,6 +347,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             fields: &[f("window", FieldTy::U64), f("root", FieldTy::U64)],
             payload: None,
             doc: "Mount a root into a window.",
+        },
+        Record {
+            kind: 6,
+            name: "move_child",
+            fields: &[
+                f("parent", FieldTy::U64),
+                f("child", FieldTy::U64),
+                f("before", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "Reposition `child` among `parent`'s children: before the \
+                  sibling `before`, or to the end when `before` is 0 (widget \
+                  ids start at 1).",
         },
         Record {
             kind: 5,
@@ -549,6 +577,7 @@ mod tests {
             ("create_when", wire::TX_CREATE_WHEN),
             ("template_end", wire::TX_TEMPLATE_END),
             ("collection_update_field", wire::TX_COLLECTION_UPDATE_FIELD),
+            ("collection_move", wire::TX_COLLECTION_MOVE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -566,6 +595,7 @@ mod tests {
                 ("set_prop", wire::APPLY_SET_PROP),
                 ("add_child", wire::APPLY_ADD_CHILD),
                 ("mount", wire::APPLY_MOUNT),
+                ("move_child", wire::APPLY_MOVE_CHILD),
                 ("destroy", wire::APPLY_DESTROY),
             ]
         );

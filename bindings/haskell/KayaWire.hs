@@ -22,7 +22,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xe22da1c95f74a5a4
+specHash = 0x378d164e75be3006
 
 valueBool :: Word32
 valueBool = 1
@@ -98,6 +98,8 @@ txKindCreateWhen :: Word16
 txKindCreateWhen = 12
 txKindTemplateEnd :: Word16
 txKindTemplateEnd = 13
+txKindCollectionMove :: Word16
+txKindCollectionMove = 15
 txKindCollectionUpdateField :: Word16
 txKindCollectionUpdateField = 14
 applyKindCreate :: Word16
@@ -108,6 +110,8 @@ applyKindAddChild :: Word16
 applyKindAddChild = 3
 applyKindMount :: Word16
 applyKindMount = 4
+applyKindMoveChild :: Word16
+applyKindMoveChild = 6
 applyKindDestroy :: Word16
 applyKindDestroy = 5
 occKindButtonClicked :: Word16
@@ -202,6 +206,10 @@ txCreateWhen id signalId = wireRecord txKindCreateWhen (word64LE id <> word64LE 
 -- Close the innermost template scope.
 txTemplateEnd :: Builder
 txTemplateEnd = wireRecord txKindTemplateEnd (mempty)
+
+-- Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them.
+txCollectionMove :: Word64 -> [Value] -> Value -> [Value] -> Builder
+txCollectionMove collectionId path key before = wireRecord txKindCollectionMove (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues before)
 
 -- Set one field of an entry's record; only bindings on that field re-resolve.
 txCollectionUpdateField :: Word64 -> [Value] -> Value -> Word32 -> Value -> Builder

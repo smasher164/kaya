@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
+
+# Everything runs inside the dev shell: the flake pins every toolchain
+# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
+# against anything else is an error, not something to paper over — and
+# a shell entered before the flake last changed is just as much a
+# bystander toolchain, so the marker carries the fingerprint of
+# flake.nix+flake.lock the shell was actually built from.
+kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
+if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
+    if [ -z "${KAYA_DEV_SHELL:-}" ]; then
+        echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
+    else
+        echo "$0: dev shell is stale — the flake changed since it was entered; re-enter \`nix develop\`" >&2
+    fi
+    exit 1
+fi
 # Recording mode's frame extraction: derive per-step stills from a
 # leg's video using the harness transcript — the timeline is relative
 # offsets ("KAYA_HARNESS: +<ms> <step>"), so the only anchor needed is
 # the lead between recorder start and leg start, measured by the runner
-# on its own clock. Frames are taken 300ms after each step fires: steps
-# are followed by settle windows, so that lands on the at-rest frame
-# the step produced. Screenshots are thus derived data; the video keeps
+# on its own clock. Frames are taken 300ms after an action step fires:
+# actions are followed by settle windows, so that lands on the at-rest
+# frame the step produced. Expect steps take no bias — an expect's
+# still must show the moment of verification, and the very next action
+# can share its transcript offset (the +300 once made an expect_order
+# still show the following click's effect instead). Screenshots are thus derived data; the video keeps
 # every in-between frame for transition forensics.
 #
 # Usage: harness-extract.sh <video> <transcript> <anchor_ms> <outdir> [crop]
@@ -51,7 +70,11 @@ if [ "${1:-}" = --selftest ]; then
         -f lavfi -i "color=blue:s=64x64:r=1:d=2" \
         -filter_complex "[0][1][2]concat=n=3" -y "$T/v.mp4" \
         || { echo "harness-extract selftest: could not synthesize video"; exit 1; }
-    printf 'KAYA_HARNESS: epoch 1000\nKAYA_HARNESS: +0ms a\nKAYA_HARNESS: +2900ms b\nKAYA_HARNESS: +20000ms c\n' \
+    # The expect step sits at +1800ms: unbiased it covers the red
+    # frame at pts 1; with the action bias (+300) it would cross into
+    # green — the regression where an expect's still showed the next
+    # step's effect.
+    printf 'KAYA_HARNESS: epoch 1000\nKAYA_HARNESS: +0ms a\nKAYA_HARNESS: +1800ms expect q\nKAYA_HARNESS: +2900ms b\nKAYA_HARNESS: +20000ms c\n' \
         >"$T/leg.log"
     "$0" "$T/v.mp4" "$T/leg.log" 1000 "$T/steps" >/dev/null \
         || { echo "harness-extract selftest: extraction failed"; exit 1; }
@@ -59,8 +82,8 @@ if [ "${1:-}" = --selftest ]; then
         ffmpeg -loglevel error -i "$1" -vf scale=1:1 -f rawvideo -pix_fmt rgb24 - 2>/dev/null \
             | od -An -tu1 | awk '{if ($1>=$2 && $1>=$3) print "r"; else if ($2>=$3) print "g"; else print "b"}'
     }
-    got="$(dominant "$T/steps/step-01-a.png")$(dominant "$T/steps/step-02-b.png")$(dominant "$T/steps/step-03-c.png")"
-    [ "$got" = rgb ] || { echo "harness-extract selftest: covering frames wrong (got $got, want rgb)"; exit 1; }
+    got="$(dominant "$T/steps/step-01-a.png")$(dominant "$T/steps/step-02-expect_q.png")$(dominant "$T/steps/step-03-b.png")$(dominant "$T/steps/step-04-c.png")"
+    [ "$got" = rrgb ] || { echo "harness-extract selftest: covering frames wrong (got $got, want rrgb)"; exit 1; }
     # A transcript with steps but a video with no frames must fail.
     : >"$T/empty.mp4"
     if "$0" "$T/empty.mp4" "$T/leg.log" 1000 "$T/steps2" >/dev/null 2>&1; then
@@ -130,7 +153,11 @@ grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT" | while IFS= read -r line; do
     n=$((n + 1))
     offset=$(sed -n 's/KAYA_HARNESS: +\([0-9]*\)ms.*/\1/p' <<<"$line")
     step=$(sed -e 's/KAYA_HARNESS: +[0-9]*ms //' -e 's/[^A-Za-z0-9._#-]/_/g' <<<"$line" | cut -c1-48)
-    at_ms=$((LEAD_MS + offset + 300))
+    case "$step" in
+        [Ee]xpect*) bias=0 ;;
+        *) bias=300 ;;
+    esac
+    at_ms=$((LEAD_MS + offset + bias))
     if [ "$at_ms" -gt "$END_MS" ]; then at_ms=$END_MS; fi
     if [ "$at_ms" -lt 0 ]; then at_ms=0; fi
     # Covering frame: last pts <= at; before the first frame, the

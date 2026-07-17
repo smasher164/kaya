@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+
+# Everything runs inside the dev shell: the flake pins every toolchain
+# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
+# against anything else is an error, not something to paper over — and
+# a shell entered before the flake last changed is just as much a
+# bystander toolchain, so the marker carries the fingerprint of
+# flake.nix+flake.lock the shell was actually built from.
+kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
+if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
+    if [ -z "${KAYA_DEV_SHELL:-}" ]; then
+        echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
+    else
+        echo "$0: dev shell is stale — the flake changed since it was entered; re-enter \`nix develop\`" >&2
+    fi
+    exit 1
+fi
 # Run every milestone-0 validation natively on macOS: the Rust example,
 # Python over the function floor, and Go and C# over the direct ring.
 # Run inside the dev shell (direnv or `nix develop`), with a logged-in
@@ -22,7 +38,7 @@ timing() {
 # check keeps guests from compiling against an ABI the source has left
 # behind.
 cargo build --lib --example milestone2 --example entry \
-    --example gallery --example todos || exit 1
+    --example gallery --example todos --example reorder || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
@@ -383,6 +399,11 @@ run todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dyl
     _build/default/guests/ocaml/todos.exe
 run todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
 
+# The reorder scene (order as collection data; expect_order reads the
+# toolkit's child order). Rust-only for now: the depth slice — the
+# other languages gain a move surface in the breadth pass.
+run reorder-rust env KAYA_SELFTEST=reorder target/debug/examples/reorder
+
 drain
 
 # The same guests against the SwiftUI backend, selected at runtime:
@@ -435,6 +456,9 @@ run todos-csharp-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/li
 run todos-ocaml-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/todos.exe
 run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
+KAYA_SELFTEST_SCRIPT="$(scene_script reorder)"
+export KAYA_SELFTEST_SCRIPT
+run reorder-rust-swiftui env KAYA_SELFTEST=reorder target/debug/examples/reorder
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs

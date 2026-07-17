@@ -1,0 +1,14 @@
+# The reorder scene: order is data. Moves travel as keys on the wire,
+# and expect_order reads the toolkit's actual child order back —
+# column#0 is the For container (created before the root column), and
+# its label children are the stamped rows.
+settle 300
+expect_order column#0 "a|b|c"
+# rotate: the first entry moves to the end.
+click button#0
+settle 200
+expect_order column#0 "b|c|a"
+# lift: the last entry moves before the first.
+click button#1
+settle 200
+expect_order column#0 "a|b|c"

@@ -115,6 +115,9 @@ struct WhenSite {
 struct Stamp {
     /// Internal widget ids in creation order; destroyed in reverse.
     widgets: Vec<WidgetId>,
+    /// The copy's root widgets (children of the For's container), in
+    /// body order — what a move repositions.
+    roots: Vec<WidgetId>,
     signal_binds: Vec<(SignalId, WidgetId)>,
     element_binds: Vec<(EntryRef, WidgetId)>,
     /// Collection instances born with this copy.
@@ -386,6 +389,12 @@ impl Scene {
                 TxOp::CollectionRemove { id, path, key } => {
                     self.remove_entry(id, path, key, &mut out)
                 }
+                TxOp::CollectionMove {
+                    id,
+                    path,
+                    key,
+                    before,
+                } => self.move_entry(id, path, key, before, &mut out),
                 TxOp::CreateFor { id, collection } => {
                     // Live For: a real container widget; its template
                     // scope opens here.
@@ -892,6 +901,72 @@ impl Scene {
         }
     }
 
+    /// Reposition an entry in the ordered table, and its stamped copy
+    /// among the For container's children. Order is collection data:
+    /// the instance stays fully reproducible from template + table.
+    fn move_entry(
+        &mut self,
+        id: CollectionId,
+        path: Vec<Value>,
+        key: Value,
+        before: Option<Value>,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let path: PathKey = path.iter().map(Key::from_value).collect();
+        let key = Key::from_value(&key);
+        let before = before.as_ref().map(Key::from_value);
+        let inst = self.instance_mut(id, &path);
+        assert!(
+            inst.entries.contains_key(&key),
+            "kaya: move of missing key {key:?} in {id:?}"
+        );
+        if let Some(anchor) = &before {
+            assert!(
+                inst.entries.contains_key(anchor),
+                "kaya: move before missing key {anchor:?} in {id:?}"
+            );
+            if anchor == &key {
+                return; // moving before itself: order unchanged
+            }
+        }
+        inst.order.retain(|k| k != &key);
+        match &before {
+            Some(anchor) => {
+                let at = inst
+                    .order
+                    .iter()
+                    .position(|k| k == anchor)
+                    .expect("anchor presence asserted above");
+                inst.order.insert(at, key.clone());
+            }
+            None => inst.order.push(key.clone()),
+        }
+        // Reposition the stamped copy, if this instance is rendered.
+        let Some(site) = self.for_sites.get(&(id, path.clone())) else {
+            return;
+        };
+        let container = site.container;
+        let Some(stamp) = self.stamps.get(&(id, path.clone(), key.clone())) else {
+            return;
+        };
+        let roots = stamp.roots.clone();
+        // The visual anchor is the first root of the anchor entry's
+        // copy; None appends. Multi-root bodies keep their internal
+        // order because each root lands before the same anchor.
+        let anchor_widget = before.as_ref().and_then(|anchor| {
+            self.stamps
+                .get(&(id, path.clone(), anchor.clone()))
+                .and_then(|s| s.roots.first().copied())
+        });
+        for child in roots {
+            out.push(ApplyOp::MoveChild {
+                parent: container,
+                child,
+                before: anchor_widget,
+            });
+        }
+    }
+
     // --- Stamping -----------------------------------------------------------
 
     /// Stamp one copy for an entry, if its collection is being rendered.
@@ -920,6 +995,7 @@ impl Scene {
                 parent: container,
                 child: node_map[root],
             });
+            stamp.roots.push(node_map[root]);
         }
         self.stamps.insert((id, path.clone(), key.clone()), stamp);
     }

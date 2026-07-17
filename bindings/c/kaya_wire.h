@@ -123,7 +123,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xe22da1c95f74a5a4ULL
+#define KAYA_SPEC_HASH 0x378d164e75be3006ULL
 
 
 /* Create a signal holding `initial`. */
@@ -223,6 +223,16 @@ static inline void kaya_tx_create_when(KayaTx *tx, uint64_t id, uint64_t signal_
 /* Close the innermost template scope. */
 static inline void kaya_tx_template_end(KayaTx *tx) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_TEMPLATE_END);
+    kaya_wire_end(tx, start);
+}
+
+/* Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. */
+static inline void kaya_tx_collection_move(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *before, uint32_t before_len) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_MOVE);
+    kaya_wire_u64(tx, collection_id);
+    kaya_wire_values(tx, path, path_len);
+    kaya_wire_value(tx, key);
+    kaya_wire_values(tx, before, before_len);
     kaya_wire_end(tx, start);
 }
 

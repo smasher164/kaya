@@ -238,6 +238,40 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             };
             core.widgets.insert(id, native);
         }
+        ApplyOp::MoveChild {
+            parent,
+            child,
+            before,
+        } => {
+            use objc2::Message;
+            let stack = match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(s) | NativeWidget::Row(s) => s.retain(),
+                _ => panic!("kaya: move_child parent is not a container"),
+            };
+            let child_view = core
+                .widgets
+                .get(&child)
+                .expect("scene validated the id")
+                .view()
+                .retain();
+            unsafe { stack.removeArrangedSubview(&child_view) };
+            let index = match before {
+                Some(anchor) => {
+                    let anchor_view = core
+                        .widgets
+                        .get(&anchor)
+                        .expect("scene validated the id")
+                        .view()
+                        .retain();
+                    let arranged = unsafe { stack.arrangedSubviews() };
+                    (0..arranged.count())
+                        .position(|i| unsafe { arranged.objectAtIndex(i) } == anchor_view)
+                        .expect("kaya: move_child anchor not among siblings")
+                }
+                None => unsafe { stack.arrangedSubviews() }.count(),
+            };
+            unsafe { stack.insertArrangedSubview_atIndex(&child_view, index) };
+        }
         ApplyOp::Destroy { id } => {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             widget.view().removeFromSuperview();

@@ -65,6 +65,7 @@ struct CoreState {
     labels: Vec<Retained<NSTextField>>,
     entries: Vec<(Retained<NSTextField>, Retained<EntryDelegate>)>,
     sliders: Vec<(Retained<NSSlider>, Retained<ButtonTarget>)>,
+    columns: Vec<Retained<NSStackView>>,
     // Held so targets and the delegates outlive the objects that
     // reference them weakly.
     _targets: Vec<Retained<ButtonTarget>>,
@@ -113,6 +114,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
                     stack.setAlignment(NSLayoutAttribute::CenterX);
                     stack.setSpacing(8.0);
+                    core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Row => {
@@ -203,6 +205,30 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
             };
             core.widgets.insert(id, native);
+        }
+        ApplyOp::MoveChild {
+            parent,
+            child,
+            before,
+        } => {
+            let stack = match core.widgets.get(&parent) {
+                Some(NativeWidget::Column(s)) | Some(NativeWidget::Row(s)) => s.clone(),
+                other => panic!("kaya: move_child parent {parent:?} is not a container ({other:?})", other = other.is_some()),
+            };
+            let child_view = core.widgets[&child].view().retain();
+            stack.removeArrangedSubview(&child_view);
+            let index = match before {
+                Some(anchor) => {
+                    let anchor_view = core.widgets[&anchor].view().retain();
+                    let arranged = stack.arrangedSubviews();
+                    (0..arranged.count())
+                        .position(|i| arranged.objectAtIndex(i) == anchor_view)
+                        .expect("kaya: move_child anchor not among siblings")
+                        as isize
+                }
+                None => stack.arrangedSubviews().count() as isize,
+            };
+            stack.insertArrangedSubview_atIndex(&child_view, index);
         }
         ApplyOp::Destroy { id } => {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
@@ -464,6 +490,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            columns: Vec::new(),
             _targets: Vec::new(),
             _entry_delegates: Vec::new(),
             _window: window,
@@ -544,6 +571,28 @@ impl crate::harness::Stage for AppKitStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             core.labels[i].stringValue().to_string()
+        })
+    }
+
+    fn child_texts(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let stack = &core.columns[i];
+            // Child order as the toolkit holds it — the registries are
+            // creation-ordered and cannot observe a move.
+            let mut texts = Vec::new();
+            for child in stack.arrangedSubviews() {
+                if let Some(field) = child.downcast_ref::<NSTextField>() {
+                    let is_label = core
+                        .labels
+                        .iter()
+                        .any(|l| std::ptr::eq::<NSTextField>(&**l, field));
+                    if is_label {
+                        texts.push(field.stringValue().to_string());
+                    }
+                }
+            }
+            texts.join("|")
         })
     }
 
