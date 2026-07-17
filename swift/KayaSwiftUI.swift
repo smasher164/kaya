@@ -235,7 +235,18 @@ private func kayaQuoted(_ rest: [Substring]) -> String {
 private func kayaRunScript(_ script: String) {
     var observed: [String] = []
     var failures: [String] = []
+    // Recording handshake: when the runner exports KAYA_HARNESS_GATE
+    // it is recording this window and holds the gate until its
+    // recorder delivers a first frame — a leg must not outrun its
+    // recording. Bounded; a no-op without the variable.
+    if let gate = ProcessInfo.processInfo.environment["KAYA_HARNESS_GATE"] {
+        let deadline = Date().addingTimeInterval(20)
+        while !FileManager.default.fileExists(atPath: gate), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
     let start = Date()
+    print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
         let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
         if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
@@ -386,8 +397,25 @@ struct KayaRoot: View {
         }
         .padding()
         .onAppear {
+            kayaPlaceWindow()
             kayaStartCommandPump()
             kayaStartSelftest()
         }
     }
+}
+
+// Recording mode tiles parallel legs so one display-scoped capture
+// sees every window unoccluded: the runner assigns a slot, the window
+// places (and bounds) itself — its own window, no permissions. The
+// geometry mirrors the AppKit backend's.
+private func kayaPlaceWindow() {
+    #if os(macOS)
+    guard let raw = ProcessInfo.processInfo.environment["KAYA_WIN_SLOT"],
+        let slot = Int(raw),
+        let window = NSApplication.shared.windows.first
+    else { return }
+    let x = 20.0 + Double(slot % 2) * 700.0
+    let y = 80.0 + Double(slot / 2) * 450.0
+    window.setFrame(NSRect(x: x, y: y, width: 640, height: 400), display: true)
+    #endif
 }

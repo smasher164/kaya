@@ -240,6 +240,7 @@ object KayaCompose {
         val observed = ArrayList<String>()
         val failures = ArrayList<String>()
         val start = System.nanoTime()
+        Log.i("kaya", "KAYA_HARNESS: epoch ${System.currentTimeMillis()}")
         for (rawLine in script.split('\n')) {
             val trimmedLine = rawLine.trim()
             if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue

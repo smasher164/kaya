@@ -30,8 +30,16 @@
 set -euo pipefail
 
 ROOT_FOR_CHECK="$(cd "$(dirname "$0")/.." && pwd)"
+# Phase timing: greppable "TIMING <phase> <n>s" lines say where a
+# run's wall time went — build, deploy, or suites.
+KAYA_T0=$SECONDS
+timing() {
+    echo "TIMING $1 $((SECONDS - KAYA_T0))s"
+    KAYA_T0=$SECONDS
+}
 # Compile the windows target before touching the VM.
 "$ROOT_FOR_CHECK/tools/check-targets.sh" windows || exit 1
+timing check-targets
 
 HOST="${1:?usage: deploy-win.sh user@host [--provision] [rust|python|go|all]}"
 shift
@@ -79,6 +87,7 @@ if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; t
     done
     sleep 30
 fi
+timing vm-ready
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
@@ -98,6 +107,7 @@ if [ -n "$missing" ]; then
     echo "$missing" >&2
     exit 1
 fi
+timing build
 
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
@@ -176,6 +186,7 @@ verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
 verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
 verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
 verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
+timing deploy
 
 # Run a shipped one-shot guest script via schtasks and print the file
 # it writes once its done-marker appears.
@@ -218,9 +229,11 @@ run_suite() {
     local name="$1"
     run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr C:\\kaya\\run_$name.cmd /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
     local tries=0
+    # 1s polls: scenes run ~4s, and 5s polls added a quantization tax
+    # of up to half the leg's real cost.
     until run_ssh "type C:\\kaya\\out_$name.txt" 2>/dev/null | grep -q "EXIT="; do
         tries=$((tries + 1))
-        if [ "$tries" -gt 60 ]; then
+        if [ "$tries" -gt 300 ]; then
             # A guest that never writes EXIT= is hung: kill it so it
             # cannot hold kaya.dll into the next suite or deploy, and
             # fail this leg loudly.
@@ -228,7 +241,7 @@ run_suite() {
             kill_guests
             return 1
         fi
-        sleep 5
+        sleep 1
     done
     echo "== $name =="
     local out
@@ -265,4 +278,5 @@ case "$SUITE" in
     analyze-dump) run_guest_oneshot analyze-dump.cmd out_analyze.txt "ANALYZEDONE" || status=1 ;;
     *) run_suite "$SUITE" || status=1 ;;
 esac
+timing suites
 exit "$status"

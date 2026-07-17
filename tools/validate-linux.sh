@@ -4,9 +4,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+T0=$SECONDS
 docker build -q -t kaya-linux "$ROOT/tools/linux" >/dev/null
+echo "TIMING image-build $((SECONDS - T0))s"
+T0=$SECONDS
 # The hard ceiling: a suite that never returns (a drain deadlock, a
 # hung guest holding the container open) gets cut here instead of
 # hanging the caller forever. Generous — a cold container compiles
 # everything from scratch.
-timeout 1800 docker run --rm -v "$ROOT:/work" kaya-linux bash /work/tools/linux/run-suites.sh
+rc=0
+timeout 1800 docker run --rm -v "$ROOT:/work" kaya-linux bash /work/tools/linux/run-suites.sh || rc=$?
+echo "TIMING container-suites $((SECONDS - T0))s"
+exit "$rc"

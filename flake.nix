@@ -93,6 +93,11 @@
             # Haskell guest (direct ring; base-only, so bare ghc suffices).
             ghc
             cabal-install
+            # Recording mode (KAYA_RECORD=1): screen capture on macOS
+            # (avfoundation) and per-step frame extraction everywhere.
+            ffmpeg
+            # The tools/ scripts are load-bearing validation; lint them.
+            shellcheck
             # Android: SDK/emulator/NDK from androidenv; Gradle builds the
             # app shells (fetches AGP/Compose from Google Maven at build time).
             androidSdk

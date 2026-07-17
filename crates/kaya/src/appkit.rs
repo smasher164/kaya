@@ -385,12 +385,32 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         .expect("kaya must be run on the main thread; the core owns it");
 
     let app = NSApplication::sharedApplication(mtm);
-    app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    // Selftest runs drive widgets by direct calls, never real input:
+    // staying an accessory (no Dock icon, no activation) keeps a
+    // 48-leg suite from stealing the human's keyboard 48 times.
+    if std::env::var("KAYA_SELFTEST").is_ok() {
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    } else {
+        app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+    }
 
     let delegate = AppDelegate::new(mtm);
     app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
-    let content_rect = NSRect::new(NSPoint::new(200.0, 200.0), NSSize::new(320.0, 160.0));
+    // Recording mode tiles parallel legs so one display-scoped capture
+    // sees every window unoccluded: the runner assigns a slot, the
+    // window places itself (its own window — no permissions involved).
+    let origin = match std::env::var("KAYA_WIN_SLOT")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        Some(slot) => NSPoint::new(
+            20.0 + f64::from(slot % 2) * 700.0,
+            80.0 + f64::from(slot / 2) * 450.0,
+        ),
+        None => NSPoint::new(200.0, 200.0),
+    };
+    let content_rect = NSRect::new(origin, NSSize::new(320.0, 160.0));
     let style = NSWindowStyleMask::Titled
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable;
@@ -407,7 +427,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // releasing on close would double-free.
     unsafe { window.setReleasedWhenClosed(false) };
     window.setTitle(&NSString::from_str("kaya milestone 2"));
-    window.makeKeyAndOrderFront(None);
+    if std::env::var("KAYA_SELFTEST").is_ok() {
+        window.orderFront(None);
+    } else {
+        window.makeKeyAndOrderFront(None);
+    }
 
     if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
         crate::harness::spawn(&scene, AppKitStage, |line| println!("{line}"));
@@ -434,7 +458,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // The first transaction may already be queued; drain before running.
     drain_transactions();
 
-    app.activate();
+    if std::env::var("KAYA_SELFTEST").is_err() {
+        app.activate();
+    }
     app.run();
     0
 }

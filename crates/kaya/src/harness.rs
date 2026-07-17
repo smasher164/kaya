@@ -197,7 +197,7 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             return;
         }
     };
-    std::thread::spawn(move || run_with_log(steps, stage, Some((log, Instant::now()))));
+    std::thread::spawn(move || run_with_log(steps, stage, Some(log)));
 }
 
 /// The synchronous run loop, factored out of spawn so tests can drive
@@ -206,7 +206,42 @@ pub fn run(steps: Vec<Step>, stage: impl Stage) {
     run_with_log(steps, stage, None);
 }
 
-fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<(fn(&str), Instant)>) {
+/// Recording handshake: when the runner exports KAYA_HARNESS_GATE, it
+/// is recording this window, and the recorder needs time to deliver
+/// its first frame (seconds, when several streams start under load).
+/// Waiting for the runner's go-file means a leg cannot outrun its
+/// recorder; without the variable this is a no-op. Bounded — a
+/// recorder that never starts must not hang the scene.
+fn gate_wait() {
+    let Ok(gate) = std::env::var("KAYA_HARNESS_GATE") else {
+        return;
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !std::path::Path::new(&gate).exists() {
+        if Instant::now() > deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
+    if log.is_some() {
+        gate_wait();
+    }
+    // Offsets are relative to here — after the gate, so the recording
+    // contains every step from its own t=0 onward.
+    let start = Instant::now();
+    let log = log.map(|log| (log, start));
+    if let Some((log, _)) = log {
+        // The wall-clock anchor recording mode pairs with the
+        // recorder's own start stamp; step offsets stay relative.
+        let epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        log(&format!("KAYA_HARNESS: epoch {epoch}"));
+    }
     // A script with no expects proves nothing; a transport that
     // mangled the text into a comment must fail, not pass.
     if !steps.iter().any(|s| matches!(s, Step::Expect(..))) {

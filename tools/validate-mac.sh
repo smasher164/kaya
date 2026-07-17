@@ -6,7 +6,16 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
+
+# Phase timing: greppable "TIMING <phase> <n>s" lines say where a
+# run's wall time went — build, legs, or capture — so the dev loop's
+# bottleneck is measured, never guessed.
+KAYA_T0=$SECONDS
+timing() {
+    echo "TIMING $1 $((SECONDS - KAYA_T0))s"
+    KAYA_T0=$SECONDS
+}
 
 # --lib as well as --example: the foreign guests load the cdylib, and
 # --example alone would leave a stale libkaya.dylib in place. The header
@@ -22,9 +31,11 @@ python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks
 # Fast cross-language/-platform gates: catch cfg'd-backend and guest
 # breakage here, in seconds, not on an emulator or VM.
 tools/check-targets.sh || exit 1
+tools/check-shell.sh || exit 1
 tools/check-sugar-surface.sh || exit 1
 tools/swift-typecheck.sh || exit 1
 tools/java-typecheck.sh || exit 1
+timing core-build+gates
 
 status=0
 
@@ -39,9 +50,190 @@ trap 'rm -rf "$LEGS_DIR"' EXIT
 leg_names=()
 leg_pids=()
 
+# Recording mode (KAYA_RECORD=1): ONE suite-long ScreenCaptureKit
+# stream films every leg. The filter is display-scoped but
+# include-listed — only guest windows are composited, so the human's
+# screen never appears — and parallel legs tile into slots
+# (KAYA_WIN_SLOT) so their crops never overlap. One stream on purpose:
+# concurrent SCK window streams starve and die where a single stream
+# is reliable; parallelism scales by adding tiles, not streams.
+# Per-leg videos and stills are derived from the suite film by crop.
+if [ -n "${KAYA_RECORD:-}" ]; then
+    JOBS="${KAYA_JOBS:-4}"
+    command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
+        || { echo "recording mode needs ffmpeg/ffprobe — run inside nix develop"; exit 1; }
+    tools/harness-extract.sh --selftest || exit 1
+    RECORDINGS="$ROOT/target/recordings/mac"
+    rm -rf "$RECORDINGS"
+    mkdir -p "$RECORDINGS"
+    # The binary's path+content is its identity to the capture stack,
+    # and REBUILDING IN PLACE POISONS IT: after enough rebuilds at one
+    # path, shareable-content queries for that identity hang or return
+    # bogus TCC declines — and the poisoned state survives reboots. A
+    # content-hashed name gives each source version one stable, fresh
+    # identity, built at most once.
+    REC_BIN="target/tools/record-suite-$(shasum tools/record-suite/main.swift | cut -c1-12)"
+    if [ ! -x "$REC_BIN" ]; then
+        mkdir -p target/tools
+        rm -f target/tools/record-suite-*
+        if RSWIFTC="$(env -u DEVELOPER_DIR -u SDKROOT xcrun --find swiftc 2>/dev/null)"; then
+            RSDK_ARGS=()
+        else
+            RSWIFTC=/usr/bin/swiftc
+            RSDK_ARGS=(-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)
+        fi
+        env -u DEVELOPER_DIR -u SDKROOT "$RSWIFTC" -O "${RSDK_ARGS[@]}" \
+            -framework ScreenCaptureKit -framework AVFoundation \
+            -o "$REC_BIN" tools/record-suite/main.swift || exit 1
+    fi
+    # Screen-capture health dies quietly: probe first and abort with
+    # instructions instead of failing every leg.
+    if ! "$REC_BIN" --probe; then
+        echo "recording mode: screen capture probe failed."
+        echo "check Screen Recording permission for this terminal/app in System"
+        echo "Settings -> Privacy & Security -> Screen & System Audio Recording."
+        exit 1
+    fi
+    PIDFILE="$RECORDINGS/pids"
+    : >"$PIDFILE"
+    "$REC_BIN" "$RECORDINGS/suite.mov" "$PIDFILE" >"$RECORDINGS/rec.log" 2>&1 &
+    REC_PID=$!
+fi
+
+# One recorded leg: claim a tile, launch the guest into it, register
+# its pid with the suite recorder, and release the guest's gate once
+# the recorder reports the window tracked — a leg cannot outrun its
+# recording. Stills come later, from the suite film, after the
+# recorder stops. Returns nonzero only for a guest failure; recording
+# gaps surface at extraction (a leg with no WINDOW record fails the
+# stills-count guard, loudly).
+run_recorded() {
+    local name="$1"
+    shift
+    local dir="$RECORDINGS/$name"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    # Claim a free tile; slots equal the pool width, so one is always
+    # freed before the pool admits another leg.
+    local slot=
+    while [ -z "$slot" ]; do
+        local i=0
+        while [ "$i" -lt "$JOBS" ]; do
+            if mkdir "$RECORDINGS/.slot-$i" 2>/dev/null; then
+                slot=$i
+                break
+            fi
+            i=$((i + 1))
+        done
+        [ -n "$slot" ] || sleep 0.1
+    done
+    local failed=0
+    KAYA_SELFTEST="${KAYA_SELFTEST:-1}" KAYA_HARNESS_GATE="$dir/go" \
+        KAYA_WIN_SLOT="$slot" "$@" >"$dir/leg.log" 2>&1 &
+    local leg_pid=$!
+    echo "$leg_pid" >>"$PIDFILE"
+    echo "$leg_pid" >"$dir/pid"
+    local warm=0
+    while [ "$warm" -lt 300 ]; do
+        grep -q "TRACKING $leg_pid\$" "$RECORDINGS/rec.log" 2>/dev/null && break
+        kill -0 "$leg_pid" 2>/dev/null || break
+        sleep 0.05
+        warm=$((warm + 1))
+    done
+    : >"$dir/go"
+    # Bounded: a hung guest fails the leg instead of wedging the suite.
+    local waited=0
+    while kill -0 "$leg_pid" 2>/dev/null && [ "$waited" -lt 240 ]; do
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    if kill -0 "$leg_pid" 2>/dev/null; then
+        kill -9 "$leg_pid" 2>/dev/null
+        echo "$name: guest did not exit within 120s"
+        failed=1
+    fi
+    wait "$leg_pid" 2>/dev/null || failed=1
+    rmdir "$RECORDINGS/.slot-$slot" 2>/dev/null
+    if [ "$failed" != 0 ]; then
+        cat "$dir/leg.log"
+        return 1
+    fi
+}
+
+# Stop the suite recorder and derive every leg's stills from the film.
+# The recorder drains until frames quiesce before finalizing (no fixed
+# grace); its exit is still nobody's word but its own — bound it.
+rec_suite_stop() {
+    [ -n "${KAYA_RECORD:-}" ] || return 0
+    kill -INT "$REC_PID" 2>/dev/null
+    local w=0
+    while kill -0 "$REC_PID" 2>/dev/null && [ "$w" -lt 50 ]; do
+        sleep 0.5
+        w=$((w + 1))
+    done
+    if kill -0 "$REC_PID" 2>/dev/null; then
+        echo "recording: recorder did not exit within 25s of SIGINT; killing"
+        kill -9 "$REC_PID" 2>/dev/null
+        status=1
+    fi
+    wait "$REC_PID" 2>/dev/null
+    local anchor scale
+    anchor=$(sed -n 's/RECORDING_START //p' "$RECORDINGS/rec.log")
+    scale=$(sed -n 's/SCALE //p' "$RECORDINGS/rec.log" | awk 'NR==1{print}')
+    if [ -z "$anchor" ] || [ -z "$scale" ]; then
+        echo "recording: no anchor in rec.log — no stills"
+        cat "$RECORDINGS/rec.log"
+        status=1
+        return
+    fi
+    # Legs share the one film; extractions are independent — run them
+    # all at once and collect verdicts after.
+    local dir
+    local pids=()
+    for dir in "$RECORDINGS"/*/; do
+        [ -f "$dir/pid" ] || continue
+        (
+            pid=$(cat "$dir/pid")
+            line=$(grep -m1 "^WINDOW $pid " "$RECORDINGS/rec.log" || true)
+            if [ -z "$line" ]; then
+                echo "$(basename "$dir"): never tracked by the recorder"
+                exit 1
+            fi
+            read -r _ _ x y wd ht <<<"$line"
+            crop=$(awk -v s="$scale" -v x="$x" -v y="$y" -v w="$wd" -v h="$ht" \
+                'BEGIN{printf "crop=%d:%d:%d:%d", w*s, h*s, x*s, y*s}')
+            echo "$crop" >"$dir/crop"
+            tools/harness-extract.sh "$RECORDINGS/suite.mov" "$dir/leg.log" \
+                "$anchor" "$dir/steps" "$crop"
+        ) >"$dir/extract.log" 2>&1 || : >"$dir/extract-failed" &
+        pids+=($!)
+    done
+    [ ${#pids[@]} -eq 0 ] || wait "${pids[@]}" 2>/dev/null || true
+    for dir in "$RECORDINGS"/*/; do
+        [ -f "$dir/extract.log" ] || continue
+        cat "$dir/extract.log"
+        [ ! -e "$dir/extract-failed" ] || status=1
+    done
+}
+
 run() {
     local name="$1"
     shift
+    if [ -n "${KAYA_RECORD:-}" ]; then
+        (
+            if run_recorded "$name" "$@" >"$LEGS_DIR/$name.log" 2>&1; then
+                echo PASS >"$LEGS_DIR/$name.verdict"
+            else
+                echo FAIL >"$LEGS_DIR/$name.verdict"
+            fi
+        ) &
+        leg_pids+=($!)
+        leg_names+=("$name")
+        while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do
+            wait -n || true
+        done
+        return
+    fi
     if [ "$JOBS" = 1 ]; then
         echo "== $name =="
         if KAYA_SELFTEST=1 timeout 120 "$@"; then
@@ -119,6 +311,7 @@ done
 # The encode-benchmark leg: the generated encoders must clear their
 # floor rates (structural-regression guard, not a race).
 CS_GUEST="$CS_GUEST" tools/bench-encode.sh || exit 1
+timing guest-builds+bench
 
 # All guests against the AppKit backend.
 run rust target/debug/examples/milestone2
@@ -176,7 +369,8 @@ export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 # some transports fold newlines into `;`, and a leading comment must
 # not swallow the folded script.
 scene_script() { grep -v '^#' "tools/scenes/$1.steps"; }
-export KAYA_SELFTEST_SCRIPT="$(scene_script milestone2)"
+KAYA_SELFTEST_SCRIPT="$(scene_script milestone2)"
+export KAYA_SELFTEST_SCRIPT
 run rust-swiftui target/debug/examples/milestone2
 run python-swiftui python3 guests/python/milestone2.py
 run go-swiftui target/go-guests/milestone2
@@ -185,7 +379,8 @@ run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/milestone2.exe
 run haskell-swiftui "$(hs_bin milestone2)"
-export KAYA_SELFTEST_SCRIPT="$(scene_script entry)"
+KAYA_SELFTEST_SCRIPT="$(scene_script entry)"
+export KAYA_SELFTEST_SCRIPT
 run entry-rust-swiftui env KAYA_SELFTEST=entry target/debug/examples/entry
 run entry-python-swiftui env KAYA_SELFTEST=entry python3 guests/python/entry.py
 run entry-go-swiftui env KAYA_SELFTEST=entry target/go-guests/entry
@@ -194,7 +389,8 @@ run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/li
 run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/entry.exe
 run entry-haskell-swiftui env KAYA_SELFTEST=entry "$(hs_bin entry)"
-export KAYA_SELFTEST_SCRIPT="$(scene_script gallery)"
+KAYA_SELFTEST_SCRIPT="$(scene_script gallery)"
+export KAYA_SELFTEST_SCRIPT
 run gallery-rust-swiftui env KAYA_SELFTEST=gallery target/debug/examples/gallery
 run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 run gallery-go-swiftui env KAYA_SELFTEST=gallery target/go-guests/gallery
@@ -203,7 +399,8 @@ run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debu
 run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/gallery.exe
 run gallery-haskell-swiftui env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
-export KAYA_SELFTEST_SCRIPT="$(scene_script todos)"
+KAYA_SELFTEST_SCRIPT="$(scene_script todos)"
+export KAYA_SELFTEST_SCRIPT
 run todos-rust-swiftui env KAYA_SELFTEST=todos target/debug/examples/todos
 run todos-python-swiftui env KAYA_SELFTEST=todos python3 guests/python/todos.py
 run todos-go-swiftui env KAYA_SELFTEST=todos target/go-guests/todos
@@ -214,6 +411,10 @@ run todos-ocaml-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/lib
 run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
+timing legs
+
+rec_suite_stop
+[ -z "${KAYA_RECORD:-}" ] || timing recording-stop+stills
 
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.

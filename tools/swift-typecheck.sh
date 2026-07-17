@@ -11,7 +11,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 if SWIFTC="$(xcrun --find swiftc 2>/dev/null)"; then
     SDK_ARGS=()

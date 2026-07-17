@@ -13,7 +13,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 CS_GUEST="${CS_GUEST:-guests/csharp/bin/Debug/net10.0/kaya-guests.dll}"
 
