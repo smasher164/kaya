@@ -1,0 +1,8 @@
+# The entry round trip: type through the control's own change path —
+# exactly what a keystroke produces — click add, read the status label.
+settle 1500
+set_text entry#0 "milk"
+settle 400
+click button#0
+settle 700
+expect label#0 "added milk, 1 total"

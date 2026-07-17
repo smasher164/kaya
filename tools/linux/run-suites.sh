@@ -96,6 +96,12 @@ drain() {
         echo "== $name =="
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
+            # The confusing failure class: verdict printed OK but the
+            # leg still failed — the process never exited (a broken
+            # Stage::finish exit path, once bitten on GTK and WinUI).
+            if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
+                echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
+            fi
             status=1
         fi
         echo "$name: $verdict"

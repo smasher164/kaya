@@ -1,0 +1,10 @@
+# The todos round trip: type, add, toggle the stamped row's checkbox
+# (a field-level update), and read the items-left label.
+settle 1500
+set_text entry#0 "buy milk"
+settle 400
+click button#0
+settle 400
+toggle checkbox#0 on
+settle 700
+expect label#0 "0 items left"

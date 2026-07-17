@@ -1,0 +1,12 @@
+# The milestone-2 round trip: two driver clicks (stamping groups,
+# items, and the When), one click on the most recently stamped remove
+# button, and the status label proves the whole loop — stamping, tags,
+# data-addressed removal, and the answering signal write.
+settle 1500
+click button#0
+settle 400
+click button#0
+settle 400
+click button#last
+settle 700
+expect label#0 "removed g2/a, 0 left"

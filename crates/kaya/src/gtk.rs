@@ -50,14 +50,15 @@ struct CoreState {
     scene: Scene,
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
-    selftest_button: Option<gtk4::Button>,
-    selftest_last_button: Option<gtk4::Button>,
-    // Every label, creation order; drivers read the one their scene
-    // puts the verdict in (gallery checks two).
-    selftest_labels: Vec<gtk4::Label>,
-    selftest_entry: Option<gtk4::Entry>,
-    selftest_checkbox: Option<gtk4::CheckButton>,
-    selftest_slider: Option<gtk4::Scale>,
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index. GTK fires the real
+    // signals for programmatic set_text/set_active/set_value, so the
+    // stage drives each control exactly as a user would.
+    buttons: Vec<gtk4::Button>,
+    checkboxes: Vec<gtk4::CheckButton>,
+    labels: Vec<gtk4::Label>,
+    entries: Vec<gtk4::Entry>,
+    sliders: Vec<gtk4::Scale>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -111,9 +112,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     entry.connect_changed(move |e| {
                         sink.send_text_tag(&tag, e.text().as_str());
                     });
-                    if core.selftest_entry.is_none() {
-                        core.selftest_entry = Some(entry.clone());
-                    }
+                    core.entries.push(entry.clone());
                     NativeWidget::Entry(entry)
                 }
                 WidgetKind::Column => {
@@ -139,9 +138,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     check.connect_toggled(move |c| {
                         sink.send_toggle_tag(&tag, c.is_active());
                     });
-                    if core.selftest_checkbox.is_none() {
-                        core.selftest_checkbox = Some(check.clone());
-                    }
+                    core.checkboxes.push(check.clone());
                     NativeWidget::Checkbox(check)
                 }
                 WidgetKind::Slider => {
@@ -158,9 +155,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     scale.connect_value_changed(move |sc| {
                         sink.send_value_tag(&tag, sc.value());
                     });
-                    if core.selftest_slider.is_none() {
-                        core.selftest_slider = Some(scale.clone());
-                    }
+                    core.sliders.push(scale.clone());
                     NativeWidget::Slider(scale)
                 }
                 WidgetKind::Button => {
@@ -172,15 +167,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     button.connect_clicked(move |_| {
                         sink.send_click_tag(&tag);
                     });
-                    if core.selftest_button.is_none() {
-                        core.selftest_button = Some(button.clone());
-                    }
-                    core.selftest_last_button = Some(button.clone());
+                    core.buttons.push(button.clone());
                     NativeWidget::Button(button)
                 }
                 WidgetKind::Label => {
                     let label = gtk4::Label::new(None);
-                    core.selftest_labels.push(label.clone());
+                    core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -285,12 +277,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             .build();
         window.present();
 
-        match std::env::var("KAYA_SELFTEST") {
-            Ok(script) if script == "entry" => spawn_entry_selftest(),
-            Ok(script) if script == "gallery" => spawn_gallery_selftest(),
-            Ok(script) if script == "todos" => spawn_todos_selftest(),
-            Ok(_) => spawn_selftest(),
-            Err(_) => {}
+        if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
+            crate::harness::spawn(&scene, GtkStage, |line| println!("{line}"));
         }
 
         CORE.with_borrow_mut(|core| {
@@ -299,12 +287,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 scene: Scene::new(),
                 occurrences: occ_tx,
                 widgets: HashMap::new(),
-                selftest_button: None,
-                selftest_last_button: None,
-                selftest_labels: Vec::new(),
-                selftest_entry: None,
-                selftest_checkbox: None,
-                selftest_slider: None,
+                buttons: Vec::new(),
+                checkboxes: Vec::new(),
+                labels: Vec::new(),
+                entries: Vec::new(),
+                sliders: Vec::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -324,245 +311,74 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     EXIT_CODE.load(Ordering::Relaxed)
 }
 
-/// Drives the round trip without a human: emit_clicked raises the real
-/// clicked signal on the main thread — twice on the scene's driver
-/// button (stamping groups, items, and the When), once on the most
-/// recently stamped button (whose click travels as a template node plus
-/// key path) — and the status label proves the whole loop.
-fn spawn_selftest() {
-    fn on_main(f: impl Fn() + Send + 'static) {
-        glib::idle_add(move || {
-            f();
-            glib::ControlFlow::Break
-        });
-    }
+/// The harness stage: GTK's native calls, each hopping to the main
+/// context. Programmatic set_text/set_active/set_value fire the real
+/// signals, so every step travels the path a user's gesture would.
+struct GtkStage;
 
-    std::thread::spawn(|| {
-        let click_first = || {
-            on_main(|| {
+impl GtkStage {
+    fn on_main<T: Send + 'static>(
+        f: impl FnOnce(&CoreState) -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cell = std::cell::Cell::new(Some((f, tx)));
+        glib::idle_add(move || {
+            if let Some((f, tx)) = cell.take() {
                 CORE.with_borrow(|core| {
-                    if let Some(core) = core.as_ref() {
-                        core.selftest_button
-                            .as_ref()
-                            .expect("the scene has a button")
-                            .emit_clicked();
-                    }
+                    let core = core.as_ref().expect("core state initialized");
+                    let _ = tx.send(f(core));
                 });
-            });
-        };
-        let click_last = || {
-            on_main(|| {
-                CORE.with_borrow(|core| {
-                    if let Some(core) = core.as_ref() {
-                        core.selftest_last_button
-                            .as_ref()
-                            .expect("the scene has stamped a button")
-                            .emit_clicked();
-                    }
-                });
-            });
-        };
-
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        click_last();
-        std::thread::sleep(std::time::Duration::from_millis(700));
-
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text();
-                if text == "removed g2/a, 0 left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-            });
+            }
+            glib::ControlFlow::Break
         });
-    });
+        rx.recv().expect("the main context applied the step")
+    }
 }
 
-/// The gallery scene's round trip (KAYA_SELFTEST=gallery): set_active
-/// fires GTK's own `toggled` signal — the same path a click takes —
-/// then the status label proves the toggle traveled up and the app
-/// answered.
-fn spawn_gallery_selftest() {
-    fn on_main(f: impl Fn() + Send + 'static) {
-        glib::idle_add(move || {
-            f();
-            glib::ControlFlow::Break
+impl crate::harness::Stage for GtkStage {
+    fn click(&self, t: crate::harness::Target) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.buttons.len());
+            core.buttons[i].emit_clicked();
         });
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_checkbox
-                        .as_ref()
-                        .expect("the scene has a checkbox")
-                        .set_active(true);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_slider
-                        .as_ref()
-                        .expect("the scene has a slider")
-                        .set_value(0.75);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let status = core.selftest_labels[0].text();
-                let volume = core.selftest_labels[1].text();
-                if status == "urgent: true" && volume == "volume: 75%" {
-                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
-                    request_exit(1);
-                }
-            });
-        });
-    });
-}
-
-/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
-/// set_text (GTK fires `changed`), click Add, toggle the stamped row's
-/// checkbox — a field-level update — and read the items-left label.
-fn spawn_todos_selftest() {
-    fn on_main(f: impl Fn() + Send + 'static) {
-        glib::idle_add(move || {
-            f();
-            glib::ControlFlow::Break
+    fn toggle(&self, t: crate::harness::Target, on: bool) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.checkboxes.len());
+            core.checkboxes[i].set_active(on);
         });
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_entry
-                        .as_ref()
-                        .expect("the scene has an entry")
-                        .set_text("buy milk");
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button")
-                        .emit_clicked();
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_checkbox
-                        .as_ref()
-                        .expect("the scene has stamped a checkbox")
-                        .set_active(true);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text();
-                if text == "0 items left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-            });
-        });
-    });
-}
-
-/// The entry scene's round trip (KAYA_SELFTEST=entry): set_text fires
-/// GTK's own `changed` signal — the same path a keystroke takes — then
-/// the add button, then the status label. Proves the uncontrolled-entry
-/// contract: text travels up as occurrences, the app folds it into its
-/// model, and nothing is read back from the widget.
-fn spawn_entry_selftest() {
-    fn on_main(f: impl Fn() + Send + 'static) {
-        glib::idle_add(move || {
-            f();
-            glib::ControlFlow::Break
+    fn set_value(&self, t: crate::harness::Target, value: f64) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.sliders.len());
+            core.sliders[i].set_value(value);
         });
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_entry
-                        .as_ref()
-                        .expect("the scene has an entry")
-                        .set_text("milk");
-                }
-            });
+    fn set_text(&self, t: crate::harness::Target, text: &str) {
+        let text = text.to_owned();
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            core.entries[i].set_text(&text);
         });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button")
-                        .emit_clicked();
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text();
-                if text == "added milk, 1 total" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-            });
-        });
-    });
+    }
+
+    fn read_label(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.labels.len());
+            core.labels[i].text().to_string()
+        })
+    }
+
+    fn finish(&self, code: i32, verdict: &str) {
+        if code == 0 {
+            println!("{verdict}");
+        } else {
+            eprintln!("{verdict}");
+        }
+        // request_exit reads the main thread's CORE; hop before asking.
+        Self::on_main(move |_| request_exit(code));
+    }
 }

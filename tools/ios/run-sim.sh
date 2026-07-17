@@ -174,6 +174,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.rustswiftui app)
     echo "== rust-swiftui =="
     out=$(SIMCTL_CHILD_KAYA_SELFTEST=1 \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/milestone2.steps")" \
         SIMCTL_CHILD_KAYA_BACKEND=swiftui \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.rustswiftui 2>&1 | tee /dev/stderr) || true
@@ -193,6 +194,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.entryswiftui app)
     echo "== entry-swiftui =="
     out=$(SIMCTL_CHILD_KAYA_SELFTEST=entry \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/entry.steps")" \
         SIMCTL_CHILD_KAYA_BACKEND=swiftui \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.entryswiftui 2>&1 | tee /dev/stderr) || true
@@ -212,6 +214,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.todosswiftui app)
     echo "== todos-swiftui =="
     out=$(SIMCTL_CHILD_KAYA_SELFTEST=todos \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/todos.steps")" \
         SIMCTL_CHILD_KAYA_BACKEND=swiftui \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.todosswiftui 2>&1 | tee /dev/stderr) || true
@@ -231,6 +234,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     CONTAINER=$(xcrun simctl get_app_container "$UDID" dev.kaya.galleryswiftui app)
     echo "== gallery-swiftui =="
     out=$(SIMCTL_CHILD_KAYA_SELFTEST=gallery \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/gallery.steps")" \
         SIMCTL_CHILD_KAYA_BACKEND=swiftui \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$CONTAINER/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$UDID" dev.kaya.galleryswiftui 2>&1 | tee /dev/stderr) || true

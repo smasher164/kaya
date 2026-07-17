@@ -66,14 +66,14 @@ struct CoreState {
     scene: Scene,
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
-    selftest_button: Option<Retained<UIButton>>,
-    selftest_last_button: Option<Retained<UIButton>>,
-    // Every label, creation order; drivers read the one their scene
-    // puts the verdict in (gallery checks two).
-    selftest_labels: Vec<Retained<UILabel>>,
-    selftest_entry: Option<Retained<UITextField>>,
-    selftest_checkbox: Option<Retained<UISwitch>>,
-    selftest_slider: Option<Retained<UISlider>>,
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index and drives each control
+    // with sendActionsForControlEvents — the real action path.
+    buttons: Vec<Retained<UIButton>>,
+    checkboxes: Vec<Retained<UISwitch>>,
+    labels: Vec<Retained<UILabel>>,
+    entries: Vec<Retained<UITextField>>,
+    sliders: Vec<Retained<UISlider>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -135,9 +135,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         );
                     }
                     core._targets.push(target);
-                    if core.selftest_entry.is_none() {
-                        core.selftest_entry = Some(field.clone());
-                    }
+                    core.entries.push(field.clone());
                     NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => {
@@ -184,9 +182,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         stack.addArrangedSubview(&toggle);
                         stack.addArrangedSubview(&caption);
                     }
-                    if core.selftest_checkbox.is_none() {
-                        core.selftest_checkbox = Some(toggle.clone());
-                    }
+                    core.checkboxes.push(toggle.clone());
                     NativeWidget::Checkbox { stack, toggle, caption }
                 }
                 WidgetKind::Slider => {
@@ -211,9 +207,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         );
                     }
                     core._targets.push(target);
-                    if core.selftest_slider.is_none() {
-                        core.selftest_slider = Some(slider.clone());
-                    }
+                    core.sliders.push(slider.clone());
                     NativeWidget::Slider(slider)
                 }
                 WidgetKind::Button => {
@@ -232,16 +226,13 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         );
                     }
                     core._targets.push(target);
-                    if core.selftest_button.is_none() {
-                        core.selftest_button = Some(button.clone());
-                    }
-                    core.selftest_last_button = Some(button.clone());
+                    core.buttons.push(button.clone());
                     NativeWidget::Button(button)
                 }
                 WidgetKind::Label => {
                     let label = UILabel::new(mtm);
                     unsafe { label.setTextColor(Some(&objc2_ui_kit::UIColor::labelColor())) };
-                    core.selftest_labels.push(label.clone());
+                    core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -417,12 +408,8 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
     window.setRootViewController(Some(&controller));
     window.makeKeyAndVisible();
 
-    match std::env::var("KAYA_SELFTEST") {
-        Ok(script) if script == "entry" => spawn_entry_selftest(),
-        Ok(script) if script == "gallery" => spawn_gallery_selftest(),
-        Ok(script) if script == "todos" => spawn_todos_selftest(),
-        Ok(_) => spawn_selftest(),
-        Err(_) => {}
+    if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
+        crate::harness::spawn(&scene, UiKitStage, |line| println!("{line}"));
     }
 
     CORE.with_borrow_mut(|core| {
@@ -431,12 +418,11 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             scene: Scene::new(),
             occurrences: occ_tx,
             widgets: HashMap::new(),
-            selftest_button: None,
-            selftest_last_button: None,
-            selftest_labels: Vec::new(),
-            selftest_entry: None,
-            selftest_checkbox: None,
-            selftest_slider: None,
+            buttons: Vec::new(),
+            checkboxes: Vec::new(),
+            labels: Vec::new(),
+            entries: Vec::new(),
+            sliders: Vec::new(),
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -475,247 +461,79 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     unreachable!("UIApplicationMain never returns");
 }
 
-/// Drives the round trip without a human: sendActionsForControlEvents
-/// raises the real touch-up-inside action path.
-fn spawn_selftest() {
-    fn on_main(f: impl Fn() + Send + 'static) {
-        DispatchQueue::main().exec_async(f);
-    }
+/// The harness stage: UIKit's native calls, each hopping to the main
+/// thread. sendActionsForControlEvents raises the real action paths —
+/// touch-up-inside, value-changed, editing-changed — exactly what a
+/// user's gesture produces.
+struct UiKitStage;
 
-    std::thread::spawn(|| {
-        let click_first = || {
-            on_main(|| {
-                CORE.with_borrow(|core| {
-                    if let Some(core) = core.as_ref() {
-                        core.selftest_button
-                            .as_ref()
-                            .expect("the scene has a button")
-                            .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
-                    }
-                });
-            });
-        };
-        let click_last = || {
-            on_main(|| {
-                CORE.with_borrow(|core| {
-                    if let Some(core) = core.as_ref() {
-                        core.selftest_last_button
-                            .as_ref()
-                            .expect("the scene has stamped a button")
-                            .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
-                    }
-                });
-            });
-        };
-
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        click_last();
-        std::thread::sleep(std::time::Duration::from_millis(700));
-
-        on_main(|| {
+impl UiKitStage {
+    fn on_main<T: Send + 'static>(
+        f: impl FnOnce(&CoreState) -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        DispatchQueue::main().exec_async(move || {
             CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
-                if text == "removed g2/a, 0 left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    std::process::exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    std::process::exit(1);
-                }
+                let core = core.as_ref().expect("core state initialized");
+                let _ = tx.send(f(core));
             });
         });
-    });
+        rx.recv().expect("the main thread applied the step")
+    }
 }
 
-/// The gallery scene's round trip (KAYA_SELFTEST=gallery): flip the
-/// switch and send ValueChanged through the control's own action path —
-/// what a tap produces — then read the status label.
-fn spawn_gallery_selftest() {
-    fn on_main(f: impl FnOnce() + Send + 'static) {
-        DispatchQueue::main().exec_async(f);
+impl crate::harness::Stage for UiKitStage {
+    fn click(&self, t: crate::harness::Target) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.buttons.len());
+            core.buttons[i].sendActionsForControlEvents(UIControlEvents::TouchUpInside);
+        });
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    let toggle = core
-                        .selftest_checkbox
-                        .as_ref()
-                        .expect("the scene has a checkbox");
-                    unsafe { toggle.setOn(true) };
-                    toggle.sendActionsForControlEvents(UIControlEvents::ValueChanged);
-                }
-            });
+    fn toggle(&self, t: crate::harness::Target, on: bool) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.checkboxes.len());
+            let toggle = &core.checkboxes[i];
+            unsafe { toggle.setOn(on) };
+            toggle.sendActionsForControlEvents(UIControlEvents::ValueChanged);
         });
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    let slider = core
-                        .selftest_slider
-                        .as_ref()
-                        .expect("the scene has a slider");
-                    unsafe { slider.setValue(0.75) };
-                    slider.sendActionsForControlEvents(UIControlEvents::ValueChanged);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text_of = |l: &Retained<UILabel>| {
-                    l.text().map(|t| t.to_string()).unwrap_or_default()
-                };
-                let status = text_of(&core.selftest_labels[0]);
-                let volume = text_of(&core.selftest_labels[1]);
-                if status == "urgent: true" && volume == "volume: 75%" {
-                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
-                    std::process::exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
-                    std::process::exit(1);
-                }
-            });
-        });
-    });
-}
-
-/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
-/// the control's own action path, tap Add, flip the stamped row's
-/// switch — a field-level update — and read the items-left label.
-fn spawn_todos_selftest() {
-    fn on_main(f: impl FnOnce() + Send + 'static) {
-        DispatchQueue::main().exec_async(f);
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    let field = core
-                        .selftest_entry
-                        .as_ref()
-                        .expect("the scene has an entry");
-                    unsafe { field.setText(Some(&NSString::from_str("buy milk"))) };
-                    field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
-                }
-            });
+    fn set_value(&self, t: crate::harness::Target, value: f64) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.sliders.len());
+            let slider = &core.sliders[i];
+            unsafe { slider.setValue(value as f32) };
+            slider.sendActionsForControlEvents(UIControlEvents::ValueChanged);
         });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button")
-                        .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    let toggle = core
-                        .selftest_checkbox
-                        .as_ref()
-                        .expect("the scene has stamped a checkbox");
-                    unsafe { toggle.setOn(true) };
-                    toggle.sendActionsForControlEvents(UIControlEvents::ValueChanged);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
-                if text == "0 items left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    std::process::exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    std::process::exit(1);
-                }
-            });
-        });
-    });
-}
-
-/// The entry scene's round trip (KAYA_SELFTEST=entry): set the field's
-/// text and send EditingChanged through the control's own action path —
-/// what a keystroke produces — then the add button, then the status
-/// label.
-fn spawn_entry_selftest() {
-    fn on_main(f: impl FnOnce() + Send + 'static) {
-        DispatchQueue::main().exec_async(f);
     }
 
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    let field = core
-                        .selftest_entry
-                        .as_ref()
-                        .expect("the scene has an entry");
-                    unsafe { field.setText(Some(&NSString::from_str("milk"))) };
-                    field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
-                }
-            });
+    fn set_text(&self, t: crate::harness::Target, text: &str) {
+        let text = text.to_owned();
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            let field = &core.entries[i];
+            unsafe { field.setText(Some(&NSString::from_str(&text))) };
+            field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
         });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                if let Some(core) = core.as_ref() {
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button")
-                        .sendActionsForControlEvents(UIControlEvents::TouchUpInside);
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_main(|| {
-            CORE.with_borrow(|core| {
-                let Some(core) = core.as_ref() else { return };
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .text()
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
-                if text == "added milk, 1 total" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    std::process::exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    std::process::exit(1);
-                }
-            });
-        });
-    });
+    }
+
+    fn read_label(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.labels.len());
+            core.labels[i]
+                .text()
+                .map(|t| t.to_string())
+                .unwrap_or_default()
+        })
+    }
+
+    fn finish(&self, code: i32, verdict: &str) {
+        if code == 0 {
+            println!("{verdict}");
+        } else {
+            eprintln!("{verdict}");
+        }
+        std::process::exit(code);
+    }
 }

@@ -1,6 +1,6 @@
 (executables
- (names milestone2 entry gallery todos)
- (modules milestone2 entry gallery todos)
- (libraries kaya_guest_binding)
+ (names milestone2 entry gallery todos encodebench)
+ (modules milestone2 entry gallery todos encodebench)
+ (libraries kaya_guest_binding unix)
  (preprocess
   (pps kaya_ppx)))

@@ -105,22 +105,31 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     cargo ndk -t arm64-v8a build --example milestone2_android
     cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
     (cd android && gradle --console=plain -q :milestone2:assembleDebug)
+    # The Kotlin interpreter reads the scene script from the
+    # environment (via the KAYA_* intent-extra mapping). Intent extras
+    # cannot carry newlines through the shell, so comments are stripped
+    # and lines fold into `;` — the grammar's newline stand-in.
+    scene_script() { grep -v '^#' "$ROOT/tools/scenes/$1.steps" | tr '\n' ';'; }
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity 1 \
-        --es KAYA_BACKEND compose
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
     run_apk entry-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity entry \
-        --es KAYA_BACKEND compose
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script entry)'"
     run_apk gallery-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity gallery \
-        --es KAYA_BACKEND compose
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script gallery)'"
     run_apk todos-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity todos \
-        --es KAYA_BACKEND compose
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
 fi
 
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then

@@ -4,6 +4,14 @@
 //! ring transport. See DESIGN.md at the repository root.
 
 mod app;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "ios",
+    target_os = "android"
+))]
+mod harness;
 mod protocol;
 mod ring;
 mod scene;

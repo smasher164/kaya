@@ -63,14 +63,13 @@ final class KayaSceneModel {
     var root: KayaNode?
     var nodes: [UInt64: KayaNode] = [:]  // main actor only
     var parents: [UInt64: UInt64] = [:]
-    var firstButton: KayaNode?
-    var lastButton: KayaNode?
-    var firstLabel: KayaNode?
-    // Every label, creation order; the gallery verdict reads two.
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index.
+    var buttons: [KayaNode] = []
+    var checkboxes: [KayaNode] = []
     var labels: [KayaNode] = []
-    var firstEntry: KayaNode?
-    var firstCheckbox: KayaNode?
-    var firstSlider: KayaNode?
+    var entries: [KayaNode] = []
+    var sliders: [KayaNode] = []
 }
 
 let kayaScene = KayaSceneModel()
@@ -146,22 +145,13 @@ private func kayaApply(_ batch: Data) {
                 let tag = [UInt8](raw[(body + 16)..<(body + 16 + tagLen)])
                 let node = KayaNode(id: id, kind: widgetKind, tag: tag)
                 kayaScene.nodes[id] = node
-                if widgetKind == kindButton {
-                    if kayaScene.firstButton == nil { kayaScene.firstButton = node }
-                    kayaScene.lastButton = node
-                }
-                if widgetKind == kindLabel {
-                    if kayaScene.firstLabel == nil { kayaScene.firstLabel = node }
-                    kayaScene.labels.append(node)
-                }
-                if widgetKind == kindSlider && kayaScene.firstSlider == nil {
-                    kayaScene.firstSlider = node
-                }
-                if widgetKind == kindEntry && kayaScene.firstEntry == nil {
-                    kayaScene.firstEntry = node
-                }
-                if widgetKind == kindCheckbox && kayaScene.firstCheckbox == nil {
-                    kayaScene.firstCheckbox = node
+                switch widgetKind {
+                case kindButton: kayaScene.buttons.append(node)
+                case kindLabel: kayaScene.labels.append(node)
+                case kindSlider: kayaScene.sliders.append(node)
+                case kindEntry: kayaScene.entries.append(node)
+                case kindCheckbox: kayaScene.checkboxes.append(node)
+                default: break
                 }
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -212,132 +202,99 @@ private func kayaApply(_ batch: Data) {
     }
 }
 
-/// Drives the round trip without a human, matching the Rust backends'
-/// spawn_selftest: two clicks on the scene's driver button (stamping
-/// groups, items, and the When), one on the most recently stamped
-/// button, and the status label proves the whole loop.
+/// The interaction harness's Swift interpreter: the same line-oriented
+/// grammar the Rust backends embed from tools/scenes (settle / click /
+/// toggle / set_value / set_text / expect, targets as kind#index,
+/// `;` accepted as a newline stand-in). The suites hand the script in
+/// through KAYA_SELFTEST_SCRIPT; steps drive the node tree exactly as
+/// a gesture would — flip the observable, emit through the host API.
 func kayaStartSelftest() {
-    guard let script = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] else { return }
-    if script == "entry" {
-        kayaStartEntrySelftest()
-        return
+    guard ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil else { return }
+    guard let script = ProcessInfo.processInfo.environment["KAYA_SELFTEST_SCRIPT"] else {
+        FileHandle.standardError.write(
+            "KAYA_SELFTEST: FAILED (no KAYA_SELFTEST_SCRIPT in the environment)\n"
+                .data(using: .utf8)!)
+        exit(1)
     }
-    if script == "gallery" {
-        kayaStartGallerySelftest()
-        return
-    }
-    if script == "todos" {
-        kayaStartTodosSelftest()
-        return
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
-        if let button = kayaScene.lastButton { KayaHost.emit(button.tag) }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
-        let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "removed g2/a, 0 left" {
-            print("KAYA_SELFTEST: OK (\(text))")
-            exit(0)
-        } else {
-            FileHandle.standardError.write(
-                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
-            exit(1)
-        }
-    }
+    Thread {
+        kayaRunScript(script)
+    }.start()
 }
 
-/// The interpreter's render: the node tree as SwiftUI declarations.
-/// The entry scene's round trip (KAYA_SELFTEST=entry): drive the same
-/// binding path a keystroke takes, click add, read the status label.
-func kayaStartEntrySelftest() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        if let entry = kayaScene.firstEntry {
-            entry.text = "milk"
-            KayaHost.emitText(entry.tag, "milk")
-        }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
-        let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "added milk, 1 total" {
-            print("KAYA_SELFTEST: OK (\(text))")
-            exit(0)
-        } else {
-            FileHandle.standardError.write(
-                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
-            exit(1)
-        }
-    }
+private func kayaTarget(_ spec: Substring, _ registry: [KayaNode]) -> KayaNode {
+    let index = spec.split(separator: "#")[1]
+    let i = index == "last" ? registry.count - 1 : Int(index)!
+    return registry[i]
 }
 
-/// The todos scene's round trip (KAYA_SELFTEST=todos): type through
-/// the binding path, add, toggle the stamped row's checkbox — a
-/// field-level update — and read the items-left label.
-func kayaStartTodosSelftest() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        if let entry = kayaScene.firstEntry {
-            entry.text = "buy milk"
-            KayaHost.emitText(entry.tag, "buy milk")
-        }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-        if let button = kayaScene.firstButton { KayaHost.emit(button.tag) }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.9) {
-        if let box = kayaScene.firstCheckbox {
-            box.checked = true
-            KayaHost.emitToggled(box.tag, true)
-        }
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-        let text = kayaScene.firstLabel?.text ?? "(no label)"
-        if text == "0 items left" {
-            print("KAYA_SELFTEST: OK (\(text))")
-            exit(0)
-        } else {
-            FileHandle.standardError.write(
-                "KAYA_SELFTEST: FAILED (label reads \(text))\n".data(using: .utf8)!)
-            exit(1)
-        }
-    }
+private func kayaQuoted(_ rest: [Substring]) -> String {
+    let joined = rest.joined(separator: " ")
+    return String(joined.dropFirst().dropLast())
 }
 
-/// The gallery scene's round trip (KAYA_SELFTEST=gallery): drive the
-/// same binding path a click takes — flip the node, emit toggled — then
-/// read the status label.
-func kayaStartGallerySelftest() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-        if let box = kayaScene.firstCheckbox {
-            box.checked = true
-            KayaHost.emitToggled(box.tag, true)
+private func kayaRunScript(_ script: String) {
+    var observed: [String] = []
+    var failures: [String] = []
+    let start = Date()
+    for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
+        let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
+        if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
+        for raw in trimmedLine.split(separator: ";", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            let offset = Int(Date().timeIntervalSince(start) * 1000)
+            print("KAYA_HARNESS: +\(offset)ms \(line)")
+            switch parts[0] {
+            case "settle":
+                Thread.sleep(forTimeInterval: Double(parts[1])! / 1000)
+            case "click":
+                DispatchQueue.main.sync {
+                    KayaHost.emit(kayaTarget(parts[1], kayaScene.buttons).tag)
+                }
+            case "toggle":
+                DispatchQueue.main.sync {
+                    let node = kayaTarget(parts[1], kayaScene.checkboxes)
+                    node.checked = parts[2] == "on"
+                    KayaHost.emitToggled(node.tag, node.checked)
+                }
+            case "set_value":
+                DispatchQueue.main.sync {
+                    let node = kayaTarget(parts[1], kayaScene.sliders)
+                    node.value = Double(parts[2])!
+                    KayaHost.emitValue(node.tag, node.value)
+                }
+            case "set_text":
+                DispatchQueue.main.sync {
+                    let node = kayaTarget(parts[1], kayaScene.entries)
+                    node.text = kayaQuoted(Array(parts[2...]))
+                    KayaHost.emitText(node.tag, node.text)
+                }
+            case "expect":
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync {
+                    kayaTarget(parts[1], kayaScene.labels).text
+                }
+                if got == want {
+                    observed.append(got)
+                } else {
+                    failures.append("\(parts[1]) reads \"\(got)\", wanted \"\(want)\"")
+                }
+            default:
+                failures.append("unknown step \(line)")
+            }
         }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-        if let slider = kayaScene.firstSlider {
-            slider.value = 0.75
-            KayaHost.emitValue(slider.tag, 0.75)
-        }
+    if failures.isEmpty && observed.isEmpty {
+        failures.append("script has no expects")
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
-        let status = kayaScene.labels.first?.text ?? "(no label)"
-        let volume = kayaScene.labels.count > 1 ? kayaScene.labels[1].text : "(no label)"
-        if status == "urgent: true" && volume == "volume: 75%" {
-            print("KAYA_SELFTEST: OK (\(status), \(volume))")
-            exit(0)
-        } else {
-            FileHandle.standardError.write(
-                "KAYA_SELFTEST: FAILED (labels read \(status), \(volume))\n".data(using: .utf8)!)
-            exit(1)
-        }
+    if failures.isEmpty {
+        print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
+        exit(0)
     }
+    FileHandle.standardError.write(
+        "KAYA_SELFTEST: FAILED (\(failures.joined(separator: "; ")))\n".data(using: .utf8)!)
+    exit(1)
 }
 
 struct KayaRender: View {

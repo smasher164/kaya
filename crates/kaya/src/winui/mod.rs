@@ -79,16 +79,16 @@ struct CoreState {
     widgets: HashMap<WidgetId, NativeWidget>,
     // Which panel each widget sits in, for Destroy's detach.
     parents: HashMap<WidgetId, StackPanel>,
-    // Click tags of the first and most recently created buttons, for the
-    // selftest's round trip.
-    selftest_button: Option<Vec<u8>>,
-    selftest_last_button: Option<Vec<u8>>,
-    // Every label, creation order; drivers read the one their scene
-    // puts the verdict in (gallery checks two).
-    selftest_labels: Vec<TextBlock>,
-    selftest_entry: Option<TextBox>,
-    selftest_checkbox: Option<CheckBox>,
-    selftest_slider: Option<Slider>,
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index. Clicks emit the stored
+    // tag directly; the other controls fire their real events for
+    // programmatic writes (SetIsChecked raises Checked, SetText raises
+    // TextChanged, SetValue raises ValueChanged).
+    buttons: Vec<Vec<u8>>,
+    checkboxes: Vec<CheckBox>,
+    labels: Vec<TextBlock>,
+    entries: Vec<TextBox>,
+    sliders: Vec<Slider>,
     window: Window,
 }
 
@@ -383,9 +383,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
-                    if core.selftest_entry.is_none() {
-                        core.selftest_entry = Some(field.clone());
-                    }
+                    core.entries.push(field.clone());
                     NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => NativeWidget::Column(StackPanel::new()?),
@@ -419,9 +417,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     check.Unchecked(&unchecked)?;
-                    if core.selftest_checkbox.is_none() {
-                        core.selftest_checkbox = Some(check.clone());
-                    }
+                    core.checkboxes.push(check.clone());
                     NativeWidget::Checkbox { check, caption }
                 }
                 WidgetKind::Slider => {
@@ -446,9 +442,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         },
                     );
                     slider.ValueChanged(&handler)?;
-                    if core.selftest_slider.is_none() {
-                        core.selftest_slider = Some(slider.clone());
-                    }
+                    core.sliders.push(slider.clone());
                     NativeWidget::Slider(slider)
                 }
                 WidgetKind::Button => {
@@ -459,10 +453,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // The tag is the click's identity, emitted verbatim;
                     // this backend never learns what it means.
                     let tag = tag.expect("buttons carry a click tag");
-                    if core.selftest_button.is_none() {
-                        core.selftest_button = Some(tag.clone());
-                    }
-                    core.selftest_last_button = Some(tag.clone());
+                    core.buttons.push(tag.clone());
                     let handler = RoutedEventHandler::new(move |_, _| {
                         click_sink.send_click_tag(&tag);
                         Ok(())
@@ -472,7 +463,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Label => {
                     let label = TextBlock::new()?;
-                    core.selftest_labels.push(label.clone());
+                    core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
             };
@@ -767,24 +758,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     window.Closed(&closed)?;
     window.Activate()?;
 
-    match std::env::var("KAYA_SELFTEST") {
-        Ok(script) if script.trim() == "entry" => {
-            eprintln!("kaya: winui selftest armed (entry)");
-            spawn_entry_selftest();
-        }
-        Ok(script) if script.trim() == "gallery" => {
-            eprintln!("kaya: winui selftest armed (gallery)");
-            spawn_gallery_selftest();
-        }
-        Ok(script) if script.trim() == "todos" => {
-            eprintln!("kaya: winui selftest armed (todos)");
-            spawn_todos_selftest();
-        }
-        Ok(script) => {
-            eprintln!("kaya: winui selftest armed ({script:?})");
-            spawn_selftest();
-        }
-        Err(_) => {}
+    if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
+        let scene = scene.trim().to_owned();
+        eprintln!("kaya: winui selftest armed ({scene})");
+        crate::harness::spawn(&scene, WinUiStage, |line| println!("{line}"));
     }
 
     CORE.with_borrow_mut(|core| {
@@ -794,12 +771,11 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             occurrences: occ_tx,
             widgets: HashMap::new(),
             parents: HashMap::new(),
-            selftest_button: None,
-            selftest_last_button: None,
-            selftest_labels: Vec::new(),
-            selftest_entry: None,
-            selftest_checkbox: None,
-            selftest_slider: None,
+            buttons: Vec::new(),
+            checkboxes: Vec::new(),
+            labels: Vec::new(),
+            entries: Vec::new(),
+            sliders: Vec::new(),
             window,
         });
     });
@@ -809,263 +785,87 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     Ok(())
 }
 
-/// Drives the round trip without a human. Uses the button's automation
-/// invoke path once peers are bound; for the skeleton it performs the
-/// click on the UI thread by raising the same handler path the pointer
-/// would take.
-fn spawn_selftest() {
-    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
-        if let Some(dispatcher) = DISPATCHER.get() {
-            let handler = DispatcherQueueHandler::new(move || f());
-            let _ = dispatcher.0.TryEnqueue(&handler);
-        }
-    }
+/// The harness stage: WinUI's native calls, each hopping to the
+/// dispatcher. Programmatic SetIsChecked/SetText/SetValue raise the
+/// real event paths; clicks emit the button's stored tag, the same
+/// bytes the pointer path would.
+struct WinUiStage;
 
-    std::thread::spawn(|| {
-        // TODO(selftest): use ButtonAutomationPeer::Invoke once automation
-        // bindings are generated, to exercise the real input path instead
-        // of the handler's emission directly.
-        let click_first = || {
-            on_ui(|| {
+impl WinUiStage {
+    fn on_ui<T: Send + 'static>(
+        f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dispatcher = DISPATCHER.get().expect("the dispatcher is up");
+        let cell = std::sync::Mutex::new(Some((f, tx)));
+        let handler = DispatcherQueueHandler::new(move || {
+            if let Some((f, tx)) = cell.lock().unwrap().take() {
                 CORE.with_borrow(|core| {
                     let core = core.as_ref().expect("core state initialized");
-                    core.occurrences.send_click_tag(
-                        core.selftest_button
-                            .as_ref()
-                            .expect("the scene has a button"),
-                    );
+                    let _ = tx.send(f(core));
                 });
-                Ok(())
-            });
-        };
-        let click_last = || {
-            on_ui(|| {
-                CORE.with_borrow(|core| {
-                    let core = core.as_ref().expect("core state initialized");
-                    core.occurrences.send_click_tag(
-                        core.selftest_last_button
-                            .as_ref()
-                            .expect("the scene has stamped a button"),
-                    );
-                });
-                Ok(())
-            });
-        };
-
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        click_first();
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        click_last();
-        std::thread::sleep(std::time::Duration::from_millis(700));
-
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .Text()?
-                    .to_string();
-                if text == "removed g2/a, 0 left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-                Ok(())
-            })
-        });
-    });
-}
-
-/// The gallery scene's round trip (KAYA_SELFTEST=gallery): SetIsChecked
-/// raises Checked — the same path a click takes — then the status label
-/// proves the toggle traveled up and the app answered.
-fn spawn_gallery_selftest() {
-    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
-        if let Some(dispatcher) = DISPATCHER.get() {
-            let handler = DispatcherQueueHandler::new(move || f());
-            let _ = dispatcher.0.TryEnqueue(&handler);
-        }
-    }
-
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let check = core
-                    .selftest_checkbox
-                    .as_ref()
-                    .expect("the scene has a checkbox");
-                let boxed: IReference<bool> = PropertyValue::CreateBoolean(true)?.cast()?;
-                check.SetIsChecked(&boxed)?;
-                Ok(())
-            })
-        });
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let slider = core
-                    .selftest_slider
-                    .as_ref()
-                    .expect("the scene has a slider");
-                slider.SetValue(0.75)?;
-                Ok(())
-            })
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let status = core.selftest_labels[0].Text()?.to_string();
-                let volume = core.selftest_labels[1].Text()?.to_string();
-                if status == "urgent: true" && volume == "volume: 75%" {
-                    println!("KAYA_SELFTEST: OK ({status}, {volume})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (labels read {status:?}, {volume:?})");
-                    request_exit(1);
-                }
-                Ok(())
-            })
-        });
-    });
-}
-
-/// The todos scene's round trip (KAYA_SELFTEST=todos): SetText raises
-/// TextChanged, click Add, SetIsChecked raises Checked on the stamped
-/// row's box — a field-level update — then read the items-left label.
-fn spawn_todos_selftest() {
-    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
-        if let Some(dispatcher) = DISPATCHER.get() {
-            let handler = DispatcherQueueHandler::new(move || f());
-            let _ = dispatcher.0.TryEnqueue(&handler);
-        }
-    }
-
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                core.selftest_entry
-                    .as_ref()
-                    .expect("the scene has an entry")
-                    .SetText(&HSTRING::from("buy milk"))?;
-                Ok(())
-            })
-        });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                core.occurrences.send_click_tag(
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button"),
-                );
-            });
+            }
             Ok(())
         });
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let check = core
-                    .selftest_checkbox
-                    .as_ref()
-                    .expect("the scene has stamped a checkbox");
-                let boxed: IReference<bool> = PropertyValue::CreateBoolean(true)?.cast()?;
-                check.SetIsChecked(&boxed)?;
-                Ok(())
-            })
-        });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .Text()?
-                    .to_string();
-                if text == "0 items left" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-                Ok(())
-            })
-        });
-    });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+        rx.recv()
+            .expect("the dispatcher applied the step")
+            .expect("the step's WinRT calls succeeded")
+    }
 }
 
-/// The entry scene's round trip (KAYA_SELFTEST=entry): SetText raises
-/// TextChanged — the same path a keystroke takes — then the add button,
-/// then the status label.
-fn spawn_entry_selftest() {
-    fn on_ui(f: impl Fn() -> windows_core::Result<()> + Send + 'static) {
-        if let Some(dispatcher) = DISPATCHER.get() {
-            let handler = DispatcherQueueHandler::new(move || f());
-            let _ = dispatcher.0.TryEnqueue(&handler);
-        }
-    }
-
-    std::thread::spawn(|| {
-        eprintln!("kaya: winui selftest thread running");
-        std::thread::sleep(std::time::Duration::from_millis(800));
-        eprintln!("kaya: winui selftest step: set entry text");
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                core.selftest_entry
-                    .as_ref()
-                    .expect("the scene has an entry")
-                    .SetText(&HSTRING::from("milk"))?;
-                Ok(())
-            })
-        });
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        eprintln!("kaya: winui selftest step: click add");
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                core.occurrences.send_click_tag(
-                    core.selftest_button
-                        .as_ref()
-                        .expect("the scene has a button"),
-                );
-            });
+impl crate::harness::Stage for WinUiStage {
+    fn click(&self, t: crate::harness::Target) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.buttons.len());
+            core.occurrences.send_click_tag(&core.buttons[i]);
             Ok(())
         });
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        on_ui(|| {
-            CORE.with_borrow(|core| {
-                let core = core.as_ref().expect("core state initialized");
-                let text = core
-                    .selftest_labels
-                    .first()
-                    .expect("the scene has a label")
-                    .Text()?
-                    .to_string();
-                if text == "added milk, 1 total" {
-                    println!("KAYA_SELFTEST: OK ({text})");
-                    request_exit(0);
-                } else {
-                    eprintln!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-                    request_exit(1);
-                }
-                Ok(())
-            })
+    }
+
+    fn toggle(&self, t: crate::harness::Target, on: bool) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.checkboxes.len());
+            let boxed: IReference<bool> = PropertyValue::CreateBoolean(on)?.cast()?;
+            core.checkboxes[i].SetIsChecked(&boxed)?;
+            Ok(())
         });
-    });
+    }
+
+    fn set_value(&self, t: crate::harness::Target, value: f64) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.sliders.len());
+            core.sliders[i].SetValue(value)?;
+            Ok(())
+        });
+    }
+
+    fn set_text(&self, t: crate::harness::Target, text: &str) {
+        let text = text.to_owned();
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            core.entries[i].SetText(&HSTRING::from(&text))?;
+            Ok(())
+        });
+    }
+
+    fn read_label(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.labels.len());
+            Ok(core.labels[i].Text()?.to_string())
+        })
+    }
+
+    fn finish(&self, code: i32, verdict: &str) {
+        if code == 0 {
+            println!("{verdict}");
+        } else {
+            eprintln!("{verdict}");
+        }
+        // request_exit reads the UI thread's APP; hop before asking.
+        Self::on_ui(move |_| {
+            request_exit(code);
+            Ok(())
+        });
+    }
 }

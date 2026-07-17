@@ -43,24 +43,14 @@ const PRESENT_GUEST: i32 = 1;
 
 /// Ops for KayaRunnable: which native step a posted hop performs.
 const OP_DRAIN: jlong = 0;
-const OP_SELFTEST_CLICK: jlong = 1;
-const OP_SELFTEST_CHECK: jlong = 2;
-const OP_SELFTEST_CLICK_LAST: jlong = 3;
-const OP_SELFTEST_SET_TEXT: jlong = 4;
-const OP_SELFTEST_TOGGLE: jlong = 5;
-const OP_SELFTEST_SET_VALUE: jlong = 6;
+const OP_HARNESS: jlong = 1;
 
 /// Shared with the app thread (doorbell) and the selftest thread.
 struct Globals {
     vm: JavaVM,
     activity: GlobalRef,
     drain: GlobalRef,
-    selftest_click: GlobalRef,
-    selftest_check: GlobalRef,
-    selftest_click_last: GlobalRef,
-    selftest_set_text: GlobalRef,
-    selftest_toggle: GlobalRef,
-    selftest_set_value: GlobalRef,
+    harness_hop: GlobalRef,
 }
 
 static GLOBALS: OnceLock<Globals> = OnceLock::new();
@@ -84,6 +74,12 @@ static TAGS: Mutex<Option<HashMap<u64, Vec<u8>>>> = Mutex::new(None);
 /// setProgress dispatches onProgressChanged synchronously.
 static RANGES: Mutex<Option<HashMap<u64, (f64, f64)>>> = Mutex::new(None);
 const SEEK_SCALE: f64 = 10000.0;
+
+/// Steps posted by the harness thread, drained on the UI thread by the
+/// OP_HARNESS runnable (closures need the UI thread's JNIEnv, which
+/// only native_run holds).
+type HarnessStep = Box<dyn FnOnce(&mut JNIEnv) + Send>;
+static HARNESS_STEPS: Mutex<Vec<HarnessStep>> = Mutex::new(Vec::new());
 static NEXT_TAG_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Touched only from the UI thread, but a Mutex keeps the types honest
@@ -94,14 +90,16 @@ struct CoreState {
     transactions: Receiver<Transaction>,
     scene: Scene,
     widgets: HashMap<WidgetId, NativeWidget>,
-    selftest_button: Option<GlobalRef>,
-    selftest_entry: Option<GlobalRef>,
-    selftest_last_button: Option<GlobalRef>,
-    // Every label, creation order; the verdict reads the one its scene
-    // writes (gallery checks two).
-    selftest_labels: Vec<GlobalRef>,
-    selftest_checkbox: Option<GlobalRef>,
-    selftest_slider: Option<GlobalRef>,
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index and drives each view
+    // through its own listener path (performClick, setText,
+    // setChecked, setProgress all fire the real listeners). Sliders
+    // carry their tag key: the f64 range mapping lives in RANGES.
+    buttons: Vec<GlobalRef>,
+    checkboxes: Vec<GlobalRef>,
+    labels: Vec<GlobalRef>,
+    entries: Vec<GlobalRef>,
+    sliders: Vec<(GlobalRef, u64)>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -271,23 +269,13 @@ fn setup(
         env.new_global_ref(runnable)
     };
     let drain = make_runnable(env, OP_DRAIN)?;
-    let selftest_click = make_runnable(env, OP_SELFTEST_CLICK)?;
-    let selftest_check = make_runnable(env, OP_SELFTEST_CHECK)?;
-    let selftest_click_last = make_runnable(env, OP_SELFTEST_CLICK_LAST)?;
-    let selftest_set_text = make_runnable(env, OP_SELFTEST_SET_TEXT)?;
-    let selftest_toggle = make_runnable(env, OP_SELFTEST_TOGGLE)?;
-    let selftest_set_value = make_runnable(env, OP_SELFTEST_SET_VALUE)?;
+    let harness_hop = make_runnable(env, OP_HARNESS)?;
 
     let globals = Globals {
         vm: env.get_java_vm()?,
         activity: env.new_global_ref(activity)?,
         drain,
-        selftest_click,
-        selftest_check,
-        selftest_click_last,
-        selftest_set_text,
-        selftest_toggle,
-        selftest_set_value,
+        harness_hop,
     };
     let _ = GLOBALS.set(globals);
 
@@ -298,16 +286,15 @@ fn setup(
         transactions: tx_rx,
         scene: Scene::new(),
         widgets: HashMap::new(),
-        selftest_button: None,
-        selftest_last_button: None,
-        selftest_labels: Vec::new(),
-        selftest_entry: None,
-        selftest_checkbox: None,
-        selftest_slider: None,
+        buttons: Vec::new(),
+        checkboxes: Vec::new(),
+        labels: Vec::new(),
+        entries: Vec::new(),
+        sliders: Vec::new(),
     });
 
-    if std::env::var_os("KAYA_SELFTEST").is_some() {
-        spawn_selftest();
+    if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
+        crate::harness::spawn(&scene, AndroidStage, |line| log::info!("{line}"));
     }
 
     // The first transaction may already be queued; drain now.
@@ -463,24 +450,13 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             let mut core = CORE.lock().unwrap();
             let core = core.as_mut().expect("core set up");
             match kind {
-                WidgetKind::Button => {
-                    if core.selftest_button.is_none() {
-                        core.selftest_button = Some(view.clone());
-                    }
-                    core.selftest_last_button = Some(view.clone());
-                }
-                WidgetKind::Label => {
-                    core.selftest_labels.push(view.clone());
-                }
-                WidgetKind::Entry if core.selftest_entry.is_none() => {
-                    core.selftest_entry = Some(view.clone());
-                }
-                WidgetKind::Checkbox if core.selftest_checkbox.is_none() => {
-                    core.selftest_checkbox = Some(view.clone());
-                }
-                WidgetKind::Slider if core.selftest_slider.is_none() => {
-                    core.selftest_slider = Some(view.clone());
-                }
+                WidgetKind::Button => core.buttons.push(view.clone()),
+                WidgetKind::Label => core.labels.push(view.clone()),
+                WidgetKind::Entry => core.entries.push(view.clone()),
+                WidgetKind::Checkbox => core.checkboxes.push(view.clone()),
+                WidgetKind::Slider => core
+                    .sliders
+                    .push((view.clone(), tag_key.expect("sliders carry a tag"))),
                 _ => {}
             }
             core.widgets.insert(id, NativeWidget { view, kind, tag_key });
@@ -591,12 +567,13 @@ fn with_widget<T>(id: WidgetId, f: impl FnOnce(&NativeWidget) -> T) -> T {
 extern "system" fn native_run(mut env: JNIEnv, _this: JObject, op: jlong) {
     let result = match op {
         OP_DRAIN => drain_transactions(&mut env),
-        OP_SELFTEST_CLICK => selftest_click(&mut env, false),
-        OP_SELFTEST_CLICK_LAST => selftest_click(&mut env, true),
-        OP_SELFTEST_CHECK => selftest_check(&mut env),
-        OP_SELFTEST_SET_TEXT => selftest_set_text(&mut env),
-        OP_SELFTEST_TOGGLE => selftest_toggle(&mut env),
-        OP_SELFTEST_SET_VALUE => selftest_set_value(&mut env),
+        OP_HARNESS => {
+            let steps: Vec<HarnessStep> = std::mem::take(&mut HARNESS_STEPS.lock().unwrap());
+            for step in steps {
+                step(&mut env);
+            }
+            Ok(())
+        }
         _ => Ok(()),
     };
     if let Err(e) = result {
@@ -686,203 +663,143 @@ extern "system" fn native_click(_env: JNIEnv, _this: JObject, tag_key: jlong) {
     }
 }
 
-/// Drives the round trip without a human: performClick raises the real
-/// click on the UI thread, the app thread answers with a signal write,
-/// and the label text proves the resolution path worked. Results go to
-/// logcat; the validation script watches for them.
-fn spawn_selftest() {
-    fn post(runnable: &GlobalRef) {
-        let Some(g) = GLOBALS.get() else { return };
-        let mut env = match g.vm.attach_current_thread_permanently() {
-            Ok(env) => env,
-            Err(e) => {
-                log::error!("kaya: selftest attach failed: {e}");
-                return;
-            }
-        };
-        if let Err(e) = env.call_method(
+/// The harness stage: android.widget's native calls, each posted to
+/// the UI thread through the OP_HARNESS runnable (JNI needs the UI
+/// thread's env). performClick, setText, setChecked, and setProgress
+/// all fire the real listeners, so every step travels the path a
+/// user's gesture would. The CORE lock is never held across a JNI call
+/// that can dispatch back into native code — refs are cloned out
+/// first, the standing rule here.
+struct AndroidStage;
+
+impl AndroidStage {
+    fn on_ui<T: Send + 'static>(f: impl FnOnce(&mut JNIEnv) -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        HARNESS_STEPS.lock().unwrap().push(Box::new(move |env| {
+            let _ = tx.send(f(env));
+        }));
+        let g = GLOBALS.get().expect("attach ran");
+        let mut env = g
+            .vm
+            .attach_current_thread_permanently()
+            .expect("kaya: harness attach failed");
+        env.call_method(
             g.activity.as_obj(),
             "runOnUiThread",
             "(Ljava/lang/Runnable;)V",
-            &[JValue::Object(runnable.as_obj())],
-        ) {
-            log::error!("kaya: selftest post failed: {e}");
-        }
+            &[JValue::Object(g.harness_hop.as_obj())],
+        )
+        .expect("kaya: harness post failed");
+        rx.recv().expect("the UI thread applied the step")
     }
 
-    std::thread::spawn(|| {
-        let Some(g) = GLOBALS.get() else { return };
-        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("todos") {
-            // The todos scene: type (setText fires the watcher), Add,
-            // toggle the stamped row's box — a field-level update —
-            // then the verdict.
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            post(&g.selftest_set_text);
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            post(&g.selftest_click);
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            post(&g.selftest_toggle);
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            post(&g.selftest_check);
-            return;
-        }
-        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("gallery") {
-            // The gallery scene: setChecked fires the listener, then
-            // setProgress fires the seek listener — the same paths a
-            // tap and a drag take — then the verdict.
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            post(&g.selftest_toggle);
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            post(&g.selftest_set_value);
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            post(&g.selftest_check);
-            return;
-        }
-        if std::env::var("KAYA_SELFTEST").as_deref() == Ok("entry") {
-            // The entry scene: setText fires the watcher — the same
-            // path a keystroke takes — then add, then the verdict.
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            post(&g.selftest_set_text);
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            post(&g.selftest_click);
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            post(&g.selftest_check);
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-        post(&g.selftest_click);
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        post(&g.selftest_click);
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        post(&g.selftest_click_last);
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        post(&g.selftest_check);
-    });
+    fn view(f: impl FnOnce(&CoreState) -> GlobalRef) -> GlobalRef {
+        let core = CORE.lock().unwrap();
+        f(core.as_ref().expect("core set up"))
+    }
 }
 
-fn selftest_click(env: &mut JNIEnv, last: bool) -> jni::errors::Result<()> {
-    // Clone the ref and release the lock first: performClick dispatches
-    // onClick -> native_click on this same thread.
-    let button = {
-        let core = CORE.lock().unwrap();
-        let Some(core) = core.as_ref() else {
-            return Ok(());
+impl crate::harness::Stage for AndroidStage {
+    fn click(&self, t: crate::harness::Target) {
+        let button = Self::view(|core| {
+            core.buttons[crate::harness::resolve(t.index, core.buttons.len())].clone()
+        });
+        Self::on_ui(move |env| {
+            let _ = env.call_method(button.as_obj(), "performClick", "()Z", &[]);
+        });
+    }
+
+    fn toggle(&self, t: crate::harness::Target, on: bool) {
+        let checkbox = Self::view(|core| {
+            core.checkboxes[crate::harness::resolve(t.index, core.checkboxes.len())].clone()
+        });
+        Self::on_ui(move |env| {
+            let _ = env.call_method(
+                checkbox.as_obj(),
+                "setChecked",
+                "(Z)V",
+                &[JValue::Bool(on as u8)],
+            );
+        });
+    }
+
+    fn set_value(&self, t: crate::harness::Target, value: f64) {
+        let (slider, key) = {
+            let core = CORE.lock().unwrap();
+            let core = core.as_ref().expect("core set up");
+            core.sliders[crate::harness::resolve(t.index, core.sliders.len())].clone()
         };
-        if last {
-            core.selftest_last_button.clone()
-        } else {
-            core.selftest_button.clone()
-        }
-    };
-    if let Some(button) = button {
-        env.call_method(button.as_obj(), "performClick", "()Z", &[])?;
+        let (min, max) = RANGES
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|r| r.get(&key).copied())
+            .unwrap_or((0.0, 1.0));
+        let span = if max > min { max - min } else { 1.0 };
+        let progress = (((value - min) / span) * SEEK_SCALE).round() as i32;
+        Self::on_ui(move |env| {
+            let _ = env.call_method(
+                slider.as_obj(),
+                "setProgress",
+                "(I)V",
+                &[JValue::Int(progress)],
+            );
+        });
     }
-    Ok(())
-}
 
-fn selftest_set_text(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let entry = {
-        let core = CORE.lock().unwrap();
-        let Some(core) = core.as_ref() else {
-            return Ok(());
-        };
-        core.selftest_entry.clone()
-    };
-    if let Some(entry) = entry {
-        let text = env.new_string("milk")?;
-        env.call_method(
-            entry.as_obj(),
-            "setText",
-            "(Ljava/lang/CharSequence;)V",
-            &[JValue::Object(&text)],
-        )?;
+    fn set_text(&self, t: crate::harness::Target, text: &str) {
+        let entry = Self::view(|core| {
+            core.entries[crate::harness::resolve(t.index, core.entries.len())].clone()
+        });
+        let text = text.to_owned();
+        Self::on_ui(move |env| {
+            let s = env.new_string(&text).expect("kaya: text alloc failed");
+            let _ = env.call_method(
+                entry.as_obj(),
+                "setText",
+                "(Ljava/lang/CharSequence;)V",
+                &[JValue::Object(&s)],
+            );
+        });
     }
-    Ok(())
-}
 
-fn selftest_toggle(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let checkbox = {
-        let core = CORE.lock().unwrap();
-        let Some(core) = core.as_ref() else {
-            return Ok(());
-        };
-        core.selftest_checkbox.clone()
-    };
-    if let Some(checkbox) = checkbox {
-        env.call_method(checkbox.as_obj(), "setChecked", "(Z)V", &[JValue::Bool(1)])?;
+    fn read_label(&self, t: crate::harness::Target) -> String {
+        let label = Self::view(|core| {
+            core.labels[crate::harness::resolve(t.index, core.labels.len())].clone()
+        });
+        Self::on_ui(move |env| {
+            let chars = env
+                .call_method(label.as_obj(), "getText", "()Ljava/lang/CharSequence;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: label read failed");
+            let string = env
+                .call_method(&chars, "toString", "()Ljava/lang/String;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: label toString failed");
+            env.get_string(&JString::from(string))
+                .expect("kaya: label decode failed")
+                .into()
+        })
     }
-    Ok(())
-}
 
-fn selftest_set_value(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let slider = {
-        let core = CORE.lock().unwrap();
-        let Some(core) = core.as_ref() else {
-            return Ok(());
-        };
-        core.selftest_slider.clone()
-    };
-    if let Some(slider) = slider {
-        // 0.75 of the fixed integer range; setProgress fires the
-        // listener, the same path a drag takes.
-        env.call_method(slider.as_obj(), "setProgress", "(I)V", &[JValue::Int(7500)])?;
+    fn finish(&self, code: i32, verdict: &str) {
+        let verdict = verdict.to_owned();
+        // A library must not kill its host, but the selftest app is the
+        // host; finish the task first so the exit reads as intentional.
+        // _exit rather than exit: libc atexit handlers tear down HWUI's
+        // mutexes while its render threads still run.
+        Self::on_ui(move |env| {
+            if code == 0 {
+                log::info!("{verdict}");
+            } else {
+                log::error!("{verdict}");
+            }
+            if let Some(g) = GLOBALS.get() {
+                let _ = env.call_method(g.activity.as_obj(), "finishAndRemoveTask", "()V", &[]);
+            }
+            unsafe { libc::_exit(code) };
+        });
     }
-    Ok(())
-}
-
-fn selftest_check(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let labels = {
-        let core = CORE.lock().unwrap();
-        let Some(core) = core.as_ref() else {
-            return Ok(());
-        };
-        core.selftest_labels.clone()
-    };
-    if labels.is_empty() {
-        log::error!("KAYA_SELFTEST: FAILED (no label in the scene)");
-        unsafe { libc::_exit(1) };
-    }
-    let mut read_label = |label: &GlobalRef| -> jni::errors::Result<String> {
-        let chars = env
-            .call_method(label.as_obj(), "getText", "()Ljava/lang/CharSequence;", &[])?
-            .l()?;
-        let string = env
-            .call_method(&chars, "toString", "()Ljava/lang/String;", &[])?
-            .l()?;
-        Ok(env.get_string(&JString::from(string))?.into())
-    };
-
-    // Every scene's verdict is one label, except the gallery's, which
-    // checks the status and volume labels together.
-    let (text, expected) = match std::env::var("KAYA_SELFTEST").as_deref() {
-        Ok("entry") => (read_label(&labels[0])?, "added milk, 1 total".to_string()),
-        Ok("gallery") => {
-            let status = read_label(&labels[0])?;
-            let volume = read_label(&labels[1])?;
-            (
-                format!("{status}, {volume}"),
-                "urgent: true, volume: 75%".to_string(),
-            )
-        }
-        Ok("todos") => (read_label(&labels[0])?, "0 items left".to_string()),
-        _ => (read_label(&labels[0])?, "removed g2/a, 0 left".to_string()),
-    };
-    let code = if text == expected {
-        log::info!("KAYA_SELFTEST: OK ({text})");
-        0
-    } else {
-        log::error!("KAYA_SELFTEST: FAILED (label reads {text:?})");
-        1
-    };
-
-    // A library must not kill its host, but the selftest app is the host;
-    // finish the task first so the exit reads as intentional to the OS.
-    // _exit rather than exit: libc atexit handlers tear down HWUI mutexes
-    // while its render threads still run, and that race aborts.
-    if let Some(g) = GLOBALS.get() {
-        let _ = env.call_method(g.activity.as_obj(), "finishAndRemoveTask", "()V", &[]);
-    }
-    unsafe { libc::_exit(code) };
 }
 
 // Raw addresses rather than direct ByteBuffers: ART's interpreter path

@@ -55,14 +55,13 @@ object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     val nodes = HashMap<Long, KayaNode>() // UI thread only
     val parents = HashMap<Long, Long>()
-    var firstButton: KayaNode? = null
-    var lastButton: KayaNode? = null
-    var firstLabel: KayaNode? = null
-    // Every label, creation order; the gallery verdict reads two.
+    // Per-kind registries in creation order (stamped copies included):
+    // the harness names targets as kind#index.
+    val buttons = ArrayList<KayaNode>()
+    val checkboxes = ArrayList<KayaNode>()
     val labels = ArrayList<KayaNode>()
-    var firstEntry: KayaNode? = null
-    var firstCheckbox: KayaNode? = null
-    var firstSlider: KayaNode? = null
+    val entries = ArrayList<KayaNode>()
+    val sliders = ArrayList<KayaNode>()
 }
 
 object KayaCompose {
@@ -128,26 +127,12 @@ object KayaCompose {
                     b.get(tag)
                     val node = KayaNode(id, widgetKind, tag)
                     KayaSceneModel.nodes[id] = node
-                    if (widgetKind == KIND_BUTTON) {
-                        if (KayaSceneModel.firstButton == null) {
-                            KayaSceneModel.firstButton = node
-                        }
-                        KayaSceneModel.lastButton = node
-                    }
-                    if (widgetKind == KIND_LABEL) {
-                        if (KayaSceneModel.firstLabel == null) {
-                            KayaSceneModel.firstLabel = node
-                        }
-                        KayaSceneModel.labels.add(node)
-                    }
-                    if (widgetKind == KIND_SLIDER && KayaSceneModel.firstSlider == null) {
-                        KayaSceneModel.firstSlider = node
-                    }
-                    if (widgetKind == KIND_ENTRY && KayaSceneModel.firstEntry == null) {
-                        KayaSceneModel.firstEntry = node
-                    }
-                    if (widgetKind == KIND_CHECKBOX && KayaSceneModel.firstCheckbox == null) {
-                        KayaSceneModel.firstCheckbox = node
+                    when (widgetKind) {
+                        KIND_BUTTON -> KayaSceneModel.buttons.add(node)
+                        KIND_LABEL -> KayaSceneModel.labels.add(node)
+                        KIND_SLIDER -> KayaSceneModel.sliders.add(node)
+                        KIND_ENTRY -> KayaSceneModel.entries.add(node)
+                        KIND_CHECKBOX -> KayaSceneModel.checkboxes.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -211,155 +196,105 @@ object KayaCompose {
     }
 
     /**
-     * Drives the round trip without a human, matching every backend's
-     * selftest: two clicks on the scene's driver button (stamping
-     * groups, items, and the When), one on the most recently stamped
-     * button, and the status label proves the whole loop. Results go to
-     * logcat; halt rather than exit so no teardown hook races the
-     * render threads.
+     * The interaction harness's Kotlin interpreter: the same
+     * line-oriented grammar the Rust backends embed from tools/scenes
+     * (settle / click / toggle / set_value / set_text / expect,
+     * targets as kind#index, `;` accepted as a newline stand-in — the
+     * intent-extra transport cannot carry newlines). Steps drive the
+     * node tree exactly as a gesture would: flip the snapshot state,
+     * emit through KayaPresent. Results go to logcat; halt rather than
+     * exit so no teardown hook races the render threads.
      */
     private fun startSelftest(activity: ComponentActivity) {
-        if (System.getenv("KAYA_SELFTEST") == "entry") {
-            startEntrySelftest(activity)
+        val script = System.getenv("KAYA_SELFTEST_SCRIPT")
+        if (script == null) {
+            Log.e("kaya", "KAYA_SELFTEST: FAILED (no KAYA_SELFTEST_SCRIPT in the environment)")
+            activity.finishAndRemoveTask()
+            Runtime.getRuntime().halt(1)
             return
         }
-        if (System.getenv("KAYA_SELFTEST") == "gallery") {
-            startGallerySelftest(activity)
-            return
-        }
-        if (System.getenv("KAYA_SELFTEST") == "todos") {
-            startTodosSelftest(activity)
-            return
-        }
-        thread(name = "kaya-selftest") {
-            Thread.sleep(1500)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
-            Thread.sleep(300)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
-            Thread.sleep(400)
-            KayaSceneModel.lastButton?.let { KayaPresent.emitClicked(it.tag) }
-            Thread.sleep(700)
-            activity.runOnUiThread {
-                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "removed g2/a, 0 left") {
-                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
-                    0
-                } else {
-                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
-                    1
-                }
-                activity.finishAndRemoveTask()
-                Runtime.getRuntime().halt(code)
-            }
-        }
+        thread(name = "kaya-selftest") { runScript(activity, script) }
     }
 
-    /**
-     * The entry scene's round trip (KAYA_SELFTEST=entry): drive the
-     * same emission path a keystroke takes, click add, read the status
-     * label.
-     */
-    private fun startEntrySelftest(activity: ComponentActivity) {
-        thread(name = "kaya-selftest") {
-            Thread.sleep(1500)
-            activity.runOnUiThread {
-                KayaSceneModel.firstEntry?.let { entry ->
-                    entry.text = "milk"
-                    KayaPresent.emitTextChanged(entry.tag, "milk")
-                }
-            }
-            Thread.sleep(400)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
-            Thread.sleep(700)
-            activity.runOnUiThread {
-                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "added milk, 1 total") {
-                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
-                    0
-                } else {
-                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
-                    1
-                }
-                activity.finishAndRemoveTask()
-                Runtime.getRuntime().halt(code)
-            }
+    private fun <T> onUi(activity: ComponentActivity, f: () -> T): T {
+        var out: T? = null
+        val done = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread {
+            out = f()
+            done.countDown()
         }
+        done.await()
+        @Suppress("UNCHECKED_CAST")
+        return out as T
     }
 
-    /**
-     * The todos scene's round trip (KAYA_SELFTEST=todos): type through
-     * the emission path, add, toggle the stamped row's box — a
-     * field-level update — and read the items-left label.
-     */
-    private fun startTodosSelftest(activity: ComponentActivity) {
-        thread(name = "kaya-selftest") {
-            Thread.sleep(1500)
-            activity.runOnUiThread {
-                KayaSceneModel.firstEntry?.let { entry ->
-                    entry.text = "buy milk"
-                    KayaPresent.emitTextChanged(entry.tag, "buy milk")
-                }
-            }
-            Thread.sleep(400)
-            KayaSceneModel.firstButton?.let { KayaPresent.emitClicked(it.tag) }
-            Thread.sleep(400)
-            activity.runOnUiThread {
-                KayaSceneModel.firstCheckbox?.let { box ->
-                    box.checked = true
-                    KayaPresent.emitToggled(box.tag, true)
-                }
-            }
-            Thread.sleep(700)
-            activity.runOnUiThread {
-                val text = KayaSceneModel.firstLabel?.text ?: "(no label)"
-                val code = if (text == "0 items left") {
-                    Log.i("kaya", "KAYA_SELFTEST: OK ($text)")
-                    0
-                } else {
-                    Log.e("kaya", "KAYA_SELFTEST: FAILED (label reads $text)")
-                    1
-                }
-                activity.finishAndRemoveTask()
-                Runtime.getRuntime().halt(code)
-            }
-        }
+    private fun target(spec: String, registry: List<KayaNode>): KayaNode {
+        val index = spec.substringAfter('#')
+        return if (index == "last") registry.last() else registry[index.toInt()]
     }
 
-    /**
-     * The gallery scene's round trip (KAYA_SELFTEST=gallery): drive the
-     * same emission path a tap takes — flip the node, emit toggled —
-     * then read the status label.
-     */
-    private fun startGallerySelftest(activity: ComponentActivity) {
-        thread(name = "kaya-selftest") {
-            Thread.sleep(1500)
-            activity.runOnUiThread {
-                KayaSceneModel.firstCheckbox?.let { box ->
-                    box.checked = true
-                    KayaPresent.emitToggled(box.tag, true)
+    private fun quoted(parts: List<String>): String =
+        parts.joinToString(" ").removeSurrounding("\"")
+
+    private fun runScript(activity: ComponentActivity, script: String) {
+        val observed = ArrayList<String>()
+        val failures = ArrayList<String>()
+        val start = System.nanoTime()
+        for (rawLine in script.split('\n')) {
+            val trimmedLine = rawLine.trim()
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("#")) continue
+            for (raw in trimmedLine.split(';')) {
+                val line = raw.trim()
+                if (line.isEmpty() || line.startsWith("#")) continue
+                val parts = line.split(' ').filter { it.isNotEmpty() }
+                val offset = (System.nanoTime() - start) / 1_000_000
+                Log.i("kaya", "KAYA_HARNESS: +${offset}ms $line")
+                when (parts[0]) {
+                    "settle" -> Thread.sleep(parts[1].toLong())
+                    "click" -> onUi(activity) {
+                        KayaPresent.emitClicked(target(parts[1], KayaSceneModel.buttons).tag)
+                    }
+                    "toggle" -> onUi(activity) {
+                        val node = target(parts[1], KayaSceneModel.checkboxes)
+                        node.checked = parts[2] == "on"
+                        KayaPresent.emitToggled(node.tag, node.checked)
+                    }
+                    "set_value" -> onUi(activity) {
+                        val node = target(parts[1], KayaSceneModel.sliders)
+                        node.value = parts[2].toDouble()
+                        KayaPresent.emitValueChanged(node.tag, node.value)
+                    }
+                    "set_text" -> onUi(activity) {
+                        val node = target(parts[1], KayaSceneModel.entries)
+                        node.text = quoted(parts.drop(2))
+                        KayaPresent.emitTextChanged(node.tag, node.text)
+                    }
+                    "expect" -> {
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) { target(parts[1], KayaSceneModel.labels).text }
+                        if (got == want) {
+                            observed.add(got)
+                        } else {
+                            failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    else -> failures.add("unknown step $line")
                 }
             }
-            Thread.sleep(400)
-            activity.runOnUiThread {
-                KayaSceneModel.firstSlider?.let { slider ->
-                    slider.value = 0.75
-                    KayaPresent.emitValueChanged(slider.tag, 0.75)
-                }
-            }
-            Thread.sleep(700)
-            activity.runOnUiThread {
-                val status = KayaSceneModel.labels.getOrNull(0)?.text ?: "(no label)"
-                val volume = KayaSceneModel.labels.getOrNull(1)?.text ?: "(no label)"
-                val code = if (status == "urgent: true" && volume == "volume: 75%") {
-                    Log.i("kaya", "KAYA_SELFTEST: OK ($status, $volume)")
-                    0
-                } else {
-                    Log.e("kaya", "KAYA_SELFTEST: FAILED (labels read $status, $volume)")
-                    1
-                }
-                activity.finishAndRemoveTask()
-                Runtime.getRuntime().halt(code)
-            }
+        }
+        if (failures.isEmpty() && observed.isEmpty()) {
+            failures.add("script has no expects")
+        }
+        val code = if (failures.isEmpty()) {
+            Log.i("kaya", "KAYA_SELFTEST: OK (${observed.joinToString(", ")})")
+            0
+        } else {
+            Log.e("kaya", "KAYA_SELFTEST: FAILED (${failures.joinToString("; ")})")
+            1
+        }
+        activity.runOnUiThread {
+            activity.finishAndRemoveTask()
+            Runtime.getRuntime().halt(code)
         }
     }
 }

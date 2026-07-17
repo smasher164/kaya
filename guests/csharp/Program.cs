@@ -10,6 +10,7 @@ static class Program
             case "entry": EntryScene.Run(); break;
             case "gallery": GalleryScene.Run(); break;
             case "todos": TodosScene.Run(); break;
+            case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }
     }

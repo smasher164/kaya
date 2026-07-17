@@ -82,6 +82,12 @@ drain() {
         echo "== $name =="
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
+            # The confusing failure class: verdict printed OK but the
+            # leg still failed — the process never exited (a broken
+            # Stage::finish exit path, once bitten on GTK and WinUI).
+            if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
+                echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
+            fi
             status=1
         fi
         echo "$name: $verdict"
@@ -106,9 +112,13 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos; do
+for guest in milestone2 entry gallery todos encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
+
+# The encode-benchmark leg: the generated encoders must clear their
+# floor rates (structural-regression guard, not a race).
+CS_GUEST="$CS_GUEST" tools/bench-encode.sh || exit 1
 
 # All guests against the AppKit backend.
 run rust target/debug/examples/milestone2
@@ -161,6 +171,12 @@ drain
 tools/swiftui/build-dylib.sh >/dev/null
 export KAYA_BACKEND=swiftui
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
+# The Swift interpreter reads the scene script from the environment
+# (the Rust backends embed theirs at build time). Comments stripped:
+# some transports fold newlines into `;`, and a leading comment must
+# not swallow the folded script.
+scene_script() { grep -v '^#' "tools/scenes/$1.steps"; }
+export KAYA_SELFTEST_SCRIPT="$(scene_script milestone2)"
 run rust-swiftui target/debug/examples/milestone2
 run python-swiftui python3 guests/python/milestone2.py
 run go-swiftui target/go-guests/milestone2
@@ -169,6 +185,7 @@ run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/milestone2.exe
 run haskell-swiftui "$(hs_bin milestone2)"
+export KAYA_SELFTEST_SCRIPT="$(scene_script entry)"
 run entry-rust-swiftui env KAYA_SELFTEST=entry target/debug/examples/entry
 run entry-python-swiftui env KAYA_SELFTEST=entry python3 guests/python/entry.py
 run entry-go-swiftui env KAYA_SELFTEST=entry target/go-guests/entry
@@ -177,6 +194,7 @@ run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/li
 run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/entry.exe
 run entry-haskell-swiftui env KAYA_SELFTEST=entry "$(hs_bin entry)"
+export KAYA_SELFTEST_SCRIPT="$(scene_script gallery)"
 run gallery-rust-swiftui env KAYA_SELFTEST=gallery target/debug/examples/gallery
 run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 run gallery-go-swiftui env KAYA_SELFTEST=gallery target/go-guests/gallery
@@ -185,6 +203,7 @@ run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debu
 run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/gallery.exe
 run gallery-haskell-swiftui env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
+export KAYA_SELFTEST_SCRIPT="$(scene_script todos)"
 run todos-rust-swiftui env KAYA_SELFTEST=todos target/debug/examples/todos
 run todos-python-swiftui env KAYA_SELFTEST=todos python3 guests/python/todos.py
 run todos-go-swiftui env KAYA_SELFTEST=todos target/go-guests/todos
@@ -193,7 +212,7 @@ run todos-csharp-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/li
 run todos-ocaml-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/todos.exe
 run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
-unset KAYA_BACKEND KAYA_SWIFTUI_LIB
+unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 
 # The one-line verdict: suites accumulate failures rather than abort,
