@@ -13,7 +13,7 @@
 
 use kaya::Occurrence;
 
-#[derive(kaya::Kaya, Clone, Debug, PartialEq)]
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Todo {
     title: String,
     done: bool,

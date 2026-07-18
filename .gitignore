@@ -20,6 +20,9 @@ __pycache__/
 /android/.kotlin/
 guests/csharp/bin/
 guests/csharp/obj/
+tools/kaya-csgen/bin/
+tools/kaya-csgen/obj/
+tools/kaya-swift-gen/.build/
 /_build/
 /_build-linux/
 guests/haskell/dist-newstyle/
@@ -30,3 +33,6 @@ guests/haskell/dist-newstyle/
 /entry
 /gallery
 /milestone2
+/reorder
+/feed
+/kaya-gen

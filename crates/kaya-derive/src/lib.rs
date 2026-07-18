@@ -1,4 +1,5 @@
-//! `#[derive(Kaya)]`: the type's own shape is the schema. On a struct
+//! `#[derive(KayaGen)]`: the type's own shape is the schema — the one
+//! KayaGen marker every language spells. On a struct
 //! it derives the one-variant sum (KayaSum + KayaRecord), field tokens,
 //! and the typed patch builder — what the old `record!` macro emitted,
 //! minus the wrapping. On an enum it derives the real sum: KayaSum with
@@ -14,7 +15,7 @@ use proc_macro2::Span;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Ident, parse_macro_input};
 
-#[proc_macro_derive(Kaya)]
+#[proc_macro_derive(KayaGen)]
 pub fn derive_kaya(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match &input.data {

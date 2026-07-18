@@ -61,7 +61,7 @@ pub use app::{
 /// The type's own shape is the schema: an enum derives the element
 /// sum, a struct the one-variant case (with field tokens and the typed
 /// patch builder).
-pub use kaya_derive::Kaya;
+pub use kaya_derive::KayaGen;
 pub use protocol::{
     CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, ValueType,
     WidgetId, WidgetKind, WindowId,

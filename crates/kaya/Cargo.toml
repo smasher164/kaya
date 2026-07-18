@@ -12,7 +12,7 @@ repository = "https://github.com/smasher164/kaya"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-# Compile-time only (proc-macro): #[derive(Kaya)] — the type's shape
+# Compile-time only (proc-macro): #[derive(KayaGen)] — the type's shape
 # is the schema.
 kaya-derive = { path = "../kaya-derive" }
 
@@ -53,9 +53,37 @@ log = "0.4"
 android_logger = "0.15"
 log-panics = "2"
 
+# The example scenes live in guests/rust, beside the other languages'
+# guests; explicit paths keep `cargo build --example <scene>` and the
+# target/…/examples output layout unchanged.
+[[example]]
+name = "milestone2"
+path = "../../guests/rust/milestone2.rs"
+
+[[example]]
+name = "entry"
+path = "../../guests/rust/entry.rs"
+
+[[example]]
+name = "gallery"
+path = "../../guests/rust/gallery.rs"
+
+[[example]]
+name = "todos"
+path = "../../guests/rust/todos.rs"
+
+[[example]]
+name = "reorder"
+path = "../../guests/rust/reorder.rs"
+
+[[example]]
+name = "feed"
+path = "../../guests/rust/feed.rs"
+
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a
 # cdylib exporting the JNI entry rather than a bin.
 [[example]]
 name = "milestone2_android"
+path = "../../guests/rust/milestone2_android.rs"
 crate-type = ["cdylib"]

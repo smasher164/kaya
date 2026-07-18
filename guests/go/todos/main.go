@@ -25,7 +25,11 @@ func init() {
 	runtime.LockOSThread()
 }
 
-// Todo is the record type and, by reflection, the schema.
+// Todo is the record type and, by reflection, the schema. kaya-gen
+// reads this declaration and emits todo_kaya.go: the collection
+// factory and the named-setter patch.
+//
+//go:generate go run dev.kaya/cmd/kaya-gen -type Todo -key string
 type Todo struct {
 	Title string
 	Done  bool
@@ -43,7 +47,7 @@ func main() {
 	// constructors carry their handlers, and the build body reads as
 	// the tree (the C guests keep the explicit floor).
 	app.Build(func(tx *kaya.Tx) {
-		todos := kaya.CollectionOf[string, Todo](tx)
+		todos := TodoCollection(tx)
 		itemsLeft := todos.Derive(tx, func(items []kaya.RecordEntry[string, Todo]) string {
 			n := 0
 			for _, e := range items {
@@ -70,10 +74,10 @@ func main() {
 				t.Row(
 					todos.Checkbox(t, func(t *Todo) *bool { return &t.Done },
 						func(tx *kaya.Tx, key string, checked bool) {
-							// One field's delta: the title never
-							// travels; the derived signal updates
-							// itself.
-							todos.Patch(tx, key).Set(func(t *Todo) *bool { return &t.Done }, checked)
+							// One field's delta through the generated
+							// named setter: the title never travels;
+							// the derived signal updates itself.
+							TodoPatch(todos, tx, key).Done(checked)
 						}),
 					todos.Label(t, func(t *Todo) *string { return &t.Title }),
 				)

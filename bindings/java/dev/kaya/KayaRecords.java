@@ -340,6 +340,12 @@ public final class KayaRecords {
             c.updateField(tx, key, selector, value);
             return this;
         }
+
+        /** Writes the field a pre-resolved token names; chainable. */
+        public <V> Patch<K, T> set(Field<V> f, V value) {
+            c.updateField(tx, key, f, value);
+            return this;
+        }
     }
 
     /**
@@ -349,6 +355,16 @@ public final class KayaRecords {
     public static <K, T> Collection<K, T> collectionOf(KayaApp.Tx tx, Class<T> type) {
         Info info = Info.of(type);
         return new Collection<>(tx.collectionWithSchema(info.schema), info);
+    }
+
+    /**
+     * The field token at a known wire index, for generated code only
+     * (the kaya annotation processor computes indices from the record
+     * declaration; hand-written code should use the checked
+     * {@link #fieldOf} instead — a hand-minted index is unchecked).
+     */
+    public static <V> Field<V> fieldAt(int index) {
+        return new Field<>(index);
     }
 
     /**

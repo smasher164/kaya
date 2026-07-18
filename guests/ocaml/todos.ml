@@ -1,6 +1,6 @@
 (* The todos scene from OCaml, on the let* surface with the
    construction sugar: the record declaration is the schema
-   ([@@deriving kaya]), constructors carry their props and handlers,
+   ([@@deriving kaya_gen]), constructors carry their props and handlers,
    containers take their children, and the tree reads as a tree. The
    sugar lowers eagerly to the same records as the explicit floor —
    the C guests keep that style on purpose.
@@ -10,7 +10,7 @@
 open Kaya_wire
 open Kaya_app
 
-type todo = { title : string; done_ : bool } [@@deriving kaya]
+type todo = { title : string; done_ : bool } [@@deriving kaya_gen]
 
 let () =
   let app = Kaya_app.create () in

@@ -198,7 +198,7 @@ impl KayaField for f64 {
 }
 
 /// A collection element type: one field-type list per constructor,
-/// with the conversions, derived by `#[derive(Kaya)]` from the type's
+/// with the conversions, derived by `#[derive(KayaGen)]` from the type's
 /// own shape — an enum is a sum, a struct the one-variant case.
 pub trait KayaSum: Clone {
     /// One schema per constructor, indexed by discriminant.
@@ -1332,9 +1332,9 @@ mod tests {
 
     use super::{AppCtx, KayaRecord, KayaSum, Tx};
     use crate::protocol::{Value, ValueType};
-    use kaya_derive::Kaya;
+    use kaya_derive::KayaGen;
 
-    #[derive(Kaya, Clone, Debug, PartialEq)]
+    #[derive(KayaGen, Clone, Debug, PartialEq)]
     struct Todo {
         title: String,
         done: bool,

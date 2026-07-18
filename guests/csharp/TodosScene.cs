@@ -10,6 +10,10 @@
 using System.Collections.Generic;
 
 // The record is the schema.
+// The record is the schema; kaya-csgen reads this declaration and
+// generates TodoKaya: the collection factory, exact-index field
+// tokens, and the named-setter patch.
+[KayaGen]
 record Todo(string Title, bool Done);
 
 static class TodosScene
@@ -25,7 +29,7 @@ static class TodosScene
 
         app.Build(tx =>
         {
-            var todos = tx.CollectionOf<Todo>();
+            var todos = TodoKaya.Collection(tx);
             // The items-left label is a derived signal: the binding
             // recomputes it from the collection after every mutation,
             // so no handler mentions it.
@@ -51,7 +55,7 @@ static class TodosScene
                     {
                         // One field's delta: the title never travels;
                         // the derived signal updates itself.
-                        todos.Patch(t2, keys[0]).Set(x => x.Done, isChecked);
+                        TodoKaya.Patch(t2, todos, keys[0]).Done(isChecked);
                     }),
                     todos.Label(t, x => x.Title)))));
         });

@@ -132,7 +132,9 @@ run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\pyth
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
 for guest in milestone2 entry gallery todos reorder feed; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
-    scp -q "$ROOT/guests/go/$guest/main.go" "$HOST:C:/kaya/guests/go/$guest/"
+    # The whole package, not just main.go: guests with generated sum
+    # surfaces (kaya-gen) carry a checked-in *_kaya.go beside it.
+    scp -q "$ROOT/guests/go/$guest/"*.go "$HOST:C:/kaya/guests/go/$guest/"
 done
 
 if [ "$PROVISION" = 1 ]; then

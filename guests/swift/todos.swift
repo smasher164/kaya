@@ -1,29 +1,16 @@
 // The todos scene from Swift, on the construction sugar: the struct is
-// the schema (Mirror walks a prototype), constructors carry their
-// props and handlers, and result-builder containers make the build
-// closure the scene's shape. The sugar lowers eagerly to the same
-// records as the explicit floor — the C guests keep that style on
-// purpose.
+// the schema — kaya-swift-gen reads this declaration and generates
+// todos+Kaya.swift (the KayaRecord conformance, typed field tokens,
+// and the collection factory) — constructors carry their props and
+// handlers, and result-builder containers make the build closure the
+// scene's shape. The sugar lowers eagerly to the same records as the
+// explicit floor — the C guests keep that style on purpose.
 
 import Foundation
 
-struct Todo: KayaRecord {
+struct Todo: KayaGen {
     var title: String
     var done: Bool
-
-    static let prototype = Todo(title: "", done: false)
-
-    init(title: String, done: Bool) {
-        self.title = title
-        self.done = done
-    }
-
-    init(values: [KayaValue]) {
-        guard case .str(let title) = values[0], case .bool(let done) = values[1] else {
-            preconditionFailure("kaya: Todo fields out of order")
-        }
-        self.init(title: title, done: done)
-    }
 }
 
 let app = KayaApp()
@@ -34,7 +21,7 @@ var draft = ""
 var nextKey = 0
 
 app.build { tx in
-    let todos = tx.collection(of: Todo.self)
+    let todos = todoCollection(tx)
     // The items-left label is a derived signal: the binding recomputes
     // it from the collection after every mutation, so no handler
     // mentions it.

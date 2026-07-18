@@ -47,9 +47,13 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swift/gallery.swift guests/swift/todos.swift guests/swift/reorder.swift guests/swift/feed.swift; do
     cp "$example" "$TMP/main.swift"
+    # A guest with generated sum surfaces (kaya-swift-gen) has a
+    # checked-in <name>+Kaya.swift companion; compile it alongside.
+    companions=$(ls "${example%.swift}"+*.swift 2>/dev/null || true)
+    # shellcheck disable=SC2086
     if ! env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$TMP/main.swift"; then
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift $companions "$TMP/main.swift"; then
         echo "swift-typecheck: FAIL ($example)"
         exit 1
     fi

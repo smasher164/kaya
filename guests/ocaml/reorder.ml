@@ -12,7 +12,7 @@
 open Kaya_wire
 open Kaya_app
 
-type item = { title : string } [@@deriving kaya]
+type item = { title : string } [@@deriving kaya_gen]
 
 let () =
   let app = Kaya_app.create () in

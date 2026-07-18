@@ -8,9 +8,17 @@
 
 import Foundation
 
+/// The generator's marker, the one KayaGen story every language
+/// tells: conform a struct or enum to KayaGen and kaya-swift-gen
+/// reads the declaration — the shape decides record or sum — and
+/// emits the runtime conformance (KayaRecord or KayaSumElement) in a
+/// generated extension, beside the factory and the typed surface.
+/// Nothing is restated: the declaration is the schema.
+protocol KayaGen {}
+
 /// A collection element type. Conform with a prototype (any instance —
 /// Mirror needs one to walk) and init(values:); everything else
-/// derives.
+/// derives. Under KayaGen both members are generated.
 protocol KayaRecord {
     static var prototype: Self { get }
     init(values: [KayaValue])

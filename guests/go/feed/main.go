@@ -25,6 +25,12 @@ func init() {
 }
 
 // Post is the sum: a sealed marker interface over its constructors.
+// kaya-gen reads this declaration — the implementing structs, in
+// declaration order — and emits post_kaya.go: the collection factory
+// (the one spelling of the constructor order) and the compile-total
+// PostEachSum eliminator.
+//
+//go:generate go run dev.kaya/cmd/kaya-gen -type Post -key string
 type Post interface{ isPost() }
 
 type Note struct{ Text string }
@@ -41,7 +47,7 @@ func main() {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		feed := kaya.SumOf[string, Post](tx, Note{}, Todo{})
+		feed := PostCollection(tx)
 		doneCount := feed.Derive(tx, func(items []kaya.RecordEntry[string, Post]) string {
 			n := 0
 			for _, e := range items {
@@ -66,15 +72,16 @@ func main() {
 				}
 			}),
 			tx.Label(doneCount),
-			tx.ForEach(feed.Collection, func(t *kaya.Tpl) {
-				// The head token is the arm's match label; the case
-				// value carries the recorder, so nothing else needs
-				// spelling.
-				feed.Case[Note](t, func(note kaya.SumCase[string, Note]) {
+			// The generated eliminator: one required arm per
+			// constructor, so a missing arm is a missing argument — a
+			// compile error. The literals' parameter types are the arm
+			// labels.
+			PostEachSum(tx, feed,
+				func(note kaya.SumCase[string, Note]) {
 					note.Label(func(n *Note) *string { return &n.Text })
-				})
-				feed.Case[Todo](t, func(todo kaya.SumCase[string, Todo]) {
-					t.Row(
+				},
+				func(todo kaya.SumCase[string, Todo]) {
+					todo.Row(
 						todo.Checkbox(func(td *Todo) *bool { return &td.Done },
 							func(tx *kaya.Tx, key string, checked bool) {
 								// The type switch is the refinement;
@@ -89,8 +96,8 @@ func main() {
 							}),
 						todo.Label(func(td *Todo) *string { return &td.Title }),
 					)
-				})
-			}),
+				},
+			),
 		))
 		for _, ins := range []struct {
 			key  string

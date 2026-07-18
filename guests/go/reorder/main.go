@@ -24,7 +24,11 @@ func init() {
 	runtime.LockOSThread()
 }
 
-// Item is the record type and, by reflection, the schema.
+// Item is the record type and, by reflection, the schema. kaya-gen
+// reads this declaration and emits item_kaya.go with the collection
+// factory.
+//
+//go:generate go run dev.kaya/cmd/kaya-gen -type Item -key string
 type Item struct {
 	Title string
 }
@@ -33,7 +37,7 @@ func main() {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		items := kaya.CollectionOf[string, Item](tx)
+		items := ItemCollection(tx)
 		tx.Mount(tx.Row(
 			tx.Button("rotate", func(tx *kaya.Tx) {
 				// First entry to the end. The model owns the order, so

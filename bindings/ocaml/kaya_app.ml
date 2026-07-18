@@ -441,7 +441,7 @@ let items c tx =
 let count c tx = List.length (items c tx)
 
 (* Records: a first-class descriptor is the schema — the honest floor
-   a future ppx deriver ([@@deriving kaya]) will generate. One
+   a future ppx deriver ([@@deriving kaya_gen]) will generate. One
    descriptor drives the schema, the conversions, and the field tokens,
    so keeping them adjacent is the discipline; the deriver will delete
    even that. *)
@@ -576,7 +576,7 @@ let for_each c body tx =
 let each c body tx = fst (for_each c body tx)
 
 (* Sums: a variant type whose constructors carry inline records. The
-   descriptor is what [@@deriving kaya] emits for such a type — one
+   descriptor is what [@@deriving kaya_gen] emits for such a type — one
    record shape per constructor, the discriminant, both conversions —
    and the generated per-sum eliminator (post_each ~note ~todo) calls
    [each_sum] with its arms; the labelled arguments are required, so

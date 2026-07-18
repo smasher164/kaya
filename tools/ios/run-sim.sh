@@ -463,7 +463,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/todos+Kaya.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -475,7 +475,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/reorder+Kaya.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -487,7 +487,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/feed+Kaya.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \

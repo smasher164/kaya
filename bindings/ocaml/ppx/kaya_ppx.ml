@@ -1,8 +1,8 @@
-(* [@@deriving kaya]: the record declaration is the schema.
+(* [@@deriving kaya_gen]: the record declaration is the schema.
 
    For
 
-     type todo = { title : string; done_ : bool } [@@deriving kaya]
+     type todo = { title : string; done_ : bool } [@@deriving kaya_gen]
 
    this emits the descriptor, one typed field token per field, and the
    patch function — typed field writes with the key spelled once, one
@@ -28,7 +28,7 @@
 
      type post = Note of { text : string }
                | Todo of { title : string; done_ : bool }
-     [@@deriving kaya]
+     [@@deriving kaya_gen]
 
    it derives the sum: the descriptor (post_sum), one typed field token
    per constructor field (post_note_text, post_todo_done_), one refined
@@ -419,8 +419,8 @@ let generate ~ctxt (_rec_flag, type_decls) =
       (descriptor :: tokens) @ patches @ [ eliminator ]
   | _ ->
       Location.raise_errorf ~loc
-        "kaya: [@@deriving kaya] applies to a single record type"
+        "kaya: [@@deriving kaya_gen] applies to a single record type"
 
 let () =
   let impl = Deriving.Generator.V2.make_noarg generate in
-  Deriving.add "kaya" ~str_type_decl:impl |> Deriving.ignore
+  Deriving.add "kaya_gen" ~str_type_decl:impl |> Deriving.ignore

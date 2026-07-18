@@ -11,7 +11,7 @@
 
 use kaya::Occurrence;
 
-#[derive(kaya::Kaya, Clone, Debug, PartialEq)]
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Item {
     title: String,
 }

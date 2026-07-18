@@ -1,6 +1,7 @@
 package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaApp;
+import dev.kaya.KayaGen;
 import dev.kaya.KayaRecords;
 
 import java.util.List;
@@ -17,15 +18,16 @@ import java.util.List;
  * everywhere.
  */
 final class Reorder {
-    /** The record is the schema. */
+    /** The record is the schema; the annotation processor reads it
+     * and generates ItemKaya, the collection factory. */
+    @KayaGen(key = "String")
     record Item(String title) {}
 
     static void app() {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            KayaRecords.Collection<String, Item> items =
-                    KayaRecords.collectionOf(tx, Item.class);
+            var items = ItemKaya.collection(tx);
 
             tx.mount(tx.row(
                     tx.button("rotate", t -> {

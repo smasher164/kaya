@@ -15,7 +15,7 @@
 
 use kaya::Occurrence;
 
-#[derive(kaya::Kaya, Clone, Debug, PartialEq)]
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 enum Post {
     Note { text: String },
     Todo { title: String, done: bool },

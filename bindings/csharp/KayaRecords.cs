@@ -217,6 +217,13 @@ sealed class RecordPatch<T>
         c.UpdateField(tx, key, selector, value);
         return this;
     }
+
+    /// Writes the field a pre-resolved token names; chainable.
+    public RecordPatch<T> Set<V>(Field<V> f, V value)
+    {
+        c.UpdateField(tx, key, f, value);
+        return this;
+    }
 }
 
 static class KayaRecords
@@ -233,6 +240,12 @@ static class KayaRecords
     /// FieldOf((Todo t) => t.Done). The name and type are the record's
     /// own, compiler-checked — no strings restating the declaration
     /// (the EF Core shape).
+    /// The field token at a known wire index, for generated code only
+    /// (kaya-csgen computes indices from the record declaration;
+    /// hand-written code should use the checked FieldOf instead — a
+    /// hand-minted index is unchecked).
+    public static Field<V> FieldAt<V>(uint index) => new Field<V>(index);
+
     public static Field<V> FieldOf<T, V>(Expression<Func<T, V>> selector)
     {
         if (selector.Body is not MemberExpression member)

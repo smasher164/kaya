@@ -15,7 +15,10 @@ using System.Linq;
 namespace Feed;
 
 // The abstract record is the sum; the derived records its
-// constructors, each one's primary constructor its schema.
+// constructors, each one's primary constructor its schema. kaya-csgen
+// reads this declaration and generates PostKaya: the collection
+// factory and the compile-total EachSum eliminator.
+[KayaGen]
 abstract record Post;
 record Note(string Text) : Post;
 record Todo(string Title, bool Done) : Post;
@@ -28,7 +31,7 @@ static class FeedScene
 
         app.Build(tx =>
         {
-            var feed = tx.SumOf<Post>(typeof(Note), typeof(Todo));
+            var feed = PostKaya.Collection(tx);
             var doneCount = feed.Derive(tx, items =>
                 $"{items.Count(e => e.Value is Todo { Done: true })} done");
 
@@ -49,12 +52,15 @@ static class FeedScene
                     }
                 }),
                 tx.Label(bind: doneCount),
-                tx.EachSum(feed,
-                    feed.Arm<Note>((t, note) =>
+                // The generated eliminator: one required delegate per
+                // constructor, so a missing arm is a missing argument
+                // — a compile error. The names are named arguments.
+                PostKaya.EachSum(tx, feed,
+                    note: (t, note) =>
                     {
                         note.Label(t, x => x.Text);
-                    }),
-                    feed.Arm<Todo>((t, todo) => t.Row(
+                    },
+                    todo: (t, todo) => t.Row(
                         todo.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
                         {
                             // The pattern match is the refinement;
@@ -63,7 +69,7 @@ static class FeedScene
                             if (feed.Get(t2, keys[0]) is Todo)
                                 feed.UpdateField<Todo, bool>(t2, keys[0], x => x.Done, isChecked);
                         }),
-                        todo.Label(t, x => x.Title))))));
+                        todo.Label(t, x => x.Title)))));
 
             feed.Insert(tx, "a", new Note("jot one"));
             feed.Insert(tx, "b", new Todo("buy milk", false));

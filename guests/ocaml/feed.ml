@@ -1,5 +1,5 @@
 (* The feed scene from OCaml: sum-typed elements, end to end. The
-   variant declaration is the sum ([@@deriving kaya] over constructors
+   variant declaration is the sum ([@@deriving kaya_gen] over constructors
    carrying inline records); the generated post_each eliminator takes
    one REQUIRED labelled arm per constructor — template totality is a
    compile error here, and the scene checks it again. Handlers
@@ -15,7 +15,7 @@ open Kaya_app
 type post =
   | Note of { text : string }
   | Todo of { title : string; done_ : bool }
-[@@deriving kaya]
+[@@deriving kaya_gen]
 
 let () =
   let app = Kaya_app.create () in

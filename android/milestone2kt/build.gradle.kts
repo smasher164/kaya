@@ -27,6 +27,16 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    sourceSets {
+        getByName("main") {
+            // The scene guests live in guests/java, beside the other
+            // languages' guests (the same out-of-tree srcDirs the :kaya
+            // module uses for bindings/java); MainActivity stays here —
+            // it is the app shell, not a scene.
+            java.srcDirs("src/main/java", "../../guests/java")
+        }
+    }
 }
 
 // KayaRecords reflects the canonical constructor when record metadata

@@ -1,6 +1,7 @@
 package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaApp;
+import dev.kaya.KayaGen;
 import dev.kaya.KayaRecords;
 
 /**
@@ -12,7 +13,10 @@ import dev.kaya.KayaRecords;
  * on purpose.
  */
 final class Todos {
-    /** The record is the schema. */
+    /** The record is the schema; the annotation processor reads it
+     * and generates TodoKaya: the collection factory, exact-index
+     * field tokens, and the named-setter patch. */
+    @KayaGen(key = "String")
     record Todo(String title, boolean done) {}
 
     // The fold: widget-owned state arrives as occurrences; the app's
@@ -34,8 +38,7 @@ final class Todos {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            KayaRecords.Collection<String, Todo> todos =
-                    KayaRecords.collectionOf(tx, Todo.class);
+            var todos = TodoKaya.collection(tx);
             // The items-left label is a derived signal: the binding
             // recomputes it from the collection after every mutation,
             // so no handler mentions it.
@@ -51,10 +54,11 @@ final class Todos {
                     tx.forEach(todos.handle, t -> {
                         t.row(
                                 todos.checkbox(t, Todo::done, (t2, key, checked) -> {
-                                    // One field's delta: the title never
-                                    // travels; the derived signal updates
-                                    // itself.
-                                    todos.patch(t2, key).set(Todo::done, checked);
+                                    // One field's delta through the
+                                    // generated named setter: the title
+                                    // never travels; the derived signal
+                                    // updates itself.
+                                    TodoKaya.patch(t2, todos, key).done(checked);
                                 }),
                                 todos.label(t, Todo::title));
                     })));

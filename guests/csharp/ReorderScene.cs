@@ -11,6 +11,9 @@
 //         dotnet run --project guests/csharp
 
 // The record is the schema.
+// The record is the schema; kaya-csgen reads this declaration and
+// generates ItemKaya, the collection factory.
+[KayaGen]
 record Item(string Title);
 
 static class ReorderScene
@@ -21,7 +24,7 @@ static class ReorderScene
 
         app.Build(tx =>
         {
-            var items = tx.CollectionOf<Item>();
+            var items = ItemKaya.Collection(tx);
             tx.Mount(tx.Row(
                 tx.Button("rotate", t =>
                 {

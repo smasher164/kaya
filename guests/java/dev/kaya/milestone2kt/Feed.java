@@ -1,8 +1,8 @@
 package dev.kaya.milestone2kt;
 
+import dev.kaya.KayaGen;
 import dev.kaya.KayaApp;
 import dev.kaya.KayaRecords;
-import dev.kaya.KayaSums;
 
 /**
  * The feed scene from the JVM: sum-typed elements, end to end. The
@@ -14,7 +14,10 @@ import dev.kaya.KayaSums;
  * occurrence folds into nothing.
  */
 final class Feed {
-    /** The sealed interface is the sum; the records its constructors. */
+    /** The sealed interface is the sum; the records its constructors.
+     * The annotation processor reads this declaration and generates
+     * PostKaya: the collection factory and the staged eliminator. */
+    @KayaGen(key = "String")
     sealed interface Post permits Note, Todo {}
 
     record Note(String text) implements Post {}
@@ -25,8 +28,7 @@ final class Feed {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            KayaSums.SumCollection<String, Post> feed =
-                    KayaSums.sumOf(tx, Post.class, Note.class, Todo.class);
+            var feed = PostKaya.collection(tx);
             KayaApp.Signal<String> doneCount = feed.derive(tx, items -> {
                 int n = 0;
                 for (KayaRecords.Entry<String, Post> entry : items) {
@@ -51,11 +53,15 @@ final class Feed {
                         }
                     }),
                     tx.label(doneCount),
-                    KayaSums.eachSum(tx, feed,
-                            feed.arm(Note.class, (t, note) -> {
+                    // The generated staged eliminator: each stage
+                    // offers exactly the next constructor's arm, so a
+                    // missing arm is a missing method — a compile
+                    // error.
+                    PostKaya.eachSum(tx, feed)
+                            .note((t, note) -> {
                                 note.label(t, Note::text);
-                            }),
-                            feed.arm(Todo.class, (t, todo) -> {
+                            })
+                            .todo((t, todo) -> {
                                 t.row(
                                         todo.checkbox(t, Todo::done,
                                                 (KayaApp.Tx t2, String key, boolean checked) -> {
@@ -67,7 +73,7 @@ final class Feed {
                                                     }
                                                 }),
                                         todo.label(t, Todo::title));
-                            }))));
+                            })));
 
             feed.insert(tx, "a", new Note("jot one"));
             feed.insert(tx, "b", new Todo("buy milk", false));

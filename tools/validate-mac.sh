@@ -41,6 +41,7 @@ cargo build --lib --example milestone2 --example entry \
     --example gallery --example todos --example reorder --example feed || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
+tools/gen-guests.sh --check || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
 # (records queue; the core is never entered).
 python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks: FAIL"; exit 1; }

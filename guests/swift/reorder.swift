@@ -9,27 +9,17 @@
 
 import Foundation
 
-struct Item: KayaRecord {
+// The struct is the schema; kaya-swift-gen reads this declaration and
+// generates reorder+Kaya.swift: the KayaRecord conformance and the
+// collection factory.
+struct Item: KayaGen {
     var title: String
-
-    static let prototype = Item(title: "")
-
-    init(title: String) {
-        self.title = title
-    }
-
-    init(values: [KayaValue]) {
-        guard case .str(let title) = values[0] else {
-            preconditionFailure("kaya: Item fields out of order")
-        }
-        self.init(title: title)
-    }
 }
 
 let app = KayaApp()
 
 app.build { tx in
-    let items = tx.collection(of: Item.self)
+    let items = itemCollection(tx)
     let root = tx.row {
         tx.button("rotate") { tx in
             // First entry to the end. The model owns the order, so the

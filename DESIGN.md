@@ -1047,7 +1047,7 @@ feature rather than reconstructed per backend afterward.
   the record on the wire; lifting a named field to the key
   (`collection(key="id")`) is binding sugar at insert time. Guest-side,
   the language's own record declaration is the single source of truth:
-  a Python dataclass, a Rust #[derive(Kaya)] struct, a Haskell Generic
+  a Python dataclass, a Rust #[derive(KayaGen)] struct, a Haskell Generic
   deriving, an OCaml ppx, a C#/Java record class, a Go tagged struct, a
   Swift prototype — the binding derives the wire schema, the
   conversions, and a set of field tokens from that one declaration, so
@@ -1101,7 +1101,7 @@ feature rather than reconstructed per backend afterward.
   union) remain future — that is the feature that would finally summon
   Value::Record; element-level sums encode flat behind their tag.
   Guest-side, the language's own sum is the declaration — a Rust enum
-  under #[derive(Kaya)] (shape decides product or sum, like
+  under #[derive(KayaGen)] (shape decides product or sum, like
   derive(Debug)), a sealed interface of records in Java, an abstract
   record family in C#, an OCaml variant, a Haskell sum via Generic, a
   Swift enum with associated values, a Python union of dataclasses, a
@@ -1118,27 +1118,50 @@ feature rather than reconstructed per backend afterward.
   the gap they leave: each call is a single-variant handler, and only
   the runtime assembles them into a total match. The convergence
   target, per language: the named, completeness-checked record of arms
-  wherever the language's metaprogramming can mint one — Rust's derive
-  and OCaml's ppx are there today — with the typed-token arms product
-  (C# `Arm<Note>(…)`, Java `arm(Note.class, …)`, Go `Case[Note]`,
-  Swift/Haskell prototype tokens) as the interim form, checked
-  complete at declaration, never later. The upgrade paths exist per
-  ecosystem precedent: a Java annotation processor generating a staged
-  builder (the Immutables idiom for named-and-required; Derive4J
-  already generates ADT eliminators this way) plus exact-index field
-  tokens that retire the reflection tier and its D8 fallback; a C#
-  source generator (dunet generates compile-total Match for unions); a
-  Swift attached macro (the CasePaths shape) giving a memberwise cases
-  struct and case tokens in place of prototype values. Go's ceiling is
+  wherever the language's metaprogramming can mint one. The marker is
+  ONE NAME in every language that has one — KayaGen — and the marked
+  declaration's shape decides what derives: a product type is a record
+  (factory, typed field tokens, a named-setter patch), a sum type is a
+  sum (factory plus the compile-total eliminator). Rust
+  (`#[derive(KayaGen)]`) and OCaml (`[@@deriving kaya_gen]`) derive
+  natively at compile time; four generators cover the rest, each
+  reading the guest's own declaration (the type is the schema; nothing
+  is restated) and emitting a checked-in file that tools/gen-guests.sh
+  regenerates and holds fresh in the gates. Go's ceiling is
   structural: struct literals are open — an omitted field is a nil
-  func, not an error — so its compile-total form is a go:generate'd
-  function with one parameter per constructor; until then its head
-  token `Case[Note]` is the arm's match label, kept deliberately, and
-  the case value carries the template recorder because Go literals
-  cannot infer their parameter types. (TypeScript's ts-pattern marks
-  the no-codegen ceiling — type-level union subtraction down to
-  `never` — which none of these type systems can express;
-  declaration-time checking is the honest floor without codegen.)
+  func, not an error — so its compile-total form is what cmd/kaya-gen
+  (a `//go:generate … kaya-gen -type T` directive, the stringer
+  tradition; interface = sum, struct = record) emits: a positional
+  function with one parameter per constructor, every argument
+  required, the literals' parameter types standing as the arm labels.
+  Java's annotation processor (tools/java-processor, on `@KayaGen`;
+  sealed interface = sum, record = record) generates the staged
+  builder — the Immutables idiom for named-and-required; Derive4J
+  generates ADT eliminators the same way — where each stage's return
+  type offers exactly the next constructor's arm and only the final
+  arm yields the widget; records get exact-index field tokens and the
+  named-setter patch. C#'s generator (tools/kaya-csgen, Roslyn syntax
+  trees over `[KayaGen]` records — abstract = sum, plain = record — a
+  standalone CLI rather than an in-build analyzer, so guests stay
+  NuGet-free and the VM build compiles plain sources; dunet is the
+  in-build precedent) emits an eliminator with one required delegate
+  parameter per constructor, named arguments at the call site, and the
+  same record surface. Swift's (tools/kaya-swift-gen, swift-syntax
+  over `: KayaGen` conformances — an empty marker protocol; enum =
+  sum, struct = record — the CasePaths shape, as a CLI rather than a
+  macro so guests stay bare swiftc) emits the runtime conformance in a
+  generated extension (KayaSumElement's prototypes and
+  init(variant:values:), KayaRecord's prototype and init(values:) —
+  nothing hand-written), typed field tokens in place of label strings,
+  and an eliminator with one required labeled parameter per
+  constructor. The typed-token arms product (`Arm<Note>(…)`,
+  `arm(Note.class, …)`, prototype tokens) remains the floor the
+  generated surfaces compile down to, still checked complete at
+  declaration, never later. (TypeScript's
+  ts-pattern marks the no-codegen ceiling — type-level union
+  subtraction down to `never` — which none of these type systems can
+  express; declaration-time checking is the honest floor without
+  codegen.)
   Mutation is
   match-refined: a field write on a sum is reachable only through a
   case analysis of the model's current entry, whose arm hands back a

@@ -137,6 +137,27 @@ struct KayaSumCollection<T: KayaSumElement> {
             UInt32(index), value)
     }
 
+    /// The witnessed field write, token form: the generated field
+    /// tokens (kaya-swift-gen) carry the index and the wire type, so
+    /// nothing resolves by label at run time.
+    func updateField<F>(
+        _ tx: KayaAppTx, _ key: KayaValue, of prototype: T, _ field: KayaField<F>,
+        _ value: KayaValue
+    ) {
+        let variant = prototype.kayaVariant
+        guard let current = get(tx, key) else {
+            preconditionFailure("kaya: update of missing key \(key)")
+        }
+        precondition(
+            current.kayaVariant == variant,
+            "kaya: update_field witnessed \(prototype.kayaCaseName) but \(key) holds \(current.kayaCaseName)")
+        var fields = current.kayaSumValues
+        fields[Int(field.index)] = value
+        tx.updateFieldRaw(
+            collection, key, T(variant: variant, values: fields), variant,
+            field.index, value)
+    }
+
     /// The collection-derived signal, over the sum's entries.
     func derive(
         _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
