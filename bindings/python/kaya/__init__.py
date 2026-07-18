@@ -51,8 +51,8 @@ import operator
 import threading
 import types
 
-import kaya
-import kaya_wire as wire
+from . import runtime
+from . import wire
 
 # The wire-representable field types; a dataclass field of any other
 # type (a handler, say) is guest-only: it lives in the model and never
@@ -1012,7 +1012,7 @@ class _TxScope:
                 raise RuntimeError("kaya: window() body declared no root container")
             records.append(wire.tx_mount(0, _pending_root.id))
         if records:
-            kaya.submit(*records)
+            runtime.submit(*records)
         return False
 
 
@@ -1048,7 +1048,7 @@ class App:
         return _TxScope(self, mount_on_exit=False)
 
     def _dispatch_loop(self):
-        while occurrence := kaya.next_occurrence():
+        while occurrence := runtime.next_occurrence():
             kind, ident, keys, payload = occurrence
             if keys:
                 handler = self._node_handlers.get((kind, ident))
@@ -1068,6 +1068,6 @@ class App:
         the exit code."""
         app_thread = threading.Thread(target=self._dispatch_loop)
         app_thread.start()
-        code = kaya.run()
+        code = runtime.run()
         app_thread.join()
         return code

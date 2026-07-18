@@ -16,17 +16,10 @@ Build the library first (cargo build), then:
     KAYA_SELFTEST=reorder python3 guests/python/reorder.py
 """
 
-import pathlib
 import sys
 from dataclasses import dataclass
 
-_here = pathlib.Path(__file__).resolve().parent
-for _base in [_here, *_here.parents]:
-    if (_base / "bindings" / "python").is_dir():
-        sys.path.insert(0, str(_base / "bindings" / "python"))
-        break
-
-import kaya_app as kaya
+import kaya
 
 
 @dataclass

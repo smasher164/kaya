@@ -30,6 +30,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
+export PYTHONPATH="$ROOT/bindings/python"
 
 CS_GUEST="${CS_GUEST:-guests/csharp/bin/Debug/net10.0/kaya-guests.dll}"
 

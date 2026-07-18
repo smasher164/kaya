@@ -191,7 +191,11 @@ scp -q \
 # sources and project files are in the directory, so a leftover from a
 # renamed or removed example would poison the build.
 run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
-scp -q "$ROOT"/bindings/python/*.py "$HOST:C:/kaya/bindings/python/"
+# Recreated from scratch every deploy: a stale flat-module layout
+# (kaya_app.py) beside the kaya/ package would be a second import
+# mechanism.
+run_ssh 'cmd /c "if exist C:\kaya\bindings\python rmdir /s /q C:\kaya\bindings\python & mkdir C:\kaya\bindings\python"'
+scp -q -r "$ROOT"/bindings/python/kaya "$HOST:C:/kaya/bindings/python/"
 scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
 scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
     "$ROOT"/bindings/csharp/*.cs \

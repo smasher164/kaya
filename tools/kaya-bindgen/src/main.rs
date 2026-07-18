@@ -45,7 +45,7 @@ fn main() {
     validate_identifiers(&SPEC, "swift", swift::RESERVED);
 
     let outputs: Vec<(&str, String)> = vec![
-        ("bindings/python/kaya_wire.py", python::emit(&SPEC)),
+        ("bindings/python/kaya/wire.py", python::emit(&SPEC)),
         ("bindings/c/kaya_wire.h", c::emit(&SPEC)),
         ("bindings/go/kaya_wire.go", go::emit(&SPEC)),
         ("bindings/csharp/KayaWire.cs", csharp::emit(&SPEC)),

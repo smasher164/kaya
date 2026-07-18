@@ -4,12 +4,9 @@ and batch, and removing a parent entry purges descendant instance
 mirrors. Runs against the real bindings; the core is never entered
 (records queue, the process exits)."""
 
-import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-
-import kaya_app as kaya
+import kaya
 
 app = kaya.App()
 failures = []

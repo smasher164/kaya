@@ -6,17 +6,10 @@ any machine that runs the suites, so only a structural regression (per-
 record reflection, tree building) can trip it.
 """
 
-import pathlib
 import sys
 import time
 
-_here = pathlib.Path(__file__).resolve().parent
-for _base in [_here, *_here.parents]:
-    if (_base / "bindings" / "python").is_dir():
-        sys.path.insert(0, str(_base / "bindings" / "python"))
-        break
-
-import kaya_wire as wire
+from kaya import wire
 
 N = 200_000
 FLOOR = 20_000  # records/second

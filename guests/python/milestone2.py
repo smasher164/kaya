@@ -12,16 +12,9 @@ Build the library first (cargo build), then:
     KAYA_SELFTEST=1 python3 crates/kaya/examples/milestone2.py
 """
 
-import pathlib
 import sys
 
-_here = pathlib.Path(__file__).resolve().parent
-for _base in [_here, *_here.parents]:
-    if (_base / "bindings" / "python").is_dir():
-        sys.path.insert(0, str(_base / "bindings" / "python"))
-        break
-
-import kaya_app as kaya
+import kaya
 
 app = kaya.App()
 

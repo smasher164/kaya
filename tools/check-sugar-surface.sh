@@ -31,7 +31,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-kinds=$(grep -oE '^KIND_[A-Z_]+' bindings/python/kaya_wire.py | sed 's/^KIND_//' | tr '[:upper:]' '[:lower:]')
+kinds=$(grep -oE '^KIND_[A-Z_]+' bindings/python/kaya/wire.py | sed 's/^KIND_//' | tr '[:upper:]' '[:lower:]')
 [ -n "$kinds" ] || { echo "check-sugar-surface: no kinds found in the generated wire file"; exit 1; }
 
 status=0
@@ -49,7 +49,7 @@ check_kind() {
     local pascal
     pascal="$(tr '[:lower:]' '[:upper:]' <<<"${kind:0:1}")${kind:1}"
     check rust    crates/kaya/src/app.rs               "$kind" "pub fn ${kind}[a-z_]*(<[^>]*>)?\("
-    check python  bindings/python/kaya_app.py          "$kind" "^def ${kind}[a-z_]*\("
+    check python  bindings/python/kaya/__init__.py          "$kind" "^def ${kind}[a-z_]*\("
     check go      bindings/go/app.go                   "$kind" "func \(tx \*Tx\) ${pascal}[A-Za-z]*\("
     check csharp  bindings/csharp/KayaApp.cs           "$kind" "public Widget ${pascal}[A-Za-z]*\("
     check java    bindings/java/dev/kaya/KayaApp.java  "$kind" "public Widget ${kind}[A-Za-z]*\("

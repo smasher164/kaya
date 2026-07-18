@@ -23,6 +23,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
+# The one Python import mechanism: the kaya package resolves from
+# here (the guests' sys.path shims are gone).
+export PYTHONPATH="$ROOT/bindings/python"
 
 # Phase timing: greppable "TIMING <phase> <n>s" lines say where a
 # run's wall time went — build, legs, or capture — so the dev loop's

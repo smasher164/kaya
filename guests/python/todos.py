@@ -12,20 +12,13 @@ Add, toggles the stamped row's checkbox, and expects the status label
 to read exactly "0 items left".
 
 Build the library first (cargo build), then:
-    KAYA_SELFTEST=todos python3 crates/kaya/examples/todos.py
+    KAYA_SELFTEST=todos python3 guests/python/todos.py
 """
 
-import pathlib
 import sys
 from dataclasses import dataclass
 
-_here = pathlib.Path(__file__).resolve().parent
-for _base in [_here, *_here.parents]:
-    if (_base / "bindings" / "python").is_dir():
-        sys.path.insert(0, str(_base / "bindings" / "python"))
-        break
-
-import kaya_app as kaya
+import kaya
 
 
 @dataclass

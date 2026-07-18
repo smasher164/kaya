@@ -8,6 +8,9 @@ set -uo pipefail
 
 cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
+# The one Python import mechanism: the kaya package resolves from
+# here (the guests' sys.path shims are gone).
+export PYTHONPATH=/work/bindings/python
 # Dune resolves external libraries through OCAMLPATH, which only opam
 # env provides — the image's bare PATH export is enough for ocamlfind
 # (its config is baked in) but not for dune.
