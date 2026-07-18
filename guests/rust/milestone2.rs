@@ -23,35 +23,41 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let status = tx.signal("step 0");
     let extras = tx.signal(false);
 
-    let step = tx.button("step");
-    let status_label = tx.label(status);
-
-    let (banner, ()) = tx.when(extras, |t| {
-        let label = t.widget(WidgetKind::Label);
-        t.set(label, Prop::Text, "extras on");
-    });
-
-    // Handles declared inside a template escape as the body's return
-    // value — no side-channel slots.
+    // Auto-parenting puts the templates where they stand: the When
+    // and the For are declared inside the column, between their
+    // siblings, and parent themselves there. Handles declared inside a
+    // template escape as the body's return value — no side-channel
+    // slots.
     let groups = tx.collection::<String>();
-    let (group_list, (items, remove_button)) = tx.for_each(&groups, |t| {
-        let name = t.widget(WidgetKind::Label);
-        t.bind_element(name, Prop::Text, 0);
-
-        let items = t.collection::<String>();
-        let (item_list, remove) = t.for_each(&items, |t| {
-            let text = t.widget(WidgetKind::Label);
-            t.bind_element(text, Prop::Text, 0);
-            let remove = t.widget(WidgetKind::Button);
-            t.set(remove, Prop::Text, "remove");
-            t.column(&[text, remove]);
-            remove
+    let (root, (step, items, remove_button)) = tx.column(|tx| {
+        let step = tx.button("step");
+        tx.label(status);
+        tx.when(extras, |t| {
+            let label = t.widget(WidgetKind::Label);
+            t.set(label, Prop::Text, "extras on");
         });
-        t.column(&[name, item_list]);
-        (items, remove)
-    });
+        let (_, (items, remove)) = tx.for_each(&groups, |t| {
+            let (_, out) = t.column(|t| {
+                let name = t.widget(WidgetKind::Label);
+                t.bind_element(name, Prop::Text, 0);
 
-    let root = tx.column(&[step, status_label, banner, group_list]);
+                let items = t.collection::<String>();
+                let (_, remove) = t.for_each(&items, |t| {
+                    let (_, remove) = t.column(|t| {
+                        let text = t.widget(WidgetKind::Label);
+                        t.bind_element(text, Prop::Text, 0);
+                        let remove = t.widget(WidgetKind::Button);
+                        t.set(remove, Prop::Text, "remove");
+                        remove
+                    });
+                    remove
+                });
+                (items, remove)
+            });
+            out
+        });
+        (step, items, remove)
+    });
     tx.mount(root);
     tx.commit();
 

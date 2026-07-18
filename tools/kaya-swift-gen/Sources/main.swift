@@ -386,7 +386,12 @@ for path in arguments {
     out += "// Regenerate with tools/gen-guests.sh (which also checks freshness).\n\n"
     out += collector.decls.map(generate).joined(separator: "\n")
     let outPath = String(path.dropLast(".swift".count)) + "+Kaya.swift"
-    try! out.write(toFile: outPath, atomically: true, encoding: .utf8)
+    // Write only on change: regeneration is idempotent AND
+    // mtime-stable, so a gen run never invalidates a concurrent build
+    // reading the checked-in file.
+    if (try? String(contentsOfFile: outPath, encoding: .utf8)) != out {
+        try! out.write(toFile: outPath, atomically: true, encoding: .utf8)
+    }
     let names = collector.decls.map(\.name).joined(separator: ", ")
     print("kaya-swift-gen: wrote \(outPath) (\(names))")
 }

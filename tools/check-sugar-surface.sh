@@ -48,7 +48,7 @@ check_kind() {
     local kind="$1"
     local pascal
     pascal="$(tr '[:lower:]' '[:upper:]' <<<"${kind:0:1}")${kind:1}"
-    check rust    crates/kaya/src/app.rs               "$kind" "pub fn ${kind}[a-z_]*\("
+    check rust    crates/kaya/src/app.rs               "$kind" "pub fn ${kind}[a-z_]*(<[^>]*>)?\("
     check python  bindings/python/kaya_app.py          "$kind" "^def ${kind}[a-z_]*\("
     check go      bindings/go/app.go                   "$kind" "func \(tx \*Tx\) ${pascal}[A-Za-z]*\("
     check csharp  bindings/csharp/KayaApp.cs           "$kind" "public Widget ${pascal}[A-Za-z]*\("

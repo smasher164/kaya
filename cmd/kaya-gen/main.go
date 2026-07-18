@@ -125,8 +125,13 @@ func main() {
 		fatal("kaya-gen: generated code does not format: %v", err)
 	}
 	path := filepath.Join(pkgDir, strings.ToLower(*typ)+"_kaya.go")
-	if err := os.WriteFile(path, out, 0o644); err != nil {
-		fatal("kaya-gen: %v", err)
+	// Write only on change: regeneration is idempotent AND
+	// mtime-stable, so a gen run never invalidates a concurrent
+	// build reading the checked-in file.
+	if existing, err := os.ReadFile(path); err != nil || !bytes.Equal(existing, out) {
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			fatal("kaya-gen: %v", err)
+		}
 	}
 	fmt.Printf("kaya-gen: wrote %s (%d %s of %s)\n", path, count, what, *typ)
 }

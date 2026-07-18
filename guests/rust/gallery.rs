@@ -19,14 +19,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let status = tx.signal("urgent: false");
     let volume_text = tx.signal("volume: 50%");
 
-    let urgent = tx.checkbox("urgent");
-    let status_label = tx.label(status);
-    let volume = tx.slider(0.0, 1.0, 0.5);
-    let volume_label = tx.label(volume_text);
-
-    let status_row = tx.row(&[urgent, status_label]);
-    let volume_row = tx.row(&[volume, volume_label]);
-    let root = tx.column(&[status_row, volume_row]);
+    let (root, (urgent, volume)) = tx.column(|tx| {
+        let (_, urgent) = tx.row(|tx| {
+            let urgent = tx.checkbox("urgent");
+            tx.label(status);
+            urgent
+        });
+        let (_, volume) = tx.row(|tx| {
+            let volume = tx.slider(0.0, 1.0, 0.5);
+            tx.label(volume_text);
+            volume
+        });
+        (urgent, volume)
+    });
     tx.mount(root);
     tx.commit();
 

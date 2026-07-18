@@ -207,8 +207,13 @@ public final class KayaProcessor extends AbstractProcessor {
 
         Path path = Path.of(out, pkg.replace('.', '/'), simple + "Kaya.java");
         Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            writer.write(b.toString());
+        // Write only on change: regeneration is idempotent AND
+        // mtime-stable, so a gen run never invalidates a concurrent
+        // build reading the checked-in file.
+        if (!Files.exists(path) || !Files.readString(path).equals(b.toString())) {
+            try (Writer writer = Files.newBufferedWriter(path)) {
+                writer.write(b.toString());
+            }
         }
         processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE,
                 "kaya: wrote " + path + " (" + permitted.size() + " constructors of "
@@ -357,8 +362,13 @@ public final class KayaProcessor extends AbstractProcessor {
 
         Path path = Path.of(out, pkg.replace('.', '/'), simple + "Kaya.java");
         Files.createDirectories(path.getParent());
-        try (Writer writer = Files.newBufferedWriter(path)) {
-            writer.write(b.toString());
+        // Write only on change: regeneration is idempotent AND
+        // mtime-stable, so a gen run never invalidates a concurrent
+        // build reading the checked-in file.
+        if (!Files.exists(path) || !Files.readString(path).equals(b.toString())) {
+            try (Writer writer = Files.newBufferedWriter(path)) {
+                writer.write(b.toString());
+            }
         }
         processingEnv.getMessager().printMessage(Diagnostic.Kind.NOTE,
                 "kaya: wrote " + path + " (" + fields.size() + " fields of " + simple + ")");

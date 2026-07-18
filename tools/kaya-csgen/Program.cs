@@ -72,7 +72,7 @@ static class Program
                             $"kaya-csgen: [KayaGen] {name} needs two derived records or more");
                         return 1;
                     }
-                    File.WriteAllText(outPath, GenerateSum(ns, name, ctors));
+                    WriteIfChanged(outPath, GenerateSum(ns, name, ctors));
                     Console.WriteLine(
                         $"kaya-csgen: wrote {outPath} ({ctors.Count} constructors of {name})");
                 }
@@ -90,7 +90,7 @@ static class Program
                             $"kaya-csgen: [KayaGen] {name} has no wire-typed parameters");
                         return 1;
                     }
-                    File.WriteAllText(outPath, GenerateRecord(ns, name, fields));
+                    WriteIfChanged(outPath, GenerateRecord(ns, name, fields));
                     Console.WriteLine(
                         $"kaya-csgen: wrote {outPath} ({fields.Count} fields of {name})");
                 }
@@ -311,6 +311,15 @@ static class Program
         }
         b.AppendLine("}");
         return b.ToString();
+    }
+
+    // Write only on change: regeneration is idempotent AND
+    // mtime-stable, so a gen run never invalidates a concurrent build
+    // reading the checked-in file.
+    static void WriteIfChanged(string path, string content)
+    {
+        if (!File.Exists(path) || File.ReadAllText(path) != content)
+            File.WriteAllText(path, content);
     }
 
     static string Lower(string s) => char.ToLowerInvariant(s[0]) + s.Substring(1);

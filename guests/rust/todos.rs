@@ -31,16 +31,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         if n == 1 { "1 item left".to_string() } else { format!("{n} items left") }
     });
 
-    let field = tx.entry();
-    let add = tx.button("Add");
-    let status = tx.label(items_left);
-    let (todo_list, check) = tx.for_each(&todos, |t| {
-        let check = t.checkbox(Todo::done());
-        let title = t.label(Todo::title());
-        t.row(&[check, title]);
-        check
+    let (root, (field, add, check)) = tx.column(|tx| {
+        let field = tx.entry();
+        let add = tx.button("Add");
+        tx.label(items_left);
+        // The tracing tier: the for statement IS the For — the body
+        // runs once, authoring the blueprint, and the row's Drop
+        // closes the template (break- and panic-safe; while the row
+        // lives, the transaction is reachable only through it).
+        let mut check = None;
+        for mut row in todos.rows(tx) {
+            let (_, c) = row.row(|t| {
+                let c = t.checkbox(Todo::done());
+                t.label(Todo::title());
+                c
+            });
+            check = Some(c);
+        }
+        (field, add, check.expect("rows yields one row"))
     });
-    let root = tx.column(&[field, add, status, todo_list]);
     tx.mount(root);
     tx.commit();
 

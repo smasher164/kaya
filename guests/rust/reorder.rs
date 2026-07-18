@@ -19,16 +19,18 @@ struct Item {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let mut tx = ctx.begin();
     let items = tx.collection::<Item>();
-    let rotate = tx.button("rotate");
-    let lift = tx.button("lift");
-    let (list, ()) = tx.for_each(&items, |t| {
-        t.label(Item::title());
-    });
     // The root is a row so the For's container is the scene's only
-    // column-kind widget: guests differ in whether containers are
-    // created before or after their children (call-time vs close-time),
-    // and column#0 must name the same widget in every language.
-    let root = tx.row(&[rotate, lift, list]);
+    // column-kind widget: statement-shaped construction is
+    // parent-first, expression trees are children-first, and column#0
+    // must name the same widget in every language.
+    let (root, (rotate, lift)) = tx.row(|tx| {
+        let rotate = tx.button("rotate");
+        let lift = tx.button("lift");
+        for mut row in items.rows(tx) {
+            row.label(Item::title());
+        }
+        (rotate, lift)
+    });
     tx.mount(root);
     for key in ["a", "b", "c"] {
         tx.insert(&items, key, Item { title: key.to_string() });

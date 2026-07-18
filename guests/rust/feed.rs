@@ -32,27 +32,31 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         format!("{n} done")
     });
 
-    let promote = tx.button("promote");
-    let status = tx.label(done_count);
-    // The eliminator as a record of arms: one field per constructor,
-    // so a missing arm is a missing field — totality at compile time,
-    // the same way a match holds its arms. Each arm's handles come
-    // back in the matching field of the out record.
-    let (list, arms) = tx.for_each_sum(&feed, PostCases {
-        note: |t: &mut kaya::Tpl| {
-            t.label(Post::note_text());
-        },
-        todo: |t: &mut kaya::Tpl| {
-            let c = t.checkbox(Post::todo_done());
-            let title = t.label(Post::todo_title());
-            t.row(&[c, title]);
-            c
-        },
-    });
-    let check = arms.todo;
     // The root is a row so the For's container stays the scene's only
     // column-kind widget (the reorder scene's lesson).
-    let root = tx.row(&[promote, status, list]);
+    let (root, (promote, check)) = tx.row(|tx| {
+        let promote = tx.button("promote");
+        tx.label(done_count);
+        // The eliminator as a record of arms: one field per
+        // constructor, so a missing arm is a missing field — totality
+        // at compile time, the same way a match holds its arms. Each
+        // arm's handles come back in the matching field of the out
+        // record.
+        let (_, arms) = tx.for_each_sum(&feed, PostCases {
+            note: |t: &mut kaya::Tpl| {
+                t.label(Post::note_text());
+            },
+            todo: |t: &mut kaya::Tpl| {
+                let (_, c) = t.row(|t| {
+                    let c = t.checkbox(Post::todo_done());
+                    t.label(Post::todo_title());
+                    c
+                });
+                c
+            },
+        });
+        (promote, arms.todo)
+    });
     tx.mount(root);
     tx.insert(&feed, "a", Post::Note { text: "jot one".into() });
     tx.insert(&feed, "b", Post::Todo { title: "buy milk".into(), done: false });

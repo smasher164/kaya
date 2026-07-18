@@ -318,6 +318,17 @@ impl<T: KayaSum> Clone for Collection<T> {
 }
 
 impl<T: KayaSum> Collection<T> {
+    /// The for-statement form: `for mut row in todos.rows(&mut tx)`
+    /// traces the record template — the body runs once, and the row's
+    /// Drop closes the template (break- and panic-safe).
+    pub fn rows<'t, 'b>(&self, tx: &'t mut Tx<'b>) -> Rows<'t, 'b> {
+        assert_root(self);
+        Rows {
+            tx: Some(tx),
+            collection: self.id,
+        }
+    }
+
     /// A signal the binding recomputes from this collection's entries
     /// after every mutation, written into the same transaction — the
     /// items-left label without any handler remembering to update it.
@@ -433,6 +444,7 @@ impl AppCtx {
             ops: Vec::new(),
             journal: Vec::new(),
             pending_derived: Vec::new(),
+            parents: Vec::new(),
             committed: false,
         }
     }
@@ -484,6 +496,12 @@ pub struct Tx<'a> {
     // registry at commit, abandoned with an aborted Tx (their signals
     // were never created).
     pending_derived: Vec<(CollectionId, Derived)>,
+    // The ambient parent stack: containers push their id around their
+    // body, constructors parent to the top, and 0 is the template-root
+    // sentinel (template bodies root themselves; a cross-zone
+    // add_child is structurally impossible). No ambient statics — the
+    // &mut Tx threading is the ambience, the egui shape.
+    parents: Vec<u64>,
     committed: bool,
 }
 
@@ -677,7 +695,24 @@ impl Tx<'_> {
     pub fn widget(&mut self, kind: WidgetKind) -> WidgetId {
         let id = self.ctx.alloc_widget();
         self.ops.push(TxOp::CreateWidget { id, kind });
+        self.auto_parent(id.0);
         id
+    }
+
+    /// The current ambient parent (0 when the scope roots itself:
+    /// template bodies, or no open container).
+    fn current_parent(&self) -> u64 {
+        self.parents.last().copied().unwrap_or(0)
+    }
+
+    fn auto_parent(&mut self, id: u64) {
+        let p = self.current_parent();
+        if p != 0 {
+            self.ops.push(TxOp::AddChild {
+                parent: WidgetId(p),
+                child: WidgetId(id),
+            });
+        }
     }
 
     pub fn set(&mut self, widget: WidgetId, prop: Prop, value: impl Into<Value>) {
@@ -700,25 +735,32 @@ impl Tx<'_> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
-    /// Construction sugar: a container from its children, so the build
-    /// body reads as the tree. Lowers to the same records — children
-    /// were created by the caller, then the container, then the
-    /// add_childs. Handlers stay in the occurrence loop, the Rust
-    /// idiom; the C guests keep the fully explicit floor.
-    pub fn column(&mut self, children: &[WidgetId]) -> WidgetId {
-        self.container_of(WidgetKind::Column, children)
+    /// Construction sugar: a container takes its body as a closure
+    /// (the egui shape — the &mut Tx is passed back in) and parents
+    /// everything declared inside it through the ambient stack, so the
+    /// build body reads as the tree and a for statement over a row
+    /// trace stands between siblings. The body's result comes back
+    /// beside the container — the way handles reach the occurrence
+    /// loop. Handlers stay in that loop, the Rust idiom; the C guests
+    /// keep the fully explicit floor.
+    pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (WidgetId, R) {
+        self.container_of(WidgetKind::Column, body)
     }
 
-    pub fn row(&mut self, children: &[WidgetId]) -> WidgetId {
-        self.container_of(WidgetKind::Row, children)
+    pub fn row<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (WidgetId, R) {
+        self.container_of(WidgetKind::Row, body)
     }
 
-    fn container_of(&mut self, kind: WidgetKind, children: &[WidgetId]) -> WidgetId {
+    fn container_of<R>(
+        &mut self,
+        kind: WidgetKind,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> (WidgetId, R) {
         let parent = self.widget(kind);
-        for child in children {
-            self.add_child(parent, *child);
-        }
-        parent
+        self.parents.push(parent.0);
+        let out = body(self);
+        self.parents.pop();
+        (parent, out)
     }
 
     /// A button with its caption.
@@ -1069,14 +1111,26 @@ impl Tx<'_> {
     ) -> (WidgetId, R) {
         assert_root(collection);
         let id = self.ctx.alloc_widget();
+        // The For parents into the enclosing scope, but the record
+        // must land after template_end — an add_child inside the
+        // blueprint would cross zones.
+        let parent = self.current_parent();
         self.ops.push(TxOp::CreateFor {
             id: id.0,
             collection: collection.id,
         });
         self.ctx.open_fors.borrow_mut().push(collection.id);
+        self.parents.push(0);
         let out = body(&mut Tpl { tx: self });
+        self.parents.pop();
         self.ctx.open_fors.borrow_mut().pop();
         self.ops.push(TxOp::TemplateEnd);
+        if parent != 0 {
+            self.ops.push(TxOp::AddChild {
+                parent: WidgetId(parent),
+                child: WidgetId(id.0),
+            });
+        }
         (id, out)
     }
 
@@ -1101,9 +1155,18 @@ impl Tx<'_> {
         body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
     ) -> (WidgetId, R) {
         let id = self.ctx.alloc_widget();
+        let parent = self.current_parent();
         self.ops.push(TxOp::CreateWhen { id: id.0, signal });
+        self.parents.push(0);
         let out = body(&mut Tpl { tx: self });
+        self.parents.pop();
         self.ops.push(TxOp::TemplateEnd);
+        if parent != 0 {
+            self.ops.push(TxOp::AddChild {
+                parent: WidgetId(parent),
+                child: WidgetId(id.0),
+            });
+        }
         (id, out)
     }
 
@@ -1141,6 +1204,92 @@ impl Tx<'_> {
 /// ids come from the template-node space and nothing renders until data
 /// stamps the blueprint. Occurrences from stamped copies name these node
 /// ids plus the copy's key path.
+/// The for-statement tracer over a collection's rows: `for mut row in
+/// todos.rows(&mut tx)` opens the For template on the single yielded
+/// element — the loop body runs once, authoring the blueprint — and
+/// the row's Drop closes the template and parents the For into the
+/// enclosing container scope. RAII makes the close structural: break-
+/// and panic-safe, and while the row lives the transaction is
+/// statically unreachable except through it — the template-zone
+/// discipline enforced by the borrow checker.
+pub struct Rows<'t, 'b> {
+    tx: Option<&'t mut Tx<'b>>,
+    collection: CollectionId,
+}
+
+impl<'t, 'b> Iterator for Rows<'t, 'b> {
+    type Item = Row<'t, 'b>;
+
+    fn next(&mut self) -> Option<Row<'t, 'b>> {
+        let tx = self.tx.take()?;
+        let id = tx.ctx.alloc_widget();
+        let parent = tx.current_parent();
+        tx.ops.push(TxOp::CreateFor {
+            id: id.0,
+            collection: self.collection,
+        });
+        tx.ctx.open_fors.borrow_mut().push(self.collection);
+        tx.parents.push(0);
+        Some(Row {
+            tx: Some(tx),
+            for_id: id.0,
+            parent,
+        })
+    }
+}
+
+/// One traced row: the template surface, borrowed out of the
+/// transaction for exactly the loop body's extent.
+pub struct Row<'t, 'b> {
+    tx: Option<&'t mut Tx<'b>>,
+    for_id: u64,
+    parent: u64,
+}
+
+impl<'b> Row<'_, 'b> {
+    fn tpl(&mut self) -> Tpl<'_, 'b> {
+        Tpl {
+            tx: self.tx.as_mut().expect("kaya: row used after close"),
+        }
+    }
+
+    pub fn widget(&mut self, kind: WidgetKind) -> TemplateNodeId {
+        self.tpl().widget(kind)
+    }
+
+    pub fn label(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().label(src)
+    }
+
+    pub fn checkbox(&mut self, src: impl Into<TplSource<BoolKind>>) -> TemplateNodeId {
+        self.tpl().checkbox(src)
+    }
+
+    pub fn row<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
+        self.tpl().row(body)
+    }
+
+    pub fn column<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
+        self.tpl().column(body)
+    }
+}
+
+impl Drop for Row<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(tx) = self.tx.take() {
+            tx.parents.pop();
+            tx.ctx.open_fors.borrow_mut().pop();
+            tx.ops.push(TxOp::TemplateEnd);
+            if self.parent != 0 {
+                tx.ops.push(TxOp::AddChild {
+                    parent: WidgetId(self.parent),
+                    child: WidgetId(self.for_id),
+                });
+            }
+        }
+    }
+}
+
 pub struct Tpl<'a, 'b> {
     tx: &'a mut Tx<'b>,
 }
@@ -1152,6 +1301,7 @@ impl Tpl<'_, '_> {
             id: WidgetId(id.0),
             kind,
         });
+        self.tx.auto_parent(id.0);
         id
     }
 
@@ -1221,21 +1371,26 @@ impl Tpl<'_, '_> {
         self.tx.ops.push(TxOp::VariantCase { variant });
     }
 
-    /// The template flavor of the container sugar.
-    pub fn row(&mut self, children: &[TemplateNodeId]) -> TemplateNodeId {
-        self.container_of(WidgetKind::Row, children)
+    /// The template flavor of the container sugar: the body's
+    /// constructors parent into it ambiently.
+    pub fn row<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (TemplateNodeId, R) {
+        self.container_of(WidgetKind::Row, body)
     }
 
-    pub fn column(&mut self, children: &[TemplateNodeId]) -> TemplateNodeId {
-        self.container_of(WidgetKind::Column, children)
+    pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (TemplateNodeId, R) {
+        self.container_of(WidgetKind::Column, body)
     }
 
-    fn container_of(&mut self, kind: WidgetKind, children: &[TemplateNodeId]) -> TemplateNodeId {
+    fn container_of<R>(
+        &mut self,
+        kind: WidgetKind,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> (TemplateNodeId, R) {
         let parent = self.widget(kind);
-        for child in children {
-            self.add_child(parent, *child);
-        }
-        parent
+        self.tx.parents.push(parent.0);
+        let out = body(self);
+        self.tx.parents.pop();
+        (parent, out)
     }
 
     /// A label bound to any addressable source: a constant, a signal,
@@ -1293,14 +1448,23 @@ impl Tpl<'_, '_> {
     ) -> (TemplateNodeId, R) {
         assert_root(collection);
         let id = self.tx.ctx.alloc_node();
+        let parent = self.tx.current_parent();
         self.tx.ops.push(TxOp::CreateFor {
             id: id.0,
             collection: collection.id,
         });
         self.tx.ctx.open_fors.borrow_mut().push(collection.id);
+        self.tx.parents.push(0);
         let out = body(&mut Tpl { tx: self.tx });
+        self.tx.parents.pop();
         self.tx.ctx.open_fors.borrow_mut().pop();
         self.tx.ops.push(TxOp::TemplateEnd);
+        if parent != 0 {
+            self.tx.ops.push(TxOp::AddChild {
+                parent: WidgetId(parent),
+                child: WidgetId(id.0),
+            });
+        }
         (id, out)
     }
 
@@ -1319,9 +1483,18 @@ impl Tpl<'_, '_> {
         body: impl FnOnce(&mut Tpl<'_, '_>) -> R,
     ) -> (TemplateNodeId, R) {
         let id = self.tx.ctx.alloc_node();
+        let parent = self.tx.current_parent();
         self.tx.ops.push(TxOp::CreateWhen { id: id.0, signal });
+        self.tx.parents.push(0);
         let out = body(&mut Tpl { tx: self.tx });
+        self.tx.parents.pop();
         self.tx.ops.push(TxOp::TemplateEnd);
+        if parent != 0 {
+            self.tx.ops.push(TxOp::AddChild {
+                parent: WidgetId(parent),
+                child: WidgetId(id.0),
+            });
+        }
         (id, out)
     }
 }
@@ -1517,6 +1690,42 @@ mod tests {
 
     use crate::protocol::{Occurrence, Prop, WidgetId, WidgetKind};
     use crate::scene::Scene;
+
+    /// The row trace's Drop is the close: a break mid-loop still ends
+    /// the template and parents the For — RAII, not a guard.
+    #[test]
+    fn row_trace_closes_on_break() {
+        use crate::protocol::TxOp;
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        let (root, ()) = tx.column(|tx| {
+            for mut row in todos.rows(tx) {
+                row.label(Todo::title());
+                break; // the row drops here; Drop closes the template
+            }
+        });
+        tx.mount(root);
+        tx.commit();
+
+        let ops = tx_rx.try_recv().expect("committed ops");
+        let end = ops
+            .iter()
+            .position(|op| matches!(op, TxOp::TemplateEnd))
+            .expect("template closed despite the break");
+        // The For's add_child lands after template_end (the cross-zone
+        // rule), parenting it into the column.
+        assert!(
+            ops[end..].iter().any(|op| matches!(
+                op,
+                TxOp::AddChild { parent, .. } if *parent == root
+            )),
+            "the For parented into the enclosing container"
+        );
+    }
 
     /// The round trip minus any backend: the app builds the milestone-1
     /// scene, an occurrence reaches it, and the answering write resolves

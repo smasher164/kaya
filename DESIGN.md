@@ -292,8 +292,10 @@ rules so far:
   add_child deferred past template_end; parents are created before
   their bodies run). Creation order is observable (kind#N harness
   names) and derivable, never per-language trivia: statement-shaped
-  construction is parent-first (Python, Swift, Go, C#, Java) and
-  expression trees are children-first (Rust, OCaml, Haskell —
+  construction is parent-first (Python, Swift, Go, C#, Java, and Rust
+  — whose containers are the egui shape, `tx.column(|tx| { … })`, the
+  &mut reborrow standing in for the ambient statics the GC languages
+  need) and expression trees are children-first (OCaml, Haskell —
   arguments evaluate before the call). The shared .steps scripts may
   therefore target containers only through the blessed column#0 (the
   For container the root-is-a-row convention keeps unique) —
@@ -302,8 +304,16 @@ rules so far:
   the strongest form), C#'s duck-typed foreach (no IEnumerable, so
   LINQ never appears on a collection at record time; the enumerator's
   Dispose closes on break), and Java's one-shot Iterable (break
-  caught at submit). The varargs container forms are gone — one
-  construction style per language. Derived signals are maintained
+  caught at submit). Rust's `for mut row in todos.rows(&mut tx)` is
+  the strongest of all: the single-yield iterator moves the &mut Tx
+  into the row, whose Drop closes the template — RAII, so the close is
+  break- AND panic-safe, and while the row lives the transaction is
+  statically unreachable except through it (the template-zone
+  discipline enforced by the borrow checker; a unit test pins the
+  break case). The varargs and slice container forms are gone — one
+  construction style per language. Rust's comparison operators stay
+  method-shaped when needed: PartialEq pins `==` to bool, the same
+  wall as Haskell's Eq. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them. A derived signal's source
   can also be a collection — `todos.derive(|items| ...)` — recomputed
