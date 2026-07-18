@@ -54,8 +54,8 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, PropToken,
-    Tpl, TplSource, Tx, ValueKind, props,
+    AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, Messages,
+    PropToken, Tpl, TplSource, Tx, ValueKind, props,
 };
 
 /// The type's own shape is the schema: an enum derives the element
@@ -63,8 +63,8 @@ pub use app::{
 /// patch builder).
 pub use kaya_derive::KayaGen;
 pub use protocol::{
-    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, ValueType,
-    WidgetId, WidgetKind, WindowId,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Path, Prop, SignalId, TemplateNodeId, Value,
+    ValueType, WidgetId, WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "macos")]

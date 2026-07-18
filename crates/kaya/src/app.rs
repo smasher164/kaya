@@ -19,8 +19,8 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
-    CollectionId, DEFAULT_WINDOW, Occurrence, Prop, PropValue, Record, SignalId, TemplateNodeId,
-    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
+    CollectionId, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
+    TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
 // --- Records: the app type is the schema --------------------------------
@@ -1303,6 +1303,162 @@ impl Drop for Row<'_, '_> {
     }
 }
 
+/// The Msg tier: a compile-total eliminator over the app's event
+/// vocabulary — the occurrence-side twin of the sum eliminators. The
+/// guest declares its meaning enum, registers each widget's mapping
+/// beside the widget (an enum tuple constructor is already a mapper:
+/// `msgs.on_change(field, Msg::Draft)`), and folds one exhaustive
+/// match. The registry converts runtime identity into the enum's tag —
+/// `match` dispatches on tags — so the loop needs no guards; and a
+/// declared variant no widget produces trips rustc's dead_code lint
+/// ("variant is never constructed"). Unmapped occurrences fold into
+/// nothing; Shutdown ends the stream. The raw loop over
+/// `ctx.next()` stays the floor.
+pub struct Messages<M> {
+    // Widget ids and template-node ids collide numerically — two id
+    // spaces, two tables.
+    widgets: RefCell<HashMap<u64, Mapper<M>>>,
+    nodes: RefCell<HashMap<u64, Mapper<M>>>,
+}
+
+type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
+
+impl<M> Default for Messages<M> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<M> Messages<M> {
+    pub fn new() -> Self {
+        Messages {
+            widgets: RefCell::new(HashMap::new()),
+            nodes: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// A click means this message (cloned per fire).
+    pub fn on_click(&self, w: WidgetId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::ButtonClicked { .. } => Some(msg.clone()),
+                _ => None,
+            }),
+        );
+    }
+
+    /// An edit maps through `f` — an enum tuple constructor fits:
+    /// `msgs.on_change(field, Msg::Draft)`.
+    pub fn on_change(&self, w: WidgetId, f: impl Fn(String) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::TextChanged { text, .. } => Some(f(text.clone())),
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_toggle(&self, w: WidgetId, f: impl Fn(bool) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::Toggled { checked, .. } => Some(f(*checked)),
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_value(&self, w: WidgetId, f: impl Fn(f64) -> M + 'static) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::ValueChanged { value, .. } => Some(f(*value)),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The template flavors: stamped-copy occurrences carry the key
+    /// path naming the copy, outermost first.
+    pub fn on_click_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceButtonClicked { path, .. } => Some(f(path.clone())),
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_change_node(&self, n: TemplateNodeId, f: impl Fn(Path, String) -> M + 'static) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceTextChanged { path, text, .. } => {
+                    Some(f(path.clone(), text.clone()))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_toggle_node(&self, n: TemplateNodeId, f: impl Fn(Path, bool) -> M + 'static) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceToggled { path, checked, .. } => {
+                    Some(f(path.clone(), *checked))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    pub fn on_value_node(&self, n: TemplateNodeId, f: impl Fn(Path, f64) -> M + 'static) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceValueChanged { path, value, .. } => {
+                    Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// The mapped occurrence stream: blocks for the next occurrence
+    /// with a registered meaning. Unmapped occurrences fold into
+    /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
+    pub fn next(&self, ctx: &AppCtx) -> Option<M> {
+        loop {
+            let occ = ctx.next();
+            let mapped = match &occ {
+                Occurrence::Shutdown => return None,
+                Occurrence::ButtonClicked { id }
+                | Occurrence::TextChanged { id, .. }
+                | Occurrence::Toggled { id, .. }
+                | Occurrence::ValueChanged { id, .. } => {
+                    self.widgets.borrow().get(&id.0).and_then(|f| f(&occ))
+                }
+                Occurrence::InstanceButtonClicked { node, .. }
+                | Occurrence::InstanceTextChanged { node, .. }
+                | Occurrence::InstanceToggled { node, .. }
+                | Occurrence::InstanceValueChanged { node, .. } => {
+                    self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
+                }
+            };
+            if let Some(m) = mapped {
+                return Some(m);
+            }
+        }
+    }
+}
+
 pub struct Tpl<'a, 'b> {
     tx: &'a mut Tx<'b>,
 }
@@ -1703,6 +1859,35 @@ mod tests {
 
     use crate::protocol::{Occurrence, Prop, WidgetId, WidgetKind};
     use crate::scene::Scene;
+
+    /// The Msg tier maps, skips, and ends: a registered widget's
+    /// occurrence comes back as the guest's own variant, an unmapped
+    /// occurrence folds into nothing, and Shutdown is None.
+    #[test]
+    fn messages_map_skip_and_end() {
+        use super::Messages;
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _keep) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let add = tx.widget(WidgetKind::Button);
+        let other = tx.widget(WidgetKind::Button);
+        tx.commit();
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum Msg {
+            Add,
+        }
+        let msgs = Messages::new();
+        msgs.on_click(add, Msg::Add);
+
+        occ_tx.send(Occurrence::ButtonClicked { id: other }).unwrap();
+        occ_tx.send(Occurrence::ButtonClicked { id: add }).unwrap();
+        occ_tx.send(Occurrence::Shutdown).unwrap();
+        assert_eq!(msgs.next(&ctx), Some(Msg::Add));
+        assert_eq!(msgs.next(&ctx), None);
+    }
 
     /// The row trace's Drop is the close: a break mid-loop still ends
     /// the template and parents the For — RAII, not a guard.

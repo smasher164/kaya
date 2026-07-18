@@ -13,7 +13,6 @@
 //! toggles the todo, promotes the first note, and watches the
 //! done-count label move.
 
-use kaya::Occurrence;
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 enum Post {
@@ -21,8 +20,16 @@ enum Post {
     Todo { title: String, done: bool },
 }
 
+/// The event vocabulary: the occurrence-side eliminator.
+#[derive(Clone)]
+enum Msg {
+    Promote,
+    Toggle(kaya::Path, bool),
+}
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    let (feed, promote, check) = ctx.apply(|tx| {
+    let msgs = kaya::Messages::new();
+    let feed = ctx.apply(|tx| {
         let feed = tx.collection::<Post>();
         let done_count = feed.derive(tx, |items| {
             let n = items
@@ -34,39 +41,38 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
         // The root is a row so the For's container stays the scene's only
         // column-kind widget (the reorder scene's lesson).
-        let (root, (promote, check)) = tx.row(|tx| {
+        let (root, ()) = tx.row(|tx| {
             let promote = tx.button("promote");
+            msgs.on_click(promote, Msg::Promote);
             tx.label(done_count);
             // The eliminator as a record of arms: one field per
             // constructor, so a missing arm is a missing field — totality
             // at compile time, the same way a match holds its arms. Each
             // arm's handles come back in the matching field of the out
             // record.
-            let (_, arms) = tx.for_each_sum(&feed, PostCases {
+            tx.for_each_sum(&feed, PostCases {
                 note: |t: &mut kaya::Tpl| {
                     t.label(Post::note_text());
                 },
                 todo: |t: &mut kaya::Tpl| {
-                    let (_, c) = t.row(|t| {
+                    t.row(|t| {
                         let c = t.checkbox(Post::todo_done());
+                        msgs.on_toggle_node(c, Msg::Toggle);
                         t.label(Post::todo_title());
-                        c
                     });
-                    c
                 },
             });
-            (promote, arms.todo)
         });
         tx.mount(root);
         tx.insert(&feed, "a", Post::Note { text: "jot one".into() });
         tx.insert(&feed, "b", Post::Todo { title: "buy milk".into(), done: false });
         tx.insert(&feed, "c", Post::Note { text: "jot two".into() });
-        (feed, promote, check)
+        feed
     });
 
-    loop {
-        match ctx.next() {
-            Occurrence::ButtonClicked { id } if id == promote => {
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            Msg::Promote => {
                 // The first note, promoted to a finished todo: the
                 // model is asked which entry is a Note — the handler
                 // never counts widgets — and the update's new
@@ -81,7 +87,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                 });
             }
-            Occurrence::InstanceToggled { node, path, checked } if node == check => {
+            Msg::Toggle(path, checked) => {
                 // The match arm as an accessor: Some exactly when the
                 // entry still holds Todo. A stale occurrence lands in
                 // the None arm and folds into nothing.
@@ -91,8 +97,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     }
                 });
             }
-            Occurrence::Shutdown => break,
-            _ => {}
         }
     }
 }

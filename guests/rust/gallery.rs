@@ -9,41 +9,47 @@
 //! sets the slider to 0.75 through the control's own event path, and
 //! expects the labels to read exactly "urgent: true" and "volume: 75%".
 
-use kaya::Occurrence;
+/// The event vocabulary: the two controls' meanings.
+#[derive(Clone)]
+enum Msg {
+    Urgent(bool),
+    Volume(f64),
+}
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     // The construction sugar: constructors carry their props,
-    // containers take their children, and the build body reads as the
-    // tree. Handlers stay in the occurrence loop, the Rust idiom.
-    let (status, volume_text, urgent, volume) = ctx.apply(|tx| {
+    // containers parent their bodies, and the Msg registrations sit
+    // beside their widgets; the fold matches on the app's own
+    // vocabulary.
+    let msgs = kaya::Messages::new();
+    let (status, volume_text) = ctx.apply(|tx| {
         let status = tx.signal("urgent: false");
         let volume_text = tx.signal("volume: 50%");
 
-        let (root, (urgent, volume)) = tx.column(|tx| {
-            let (_, urgent) = tx.row(|tx| {
+        let (root, ()) = tx.column(|tx| {
+            tx.row(|tx| {
                 let urgent = tx.checkbox("urgent");
+                msgs.on_toggle(urgent, Msg::Urgent);
                 tx.label(status);
-                urgent
             });
-            let (_, volume) = tx.row(|tx| {
+            tx.row(|tx| {
                 let volume = tx.slider(0.0, 1.0, 0.5);
+                msgs.on_value(volume, Msg::Volume);
                 tx.label(volume_text);
-                volume
             });
-            (urgent, volume)
         });
         tx.mount(root);
-        (status, volume_text, urgent, volume)
+        (status, volume_text)
     });
 
-    loop {
-        match ctx.next() {
-            Occurrence::Toggled { id, checked } if id == urgent => {
+    while let Some(msg) = msgs.next(&ctx) {
+        match msg {
+            Msg::Urgent(checked) => {
                 ctx.apply(|tx| {
                     tx.write(status, format!("urgent: {checked}"));
                 });
             }
-            Occurrence::ValueChanged { id, value } if id == volume => {
+            Msg::Volume(value) => {
                 // Integer percent, so every language's formatting
                 // agrees on the selftest string.
                 ctx.apply(|tx| {
@@ -53,8 +59,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     );
                 });
             }
-            Occurrence::Shutdown => break,
-            _ => {}
         }
     }
 }

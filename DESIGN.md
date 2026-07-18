@@ -313,7 +313,24 @@ rules so far:
   break case). The varargs and slice container forms are gone — one
   construction style per language. Rust's comparison operators stay
   method-shaped when needed: PartialEq pins `==` to bool, the same
-  wall as Haskell's Eq. Derived signals are maintained
+  wall as Haskell's Eq. Rust's handler model is the Msg tier — the
+  occurrence-side twin of the sum eliminators: the guest declares its
+  event vocabulary as an enum, registers each widget's mapping beside
+  the widget (an enum tuple constructor is already the mapper:
+  `msgs.on_change(field, Msg::Draft)`), and folds one exhaustive
+  match. The registry converts runtime identity into the enum's tag —
+  match dispatches on tags, and identifier patterns bind rather than
+  compare, so guard-free dispatch requires reifying "which widget"
+  into variants; the same reasoning that rejected sequential case
+  calls for templates rejects per-widget closure registration here.
+  Two compiler checks fall out that no other binding has: match
+  totality (every declared event handled) and dead_code (a variant no
+  widget produces is "never constructed"). The raw occurrence loop
+  stays the documented floor (the entry and milestone2 scenes), and
+  the Xilem-style co-located-closure tier is expressible on top of
+  Messages by instantiating M as a boxed command — the reverse
+  construction does not exist, which is why Messages is the
+  primitive. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them. A derived signal's source
   can also be a collection — `todos.derive(|items| ...)` — recomputed
