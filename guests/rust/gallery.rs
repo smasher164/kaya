@@ -15,39 +15,43 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // The construction sugar: constructors carry their props,
     // containers take their children, and the build body reads as the
     // tree. Handlers stay in the occurrence loop, the Rust idiom.
-    let mut tx = ctx.begin();
-    let status = tx.signal("urgent: false");
-    let volume_text = tx.signal("volume: 50%");
+    let (status, volume_text, urgent, volume) = ctx.apply(|tx| {
+        let status = tx.signal("urgent: false");
+        let volume_text = tx.signal("volume: 50%");
 
-    let (root, (urgent, volume)) = tx.column(|tx| {
-        let (_, urgent) = tx.row(|tx| {
-            let urgent = tx.checkbox("urgent");
-            tx.label(status);
-            urgent
+        let (root, (urgent, volume)) = tx.column(|tx| {
+            let (_, urgent) = tx.row(|tx| {
+                let urgent = tx.checkbox("urgent");
+                tx.label(status);
+                urgent
+            });
+            let (_, volume) = tx.row(|tx| {
+                let volume = tx.slider(0.0, 1.0, 0.5);
+                tx.label(volume_text);
+                volume
+            });
+            (urgent, volume)
         });
-        let (_, volume) = tx.row(|tx| {
-            let volume = tx.slider(0.0, 1.0, 0.5);
-            tx.label(volume_text);
-            volume
-        });
-        (urgent, volume)
+        tx.mount(root);
+        (status, volume_text, urgent, volume)
     });
-    tx.mount(root);
-    tx.commit();
 
     loop {
         match ctx.next() {
             Occurrence::Toggled { id, checked } if id == urgent => {
-                let mut tx = ctx.begin();
-                tx.write(status, format!("urgent: {checked}"));
-                tx.commit();
+                ctx.apply(|tx| {
+                    tx.write(status, format!("urgent: {checked}"));
+                });
             }
             Occurrence::ValueChanged { id, value } if id == volume => {
                 // Integer percent, so every language's formatting
                 // agrees on the selftest string.
-                let mut tx = ctx.begin();
-                tx.write(volume_text, format!("volume: {}%", (value * 100.0).round() as i64));
-                tx.commit();
+                ctx.apply(|tx| {
+                    tx.write(
+                        volume_text,
+                        format!("volume: {}%", (value * 100.0).round() as i64),
+                    );
+                });
             }
             Occurrence::Shutdown => break,
             _ => {}

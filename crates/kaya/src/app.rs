@@ -438,6 +438,19 @@ impl AppCtx {
     /// Start a transaction: a batch of records applied atomically when
     /// committed. Ids are allocated here — a monotonic counter per space,
     /// unique by construction.
+    /// Run `body` in a fresh transaction and commit it on return —
+    /// the closure-scoped form of begin/commit, and the body's result
+    /// comes back out (the way a build's handles reach the occurrence
+    /// loop). A panic inside the body abandons the transaction before
+    /// the unwind continues: commit is never reached, and Tx's Drop
+    /// rolls the model mirrors back.
+    pub fn apply<R>(&self, body: impl FnOnce(&mut Tx<'_>) -> R) -> R {
+        let mut tx = self.begin();
+        let out = body(&mut tx);
+        tx.commit();
+        out
+    }
+
     pub fn begin(&self) -> Tx<'_> {
         Tx {
             ctx: self,

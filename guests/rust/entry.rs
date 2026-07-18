@@ -12,28 +12,29 @@
 use kaya::{Occurrence, Prop, WidgetKind};
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    let mut tx = ctx.begin();
-    let status = tx.signal("no todos");
+    let (status, field, add, todos) = ctx.apply(|tx| {
+        let status = tx.signal("no todos");
 
-    let column = tx.widget(WidgetKind::Column);
-    let field = tx.widget(WidgetKind::Entry);
-    let add = tx.widget(WidgetKind::Button);
-    tx.set(add, Prop::Text, "add");
-    let status_label = tx.widget(WidgetKind::Label);
-    tx.bind(status_label, Prop::Text, status);
+        let column = tx.widget(WidgetKind::Column);
+        let field = tx.widget(WidgetKind::Entry);
+        let add = tx.widget(WidgetKind::Button);
+        tx.set(add, Prop::Text, "add");
+        let status_label = tx.widget(WidgetKind::Label);
+        tx.bind(status_label, Prop::Text, status);
 
-    let todos = tx.collection::<String>();
-    let (todo_list, ()) = tx.for_each(&todos, |t| {
-        let label = t.widget(WidgetKind::Label);
-        t.bind_element(label, Prop::Text, 0);
+        let todos = tx.collection::<String>();
+        let (todo_list, ()) = tx.for_each(&todos, |t| {
+            let label = t.widget(WidgetKind::Label);
+            t.bind_element(label, Prop::Text, 0);
+        });
+
+        tx.add_child(column, field);
+        tx.add_child(column, add);
+        tx.add_child(column, status_label);
+        tx.add_child(column, todo_list);
+        tx.mount(column);
+        (status, field, add, todos)
     });
-
-    tx.add_child(column, field);
-    tx.add_child(column, add);
-    tx.add_child(column, status_label);
-    tx.add_child(column, todo_list);
-    tx.mount(column);
-    tx.commit();
 
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this variable, not a widget read.
@@ -44,11 +45,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::TextChanged { id, text } if id == field => draft = text,
             Occurrence::ButtonClicked { id } if id == add => {
                 next_key += 1;
-                let mut tx = ctx.begin();
-                tx.insert(&todos, format!("t{next_key}"), draft.clone());
-                let total = tx.len(&todos);
-                tx.write(status, format!("added {draft}, {total} total"));
-                tx.commit();
+                ctx.apply(|tx| {
+                    tx.insert(&todos, format!("t{next_key}"), draft.clone());
+                    let total = tx.len(&todos);
+                    tx.write(status, format!("added {draft}, {total} total"));
+                });
             }
             Occurrence::Shutdown => break,
             _ => {}

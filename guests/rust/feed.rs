@@ -22,46 +22,47 @@ enum Post {
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    let mut tx = ctx.begin();
-    let feed = tx.collection::<Post>();
-    let done_count = feed.derive(&mut tx, |items| {
-        let n = items
-            .iter()
-            .filter(|(_, p)| matches!(p, Post::Todo { done: true, .. }))
-            .count();
-        format!("{n} done")
-    });
-
-    // The root is a row so the For's container stays the scene's only
-    // column-kind widget (the reorder scene's lesson).
-    let (root, (promote, check)) = tx.row(|tx| {
-        let promote = tx.button("promote");
-        tx.label(done_count);
-        // The eliminator as a record of arms: one field per
-        // constructor, so a missing arm is a missing field — totality
-        // at compile time, the same way a match holds its arms. Each
-        // arm's handles come back in the matching field of the out
-        // record.
-        let (_, arms) = tx.for_each_sum(&feed, PostCases {
-            note: |t: &mut kaya::Tpl| {
-                t.label(Post::note_text());
-            },
-            todo: |t: &mut kaya::Tpl| {
-                let (_, c) = t.row(|t| {
-                    let c = t.checkbox(Post::todo_done());
-                    t.label(Post::todo_title());
-                    c
-                });
-                c
-            },
+    let (feed, promote, check) = ctx.apply(|tx| {
+        let feed = tx.collection::<Post>();
+        let done_count = feed.derive(tx, |items| {
+            let n = items
+                .iter()
+                .filter(|(_, p)| matches!(p, Post::Todo { done: true, .. }))
+                .count();
+            format!("{n} done")
         });
-        (promote, arms.todo)
+
+        // The root is a row so the For's container stays the scene's only
+        // column-kind widget (the reorder scene's lesson).
+        let (root, (promote, check)) = tx.row(|tx| {
+            let promote = tx.button("promote");
+            tx.label(done_count);
+            // The eliminator as a record of arms: one field per
+            // constructor, so a missing arm is a missing field — totality
+            // at compile time, the same way a match holds its arms. Each
+            // arm's handles come back in the matching field of the out
+            // record.
+            let (_, arms) = tx.for_each_sum(&feed, PostCases {
+                note: |t: &mut kaya::Tpl| {
+                    t.label(Post::note_text());
+                },
+                todo: |t: &mut kaya::Tpl| {
+                    let (_, c) = t.row(|t| {
+                        let c = t.checkbox(Post::todo_done());
+                        t.label(Post::todo_title());
+                        c
+                    });
+                    c
+                },
+            });
+            (promote, arms.todo)
+        });
+        tx.mount(root);
+        tx.insert(&feed, "a", Post::Note { text: "jot one".into() });
+        tx.insert(&feed, "b", Post::Todo { title: "buy milk".into(), done: false });
+        tx.insert(&feed, "c", Post::Note { text: "jot two".into() });
+        (feed, promote, check)
     });
-    tx.mount(root);
-    tx.insert(&feed, "a", Post::Note { text: "jot one".into() });
-    tx.insert(&feed, "b", Post::Todo { title: "buy milk".into(), done: false });
-    tx.insert(&feed, "c", Post::Note { text: "jot two".into() });
-    tx.commit();
 
     loop {
         match ctx.next() {
@@ -70,25 +71,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // model is asked which entry is a Note — the handler
                 // never counts widgets — and the update's new
                 // constructor restamps that key's copy in place.
-                let mut tx = ctx.begin();
-                let note = tx.items(&feed).into_iter().find_map(|(k, p)| match p {
-                    Post::Note { text } => Some((k, text)),
-                    _ => None,
+                ctx.apply(|tx| {
+                    let note = tx.items(&feed).into_iter().find_map(|(k, p)| match p {
+                        Post::Note { text } => Some((k, text)),
+                        _ => None,
+                    });
+                    if let Some((key, text)) = note {
+                        tx.update(&feed, key, Post::Todo { title: text, done: true });
+                    }
                 });
-                if let Some((key, text)) = note {
-                    tx.update(&feed, key, Post::Todo { title: text, done: true });
-                }
-                tx.commit();
             }
             Occurrence::InstanceToggled { node, path, checked } if node == check => {
                 // The match arm as an accessor: Some exactly when the
                 // entry still holds Todo. A stale occurrence lands in
                 // the None arm and folds into nothing.
-                let mut tx = ctx.begin();
-                if let Some(todo) = Post::todo(&mut tx, &feed, path[0].clone()) {
-                    todo.done(checked);
-                }
-                tx.commit();
+                ctx.apply(|tx| {
+                    if let Some(todo) = Post::todo(tx, &feed, path[0].clone()) {
+                        todo.done(checked);
+                    }
+                });
             }
             Occurrence::Shutdown => break,
             _ => {}

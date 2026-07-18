@@ -17,25 +17,26 @@ struct Item {
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    let mut tx = ctx.begin();
-    let items = tx.collection::<Item>();
-    // The root is a row so the For's container is the scene's only
-    // column-kind widget: statement-shaped construction is
-    // parent-first, expression trees are children-first, and column#0
-    // must name the same widget in every language.
-    let (root, (rotate, lift)) = tx.row(|tx| {
-        let rotate = tx.button("rotate");
-        let lift = tx.button("lift");
-        for mut row in items.rows(tx) {
-            row.label(Item::title());
+    let (items, rotate, lift) = ctx.apply(|tx| {
+        let items = tx.collection::<Item>();
+        // The root is a row so the For's container is the scene's only
+        // column-kind widget: statement-shaped construction is
+        // parent-first, expression trees are children-first, and
+        // column#0 must name the same widget in every language.
+        let (root, (rotate, lift)) = tx.row(|tx| {
+            let rotate = tx.button("rotate");
+            let lift = tx.button("lift");
+            for mut row in items.rows(tx) {
+                row.label(Item::title());
+            }
+            (rotate, lift)
+        });
+        tx.mount(root);
+        for key in ["a", "b", "c"] {
+            tx.insert(&items, key, Item { title: key.to_string() });
         }
-        (rotate, lift)
+        (items, rotate, lift)
     });
-    tx.mount(root);
-    for key in ["a", "b", "c"] {
-        tx.insert(&items, key, Item { title: key.to_string() });
-    }
-    tx.commit();
 
     loop {
         match ctx.next() {
@@ -43,21 +44,23 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // First entry to the end. The model owns the order, so
                 // the handler asks it which key is first — it never
                 // counts widgets.
-                let mut tx = ctx.begin();
-                let entries = tx.items(&items);
-                let (first, _) = entries.first().expect("reorder scene has entries").clone();
-                tx.move_to_end(&items, first);
-                tx.commit();
+                ctx.apply(|tx| {
+                    let entries = tx.items(&items);
+                    let (first, _) =
+                        entries.first().expect("reorder scene has entries").clone();
+                    tx.move_to_end(&items, first);
+                });
             }
             Occurrence::ButtonClicked { id } if id == lift => {
                 // Last entry to the front: move_to_front is sugar for
                 // move_before the current first key — the same wire
                 // op, keys never indices.
-                let mut tx = ctx.begin();
-                let entries = tx.items(&items);
-                let (last, _) = entries.last().expect("reorder scene has entries").clone();
-                tx.move_to_front(&items, last);
-                tx.commit();
+                ctx.apply(|tx| {
+                    let entries = tx.items(&items);
+                    let (last, _) =
+                        entries.last().expect("reorder scene has entries").clone();
+                    tx.move_to_front(&items, last);
+                });
             }
             Occurrence::Shutdown => break,
             _ => {}
