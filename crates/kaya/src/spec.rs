@@ -37,9 +37,11 @@ pub enum FieldTy {
     /// { u32 count; u32 reserved; count values }: a key path or an
     /// entry's record — one encoding, named by the field.
     Values,
-    /// { u32 count; u32 reserved; count u32 value-type tags, padded to
-    /// 8 }: a collection's schema.
-    TypeTags,
+    /// { u32 variant_count; u32 reserved; per variant: u32 field_count,
+    /// field_count u32 value-type tags; padded to 8 }: one schema per
+    /// variant of a collection's element sum. A record collection is
+    /// the one-variant case.
+    VariantSchemas,
 }
 
 /// One record kind of a channel: the numeric kind, a name, its fields
@@ -214,12 +216,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             name: "create_collection",
             fields: &[
                 f("collection_id", FieldTy::U64),
-                f("schema", FieldTy::TypeTags),
+                f("variants", FieldTy::VariantSchemas),
             ],
             payload: None,
-            doc: "Declare a collection and its schema — the ordered field \
-                  types every entry must match; a scalar collection is the \
-                  one-field case. A blueprint when inside a template.",
+            doc: "Declare a collection and its schema: one ordered \
+                  field-type list per variant of the element sum. A record \
+                  collection is the one-variant case and a scalar collection \
+                  the one-variant one-field case. Variants are indices; \
+                  names never travel. A blueprint when inside a template.",
         },
         Record {
             kind: 8,
@@ -228,11 +232,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("collection_id", FieldTy::U64),
                 f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
+                f("variant", FieldTy::U32),
+                f("reserved", FieldTy::U32),
                 f("fields", FieldTy::Values),
             ],
             payload: None,
             doc: "Insert an entry into the instance at `path`; the fields \
-                  match the schema positionally. Stamps a copy.",
+                  match `variant`'s schema positionally. Stamps a copy from \
+                  that variant's case.",
         },
         Record {
             kind: 9,
@@ -241,10 +248,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("collection_id", FieldTy::U64),
                 f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
+                f("variant", FieldTy::U32),
+                f("reserved", FieldTy::U32),
                 f("fields", FieldTy::Values),
             ],
             payload: None,
-            doc: "Replace an entry's record; every element binding follows.",
+            doc: "Replace an entry's record; every element binding follows. \
+                  A different `variant` than the entry's current one tears \
+                  down its stamped copy and restamps from the new variant's \
+                  case, in place.",
         },
         Record {
             kind: 10,
@@ -301,12 +313,29 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("path", FieldTy::Values),
                 f("key", FieldTy::Value),
                 f("field", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("variant", FieldTy::U32),
                 f("value", FieldTy::Value),
             ],
             payload: None,
             doc: "Set one field of an entry's record; only bindings on that \
-                  field re-resolve.",
+                  field re-resolve. `variant` is the discriminant the guest \
+                  witnessed in the match that produced this write — the \
+                  scene asserts it against the entry's stored variant, so a \
+                  drifted model fails loudly; it never changes a \
+                  constructor (update does).",
+        },
+        Record {
+            kind: 16,
+            name: "variant_case",
+            fields: &[
+                f("variant", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Inside a For over a sum: the records that follow (until \
+                  the next variant_case or template_end) are the blueprint \
+                  for this variant. Cases must be total at template_end; an \
+                  empty case renders a constructor as nothing, explicitly.",
         },
     ],
     apply: &[
@@ -489,7 +518,7 @@ mod tests {
         U64(u64),
         Value(Value),
         Values(Vec<Value>),
-        TypeTags(Vec<u32>),
+        VariantSchemas(Vec<Vec<u32>>),
     }
 
     impl GenericWriter {
@@ -509,11 +538,16 @@ mod tests {
                             self.value(v);
                         }
                     }
-                    (FieldTy::TypeTags, Arg::TypeTags(tags)) => {
-                        self.buf.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+                    (FieldTy::VariantSchemas, Arg::VariantSchemas(variants)) => {
+                        self.buf
+                            .extend_from_slice(&(variants.len() as u32).to_le_bytes());
                         self.buf.extend_from_slice(&0u32.to_le_bytes());
-                        for tag in tags {
-                            self.buf.extend_from_slice(&tag.to_le_bytes());
+                        for schema in variants {
+                            self.buf
+                                .extend_from_slice(&(schema.len() as u32).to_le_bytes());
+                            for tag in schema {
+                                self.buf.extend_from_slice(&tag.to_le_bytes());
+                            }
                         }
                         while self.buf.len() % 8 != 0 {
                             self.buf.push(0);
@@ -578,6 +612,7 @@ mod tests {
             ("template_end", wire::TX_TEMPLATE_END),
             ("collection_update_field", wire::TX_COLLECTION_UPDATE_FIELD),
             ("collection_move", wire::TX_COLLECTION_MOVE),
+            ("variant_case", wire::TX_VARIANT_CASE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -673,7 +708,15 @@ mod tests {
         );
         w.record(
             tx_record("create_collection"),
-            &[Arg::U64(3), Arg::TypeTags(vec![wire::VALUE_STR, wire::VALUE_BOOL])],
+            &[
+                Arg::U64(3),
+                // A sum: Note{Str} | Todo{Str, Bool} — the record
+                // collection is the one-variant case of this encoding.
+                Arg::VariantSchemas(vec![
+                    vec![wire::VALUE_STR],
+                    vec![wire::VALUE_STR, wire::VALUE_BOOL],
+                ]),
+            ],
         );
         w.record(
             tx_record("collection_insert"),
@@ -681,6 +724,8 @@ mod tests {
                 Arg::U64(3),
                 Arg::Values(vec![Value::from("g1")]),
                 Arg::Value(Value::from("a")),
+                Arg::U32(1),
+                Arg::U32(0),
                 Arg::Values(vec![Value::from("send report"), Value::Bool(false)]),
             ],
         );
@@ -691,10 +736,11 @@ mod tests {
                 Arg::Values(vec![Value::from("g1")]),
                 Arg::Value(Value::from("a")),
                 Arg::U32(1),
-                Arg::U32(0),
+                Arg::U32(1),
                 Arg::Value(Value::Bool(true)),
             ],
         );
+        w.record(tx_record("variant_case"), &[Arg::U32(1), Arg::U32(0)]);
         w.record(
             tx_record("collection_remove"),
             &[
@@ -719,21 +765,27 @@ mod tests {
             },
             TxOp::CreateCollection {
                 id: CollectionId(3),
-                schema: vec![ValueType::Str, ValueType::Bool],
+                variants: vec![
+                    vec![ValueType::Str],
+                    vec![ValueType::Str, ValueType::Bool],
+                ],
             },
             TxOp::CollectionInsert {
                 id: CollectionId(3),
                 path: vec![Value::from("g1")],
                 key: Value::from("a"),
+                variant: 1,
                 record: vec![Value::from("send report"), Value::Bool(false)],
             },
             TxOp::CollectionUpdateField {
                 id: CollectionId(3),
                 path: vec![Value::from("g1")],
                 key: Value::from("a"),
+                variant: 1,
                 field: 1,
                 value: Value::Bool(true),
             },
+            TxOp::VariantCase { variant: 1 },
             TxOp::CollectionRemove {
                 id: CollectionId(3),
                 path: vec![],

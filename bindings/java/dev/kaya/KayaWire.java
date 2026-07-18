@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x378d164e75be3006L;
+    public static final long SPEC_HASH = 0x3549f42a1a09369eL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -54,6 +54,7 @@ public final class KayaWire {
     public static final short TX_KIND_TEMPLATE_END = 13;
     public static final short TX_KIND_COLLECTION_MOVE = 15;
     public static final short TX_KIND_COLLECTION_UPDATE_FIELD = 14;
+    public static final short TX_KIND_VARIANT_CASE = 16;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -110,9 +111,12 @@ public final class KayaWire {
 
     // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},
     // padded to 8.
-    private static void encodeTypeTags(ByteBuffer b, int[] tags) {
-        b.putInt(tags.length).putInt(0);
-        for (int t : tags) b.putInt(t);
+    private static void encodeVariantSchemas(ByteBuffer b, int[][] variants) {
+        b.putInt(variants.length).putInt(0);
+        for (int[] schema : variants) {
+            b.putInt(schema.length);
+            for (int t : schema) b.putInt(t);
+        }
         while (b.position() % 8 != 0) b.put((byte) 0);
     }
 
@@ -157,30 +161,34 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. */
-    public static byte[] txCreateCollection(long collectionId, int[] schema) {
+    /** Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. */
+    public static byte[] txCreateCollection(long collectionId, int[][] variants) {
         ByteBuffer b = begin(TX_KIND_CREATE_COLLECTION);
         b.putLong(collectionId);
-        encodeTypeTags(b, schema);
+        encodeVariantSchemas(b, variants);
         return finish(b);
     }
 
-    /** Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. */
-    public static byte[] txCollectionInsert(long collectionId, Object[] path, Object key, Object[] fields) {
+    /** Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. */
+    public static byte[] txCollectionInsert(long collectionId, Object[] path, Object key, int variant, Object[] fields) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_INSERT);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
+        b.putInt(variant);
+        b.putInt(0);
         encodeValues(b, fields);
         return finish(b);
     }
 
-    /** Replace an entry's record; every element binding follows. */
-    public static byte[] txCollectionUpdate(long collectionId, Object[] path, Object key, Object[] fields) {
+    /** Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. */
+    public static byte[] txCollectionUpdate(long collectionId, Object[] path, Object key, int variant, Object[] fields) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
+        b.putInt(variant);
+        b.putInt(0);
         encodeValues(b, fields);
         return finish(b);
     }
@@ -226,15 +234,23 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Set one field of an entry's record; only bindings on that field re-resolve. */
-    public static byte[] txCollectionUpdateField(long collectionId, Object[] path, Object key, int field, Object value) {
+    /** Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). */
+    public static byte[] txCollectionUpdateField(long collectionId, Object[] path, Object key, int field, int variant, Object value) {
         ByteBuffer b = begin(TX_KIND_COLLECTION_UPDATE_FIELD);
         b.putLong(collectionId);
         encodeValues(b, path);
         encodeValue(b, key);
         b.putInt(field);
-        b.putInt(0);
+        b.putInt(variant);
         encodeValue(b, value);
+        return finish(b);
+    }
+
+    /** Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. */
+    public static byte[] txVariantCase(int variant) {
+        ByteBuffer b = begin(TX_KIND_VARIANT_CASE);
+        b.putInt(variant);
+        b.putInt(0);
         return finish(b);
     }
 

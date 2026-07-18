@@ -465,7 +465,7 @@ final class KayaAppTx {
     func collection() -> KayaCollection {
         let c = app.nextCollection()
         app.registerCollection(c.id)
-        tx.createCollection(c.id, [UInt32(KAYA_VALUE_STR)])
+        tx.createCollection(c.id, [[UInt32(KAYA_VALUE_STR)]])
         return c
     }
 
@@ -505,13 +505,13 @@ final class KayaAppTx {
 
     func insert(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
-        tx.collectionInsert(c.id, c.path, key, [value])
+        tx.collectionInsert(c.id, c.path, key, 0, [value])
         recomputeDerived(c)
     }
 
     func update(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
         app.modelSet(c.id, c.path, key, value)
-        tx.collectionUpdate(c.id, c.path, key, [value])
+        tx.collectionUpdate(c.id, c.path, key, 0, [value])
         recomputeDerived(c)
     }
 
@@ -586,27 +586,44 @@ final class KayaAppTx {
     // The raw record paths KayaRecords builds on: the model keeps the
     // record struct itself; only the wire fields travel.
     func collectionWithSchema(_ schema: [UInt32]) -> KayaCollection {
+        collectionWithVariants([schema])
+    }
+
+    func collectionWithVariants(_ variants: [[UInt32]]) -> KayaCollection {
         let c = app.nextCollection()
         app.registerCollection(c.id)
-        tx.createCollection(c.id, schema)
+        tx.createCollection(c.id, variants)
         return c
     }
 
-    func insertRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
+    func emitVariantCase(_ variant: UInt32) {
+        tx.variantCase(variant)
+    }
+
+    func insertRecordRaw(
+        _ c: KayaCollection, _ key: KayaValue, _ model: Any, _ variant: UInt32,
+        _ fields: [KayaValue]
+    ) {
         app.modelSet(c.id, c.path, key, model)
-        tx.collectionInsert(c.id, c.path, key, fields)
+        tx.collectionInsert(c.id, c.path, key, variant, fields)
         recomputeDerived(c)
     }
 
-    func updateRecordRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ fields: [KayaValue]) {
+    func updateRecordRaw(
+        _ c: KayaCollection, _ key: KayaValue, _ model: Any, _ variant: UInt32,
+        _ fields: [KayaValue]
+    ) {
         app.modelSet(c.id, c.path, key, model)
-        tx.collectionUpdate(c.id, c.path, key, fields)
+        tx.collectionUpdate(c.id, c.path, key, variant, fields)
         recomputeDerived(c)
     }
 
-    func updateFieldRaw(_ c: KayaCollection, _ key: KayaValue, _ model: Any, _ field: UInt32, _ value: KayaValue) {
+    func updateFieldRaw(
+        _ c: KayaCollection, _ key: KayaValue, _ model: Any, _ variant: UInt32,
+        _ field: UInt32, _ value: KayaValue
+    ) {
         app.modelSet(c.id, c.path, key, model)
-        tx.collectionUpdateField(c.id, c.path, key, field, value)
+        tx.collectionUpdateField(c.id, c.path, key, field, variant, value)
         recomputeDerived(c)
     }
 

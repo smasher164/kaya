@@ -223,18 +223,35 @@ pub enum TxOp {
     SetProperty { widget: WidgetId, prop: Prop, value: PropValue },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
-    /// Declare a collection with its schema: the ordered field types
-    /// every entry must match. Mandatory — a scalar collection is the
-    /// one-field case, not a separate mode.
-    CreateCollection { id: CollectionId, schema: Vec<ValueType> },
+    /// Declare a collection with its schema: one ordered field-type
+    /// list per variant of the element sum. Mandatory — a record
+    /// collection is the one-variant case and a scalar collection the
+    /// one-variant one-field case, not separate modes. Variants are
+    /// indices; variant names never travel, like field names.
+    CreateCollection { id: CollectionId, variants: Vec<Vec<ValueType>> },
     /// Delta ops. `path` addresses the collection instance (one key per
     /// enclosing For of the collection's declaration site; empty for a
-    /// top-level collection).
-    CollectionInsert { id: CollectionId, path: Path, key: Value, record: Record },
-    CollectionUpdate { id: CollectionId, path: Path, key: Value, record: Record },
+    /// top-level collection). `variant` selects which of the sum's
+    /// schemas the record matches; an update whose variant differs from
+    /// the entry's current one tears down its stamped copy and restamps
+    /// from the new variant's case.
+    CollectionInsert { id: CollectionId, path: Path, key: Value, variant: u32, record: Record },
+    CollectionUpdate { id: CollectionId, path: Path, key: Value, variant: u32, record: Record },
     /// One field's delta: toggling a todo's `done` never resends its
-    /// title, and only bindings on that field re-resolve.
-    CollectionUpdateField { id: CollectionId, path: Path, key: Value, field: u32, value: Value },
+    /// title, and only bindings on that field re-resolve. `variant` is
+    /// the discriminant the guest witnessed in the match that produced
+    /// this write — never a way to change it — and the scene asserts it
+    /// against the entry's stored variant, so a binding whose model
+    /// drifted from the core fails loudly instead of writing a
+    /// type-correct field of the wrong constructor.
+    CollectionUpdateField {
+        id: CollectionId,
+        path: Path,
+        key: Value,
+        variant: u32,
+        field: u32,
+        value: Value,
+    },
     CollectionRemove { id: CollectionId, path: Path, key: Value },
     /// Reposition an entry in the ordered table: before the entry at
     /// `before`, or to the end when None. Keys, never indices.
@@ -242,10 +259,18 @@ pub enum TxOp {
     /// Opens a template scope; records until TemplateEnd are the
     /// blueprint. The For itself lives where it was declared (live
     /// widget at top level, template node inside another template).
+    /// Over a multi-variant collection the scope is split by
+    /// VariantCase records — one blueprint per constructor, checked
+    /// total at TemplateEnd.
     CreateFor { id: u64, collection: CollectionId },
     /// When is For over a zero-or-one collection wired to a Bool signal:
     /// false→true stamps the template, true→false unstamps.
     CreateWhen { id: u64, signal: SignalId },
+    /// Inside a For over a sum: the records that follow (until the next
+    /// VariantCase or TemplateEnd) are the blueprint for this variant.
+    /// Declaring a case with no records is the explicit way to render
+    /// a constructor as nothing; omitting a case is a scene error.
+    VariantCase { variant: u32 },
     TemplateEnd,
 }
 

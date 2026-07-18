@@ -500,7 +500,7 @@ sealed class Tx
     {
         var c = App.NextCollection();
         App.RegisterCollection(c.Id);
-        Records.Add(KayaWire.TxCreateCollection(c.Id, new uint[] { KayaWire.ValueStr }));
+        Records.Add(KayaWire.TxCreateCollection(c.Id, new[] { new uint[] { KayaWire.ValueStr } }));
         return c;
     }
 
@@ -531,14 +531,14 @@ sealed class Tx
     public void Insert(Collection c, object key, object value)
     {
         ModelSet(c.Id, c.Path, key, value);
-        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, new[] { value }));
+        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, 0, new[] { value }));
         RecomputeDerived(c);
     }
 
     public void Update(Collection c, object key, object value)
     {
         ModelSet(c.Id, c.Path, key, value);
-        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, new[] { value }));
+        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, 0, new[] { value }));
         RecomputeDerived(c);
     }
 
@@ -633,30 +633,38 @@ sealed class Tx
     // record object itself; only the wire fields travel.
     internal Collection CollectionWithSchema(uint[] schema)
     {
+        return CollectionWithVariants(new[] { schema });
+    }
+
+    internal Collection CollectionWithVariants(uint[][] variants)
+    {
         var c = App.NextCollection();
         App.RegisterCollection(c.Id);
-        Records.Add(KayaWire.TxCreateCollection(c.Id, schema));
+        Records.Add(KayaWire.TxCreateCollection(c.Id, variants));
         return c;
     }
 
-    internal void InsertRecordRaw(Collection c, object key, object model, object[] fields)
+    internal void EmitVariantCase(uint variant) =>
+        Records.Add(KayaWire.TxVariantCase(variant));
+
+    internal void InsertRecordRaw(Collection c, object key, object model, uint variant, object[] fields)
     {
         ModelSet(c.Id, c.Path, key, model);
-        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, fields));
+        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, variant, fields));
         RecomputeDerived(c);
     }
 
-    internal void UpdateRecordRaw(Collection c, object key, object model, object[] fields)
+    internal void UpdateRecordRaw(Collection c, object key, object model, uint variant, object[] fields)
     {
         ModelSet(c.Id, c.Path, key, model);
-        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, fields));
+        Records.Add(KayaWire.TxCollectionUpdate(c.Id, c.Path, key, variant, fields));
         RecomputeDerived(c);
     }
 
-    internal void UpdateFieldRaw(Collection c, object key, object model, uint field, object value)
+    internal void UpdateFieldRaw(Collection c, object key, object model, uint variant, uint field, object value)
     {
         ModelSet(c.Id, c.Path, key, model);
-        Records.Add(KayaWire.TxCollectionUpdateField(c.Id, c.Path, key, field, value));
+        Records.Add(KayaWire.TxCollectionUpdateField(c.Id, c.Path, key, field, variant, value));
         RecomputeDerived(c);
     }
 

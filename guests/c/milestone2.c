@@ -51,13 +51,15 @@ static void build_scene(void) {
     kaya_tx_template_end(&tx);
 
     /* For over groups, nesting a For over items. */
-    kaya_tx_create_collection(&tx, C_GROUPS, (uint32_t[]){KAYA_VALUE_STR}, 1);
+    kaya_tx_create_collection(&tx, C_GROUPS,
+                              (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_GROUPS, C_GROUPS);
     kaya_tx_create_widget(&tx, N_GROUP_COL, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, N_GROUP_NAME, KAYA_KIND_LABEL);
     kaya_tx_bind_text_element(&tx, N_GROUP_NAME, 0, 0);
     kaya_tx_add_child(&tx, N_GROUP_COL, N_GROUP_NAME);
-    kaya_tx_create_collection(&tx, C_ITEMS, (uint32_t[]){KAYA_VALUE_STR}, 1);
+    kaya_tx_create_collection(&tx, C_ITEMS,
+                              (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, N_ITEMS_FOR, C_ITEMS);
     kaya_tx_create_widget(&tx, N_ITEM_ROW, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, N_ITEM_TEXT, KAYA_KIND_LABEL);
@@ -104,19 +106,19 @@ static void *app(void *arg) {
             KayaVal g1 = kaya_str("g1");
             KayaVal g2 = kaya_str("g2");
             if (steps == 1) {
-                kaya_tx_collection_insert(&tx, C_GROUPS, 0, 0, kaya_str("g1"),
+                kaya_tx_collection_insert(&tx, C_GROUPS, 0, 0, kaya_str("g1"), 0,
                                           (KayaVal[]){kaya_str("Work")}, 1);
-                kaya_tx_collection_insert(&tx, C_ITEMS, &g1, 1, kaya_str("a"),
+                kaya_tx_collection_insert(&tx, C_ITEMS, &g1, 1, kaya_str("a"), 0,
                                           (KayaVal[]){kaya_str("send report")}, 1);
-                kaya_tx_collection_insert(&tx, C_ITEMS, &g1, 1, kaya_str("b"),
+                kaya_tx_collection_insert(&tx, C_ITEMS, &g1, 1, kaya_str("b"), 0,
                                           (KayaVal[]){kaya_str("buy milk")}, 1);
                 items_in[0] = 2;
             } else if (steps == 2) {
-                kaya_tx_collection_insert(&tx, C_GROUPS, 0, 0, kaya_str("g2"),
+                kaya_tx_collection_insert(&tx, C_GROUPS, 0, 0, kaya_str("g2"), 0,
                                           (KayaVal[]){kaya_str("Home")}, 1);
-                kaya_tx_collection_insert(&tx, C_ITEMS, &g2, 1, kaya_str("a"),
+                kaya_tx_collection_insert(&tx, C_ITEMS, &g2, 1, kaya_str("a"), 0,
                                           (KayaVal[]){kaya_str("water plants")}, 1);
-                kaya_tx_collection_update(&tx, C_GROUPS, 0, 0, kaya_str("g1"),
+                kaya_tx_collection_update(&tx, C_GROUPS, 0, 0, kaya_str("g1"), 0,
                                           (KayaVal[]){kaya_str("Office")}, 1);
                 items_in[1] = 1;
             }

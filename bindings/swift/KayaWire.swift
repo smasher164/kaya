@@ -15,7 +15,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x378d164e75be3006
+let kayaSpecHash: UInt64 = 0x3549f42a1a09369e
 
 struct KayaTx {
     var bytes = Data()
@@ -68,11 +68,15 @@ struct KayaTx {
         for v in vals { value(v) }
     }
 
-    /// A collection schema: counted KAYA_VALUE_* tags, padded to 8.
-    mutating func typeTags(_ tags: [UInt32]) {
-        u32(UInt32(tags.count))
+    /// A collection's element sum: per variant, counted KAYA_VALUE_*
+    /// tags, padded to 8. A record collection is the one-variant case.
+    mutating func variantSchemas(_ variants: [[UInt32]]) {
+        u32(UInt32(variants.count))
         u32(0)
-        for t in tags { u32(t) }
+        for schema in variants {
+            u32(UInt32(schema.count))
+            for t in schema { u32(t) }
+        }
         while bytes.count % 8 != 0 { bytes.append(0) }
     }
 
@@ -133,30 +137,34 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
-    mutating func createCollection(_ collectionId: UInt64, _ schema: [UInt32]) {
+    /// Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template.
+    mutating func createCollection(_ collectionId: UInt64, _ variants: [[UInt32]]) {
         let start = self.begin(UInt16(KAYA_TX_CREATE_COLLECTION))
         self.u64(collectionId)
-        self.typeTags(schema)
+        self.variantSchemas(variants)
         self.end(start)
     }
 
-    /// Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
-    mutating func collectionInsert(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ fields: [KayaValue]) {
+    /// Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case.
+    mutating func collectionInsert(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ variant: UInt32, _ fields: [KayaValue]) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_INSERT))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
+        self.u32(variant)
+        self.u32(0)
         self.values(fields)
         self.end(start)
     }
 
-    /// Replace an entry's record; every element binding follows.
-    mutating func collectionUpdate(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ fields: [KayaValue]) {
+    /// Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place.
+    mutating func collectionUpdate(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ variant: UInt32, _ fields: [KayaValue]) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
+        self.u32(variant)
+        self.u32(0)
         self.values(fields)
         self.end(start)
     }
@@ -202,15 +210,23 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// Set one field of an entry's record; only bindings on that field re-resolve.
-    mutating func collectionUpdateField(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ field: UInt32, _ value: KayaValue) {
+    /// Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does).
+    mutating func collectionUpdateField(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ field: UInt32, _ variant: UInt32, _ value: KayaValue) {
         let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE_FIELD))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
         self.u32(field)
-        self.u32(0)
+        self.u32(variant)
         self.value(value)
+        self.end(start)
+    }
+
+    /// Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
+    mutating func variantCase(_ variant: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_VARIANT_CASE))
+        self.u32(variant)
+        self.u32(0)
         self.end(start)
     }
 

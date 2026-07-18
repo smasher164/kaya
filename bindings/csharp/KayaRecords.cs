@@ -113,10 +113,10 @@ sealed class RecordCollection<T>
     }
 
     public void Insert(Tx tx, object key, T value) =>
-        tx.InsertRecordRaw(Collection, key, value, Info.WireFields(value));
+        tx.InsertRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
     public void Update(Tx tx, object key, T value) =>
-        tx.UpdateRecordRaw(Collection, key, value, Info.WireFields(value));
+        tx.UpdateRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
     /// One field's delta by selector: the rest of the record never
     /// travels; the model's copy is reconstructed with the new value.
@@ -133,7 +133,7 @@ sealed class RecordCollection<T>
                 current = entry.Value;
         if (current == null)
             throw new InvalidOperationException($"kaya: update of missing key {key}");
-        tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), f.Index, value);
+        tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), 0, f.Index, value);
     }
 
     /// MoveBefore repositions an entry before another's: order is

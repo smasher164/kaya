@@ -122,9 +122,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("    // A collection schema: {u32 count, u32 reserved, count VALUE_* tags},");
     c.line("    // padded to 8.");
-    c.line("    private static void encodeTypeTags(ByteBuffer b, int[] tags) {");
-    c.line("        b.putInt(tags.length).putInt(0);");
-    c.line("        for (int t : tags) b.putInt(t);");
+    c.line("    private static void encodeVariantSchemas(ByteBuffer b, int[][] variants) {");
+    c.line("        b.putInt(variants.length).putInt(0);");
+    c.line("        for (int[] schema : variants) {");
+    c.line("            b.putInt(schema.length);");
+    c.line("            for (int t : schema) b.putInt(t);");
+    c.line("        }");
     c.line("        while (b.position() % 8 != 0) b.put((byte) 0);");
     c.line("    }");
 
@@ -269,7 +272,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("long {}", camel(f.name)),
             FieldTy::Value => format!("Object {}", camel(f.name)),
             FieldTy::Values => format!("Object[] {}", camel(f.name)),
-            FieldTy::TypeTags => format!("int[] {}", camel(f.name)),
+            FieldTy::VariantSchemas => format!("int[][] {}", camel(f.name)),
         });
     }
     c.line("");
@@ -290,7 +293,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("        b.putLong({});", camel(f.name)),
             FieldTy::Value => format!("        encodeValue(b, {});", camel(f.name)),
             FieldTy::Values => format!("        encodeValues(b, {});", camel(f.name)),
-            FieldTy::TypeTags => format!("        encodeTypeTags(b, {});", camel(f.name)),
+            FieldTy::VariantSchemas => format!("        encodeVariantSchemas(b, {});", camel(f.name)),
         });
     }
     c.line("        return finish(b);");

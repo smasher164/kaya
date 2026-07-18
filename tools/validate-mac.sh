@@ -38,7 +38,7 @@ timing() {
 # check keeps guests from compiling against an ABI the source has left
 # behind.
 cargo build --lib --example milestone2 --example entry \
-    --example gallery --example todos --example reorder || exit 1
+    --example gallery --example todos --example reorder --example feed || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
@@ -346,7 +346,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos reorder encodebench; do
+for guest in milestone2 entry gallery todos reorder feed encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -410,6 +410,18 @@ run reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya
     _build/default/guests/ocaml/reorder.exe
 run reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
 
+# The feed scene (sum-typed elements: per-variant templates, promote =
+# variant-change restamp, match-refined witnessed field writes), every
+# language against AppKit.
+run feed-rust env KAYA_SELFTEST=feed target/debug/examples/feed
+run feed-python env KAYA_SELFTEST=feed python3 guests/python/feed.py
+run feed-go env KAYA_SELFTEST=feed target/go-guests/feed
+run feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/feed.exe
+run feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
+
 drain
 
 # The same guests against the SwiftUI backend, selected at runtime:
@@ -472,6 +484,16 @@ run reorder-csharp-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debu
 run reorder-ocaml-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/reorder.exe
 run reorder-haskell-swiftui env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
+KAYA_SELFTEST_SCRIPT="$(scene_script feed)"
+export KAYA_SELFTEST_SCRIPT
+run feed-rust-swiftui env KAYA_SELFTEST=feed target/debug/examples/feed
+run feed-python-swiftui env KAYA_SELFTEST=feed python3 guests/python/feed.py
+run feed-go-swiftui env KAYA_SELFTEST=feed target/go-guests/feed
+run feed-csharp-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run feed-ocaml-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/feed.exe
+run feed-haskell-swiftui env KAYA_SELFTEST=feed "$(hs_bin feed)"
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs

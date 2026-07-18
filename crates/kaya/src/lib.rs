@@ -48,15 +48,20 @@ mod swiftui_host;
 ))]
 pub mod capi;
 
+// The derive's generated code names types through `::kaya::...`; this
+// alias makes that path resolve inside the crate itself (examples and
+// unit tests), the serde trick.
+extern crate self as kaya;
+
 pub use app::{
-    AppCtx, Collection, Field, KayaField, KayaPatch, KayaRecord, PropToken, Tpl, TplSource, Tx,
-    ValueKind, props,
+    AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, PropToken,
+    Tpl, TplSource, Tx, ValueKind, props,
 };
 
-// The record! macro expands paste! for its generated builder's name;
-// the re-export keeps guests free of the dependency.
-#[doc(hidden)]
-pub use paste::paste as __paste;
+/// The type's own shape is the schema: an enum derives the element
+/// sum, a struct the one-variant case (with field tokens and the typed
+/// patch builder).
+pub use kaya_derive::Kaya;
 pub use protocol::{
     CollectionId, DEFAULT_WINDOW, Occurrence, Prop, SignalId, TemplateNodeId, Value, ValueType,
     WidgetId, WidgetKind, WindowId,

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x378d164e75be3006;
+    public const ulong SpecHash = 0x3549f42a1a09369e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -53,6 +53,7 @@ static class KayaWire
     public const ushort TxKindTemplateEnd = 13;
     public const ushort TxKindCollectionMove = 15;
     public const ushort TxKindCollectionUpdateField = 14;
+    public const ushort TxKindVariantCase = 16;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -109,12 +110,16 @@ static class KayaWire
 
     // A collection schema: {u32 count, u32 reserved, count Value* tags},
     // padded to 8.
-    static void EncodeTypeTags(BinaryWriter w, uint[] tags)
+    static void EncodeVariantSchemas(BinaryWriter w, uint[][] variants)
     {
-        w.Write((uint)tags.Length);
+        w.Write((uint)variants.Length);
         w.Write(0u);
-        foreach (uint t in tags)
-            w.Write(t);
+        foreach (uint[] schema in variants)
+        {
+            w.Write((uint)schema.Length);
+            foreach (uint t in schema)
+                w.Write(t);
+        }
         Pad(w);
     }
 
@@ -181,33 +186,37 @@ static class KayaWire
         return Finish(stream, w, TxKindMount);
     }
 
-    /// Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
-    public static byte[] TxCreateCollection(ulong collectionId, uint[] schema)
+    /// Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template.
+    public static byte[] TxCreateCollection(ulong collectionId, uint[][] variants)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
-        EncodeTypeTags(w, schema);
+        EncodeVariantSchemas(w, variants);
         return Finish(stream, w, TxKindCreateCollection);
     }
 
-    /// Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
-    public static byte[] TxCollectionInsert(ulong collectionId, object[] path, object key, object[] fields)
+    /// Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case.
+    public static byte[] TxCollectionInsert(ulong collectionId, object[] path, object key, uint variant, object[] fields)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
         EncodeValues(w, path);
         EncodeValue(w, key);
+        w.Write(variant);
+        w.Write(0u);
         EncodeValues(w, fields);
         return Finish(stream, w, TxKindCollectionInsert);
     }
 
-    /// Replace an entry's record; every element binding follows.
-    public static byte[] TxCollectionUpdate(ulong collectionId, object[] path, object key, object[] fields)
+    /// Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place.
+    public static byte[] TxCollectionUpdate(ulong collectionId, object[] path, object key, uint variant, object[] fields)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
         EncodeValues(w, path);
         EncodeValue(w, key);
+        w.Write(variant);
+        w.Write(0u);
         EncodeValues(w, fields);
         return Finish(stream, w, TxKindCollectionUpdate);
     }
@@ -258,17 +267,26 @@ static class KayaWire
         return Finish(stream, w, TxKindCollectionMove);
     }
 
-    /// Set one field of an entry's record; only bindings on that field re-resolve.
-    public static byte[] TxCollectionUpdateField(ulong collectionId, object[] path, object key, uint field, object value)
+    /// Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does).
+    public static byte[] TxCollectionUpdateField(ulong collectionId, object[] path, object key, uint field, uint variant, object value)
     {
         var w = Begin(out var stream);
         w.Write(collectionId);
         EncodeValues(w, path);
         EncodeValue(w, key);
         w.Write(field);
-        w.Write(0u);
+        w.Write(variant);
         EncodeValue(w, value);
         return Finish(stream, w, TxKindCollectionUpdateField);
+    }
+
+    /// Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
+    public static byte[] TxVariantCase(uint variant)
+    {
+        var w = Begin(out var stream);
+        w.Write(variant);
+        w.Write(0u);
+        return Finish(stream, w, TxKindVariantCase);
     }
 
     /// set_property with a constant text value.

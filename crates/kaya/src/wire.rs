@@ -36,6 +36,7 @@ pub const TX_CREATE_WHEN: u16 = 12;
 pub const TX_TEMPLATE_END: u16 = 13;
 pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const TX_COLLECTION_MOVE: u16 = 15;
+pub const TX_VARIANT_CASE: u16 = 16;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -135,12 +136,19 @@ impl<'a> Reader<'a> {
 
     /// A schema: { u32 count; u32 reserved; count u32 value-type tags },
     /// padded to 8.
-    fn schema(&mut self) -> Vec<ValueType> {
+    /// One field-type list per variant of the element sum; a record
+    /// collection is the one-variant case.
+    fn variants(&mut self) -> Vec<Vec<ValueType>> {
         let count = self.u32() as usize;
         let _reserved = self.u32();
-        let schema = (0..count).map(|_| value_type(self.u32())).collect();
+        let variants = (0..count)
+            .map(|_| {
+                let fields = self.u32() as usize;
+                (0..fields).map(|_| value_type(self.u32())).collect()
+            })
+            .collect();
         self.at = pad8(self.at);
-        schema
+        variants
     }
 }
 
@@ -248,31 +256,45 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
             },
             TX_CREATE_COLLECTION => TxOp::CreateCollection {
                 id: CollectionId(r.u64()),
-                schema: r.schema(),
+                variants: r.variants(),
             },
             TX_COLLECTION_INSERT => TxOp::CollectionInsert {
                 id: CollectionId(r.u64()),
                 path: r.path(),
                 key: r.value(),
+                variant: {
+                    let variant = r.u32();
+                    let _reserved = r.u32();
+                    variant
+                },
                 record: r.record(),
             },
             TX_COLLECTION_UPDATE => TxOp::CollectionUpdate {
                 id: CollectionId(r.u64()),
                 path: r.path(),
                 key: r.value(),
+                variant: {
+                    let variant = r.u32();
+                    let _reserved = r.u32();
+                    variant
+                },
                 record: r.record(),
             },
-            TX_COLLECTION_UPDATE_FIELD => TxOp::CollectionUpdateField {
-                id: CollectionId(r.u64()),
-                path: r.path(),
-                key: r.value(),
-                field: {
-                    let field = r.u32();
-                    let _reserved = r.u32();
-                    field
-                },
-                value: r.value(),
-            },
+            TX_COLLECTION_UPDATE_FIELD => {
+                let id = CollectionId(r.u64());
+                let path = r.path();
+                let key = r.value();
+                let field = r.u32();
+                let variant = r.u32();
+                TxOp::CollectionUpdateField {
+                    id,
+                    path,
+                    key,
+                    variant,
+                    field,
+                    value: r.value(),
+                }
+            }
             TX_COLLECTION_MOVE => TxOp::CollectionMove {
                 id: CollectionId(r.u64()),
                 path: r.path(),
@@ -300,6 +322,13 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                 signal: SignalId(r.u64()),
             },
             TX_TEMPLATE_END => TxOp::TemplateEnd,
+            TX_VARIANT_CASE => TxOp::VariantCase {
+                variant: {
+                    let variant = r.u32();
+                    let _reserved = r.u32();
+                    variant
+                },
+            },
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
@@ -537,42 +566,49 @@ impl Writer {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
-            TxOp::CreateCollection { id, schema } => {
+            TxOp::CreateCollection { id, variants } => {
                 self.record(TX_CREATE_COLLECTION, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    b.extend_from_slice(&(schema.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&(variants.len() as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
-                    for ty in schema {
-                        b.extend_from_slice(&value_type_raw(*ty).to_le_bytes());
+                    for schema in variants {
+                        b.extend_from_slice(&(schema.len() as u32).to_le_bytes());
+                        for ty in schema {
+                            b.extend_from_slice(&value_type_raw(*ty).to_le_bytes());
+                        }
                     }
                     while b.len() % 8 != 0 {
                         b.push(0);
                     }
                 })
             }
-            TxOp::CollectionInsert { id, path, key, record } => {
+            TxOp::CollectionInsert { id, path, key, variant, record } => {
                 self.record(TX_COLLECTION_INSERT, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     write_path(b, path);
                     write_value(b, key);
+                    b.extend_from_slice(&variant.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
                     write_values(b, record);
                 })
             }
-            TxOp::CollectionUpdate { id, path, key, record } => {
+            TxOp::CollectionUpdate { id, path, key, variant, record } => {
                 self.record(TX_COLLECTION_UPDATE, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     write_path(b, path);
                     write_value(b, key);
+                    b.extend_from_slice(&variant.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
                     write_values(b, record);
                 })
             }
-            TxOp::CollectionUpdateField { id, path, key, field, value } => {
+            TxOp::CollectionUpdateField { id, path, key, variant, field, value } => {
                 self.record(TX_COLLECTION_UPDATE_FIELD, |b| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     write_path(b, path);
                     write_value(b, key);
                     b.extend_from_slice(&field.to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&variant.to_le_bytes());
                     write_value(b, value);
                 })
             }
@@ -599,6 +635,10 @@ impl Writer {
             TxOp::CreateWhen { id, signal } => self.record(TX_CREATE_WHEN, |b| {
                 b.extend_from_slice(&id.to_le_bytes());
                 b.extend_from_slice(&signal.0.to_le_bytes());
+            }),
+            TxOp::VariantCase { variant } => self.record(TX_VARIANT_CASE, |b| {
+                b.extend_from_slice(&variant.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
             }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_| {}),
         }
@@ -753,14 +793,24 @@ mod tests {
     fn structural_ops_round_trip() {
         use crate::protocol::CollectionId;
         let ops = vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            // A sum: Note{Str} | Todo{Str, Bool}; a record collection is
+            // the one-variant case of the same encoding.
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![
+                    vec![ValueType::Str],
+                    vec![ValueType::Str, ValueType::Bool],
+                ],
+            },
             TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
             TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
             TxOp::SetProperty {
                 widget: WidgetId(3),
                 prop: Prop::Text,
                 value: PropValue::Element { level: 0, field: 0 },
             },
+            TxOp::VariantCase { variant: 1 },
             TxOp::TemplateEnd,
             TxOp::CreateWhen { id: 4, signal: SignalId(9) },
             TxOp::TemplateEnd,
@@ -768,13 +818,23 @@ mod tests {
                 id: CollectionId(1),
                 path: vec![],
                 key: Value::from("g1"),
+                variant: 0,
                 record: vec![Value::from("Work")],
             },
             TxOp::CollectionUpdate {
                 id: CollectionId(7),
                 path: vec![Value::from("g1"), Value::I64(4)],
                 key: Value::I64(4),
-                record: vec![Value::Bool(true)],
+                variant: 1,
+                record: vec![Value::from("Work"), Value::Bool(true)],
+            },
+            TxOp::CollectionUpdateField {
+                id: CollectionId(7),
+                path: vec![Value::from("g1")],
+                key: Value::I64(4),
+                variant: 1,
+                field: 1,
+                value: Value::Bool(false),
             },
             TxOp::CollectionRemove {
                 id: CollectionId(7),

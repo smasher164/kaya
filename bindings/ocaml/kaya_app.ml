@@ -42,7 +42,10 @@ type collection = { cid : int64; cpath : Kaya_wire.value list }
    Entries keep insertion order, matching the core's rendering. *)
 type instance = {
   path : Kaya_wire.value list;
-  entries : (Kaya_wire.value * Kaya_wire.value list) list;
+  (* (key, (variant, fields)): the discriminant rides with the
+     record, so refined reads and witnessed writes see the same fold
+     the core holds. *)
+  entries : (Kaya_wire.value * (int * Kaya_wire.value list)) list;
 }
 
 type app = {
@@ -117,18 +120,19 @@ let touch tx cid =
 
 (* One [value list] per entry: the record's wire fields (a scalar
    collection is the one-field case). *)
-let model_set tx cid path key value =
+let model_set tx cid path key variant value =
   touch tx cid;
+  let entry = (variant, value) in
   let upsert i =
     if List.mem_assoc key i.entries then
-      { i with entries = List.map (fun (k, v) -> (k, if k = key then value else v)) i.entries }
-    else { i with entries = i.entries @ [ (key, value) ] }
+      { i with entries = List.map (fun (k, v) -> (k, if k = key then entry else v)) i.entries }
+    else { i with entries = i.entries @ [ (key, entry) ] }
   in
   let instances = instances_of tx.app cid in
   let instances =
     if List.exists (fun i -> i.path = path) instances then
       List.map (fun i -> if i.path = path then upsert i else i) instances
-    else instances @ [ { path; entries = [ (key, value) ] } ]
+    else instances @ [ { path; entries = [ (key, entry) ] } ]
   in
   Hashtbl.replace tx.app.model cid instances
 
@@ -342,7 +346,7 @@ let collection tx =
       Hashtbl.replace tx.app.children parent
         (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
   | [] -> ());
-  emit tx (Kaya_wire.tx_create_collection id [Kaya_wire.value_str]);
+  emit tx (Kaya_wire.tx_create_collection id [ [ Kaya_wire.value_str ] ]);
   { cid = id; cpath = [] }
 
 (* The instance of this collection inside the copy keyed by [key] of
@@ -356,13 +360,13 @@ let assert_root c =
     invalid_arg "kaya: for_each binds the collection itself, not an instance — drop the at"
 
 let insert c key value tx =
-  model_set tx c.cid c.cpath key [ value ];
-  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key [ value ]);
+  model_set tx c.cid c.cpath key 0 [ value ];
+  emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ value ]);
   recompute_derived tx c.cid c.cpath
 
 let update c key value tx =
-  model_set tx c.cid c.cpath key [ value ];
-  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key [ value ]);
+  model_set tx c.cid c.cpath key 0 [ value ];
+  emit tx (Kaya_wire.tx_collection_update c.cid c.cpath key 0 [ value ]);
   recompute_derived tx c.cid c.cpath
 
 let remove c key tx =
@@ -431,7 +435,7 @@ let move_after c key anchor tx =
    so far (this transaction's included), in insertion order. *)
 let items c tx =
   match List.find_opt (fun i -> i.path = c.cpath) (instances_of tx.app c.cid) with
-  | Some i -> List.map (fun (k, vs) -> (k, List.hd vs)) i.entries
+  | Some i -> List.map (fun (k, (_, vs)) -> (k, List.hd vs)) i.entries
   | None -> []
 
 let count c tx = List.length (items c tx)
@@ -484,19 +488,19 @@ let collection_of rt tx =
       Hashtbl.replace tx.app.children parent
         (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
   | [] -> ());
-  emit tx (Kaya_wire.tx_create_collection id rt.rt_schema);
+  emit tx (Kaya_wire.tx_create_collection id [ rt.rt_schema ]);
   { rc_handle = { cid = id; cpath = [] }; rc_type = rt }
 
 let insert_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
-  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
-  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key fields);
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
+  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key 0 fields);
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 let update_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
-  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key fields;
-  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key fields);
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
+  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key 0 fields);
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* One field's delta: the rest of the record never travels; the
@@ -511,15 +515,15 @@ let update_field rc key fd value tx =
     with
     | Some i -> (
         match List.assoc_opt key i.entries with
-        | Some vs -> vs
+        | Some (_, vs) -> vs
         | None -> invalid_arg "kaya: update of missing key")
     | None -> invalid_arg "kaya: update of missing instance"
   in
   let updated = List.mapi (fun i v -> if i = fd.fd_index then wire else v) current in
-  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key updated;
+  model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 updated;
   emit tx
     (Kaya_wire.tx_collection_update_field rc.rc_handle.cid rc.rc_handle.cpath key
-       fd.fd_index wire);
+       fd.fd_index 0 wire);
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* The typed model: what this guest wrote, in insertion order. *)
@@ -527,7 +531,7 @@ let record_items rc tx =
   match
     List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
   with
-  | Some i -> List.map (fun (k, vs) -> (k, rc.rc_type.rt_of_values vs)) i.entries
+  | Some i -> List.map (fun (k, (_, vs)) -> (k, rc.rc_type.rt_of_values vs)) i.entries
   | None -> []
 
 (* A signal recomputed from this collection's entries after every
@@ -570,6 +574,135 @@ let for_each c body tx =
 (* A For as a child: for_each whose body keeps no handles — the
    common case once handlers co-locate at their constructors. *)
 let each c body tx = fst (for_each c body tx)
+
+(* Sums: a variant type whose constructors carry inline records. The
+   descriptor is what [@@deriving kaya] emits for such a type — one
+   record shape per constructor, the discriminant, both conversions —
+   and the generated per-sum eliminator (post_each ~note ~todo) calls
+   [each_sum] with its arms; the labelled arguments are required, so
+   totality is a compile error there, and the scene checks it again. *)
+type 'a sum_type = {
+  st_schemas : int list list;
+  st_variant : 'a -> int;
+  st_to_values : 'a -> Kaya_wire.value list;
+  st_of_values : int -> Kaya_wire.value list -> 'a;
+}
+
+type 'a sum_collection = { sc_handle : collection; sc_type : 'a sum_type }
+
+let sum_handle sc = sc.sc_handle
+
+let sum_of st tx =
+  tx.app.c_collection <- Int64.add tx.app.c_collection 1L;
+  let id = tx.app.c_collection in
+  (match tx.app.open_fors with
+  | parent :: _ ->
+      Hashtbl.replace tx.app.children parent
+        (Option.value ~default:[] (Hashtbl.find_opt tx.app.children parent) @ [ id ])
+  | [] -> ());
+  emit tx (Kaya_wire.tx_create_collection id st.st_schemas);
+  { sc_handle = { cid = id; cpath = [] }; sc_type = st }
+
+(* Insert witnesses the value's own constructor onto the wire. *)
+let sum_insert sc key value tx =
+  let variant = sc.sc_type.st_variant value in
+  let fields = sc.sc_type.st_to_values value in
+  model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
+  emit tx
+    (Kaya_wire.tx_collection_insert sc.sc_handle.cid sc.sc_handle.cpath key
+       variant fields);
+  recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
+
+(* Update replaces a record wholesale; a different constructor than
+   the entry's current one restamps its copy in place. *)
+let sum_update sc key value tx =
+  let variant = sc.sc_type.st_variant value in
+  let fields = sc.sc_type.st_to_values value in
+  model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
+  emit tx
+    (Kaya_wire.tx_collection_update sc.sc_handle.cid sc.sc_handle.cpath key
+       variant fields);
+  recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
+
+(* The typed model, in insertion order; [match] eliminates the
+   values. *)
+let sum_items sc tx =
+  match
+    List.find_opt
+      (fun i -> i.path = sc.sc_handle.cpath)
+      (instances_of tx.app sc.sc_handle.cid)
+  with
+  | Some i ->
+      List.map (fun (k, (v, vs)) -> (k, sc.sc_type.st_of_values v vs)) i.entries
+  | None -> []
+
+(* The entry's current value — the scrutinee for the match that
+   precedes a patch. *)
+let sum_get sc key tx =
+  match
+    List.find_opt
+      (fun i -> i.path = sc.sc_handle.cpath)
+      (instances_of tx.app sc.sc_handle.cid)
+  with
+  | Some i ->
+      Option.map
+        (fun (v, vs) -> sc.sc_type.st_of_values v vs)
+        (List.assoc_opt key i.entries)
+  | None -> None
+
+(* The witnessed field write, called by the generated per-constructor
+   patches: the match that produced the write names the variant, and
+   the model refuses a drifted entry — the guard is checked, not
+   trusted. *)
+let sum_update_field sc key ~variant fd value tx =
+  let wire = fd.fd_to_value value in
+  let stored, current =
+    match
+      List.find_opt
+        (fun i -> i.path = sc.sc_handle.cpath)
+        (instances_of tx.app sc.sc_handle.cid)
+    with
+    | Some i -> (
+        match List.assoc_opt key i.entries with
+        | Some (v, vs) -> (v, vs)
+        | None -> invalid_arg "kaya: update of missing key")
+    | None -> invalid_arg "kaya: update of missing instance"
+  in
+  if stored <> variant then
+    invalid_arg "kaya: update_field witnessed a constructor the entry no longer holds";
+  let updated = List.mapi (fun i v -> if i = fd.fd_index then wire else v) current in
+  model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant updated;
+  emit tx
+    (Kaya_wire.tx_collection_update_field sc.sc_handle.cid sc.sc_handle.cpath
+       key fd.fd_index variant wire);
+  recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
+
+(* The collection-derived signal, over the sum's entries. *)
+let sum_derive sc compute tx =
+  let s = signal (compute (sum_items sc tx)) tx in
+  tx.pending_derived <-
+    (sc.sc_handle.cid, fun tx' -> write s (compute (sum_items sc tx')) tx')
+    :: tx.pending_derived;
+  s
+
+(* The eliminator's mechanism: (variant, arm) pairs in declaration
+   order, each arm a Tpl program. Only the generated per-sum wrappers
+   call this — their required labelled arguments are what makes
+   totality a compile error. *)
+let each_sum sc arms tx =
+  assert_root sc.sc_handle;
+  tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
+  let id = tx.app.c_widget in
+  emit tx (Kaya_wire.tx_create_for id sc.sc_handle.cid);
+  tx.app.open_fors <- sc.sc_handle.cid :: tx.app.open_fors;
+  List.iter
+    (fun (variant, arm) ->
+      emit tx (Kaya_wire.tx_variant_case variant);
+      arm { tpl_tx = tx })
+    arms;
+  tx.app.open_fors <- List.tl tx.app.open_fors;
+  emit tx (Kaya_wire.tx_template_end ());
+  Widget id
 
 (* A When over a Bool signal: stamps on true, unstamps on false. *)
 let when_ (Signal sid) body tx =

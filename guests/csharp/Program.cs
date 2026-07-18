@@ -11,6 +11,7 @@ static class Program
             case "gallery": GalleryScene.Run(); break;
             case "todos": TodosScene.Run(); break;
             case "reorder": ReorderScene.Run(); break;
+            case "feed": Feed.FeedScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }

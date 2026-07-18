@@ -16,7 +16,7 @@ static class EncodeBench
         for (int i = 0; i < n; i++)
         {
             byte[] rec = KayaWire.TxCollectionInsert(1, System.Array.Empty<object>(),
-                $"k{i & 1023}", new object[] { "send report", false });
+                $"k{i & 1023}", 0, new object[] { "send report", false });
             sink += rec.Length;
         }
         sw.Stop();

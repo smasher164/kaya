@@ -28,6 +28,10 @@ mod todos;
 #[path = "reorder.rs"]
 mod reorder;
 
+#[cfg(target_os = "android")]
+#[path = "feed.rs"]
+mod feed;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -38,6 +42,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("gallery") => gallery::app(ctx),
         Ok("todos") => todos::app(ctx),
         Ok("reorder") => reorder::app(ctx),
+        Ok("feed") => feed::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

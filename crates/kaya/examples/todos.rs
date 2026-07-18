@@ -13,11 +13,10 @@
 
 use kaya::Occurrence;
 
-kaya::record! {
-    struct Todo {
-        title: String,
-        done: bool,
-    }
+#[derive(kaya::Kaya, Clone, Debug, PartialEq)]
+struct Todo {
+    title: String,
+    done: bool,
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {

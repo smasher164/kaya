@@ -10,7 +10,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encodeValue", "encodeValues", "encodeTypeTags", "beginRecord", "endRecord", "ParseOccurrence",
+    "encodeValue", "encodeValues", "encodeVariantSchemas", "beginRecord", "endRecord", "ParseOccurrence",
     "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
     "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range",
     "return", "select", "struct", "switch", "type", "var",
@@ -118,13 +118,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn b");
     c.line("}");
     c.line("");
-    c.line("// encodeTypeTags appends a collection schema: {u32 count, u32 reserved,");
-    c.line("// count Value* tags}, padded to 8.");
-    c.line("func encodeTypeTags(b []byte, tags []uint32) []byte {");
-    c.line("\tb = binary.LittleEndian.AppendUint32(b, uint32(len(tags)))");
+    c.line("// encodeVariantSchemas appends a collection's element sum: {u32");
+    c.line("// variant_count, u32 reserved, per variant: u32 field_count,");
+    c.line("// field_count Value* tags}, padded to 8. A record collection is");
+    c.line("// the one-variant case.");
+    c.line("func encodeVariantSchemas(b []byte, variants [][]uint32) []byte {");
+    c.line("\tb = binary.LittleEndian.AppendUint32(b, uint32(len(variants)))");
     c.line("\tb = binary.LittleEndian.AppendUint32(b, 0)");
-    c.line("\tfor _, t := range tags {");
-    c.line("\t\tb = binary.LittleEndian.AppendUint32(b, t)");
+    c.line("\tfor _, schema := range variants {");
+    c.line("\t\tb = binary.LittleEndian.AppendUint32(b, uint32(len(schema)))");
+    c.line("\t\tfor _, t := range schema {");
+    c.line("\t\t\tb = binary.LittleEndian.AppendUint32(b, t)");
+    c.line("\t\t}");
     c.line("\t}");
     c.line("\tfor len(b)%8 != 0 {");
     c.line("\t\tb = append(b, 0)");
@@ -267,7 +272,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("{} uint64", param(f.name)),
             FieldTy::Value => format!("{} any", param(f.name)),
             FieldTy::Values => format!("{} []any", param(f.name)),
-            FieldTy::TypeTags => format!("{} []uint32", param(f.name)),
+            FieldTy::VariantSchemas => format!("{} [][]uint32", param(f.name)),
         });
     }
     c.line("");
@@ -293,7 +298,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             ),
             FieldTy::Value => format!("\tb = encodeValue(b, {})", param(f.name)),
             FieldTy::Values => format!("\tb = encodeValues(b, {})", param(f.name)),
-            FieldTy::TypeTags => format!("\tb = encodeTypeTags(b, {})", param(f.name)),
+            FieldTy::VariantSchemas => format!("\tb = encodeVariantSchemas(b, {})", param(f.name)),
         });
     }
     c.line("\treturn endRecord(b)");

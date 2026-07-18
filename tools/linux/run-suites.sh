@@ -15,7 +15,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -155,7 +155,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos reorder; do
+for guest in milestone2 entry gallery todos reorder feed; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -210,6 +210,17 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/reorder.exe
     run "$proto" reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
+    # The feed scene (sum-typed elements): per-variant templates,
+    # promote = variant-change restamp, witnessed field writes.
+    run "$proto" feed-rust env KAYA_SELFTEST=feed "$CARGO_TARGET_DIR/debug/examples/feed"
+    run "$proto" feed-c env KAYA_SELFTEST=feed /tmp/c-guests/feed
+    run "$proto" feed-python env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
+        python3 guests/python/feed.py
+    run "$proto" feed-go env KAYA_SELFTEST=feed /tmp/go-guests/feed
+    run "$proto" feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
+    run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
 done
 drain
 

@@ -29,6 +29,13 @@ typedef struct {
     uint32_t s_len;
 } KayaVal;
 
+/* One variant of a collection's element sum: its ordered
+ * KAYA_VALUE_* field tags. A record collection declares one. */
+typedef struct {
+    const uint32_t *tags;
+    uint32_t len;
+} KayaVariantSchema;
+
 static inline KayaVal kaya_str(const char *s) {
     KayaVal v = {KAYA_VALUE_STR, 0, 0, s, (uint32_t)strlen(s)};
     return v;
@@ -101,11 +108,14 @@ static inline void kaya_wire_values(KayaTx *tx, const KayaVal *vals, uint32_t n)
 
 /* A collection schema: {u32 count, u32 reserved, count KAYA_VALUE_*
  * tags}, padded to 8. */
-static inline void kaya_wire_type_tags(KayaTx *tx, const uint32_t *tags, uint32_t n) {
+static inline void kaya_wire_variant_schemas(KayaTx *tx, const KayaVariantSchema *variants, uint32_t n) {
     kaya_wire_u32(tx, n);
     kaya_wire_u32(tx, 0);
-    for (uint32_t i = 0; i < n; i++)
-        kaya_wire_u32(tx, tags[i]);
+    for (uint32_t i = 0; i < n; i++) {
+        kaya_wire_u32(tx, variants[i].len);
+        for (uint32_t j = 0; j < variants[i].len; j++)
+            kaya_wire_u32(tx, variants[i].tags[j]);
+    }
     kaya_wire_pad(tx);
 }
 
@@ -123,7 +133,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x378d164e75be3006ULL
+#define KAYA_SPEC_HASH 0x3549f42a1a09369eULL
 
 
 /* Create a signal holding `initial`. */
@@ -167,30 +177,34 @@ static inline void kaya_tx_mount(KayaTx *tx, uint64_t window, uint64_t root) {
     kaya_wire_end(tx, start);
 }
 
-/* Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. */
-static inline void kaya_tx_create_collection(KayaTx *tx, uint64_t collection_id, const uint32_t *schema, uint32_t schema_len) {
+/* Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. */
+static inline void kaya_tx_create_collection(KayaTx *tx, uint64_t collection_id, const KayaVariantSchema *variants, uint32_t variants_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_COLLECTION);
     kaya_wire_u64(tx, collection_id);
-    kaya_wire_type_tags(tx, schema, schema_len);
+    kaya_wire_variant_schemas(tx, variants, variants_len);
     kaya_wire_end(tx, start);
 }
 
-/* Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. */
-static inline void kaya_tx_collection_insert(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *fields, uint32_t fields_len) {
+/* Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. */
+static inline void kaya_tx_collection_insert(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t variant, const KayaVal *fields, uint32_t fields_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_INSERT);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
+    kaya_wire_u32(tx, variant);
+    kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, fields, fields_len);
     kaya_wire_end(tx, start);
 }
 
-/* Replace an entry's record; every element binding follows. */
-static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *fields, uint32_t fields_len) {
+/* Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. */
+static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t variant, const KayaVal *fields, uint32_t fields_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
+    kaya_wire_u32(tx, variant);
+    kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, fields, fields_len);
     kaya_wire_end(tx, start);
 }
@@ -236,15 +250,23 @@ static inline void kaya_tx_collection_move(KayaTx *tx, uint64_t collection_id, c
     kaya_wire_end(tx, start);
 }
 
-/* Set one field of an entry's record; only bindings on that field re-resolve. */
-static inline void kaya_tx_collection_update_field(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t field, KayaVal value) {
+/* Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). */
+static inline void kaya_tx_collection_update_field(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t field, uint32_t variant, KayaVal value) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE_FIELD);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_u32(tx, field);
-    kaya_wire_u32(tx, 0);
+    kaya_wire_u32(tx, variant);
     kaya_wire_value(tx, value);
+    kaya_wire_end(tx, start);
+}
+
+/* Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. */
+static inline void kaya_tx_variant_case(KayaTx *tx, uint32_t variant) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_VARIANT_CASE);
+    kaya_wire_u32(tx, variant);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, start);
 }
 

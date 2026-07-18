@@ -22,7 +22,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x378d164e75be3006
+specHash = 0x3549f42a1a09369e
 
 valueBool :: Word32
 valueBool = 1
@@ -102,6 +102,8 @@ txKindCollectionMove :: Word16
 txKindCollectionMove = 15
 txKindCollectionUpdateField :: Word16
 txKindCollectionUpdateField = 14
+txKindVariantCase :: Word16
+txKindVariantCase = 16
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -143,11 +145,13 @@ encodeValues :: [Value] -> Builder
 encodeValues vals =
   word32LE (fromIntegral (length vals)) <> word32LE 0 <> foldMap encodeValue vals
 
--- | A collection schema: counted value-type tags, padded to 8.
-encodeTypeTags :: [Word32] -> Builder
-encodeTypeTags tags =
-  let body = word32LE (fromIntegral (length tags)) <> word32LE 0 <> foldMap word32LE tags
-      len = 8 + 4 * length tags
+-- | A collection's element sum: per variant, counted value-type tags,
+-- padded to 8. A record collection is the one-variant case.
+encodeVariantSchemas :: [[Word32]] -> Builder
+encodeVariantSchemas variants =
+  let one schema = word32LE (fromIntegral (length schema)) <> foldMap word32LE schema
+      body = word32LE (fromIntegral (length variants)) <> word32LE 0 <> foldMap one variants
+      len = 8 + 4 * (length variants + sum (map length variants))
       padding = (8 - len `mod` 8) `mod` 8
    in body <> byteString (BS.replicate padding 0)
 
@@ -179,17 +183,17 @@ txAddChild parent child = wireRecord txKindAddChild (word64LE parent <> word64LE
 txMount :: Word64 -> Word64 -> Builder
 txMount window root = wireRecord txKindMount (word64LE window <> word64LE root)
 
--- Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
-txCreateCollection :: Word64 -> [Word32] -> Builder
-txCreateCollection collectionId schema = wireRecord txKindCreateCollection (word64LE collectionId <> encodeTypeTags schema)
+-- Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template.
+txCreateCollection :: Word64 -> [[Word32]] -> Builder
+txCreateCollection collectionId variants = wireRecord txKindCreateCollection (word64LE collectionId <> encodeVariantSchemas variants)
 
--- Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
-txCollectionInsert :: Word64 -> [Value] -> Value -> [Value] -> Builder
-txCollectionInsert collectionId path key fields = wireRecord txKindCollectionInsert (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues fields)
+-- Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case.
+txCollectionInsert :: Word64 -> [Value] -> Value -> Word32 -> [Value] -> Builder
+txCollectionInsert collectionId path key variant fields = wireRecord txKindCollectionInsert (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE variant <> word32LE 0 <> encodeValues fields)
 
--- Replace an entry's record; every element binding follows.
-txCollectionUpdate :: Word64 -> [Value] -> Value -> [Value] -> Builder
-txCollectionUpdate collectionId path key fields = wireRecord txKindCollectionUpdate (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues fields)
+-- Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place.
+txCollectionUpdate :: Word64 -> [Value] -> Value -> Word32 -> [Value] -> Builder
+txCollectionUpdate collectionId path key variant fields = wireRecord txKindCollectionUpdate (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE variant <> word32LE 0 <> encodeValues fields)
 
 -- Remove an entry; its stamped copy tears down.
 txCollectionRemove :: Word64 -> [Value] -> Value -> Builder
@@ -211,9 +215,13 @@ txTemplateEnd = wireRecord txKindTemplateEnd (mempty)
 txCollectionMove :: Word64 -> [Value] -> Value -> [Value] -> Builder
 txCollectionMove collectionId path key before = wireRecord txKindCollectionMove (word64LE collectionId <> encodeValues path <> encodeValue key <> encodeValues before)
 
--- Set one field of an entry's record; only bindings on that field re-resolve.
-txCollectionUpdateField :: Word64 -> [Value] -> Value -> Word32 -> Value -> Builder
-txCollectionUpdateField collectionId path key field value = wireRecord txKindCollectionUpdateField (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE field <> word32LE 0 <> encodeValue value)
+-- Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does).
+txCollectionUpdateField :: Word64 -> [Value] -> Value -> Word32 -> Word32 -> Value -> Builder
+txCollectionUpdateField collectionId path key field variant value = wireRecord txKindCollectionUpdateField (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE field <> word32LE variant <> encodeValue value)
+
+-- Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
+txVariantCase :: Word32 -> Builder
+txVariantCase variant = wireRecord txKindVariantCase (word32LE variant <> word32LE 0)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

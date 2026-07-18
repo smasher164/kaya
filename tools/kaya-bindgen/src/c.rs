@@ -50,6 +50,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    uint32_t s_len;");
     c.line("} KayaVal;");
     c.line("");
+    c.line("/* One variant of a collection's element sum: its ordered");
+    c.line(" * KAYA_VALUE_* field tags. A record collection declares one. */");
+    c.line("typedef struct {");
+    c.line("    const uint32_t *tags;");
+    c.line("    uint32_t len;");
+    c.line("} KayaVariantSchema;");
+    c.line("");
     c.line("static inline KayaVal kaya_str(const char *s) {");
     c.line("    KayaVal v = {KAYA_VALUE_STR, 0, 0, s, (uint32_t)strlen(s)};");
     c.line("    return v;");
@@ -122,11 +129,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("/* A collection schema: {u32 count, u32 reserved, count KAYA_VALUE_*");
     c.line(" * tags}, padded to 8. */");
-    c.line("static inline void kaya_wire_type_tags(KayaTx *tx, const uint32_t *tags, uint32_t n) {");
+    c.line("static inline void kaya_wire_variant_schemas(KayaTx *tx, const KayaVariantSchema *variants, uint32_t n) {");
     c.line("    kaya_wire_u32(tx, n);");
     c.line("    kaya_wire_u32(tx, 0);");
-    c.line("    for (uint32_t i = 0; i < n; i++)");
-    c.line("        kaya_wire_u32(tx, tags[i]);");
+    c.line("    for (uint32_t i = 0; i < n; i++) {");
+    c.line("        kaya_wire_u32(tx, variants[i].len);");
+    c.line("        for (uint32_t j = 0; j < variants[i].len; j++)");
+    c.line("            kaya_wire_u32(tx, variants[i].tags[j]);");
+    c.line("    }");
     c.line("    kaya_wire_pad(tx);");
     c.line("}");
     c.line("");
@@ -159,8 +169,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::U64 => format!("uint64_t {}", f.name),
                 FieldTy::Value => format!("KayaVal {}", f.name),
                 FieldTy::Values => format!("const KayaVal *{}, uint32_t {}_len", f.name, f.name),
-                FieldTy::TypeTags => {
-                    format!("const uint32_t *{}, uint32_t {}_len", f.name, f.name)
+                FieldTy::VariantSchemas => {
+                    format!("const KayaVariantSchema *{}, uint32_t {}_len", f.name, f.name)
                 }
             });
         }
@@ -184,8 +194,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::Values => {
                     format!("    kaya_wire_values(tx, {}, {}_len);", f.name, f.name)
                 }
-                FieldTy::TypeTags => {
-                    format!("    kaya_wire_type_tags(tx, {}, {}_len);", f.name, f.name)
+                FieldTy::VariantSchemas => {
+                    format!("    kaya_wire_variant_schemas(tx, {}, {}_len);", f.name, f.name)
                 }
             });
         }

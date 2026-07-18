@@ -85,6 +85,18 @@ module KayaApp
     label,
     checkbox,
     each,
+    KayaSum (..),
+    SumCollection,
+    sumHandle,
+    sumCollectionOf,
+    sumInsert,
+    sumUpdate,
+    sumItems,
+    sumGet,
+    sumPatch,
+    sumDerive,
+    sumArm,
+    eachSum,
   )
 where
 
@@ -96,6 +108,7 @@ import Data.List (elemIndex)
 import GHC.Records (HasField)
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
+import qualified Data.List as List
 import Data.Proxy (Proxy (..))
 import Data.Word (Word32, Word64)
 import GHC.Generics
@@ -142,7 +155,10 @@ data Instance = Instance
   { iPath :: ![W.Value],
     -- One [W.Value] per entry: the record's wire fields (a scalar
     -- collection is the one-field case).
-    iEntries :: ![(W.Value, [W.Value])]
+    -- (key, (variant, fields)): the discriminant rides with the
+    -- record, so refined reads and witnessed writes see the same fold
+    -- the core holds.
+    iEntries :: ![(W.Value, (Word32, [W.Value]))]
   }
 
 -- The collection is the model — the only copy: every mutation op edits
@@ -168,7 +184,7 @@ data BuildState = BuildState
     -- buildTx like the model, so an abandoned Build abandons its
     -- registrations too. The compute is wire-level: entries in, one
     -- value out.
-    bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, [W.Value])] -> W.Value)])
+    bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)])
   }
 
 data Pending
@@ -178,9 +194,11 @@ data Pending
   | PValue !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
 
-modelSet :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> Model -> Model
-modelSet cid path key value model = Map.insert cid (go (Map.findWithDefault [] cid model)) model
+modelSet :: Word64 -> [W.Value] -> W.Value -> Word32 -> [W.Value] -> Model -> Model
+modelSet cid path key variant fields model =
+  Map.insert cid (go (Map.findWithDefault [] cid model)) model
   where
+    value = (variant, fields)
     go [] = [Instance path [(key, value)]]
     go (i : rest)
       | iPath i == path = i {iEntries = upsert (iEntries i)} : rest
@@ -225,7 +243,7 @@ modelMove cid path key before = Map.adjust (map go) cid
       | otherwise = (k, v) : insertAt anchor entry rest
     insertAt _ entry [] = [entry]
 
-lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, [W.Value])]
+lookupEntries :: Word64 -> [W.Value] -> Model -> [(W.Value, (Word32, [W.Value]))]
 lookupEntries cid path model =
   case filter ((== path) . iPath) (Map.findWithDefault [] cid model) of
     (i : _) -> iEntries i
@@ -343,7 +361,7 @@ instance Declare Build where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [W.valueStr]})
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [[W.valueStr]]})
   forEach coll body =
     Build $ \s ->
       let cid = assertRoot coll
@@ -369,7 +387,7 @@ instance Declare Tpl where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [W.valueStr]})
+     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [[W.valueStr]]})
   forEach coll body =
     Tpl $ \s ->
       let cid = assertRoot coll
@@ -412,14 +430,14 @@ recomputeDerived cid path s
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionInsert n path key [value],
-       bModel = modelSet n path key [value] (bModel s)})
+    s {bRecords = bRecords s <> W.txCollectionInsert n path key 0 [value],
+       bModel = modelSet n path key 0 [value] (bModel s)})
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionUpdate n path key [value],
-       bModel = modelSet n path key [value] (bModel s)})
+    s {bRecords = bRecords s <> W.txCollectionUpdate n path key 0 [value],
+       bModel = modelSet n path key 0 [value] (bModel s)})
 
 remove :: Collection -> W.Value -> Build ()
 remove (Collection n path) key = Build $ \s ->
@@ -484,7 +502,7 @@ moveEntry (Collection n path) key before = Build $ \s ->
 -- patch so far (this transaction's included), in insertion order.
 items :: Collection -> Build [(W.Value, W.Value)]
 items (Collection n path) = Build $ \s ->
-  (map (\(k, vs) -> (k, head vs)) (lookupEntries n path (bModel s)), s)
+  (map (\(k, (_, vs)) -> (k, head vs)) (lookupEntries n path (bModel s)), s)
 
 count :: Collection -> Build Int
 count c = length <$> items c
@@ -606,6 +624,169 @@ checkbox src handler = do
 -- case once handlers co-locate at their constructors.
 each :: Collection -> Tpl a -> Build Widget
 each c body = fst <$> forEach c body
+
+-- Sums: the data declaration is the sum. KayaSum derives everything
+-- from the Generic representation — one schema per constructor (each
+-- constructor's fields walked by the same GRecord machinery records
+-- use), the discriminant, both conversions — so `deriving Generic` +
+-- an empty instance is the whole obligation, exactly as with records.
+-- Elimination is Haskell-shaped where the guest holds the value (case
+-- / pattern matches); the template takes a product of arms checked
+-- complete at declaration, with the scene as the second check.
+-- Mutation is witnessed by the scrutinee the guest just matched.
+
+class GSum f where
+  gsCount :: proxy f -> Word32
+  gsSchemas :: proxy f -> [[Word32]]
+  gsVariant :: f p -> Word32
+  gsToValues :: f p -> [W.Value]
+  gsFromParts :: Word32 -> [W.Value] -> f p
+
+instance GSum f => GSum (M1 D c f) where
+  gsCount _ = gsCount (Proxy :: Proxy f)
+  gsSchemas _ = gsSchemas (Proxy :: Proxy f)
+  gsVariant (M1 x) = gsVariant x
+  gsToValues (M1 x) = gsToValues x
+  gsFromParts v vs = M1 (gsFromParts v vs)
+
+instance (GSum a, GSum b) => GSum (a :+: b) where
+  gsCount _ = gsCount (Proxy :: Proxy a) + gsCount (Proxy :: Proxy b)
+  gsSchemas _ = gsSchemas (Proxy :: Proxy a) ++ gsSchemas (Proxy :: Proxy b)
+  gsVariant (L1 x) = gsVariant x
+  gsVariant (R1 x) = gsCount (Proxy :: Proxy a) + gsVariant x
+  gsToValues (L1 x) = gsToValues x
+  gsToValues (R1 x) = gsToValues x
+  gsFromParts v vs
+    | v < gsCount (Proxy :: Proxy a) = L1 (gsFromParts v vs)
+    | otherwise = R1 (gsFromParts (v - gsCount (Proxy :: Proxy a)) vs)
+
+-- The sum-of-records shape: each constructor wraps exactly one record
+-- type (PNote Note | PTodo Todo), so the constructor's schema is the
+-- inner record's, and the per-constructor field tokens are the inner
+-- record's own (field @"done" @Todo) — nothing new to declare.
+instance KayaRecord inner => GSum (M1 C c (M1 S sc (K1 R inner))) where
+  gsCount _ = 1
+  gsSchemas _ = [kayaSchema (Proxy :: Proxy inner)]
+  gsVariant _ = 0
+  gsToValues (M1 (M1 (K1 r))) = toValues r
+  gsFromParts 0 vs = M1 (M1 (K1 (fromValues vs)))
+  gsFromParts _ _ = error "kaya: variant out of range"
+
+-- | A sum element type; `deriving Generic` is the whole obligation.
+class KayaSum a where
+  kayaVariantSchemas :: proxy a -> [[Word32]]
+  default kayaVariantSchemas :: (Generic a, GSum (Rep a)) => proxy a -> [[Word32]]
+  kayaVariantSchemas _ = gsSchemas (Proxy :: Proxy (Rep a))
+  kayaSumVariant :: a -> Word32
+  default kayaSumVariant :: (Generic a, GSum (Rep a)) => a -> Word32
+  kayaSumVariant = gsVariant . from
+  kayaSumToValues :: a -> [W.Value]
+  default kayaSumToValues :: (Generic a, GSum (Rep a)) => a -> [W.Value]
+  kayaSumToValues = gsToValues . from
+  kayaSumFromParts :: Word32 -> [W.Value] -> a
+  default kayaSumFromParts :: (Generic a, GSum (Rep a)) => Word32 -> [W.Value] -> a
+  kayaSumFromParts v vs = to (gsFromParts v vs)
+
+newtype SumCollection a = SumCollection {sumHandle :: Collection}
+
+sumCollectionOf :: forall a. KayaSum a => Proxy a -> Build (SumCollection a)
+sumCollectionOf p = Build $ \s ->
+  let c = bCounters s
+      n = cCollection c + 1
+      s' = registerCollection n s {bCounters = c {cCollection = n}}
+   in ( SumCollection (Collection n []),
+        s' {bRecords = bRecords s' <> W.txCreateCollection n (kayaVariantSchemas p)}
+      )
+
+-- | Insert witnesses the value's own constructor onto the wire.
+sumInsert :: KayaSum a => SumCollection a -> W.Value -> a -> Build ()
+sumInsert (SumCollection (Collection n path)) key value = Build $ \s ->
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionInsert n path key (kayaSumVariant value) (kayaSumToValues value),
+       bModel = modelSet n path key (kayaSumVariant value) (kayaSumToValues value) (bModel s)})
+
+-- | Update replaces a record wholesale; a different constructor than
+-- the entry's current one restamps its copy in place.
+sumUpdate :: KayaSum a => SumCollection a -> W.Value -> a -> Build ()
+sumUpdate (SumCollection (Collection n path)) key value = Build $ \s ->
+  ((), recomputeDerived n path
+    s {bRecords = bRecords s <> W.txCollectionUpdate n path key (kayaSumVariant value) (kayaSumToValues value),
+       bModel = modelSet n path key (kayaSumVariant value) (kayaSumToValues value) (bModel s)})
+
+-- | The typed model, in insertion order; `case` eliminates the values.
+sumItems :: KayaSum a => SumCollection a -> Build [(W.Value, a)]
+sumItems (SumCollection (Collection n path)) = Build $ \s ->
+  (map (\(k, (v, vs)) -> (k, kayaSumFromParts v vs)) (lookupEntries n path (bModel s)), s)
+
+-- | The entry's current value — the scrutinee for the match that
+-- precedes a patch.
+sumGet :: KayaSum a => SumCollection a -> W.Value -> Build (Maybe a)
+sumGet (SumCollection (Collection n path)) key = Build $ \s ->
+  ( fmap (\(v, vs) -> kayaSumFromParts v vs)
+      (lookup key (lookupEntries n path (bModel s))),
+    s)
+
+-- | The witnessed patch: the scrutinee the guest just matched is the
+-- witness — its constructor names the variant — and the model refuses
+-- a drifted entry, so the guard is checked, not trusted.
+sumPatch :: KayaSum a => SumCollection a -> W.Value -> a -> [FieldSet v] -> Build ()
+sumPatch c key witness = mapM_ (\(FieldSet i v) -> sumUpdateFieldWire c key (kayaSumVariant witness) i v)
+
+sumUpdateFieldWire :: SumCollection a -> W.Value -> Word32 -> Word32 -> W.Value -> Build ()
+sumUpdateFieldWire (SumCollection (Collection n path)) key variant i wire = Build $ \s ->
+  let (stored, current) = case lookup key (lookupEntries n path (bModel s)) of
+        Just (v, vs) -> (v, vs)
+        Nothing -> error "kaya: update of missing key"
+      updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
+   in if stored /= variant
+        then error "kaya: update_field witnessed a constructor the entry no longer holds"
+        else
+          ((), recomputeDerived n path
+            s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i variant wire,
+               bModel = modelSet n path key variant updated (bModel s)})
+
+-- | The collection-derived signal, over the sum's entries.
+sumDerive ::
+  forall a. KayaSum a =>
+  SumCollection a -> ([(W.Value, a)] -> W.Value) -> Build Signal
+sumDerive (SumCollection (Collection n _)) compute = Build $ \s ->
+  let wireCompute entries = compute (map (\(k, (v, vs)) -> (k, kayaSumFromParts v vs :: a)) entries)
+      initial = wireCompute (lookupEntries n [] (bModel s))
+      c = bCounters s
+      sid = cSignal c + 1
+      s' = s {bCounters = c {cSignal = sid},
+              bRecords = bRecords s <> W.txCreateSignal sid initial,
+              bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
+   in (Signal sid, s')
+
+-- | One arm of the template eliminator: the prototype value names the
+-- constructor, the Tpl program is its blueprint.
+data SumArm = SumArm !Word32 (Tpl ())
+
+sumArm :: KayaSum a => a -> Tpl () -> SumArm
+sumArm prototype = SumArm (kayaSumVariant prototype)
+
+-- | The template eliminator: a product of arms, one per constructor,
+-- handed over whole. Completeness is checked here at declaration (one
+-- arm per constructor, any order) and again by the scene — an omitted
+-- constructor never waits for its first insert to fail.
+eachSum :: forall a. KayaSum a => SumCollection a -> [SumArm] -> Build Widget
+eachSum (SumCollection coll) arms = Build $ \s ->
+  let count = length (kayaVariantSchemas (Proxy :: Proxy a))
+      variants = map (\(SumArm v _) -> v) arms
+      _checked
+        | length arms /= count =
+            error ("kaya: the eliminator needs " ++ show count ++ " arms, got " ++ show (length arms))
+        | length (List.nub variants) /= length variants =
+            error "kaya: two arms for one constructor"
+        | otherwise = ()
+      body = mapM_ (\(SumArm v (Tpl arm)) -> Tpl (\st ->
+        ((), snd (arm st {bRecords = bRecords st <> W.txVariantCase v})))) arms
+      ((self, _), s') =
+        _checked `seq`
+        bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
+      cid = assertRoot coll
+   in (Widget self, s')
 
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
@@ -732,20 +913,20 @@ collectionOf p = Build $ \s ->
       n = cCollection c + 1
       s' = registerCollection n s {bCounters = c {cCollection = n}}
    in ( RecordCollection (Collection n []),
-        s' {bRecords = bRecords s' <> W.txCreateCollection n (kayaSchema p)}
+        s' {bRecords = bRecords s' <> W.txCreateCollection n [kayaSchema p]}
       )
 
 insertRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionInsert n path key (toValues value),
-       bModel = modelSet n path key (toValues value) (bModel s)})
+    s {bRecords = bRecords s <> W.txCollectionInsert n path key 0 (toValues value),
+       bModel = modelSet n path key 0 (toValues value) (bModel s)})
 
 updateRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionUpdate n path key (toValues value),
-       bModel = modelSet n path key (toValues value) (bModel s)})
+    s {bRecords = bRecords s <> W.txCollectionUpdate n path key 0 (toValues value),
+       bModel = modelSet n path key 0 (toValues value) (bModel s)})
 
 -- | One field's delta: the rest of the record never travels; the
 -- model's copy updates the same slot.
@@ -757,12 +938,12 @@ updateField c key (KField i) value = updateFieldWire c key i (toFieldValue value
 updateFieldWire :: RecordCollection a -> W.Value -> Word32 -> W.Value -> Build ()
 updateFieldWire (RecordCollection (Collection n path)) key i wire = Build $ \s ->
   let current = case lookup key (lookupEntries n path (bModel s)) of
-        Just vs -> vs
+        Just (_, vs) -> vs
         Nothing -> error "kaya: update of missing key"
       updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i wire,
-           bModel = modelSet n path key updated (bModel s)})
+        s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i 0 wire,
+           bModel = modelSet n path key 0 updated (bModel s)})
 
 -- | One recorded field write of an a-record: the value's type checks
 -- against the field's at the use site, then the pair travels as
@@ -781,7 +962,7 @@ patch c key = mapM_ (\(FieldSet i v) -> updateFieldWire c key i v)
 -- | The typed model: what this guest wrote, in insertion order.
 recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
 recordItems (RecordCollection (Collection n path)) = Build $ \s ->
-  (map (\(k, vs) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
+  (map (\(k, (_, vs)) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
 
 -- | A signal the binding recomputes from this collection's entries
 -- after every mutation, written into the same transaction — the
@@ -792,7 +973,7 @@ derive ::
   forall a. KayaRecord a =>
   RecordCollection a -> ([(W.Value, a)] -> W.Value) -> Build Signal
 derive (RecordCollection (Collection n _)) compute = Build $ \s ->
-  let wireCompute entries = compute (map (\(k, vs) -> (k, fromValues vs :: a)) entries)
+  let wireCompute entries = compute (map (\(k, (_, vs)) -> (k, fromValues vs :: a)) entries)
       initial = wireCompute (lookupEntries n [] (bModel s))
       c = bCounters s
       sid = cSignal c + 1
@@ -817,7 +998,7 @@ bindCheckedField (Node n) level (KField i) = emitT (W.txBindCheckedElement n lev
 data App = App
   { appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
-    appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, [W.Value])] -> W.Value)]),
+    appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
     appWidgetChanges :: IORef (Map.Map Word64 (String -> IO ())),

@@ -23,7 +23,7 @@ struct KayaField<V> {
     let index: UInt32
 }
 
-private func wireValue(_ any: Any) -> KayaValue? {
+func wireValue(_ any: Any) -> KayaValue? {
     switch any {
     case let s as String: return .str(s)
     case let b as Bool: return .bool(b)
@@ -93,11 +93,11 @@ struct KayaRecordCollection<T: KayaRecord> {
     let collection: KayaCollection
 
     func insert(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
-        tx.insertRecordRaw(collection, key, value, value.kayaValues)
+        tx.insertRecordRaw(collection, key, value, 0, value.kayaValues)
     }
 
     func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
-        tx.updateRecordRaw(collection, key, value, value.kayaValues)
+        tx.updateRecordRaw(collection, key, value, 0, value.kayaValues)
     }
 
     /// One field's delta by key path: the rest of the record never
@@ -120,7 +120,7 @@ struct KayaRecordCollection<T: KayaRecord> {
             preconditionFailure("kaya: \(V.self) is not a wire type")
         }
         fields[Int(f.index)] = wire
-        tx.updateFieldRaw(collection, key, T(values: fields), f.index, wire)
+        tx.updateFieldRaw(collection, key, T(values: fields), 0, f.index, wire)
     }
 
     /// Repositions an entry before another's: order is collection

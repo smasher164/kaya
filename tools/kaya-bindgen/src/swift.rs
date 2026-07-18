@@ -110,11 +110,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        for v in vals { value(v) }");
     c.line("    }");
     c.line("");
-    c.line("    /// A collection schema: counted KAYA_VALUE_* tags, padded to 8.");
-    c.line("    mutating func typeTags(_ tags: [UInt32]) {");
-    c.line("        u32(UInt32(tags.count))");
+    c.line("    /// A collection's element sum: per variant, counted KAYA_VALUE_*");
+    c.line("    /// tags, padded to 8. A record collection is the one-variant case.");
+    c.line("    mutating func variantSchemas(_ variants: [[UInt32]]) {");
+    c.line("        u32(UInt32(variants.count))");
     c.line("        u32(0)");
-    c.line("        for t in tags { u32(t) }");
+    c.line("        for schema in variants {");
+    c.line("            u32(UInt32(schema.count))");
+    c.line("            for t in schema { u32(t) }");
+    c.line("        }");
     c.line("        while bytes.count % 8 != 0 { bytes.append(0) }");
     c.line("    }");
     c.line("");
@@ -277,7 +281,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("_ {}: UInt64", camel(f.name)),
             FieldTy::Value => format!("_ {}: KayaValue", camel(f.name)),
             FieldTy::Values => format!("_ {}: [KayaValue]", camel(f.name)),
-            FieldTy::TypeTags => format!("_ {}: [UInt32]", camel(f.name)),
+            FieldTy::VariantSchemas => format!("_ {}: [[UInt32]]", camel(f.name)),
         });
     }
     c.line("");
@@ -298,7 +302,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("        self.u64({})", camel(f.name)),
             FieldTy::Value => format!("        self.value({})", camel(f.name)),
             FieldTy::Values => format!("        self.values({})", camel(f.name)),
-            FieldTy::TypeTags => format!("        self.typeTags({})", camel(f.name)),
+            FieldTy::VariantSchemas => format!("        self.variantSchemas({})", camel(f.name)),
         });
     }
     c.line("        self.end(start)");

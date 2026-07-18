@@ -482,7 +482,7 @@ public final class KayaApp {
         public Collection collection() {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
-            records.add(KayaWire.txCreateCollection(c.id, new int[] { KayaWire.VALUE_STR }));
+            records.add(KayaWire.txCreateCollection(c.id, new int[][] { { KayaWire.VALUE_STR } }));
             return c;
         }
 
@@ -531,40 +531,48 @@ public final class KayaApp {
 
         public void insert(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, new Object[] { value }));
+            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, 0, new Object[] { value }));
             recomputeDerived(c);
         }
 
         public void update(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, new Object[] { value }));
+            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, 0, new Object[] { value }));
             recomputeDerived(c);
         }
 
         // The raw record paths KayaRecords builds on: the model keeps
         // the record object itself; only the wire fields travel.
         Collection collectionWithSchema(int[] schema) {
+            return collectionWithVariants(new int[][] { schema });
+        }
+
+        Collection collectionWithVariants(int[][] variants) {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
-            records.add(KayaWire.txCreateCollection(c.id, schema));
+            records.add(KayaWire.txCreateCollection(c.id, variants));
             return c;
         }
 
-        void insertRecordRaw(Collection c, Object key, Object model, Object[] fields) {
+        void emitVariantCase(int variant) {
+            records.add(KayaWire.txVariantCase(variant));
+        }
+
+        void insertRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, fields));
+            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, variant, fields));
             recomputeDerived(c);
         }
 
-        void updateRecordRaw(Collection c, Object key, Object model, Object[] fields) {
+        void updateRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, fields));
+            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, variant, fields));
             recomputeDerived(c);
         }
 
-        void updateFieldRaw(Collection c, Object key, Object model, int field, Object value) {
+        void updateFieldRaw(Collection c, Object key, Object model, int variant, int field, Object value) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, value));
+            records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, variant, value));
             recomputeDerived(c);
         }
 

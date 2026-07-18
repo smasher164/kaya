@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/kaya"]
+members = ["crates/kaya", "crates/kaya-derive"]
 # Dev tools, not part of the build graph: regenerate WinUI bindings and
 # the per-language wire bindings.
 exclude = ["tools/winui-bindgen", "tools/kaya-bindgen"]

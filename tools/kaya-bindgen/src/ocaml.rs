@@ -10,7 +10,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encode_value", "encode_values", "encode_type_tags", "finish", "parse_value", "parse_occurrence",
+    "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
     "include", "inherit", "initializer", "lazy", "let", "match", "method", "module", "mutable",
@@ -75,11 +75,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  Buffer.add_int32_le b 0l;");
     c.line("  List.iter (encode_value b) vals");
     c.line("");
-    c.line("(* A collection schema: counted value-type tags, padded to 8. *)");
-    c.line("let encode_type_tags b tags =");
-    c.line("  Buffer.add_int32_le b (Int32.of_int (List.length tags));");
+    c.line("(* A collection's element sum: per variant, counted value-type tags,");
+    c.line("   padded to 8. A record collection is the one-variant case. *)");
+    c.line("let encode_variant_schemas b variants =");
+    c.line("  Buffer.add_int32_le b (Int32.of_int (List.length variants));");
     c.line("  Buffer.add_int32_le b 0l;");
-    c.line("  List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) tags;");
+    c.line("  List.iter");
+    c.line("    (fun schema ->");
+    c.line("      Buffer.add_int32_le b (Int32.of_int (List.length schema));");
+    c.line("      List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) schema)");
+    c.line("    variants;");
     c.line("  pad8 b");
     c.line("");
     c.line("let finish kind fill =");
@@ -220,7 +225,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("      Buffer.add_int64_le b {}", f.name),
             FieldTy::Value => format!("      encode_value b {}", f.name),
             FieldTy::Values => format!("      encode_values b {}", f.name),
-            FieldTy::TypeTags => format!("      encode_type_tags b {}", f.name),
+            FieldTy::VariantSchemas => format!("      encode_variant_schemas b {}", f.name),
         });
     }
     if lines.is_empty() {

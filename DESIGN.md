@@ -328,7 +328,7 @@ rules so far:
   record and compares (a diff pays a copy plus per-field comparisons —
   Mirror walks in Swift, deep string clones in Rust — to infer what the
   call sites stated). Where the binding owns code generation the
-  setters are per-field and named (the record! builder in Rust, the
+  setters are per-field and named (the derive's builder in Rust, the
   ppx's optional labelled arguments in OCaml — Python's kwargs patch
   with static types); elsewhere a set-chain over the selector vocabulary
   (`.Set(x => x.Done, true)`, `.set(\.done, checked)`,
@@ -1047,7 +1047,7 @@ feature rather than reconstructed per backend afterward.
   the record on the wire; lifting a named field to the key
   (`collection(key="id")`) is binding sugar at insert time. Guest-side,
   the language's own record declaration is the single source of truth:
-  a Python dataclass, a Rust `record!` struct, a Haskell Generic
+  a Python dataclass, a Rust #[derive(Kaya)] struct, a Haskell Generic
   deriving, an OCaml ppx, a C#/Java record class, a Go tagged struct, a
   Swift prototype — the binding derives the wire schema, the
   conversions, and a set of field tokens from that one declaration, so
@@ -1073,6 +1073,91 @@ feature rather than reconstructed per backend afterward.
   review vigilance. Definition of done: the appendix's todo scene —
   entry, add button, a For of checkbox-plus-label rows, items-left
   label, field-level toggle updates — green on the full matrix from
+  every guest.
+- Sum-typed elements complete milestone 3: a collection's schema is one
+  ordered field-type list per variant of the element sum, and a record
+  collection is the one-variant case, exactly as a scalar collection is
+  the one-field case — the same degeneracy move, so nothing bifurcates
+  and every existing scene stays valid. Variants are indices; variant
+  names live in the bindings, like field names, preserving "no hot path
+  resolves a name". Entries carry their discriminant: insert and update
+  state it ahead of the fields, the core stores it with the record, and
+  an update whose variant differs from the stored one tears down that
+  entry's stamped copy and restamps it in place from the new
+  constructor's case — the When-toggle rebuild applied per entry, which
+  the reproducibility rule already licenses. update_field can never
+  change a constructor; the whole record necessarily travels when one
+  does. Inside a For over a sum, variant_case records split the
+  template into one blueprint per constructor. The declaration as a
+  whole is an eliminator, and it is checked *total* at template_end:
+  the failure a missing case would otherwise cause is data-dependent —
+  the first insert of the unlucky constructor, in production, after the
+  fourth variant was added and one of three Fors wasn't extended — so
+  the check runs at declaration, the earliest point in the system, and
+  declaring an empty case is the explicit way to render a constructor
+  as nothing. Element bindings inside case v validate against variant
+  v's schema: the record milestone's declaration-time guarantee, per
+  constructor. Field-type-level sums (a field whose type is itself a
+  union) remain future — that is the feature that would finally summon
+  Value::Record; element-level sums encode flat behind their tag.
+  Guest-side, the language's own sum is the declaration — a Rust enum
+  under #[derive(Kaya)] (shape decides product or sum, like
+  derive(Debug)), a sealed interface of records in Java, an abstract
+  record family in C#, an OCaml variant, a Haskell sum via Generic, a
+  Swift enum with associated values, a Python union of dataclasses, a
+  Go sealed marker interface over structs. The template declaration is
+  an eliminator and the binding surfaces it as one: a record of arms,
+  one named arm per constructor (`PostCases { note: .., todo: .. }`),
+  because a product of arm functions *is* the case analysis — so
+  wherever the language checks record literals or interface
+  implementations for completeness (Rust struct literals, a sealed
+  visitor interface in Java/C#, a record of functions in Haskell),
+  template totality is a compile error, and the scene's
+  declaration-time check remains the backstop for the languages that
+  cannot. Sequential per-case builder calls were rejected for exactly
+  the gap they leave: each call is a single-variant handler, and only
+  the runtime assembles them into a total match. The convergence
+  target, per language: the named, completeness-checked record of arms
+  wherever the language's metaprogramming can mint one — Rust's derive
+  and OCaml's ppx are there today — with the typed-token arms product
+  (C# `Arm<Note>(…)`, Java `arm(Note.class, …)`, Go `Case[Note]`,
+  Swift/Haskell prototype tokens) as the interim form, checked
+  complete at declaration, never later. The upgrade paths exist per
+  ecosystem precedent: a Java annotation processor generating a staged
+  builder (the Immutables idiom for named-and-required; Derive4J
+  already generates ADT eliminators this way) plus exact-index field
+  tokens that retire the reflection tier and its D8 fallback; a C#
+  source generator (dunet generates compile-total Match for unions); a
+  Swift attached macro (the CasePaths shape) giving a memberwise cases
+  struct and case tokens in place of prototype values. Go's ceiling is
+  structural: struct literals are open — an omitted field is a nil
+  func, not an error — so its compile-total form is a go:generate'd
+  function with one parameter per constructor; until then its head
+  token `Case[Note]` is the arm's match label, kept deliberately, and
+  the case value carries the template recorder because Go literals
+  cannot infer their parameter types. (TypeScript's ts-pattern marks
+  the no-codegen ceiling — type-level union subtraction down to
+  `never` — which none of these type systems can express;
+  declaration-time checking is the honest floor without codegen.)
+  Mutation is
+  match-refined: a field write on a sum is reachable only through a
+  case analysis of the model's current entry, whose arm hands back a
+  handle refined to that constructor's fields. Never through a claimed
+  tag — a claim is a dynamic cast — and the refinement must be fresh at
+  write time because occurrences queue: a handler co-located in one
+  constructor's case can run after the guest has already converted the
+  entry, and re-eliminating at write time makes the stale arm simply
+  not run, the fold-if-applicable answer to that race. The wire's
+  update_field still carries the discriminant, as a *witness* of that
+  match rather than a claim: the scene asserts it against the stored
+  tag, turning every field delta into a consistency check between the
+  binding's hand-written model and the core's table — the drift class
+  that bit the move ops, structurally guarded at the op where drifting
+  would otherwise write a type-correct field of the wrong constructor.
+  Definition of done: the feed scene — notes and todos in one
+  collection, one case per constructor, a promote handler exercising
+  the variant-change restamp, a toggle through the refined patch, a
+  derived signal folding over the sum — green on the full matrix from
   every guest.
 - The conformance gallery is the definition of done. A widget is admitted
   when its scene passes on every platform, and the scene list grows one

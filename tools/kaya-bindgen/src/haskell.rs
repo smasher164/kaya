@@ -9,7 +9,7 @@ use kaya::spec::{FieldTy, ProtocolSpec, Record};
 use crate::{Ctx, prop_variants, record_params};
 
 pub const RESERVED: &[&str] = &[
-    "encodeValue", "encodeValues", "encodeTypeTags", "wireRecord", "parseValue", "parseOccurrence",
+    "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -100,11 +100,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("encodeValues vals =");
     c.line("  word32LE (fromIntegral (length vals)) <> word32LE 0 <> foldMap encodeValue vals");
     c.line("");
-    c.line("-- | A collection schema: counted value-type tags, padded to 8.");
-    c.line("encodeTypeTags :: [Word32] -> Builder");
-    c.line("encodeTypeTags tags =");
-    c.line("  let body = word32LE (fromIntegral (length tags)) <> word32LE 0 <> foldMap word32LE tags");
-    c.line("      len = 8 + 4 * length tags");
+    c.line("-- | A collection's element sum: per variant, counted value-type tags,");
+    c.line("-- padded to 8. A record collection is the one-variant case.");
+    c.line("encodeVariantSchemas :: [[Word32]] -> Builder");
+    c.line("encodeVariantSchemas variants =");
+    c.line("  let one schema = word32LE (fromIntegral (length schema)) <> foldMap word32LE schema");
+    c.line("      body = word32LE (fromIntegral (length variants)) <> word32LE 0 <> foldMap one variants");
+    c.line("      len = 8 + 4 * (length variants + sum (map length variants))");
     c.line("      padding = (8 - len `mod` 8) `mod` 8");
     c.line("   in body <> byteString (BS.replicate padding 0)");
     c.line("");
@@ -225,7 +227,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => "Word64",
             FieldTy::Value => "Value",
             FieldTy::Values => "[Value]",
-            FieldTy::TypeTags => "[Word32]",
+            FieldTy::VariantSchemas => "[[Word32]]",
         });
         names.push(camel(f.name));
     }
@@ -244,7 +246,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::U64 => format!("word64LE {}", camel(f.name)),
             FieldTy::Value => format!("encodeValue {}", camel(f.name)),
             FieldTy::Values => format!("encodeValues {}", camel(f.name)),
-            FieldTy::TypeTags => format!("encodeTypeTags {}", camel(f.name)),
+            FieldTy::VariantSchemas => format!("encodeVariantSchemas {}", camel(f.name)),
         });
     }
     let body = if body.is_empty() {

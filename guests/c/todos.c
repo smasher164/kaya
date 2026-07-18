@@ -41,8 +41,9 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_STATUS, SIG_LEFT);
 
-    kaya_tx_create_collection(&tx, C_TODOS,
-                              (uint32_t[]){KAYA_VALUE_STR, KAYA_VALUE_BOOL}, 2);
+    kaya_tx_create_collection(
+        &tx, C_TODOS,
+        (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR, KAYA_VALUE_BOOL}, 2}}, 1);
     kaya_tx_create_for(&tx, W_FOR_TODOS, C_TODOS);
     kaya_tx_create_widget(&tx, N_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, N_CHECK, KAYA_KIND_CHECKBOX);
@@ -110,9 +111,12 @@ static void *app(void *arg) {
                 }
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
-                /* One field's delta: the title never travels. */
+                /* One field's delta: the title never travels. The 0
+                 * after F_DONE is the witnessed variant — a record
+                 * collection has one constructor. */
                 kaya_tx_collection_update_field(&tx, C_TODOS, 0, 0, keys[0],
-                                                F_DONE, kaya_bool(payload.i != 0));
+                                                F_DONE, 0,
+                                                kaya_bool(payload.i != 0));
                 write_items_left(&tx);
                 kaya_submit(tx.buf, tx.len);
             }
@@ -125,7 +129,7 @@ static void *app(void *arg) {
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
                 kaya_tx_collection_insert(
-                    &tx, C_TODOS, 0, 0, kaya_str(todos[n_todos - 1].key),
+                    &tx, C_TODOS, 0, 0, kaya_str(todos[n_todos - 1].key), 0,
                     (KayaVal[]){kaya_str(draft), kaya_bool(0)}, 2);
                 write_items_left(&tx);
                 kaya_submit(tx.buf, tx.len);

@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x378d164e75be3006
+	SpecHash uint64 = 0x3549f42a1a09369e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -53,6 +53,7 @@ const (
 	txTemplateEnd = 13
 	txCollectionMove = 15
 	txCollectionUpdateField = 14
+	txVariantCase = 16
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -115,13 +116,18 @@ func encodeValues(b []byte, vals []any) []byte {
 	return b
 }
 
-// encodeTypeTags appends a collection schema: {u32 count, u32 reserved,
-// count Value* tags}, padded to 8.
-func encodeTypeTags(b []byte, tags []uint32) []byte {
-	b = binary.LittleEndian.AppendUint32(b, uint32(len(tags)))
+// encodeVariantSchemas appends a collection's element sum: {u32
+// variant_count, u32 reserved, per variant: u32 field_count,
+// field_count Value* tags}, padded to 8. A record collection is
+// the one-variant case.
+func encodeVariantSchemas(b []byte, variants [][]uint32) []byte {
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(variants)))
 	b = binary.LittleEndian.AppendUint32(b, 0)
-	for _, t := range tags {
-		b = binary.LittleEndian.AppendUint32(b, t)
+	for _, schema := range variants {
+		b = binary.LittleEndian.AppendUint32(b, uint32(len(schema)))
+		for _, t := range schema {
+			b = binary.LittleEndian.AppendUint32(b, t)
+		}
 	}
 	for len(b)%8 != 0 {
 		b = append(b, 0)
@@ -183,30 +189,34 @@ func TxMount(window uint64, root uint64) []byte {
 	return endRecord(b)
 }
 
-// TxCreateCollection: Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template.
-func TxCreateCollection(collectionId uint64, schema []uint32) []byte {
+// TxCreateCollection: Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template.
+func TxCreateCollection(collectionId uint64, variants [][]uint32) []byte {
 	b := beginRecord(txCreateCollection)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
-	b = encodeTypeTags(b, schema)
+	b = encodeVariantSchemas(b, variants)
 	return endRecord(b)
 }
 
-// TxCollectionInsert: Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy.
-func TxCollectionInsert(collectionId uint64, path []any, key any, fields []any) []byte {
+// TxCollectionInsert: Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case.
+func TxCollectionInsert(collectionId uint64, path []any, key any, variant uint32, fields []any) []byte {
 	b := beginRecord(txCollectionInsert)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
 	b = encodeValues(b, path)
 	b = encodeValue(b, key)
+	b = binary.LittleEndian.AppendUint32(b, variant)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValues(b, fields)
 	return endRecord(b)
 }
 
-// TxCollectionUpdate: Replace an entry's record; every element binding follows.
-func TxCollectionUpdate(collectionId uint64, path []any, key any, fields []any) []byte {
+// TxCollectionUpdate: Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place.
+func TxCollectionUpdate(collectionId uint64, path []any, key any, variant uint32, fields []any) []byte {
 	b := beginRecord(txCollectionUpdate)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
 	b = encodeValues(b, path)
 	b = encodeValue(b, key)
+	b = binary.LittleEndian.AppendUint32(b, variant)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	b = encodeValues(b, fields)
 	return endRecord(b)
 }
@@ -252,15 +262,23 @@ func TxCollectionMove(collectionId uint64, path []any, key any, before []any) []
 	return endRecord(b)
 }
 
-// TxCollectionUpdateField: Set one field of an entry's record; only bindings on that field re-resolve.
-func TxCollectionUpdateField(collectionId uint64, path []any, key any, field uint32, value any) []byte {
+// TxCollectionUpdateField: Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does).
+func TxCollectionUpdateField(collectionId uint64, path []any, key any, field uint32, variant uint32, value any) []byte {
 	b := beginRecord(txCollectionUpdateField)
 	b = binary.LittleEndian.AppendUint64(b, collectionId)
 	b = encodeValues(b, path)
 	b = encodeValue(b, key)
 	b = binary.LittleEndian.AppendUint32(b, field)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, variant)
 	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
+// TxVariantCase: Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
+func TxVariantCase(variant uint32) []byte {
+	b := beginRecord(txVariantCase)
+	b = binary.LittleEndian.AppendUint32(b, variant)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 

@@ -9,7 +9,7 @@ Python bool, int, float, and str, mapped to the kaya value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x378d164e75be3006
+SPEC_HASH = 0x3549f42a1a09369e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -51,6 +51,7 @@ TX_CREATE_WHEN = 12
 TX_TEMPLATE_END = 13
 TX_COLLECTION_MOVE = 15
 TX_COLLECTION_UPDATE_FIELD = 14
+TX_VARIANT_CASE = 16
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -90,9 +91,12 @@ class _enc:
 
 
     @staticmethod
-    def type_tags(schema):
-        """Encode a collection schema: a counted list of VALUE_* tags."""
-        return _pad(struct.pack("<II", len(schema), 0) + b"".join(struct.pack("<I", t) for t in schema))
+    def variant_schemas(variants):
+        """Encode a collection's element sum: per variant, a counted list of VALUE_* tags. A record collection is the one-variant case."""
+        body = struct.pack("<II", len(variants), 0)
+        for schema in variants:
+            body += struct.pack("<I", len(schema)) + b"".join(struct.pack("<I", t) for t in schema)
+        return _pad(body)
 
 
 def record(kind, body):
@@ -121,17 +125,17 @@ def tx_mount(window, root):
     """Mount a root into a window (0 = the default window)."""
     return record(TX_MOUNT, struct.pack("<Q", window) + struct.pack("<Q", root))
 
-def tx_create_collection(collection_id, schema):
-    """Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template."""
-    return record(TX_CREATE_COLLECTION, struct.pack("<Q", collection_id) + _enc.type_tags(schema))
+def tx_create_collection(collection_id, variants):
+    """Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template."""
+    return record(TX_CREATE_COLLECTION, struct.pack("<Q", collection_id) + _enc.variant_schemas(variants))
 
-def tx_collection_insert(collection_id, path, key, fields):
-    """Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy."""
-    return record(TX_COLLECTION_INSERT, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(fields))
+def tx_collection_insert(collection_id, path, key, variant, fields):
+    """Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case."""
+    return record(TX_COLLECTION_INSERT, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", variant) + struct.pack("<I", 0) + _enc.values(fields))
 
-def tx_collection_update(collection_id, path, key, fields):
-    """Replace an entry's record; every element binding follows."""
-    return record(TX_COLLECTION_UPDATE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(fields))
+def tx_collection_update(collection_id, path, key, variant, fields):
+    """Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place."""
+    return record(TX_COLLECTION_UPDATE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", variant) + struct.pack("<I", 0) + _enc.values(fields))
 
 def tx_collection_remove(collection_id, path, key):
     """Remove an entry; its stamped copy tears down."""
@@ -153,9 +157,13 @@ def tx_collection_move(collection_id, path, key, before):
     """Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them."""
     return record(TX_COLLECTION_MOVE, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + _enc.values(before))
 
-def tx_collection_update_field(collection_id, path, key, field, value):
-    """Set one field of an entry's record; only bindings on that field re-resolve."""
-    return record(TX_COLLECTION_UPDATE_FIELD, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", field) + struct.pack("<I", 0) + _enc.value(value))
+def tx_collection_update_field(collection_id, path, key, field, variant, value):
+    """Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does)."""
+    return record(TX_COLLECTION_UPDATE_FIELD, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", field) + struct.pack("<I", variant) + _enc.value(value))
+
+def tx_variant_case(variant):
+    """Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly."""
+    return record(TX_VARIANT_CASE, struct.pack("<I", variant) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id, text):

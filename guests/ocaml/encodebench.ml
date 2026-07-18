@@ -16,6 +16,7 @@ let () =
     let rec_ =
       tx_collection_insert 1L []
         (Str (Printf.sprintf "k%d" (i land 1023)))
+        0
         [ Str "send report"; Bool false ]
     in
     sink := !sink + String.length rec_

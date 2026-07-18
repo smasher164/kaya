@@ -190,11 +190,11 @@ public final class KayaRecords {
         }
 
         public void insert(KayaApp.Tx tx, K key, T value) {
-            tx.insertRecordRaw(handle, key, value, info.wireFields(value));
+            tx.insertRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
 
         public void update(KayaApp.Tx tx, K key, T value) {
-            tx.updateRecordRaw(handle, key, value, info.wireFields(value));
+            tx.updateRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
 
         /**
@@ -218,7 +218,7 @@ public final class KayaRecords {
             if (current == null) {
                 throw new IllegalStateException("kaya: update of missing key " + key);
             }
-            tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), f.index, value);
+            tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), 0, f.index, value);
         }
 
         /**

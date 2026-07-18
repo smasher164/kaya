@@ -11,10 +11,9 @@
 
 use kaya::Occurrence;
 
-kaya::record! {
-    struct Item {
-        title: String,
-    }
+#[derive(kaya::Kaya, Clone, Debug, PartialEq)]
+struct Item {
+    title: String,
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {

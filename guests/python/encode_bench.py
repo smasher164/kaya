@@ -24,7 +24,7 @@ FLOOR = 20_000  # records/second
 start = time.perf_counter()
 chunk = []
 for i in range(N):
-    chunk.append(wire.tx_collection_insert(1, [], f"k{i & 1023}", ["send report", False]))
+    chunk.append(wire.tx_collection_insert(1, [], f"k{i & 1023}", 0, ["send report", False]))
     if len(chunk) == 1000:
         chunk.clear()
 elapsed = time.perf_counter() - start

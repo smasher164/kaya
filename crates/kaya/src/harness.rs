@@ -39,6 +39,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "gallery" => Some(include_str!("../../../tools/scenes/gallery.steps")),
         "todos" => Some(include_str!("../../../tools/scenes/todos.steps")),
         "reorder" => Some(include_str!("../../../tools/scenes/reorder.steps")),
+        "feed" => Some(include_str!("../../../tools/scenes/feed.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -332,7 +333,7 @@ mod tests {
 
     #[test]
     fn scripts_parse_and_grammar_round_trips() {
-        for scene in ["entry", "gallery", "todos", "reorder", "1"] {
+        for scene in ["entry", "gallery", "todos", "reorder", "feed", "1"] {
             parse(script(scene).unwrap()).unwrap();
         }
         let steps = parse(

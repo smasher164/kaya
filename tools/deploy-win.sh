@@ -69,6 +69,7 @@ for arg in "$@"; do
         gallery_rust|gallery_python|gallery_go|gallery_csharp) SUITE="$arg" ;;
         todos_rust|todos_python|todos_go|todos_csharp) SUITE="$arg" ;;
         reorder_rust|reorder_python|reorder_go|reorder_csharp) SUITE="$arg" ;;
+        feed_rust|feed_python|feed_go|feed_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -109,7 +110,7 @@ timing vm-ready
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc \
-        --example milestone2 --example entry --example gallery --example todos --example reorder)
+        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -129,7 +130,7 @@ timing build
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
-for guest in milestone2 entry gallery todos reorder; do
+for guest in milestone2 entry gallery todos reorder feed; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     scp -q "$ROOT/guests/go/$guest/main.go" "$HOST:C:/kaya/guests/go/$guest/"
 done
@@ -151,7 +152,7 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -168,6 +169,7 @@ scp -q \
     "$TARGET/examples/gallery.exe" \
     "$TARGET/examples/todos.exe" \
     "$TARGET/examples/reorder.exe" \
+    "$TARGET/examples/feed.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
     "$ROOT/guests/python/milestone2.py" \
@@ -175,6 +177,7 @@ scp -q \
     "$ROOT/guests/python/gallery.py" \
     "$ROOT/guests/python/todos.py" \
     "$ROOT/guests/python/reorder.py" \
+    "$ROOT/guests/python/feed.py" \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
@@ -212,6 +215,7 @@ verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
 verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
 verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
 verify_remote "$TARGET/examples/reorder.exe" 'C:\kaya\reorder.exe'
+verify_remote "$TARGET/examples/feed.exe" 'C:\kaya\feed.exe'
 timing deploy
 
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
@@ -494,6 +498,10 @@ case "$SUITE" in
         run_suite reorder_python
         run_suite reorder_go
         run_suite reorder_csharp
+        run_suite feed_rust
+        run_suite feed_python
+        run_suite feed_go
+        run_suite feed_csharp
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;

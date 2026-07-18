@@ -77,9 +77,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     c.line("");
     c.line("    @staticmethod");
-    c.line("    def type_tags(schema):");
-    c.line("        \"\"\"Encode a collection schema: a counted list of VALUE_* tags.\"\"\"");
-    c.line("        return _pad(struct.pack(\"<II\", len(schema), 0) + b\"\".join(struct.pack(\"<I\", t) for t in schema))");
+    c.line("    def variant_schemas(variants):");
+    c.line("        \"\"\"Encode a collection's element sum: per variant, a counted list of VALUE_* tags. A record collection is the one-variant case.\"\"\"");
+    c.line("        body = struct.pack(\"<II\", len(variants), 0)");
+    c.line("        for schema in variants:");
+    c.line("            body += struct.pack(\"<I\", len(schema)) + b\"\".join(struct.pack(\"<I\", t) for t in schema)");
+    c.line("        return _pad(body)");
     c.line("");
     c.line("");
     c.line("def record(kind, body):");
@@ -107,7 +110,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 FieldTy::U64 => format!("struct.pack(\"<Q\", {})", f.name),
                 FieldTy::Value => format!("_enc.value({})", f.name),
                 FieldTy::Values => format!("_enc.values({})", f.name),
-                FieldTy::TypeTags => format!("_enc.type_tags({})", f.name),
+                FieldTy::VariantSchemas => format!("_enc.variant_schemas({})", f.name),
             });
         }
         let body = if parts.is_empty() {

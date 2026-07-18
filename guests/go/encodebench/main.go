@@ -20,7 +20,7 @@ func main() {
 	start := time.Now()
 	var sink int
 	for i := 0; i < n; i++ {
-		rec := kaya.TxCollectionInsert(1, nil, fmt.Sprintf("k%d", i&1023),
+		rec := kaya.TxCollectionInsert(1, nil, fmt.Sprintf("k%d", i&1023), 0,
 			[]any{"send report", false})
 		sink += len(rec)
 	}

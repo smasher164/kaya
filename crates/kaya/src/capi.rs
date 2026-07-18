@@ -98,6 +98,7 @@ pub const KAYA_TX_CREATE_WHEN: u16 = 12;
 pub const KAYA_TX_TEMPLATE_END: u16 = 13;
 pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const KAYA_TX_COLLECTION_MOVE: u16 = 15;
+pub const KAYA_TX_VARIANT_CASE: u16 = 16;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -124,6 +125,7 @@ const _: () = assert!(
         && KAYA_TX_TEMPLATE_END == wire::TX_TEMPLATE_END
         && KAYA_TX_COLLECTION_UPDATE_FIELD == wire::TX_COLLECTION_UPDATE_FIELD
         && KAYA_TX_COLLECTION_MOVE == wire::TX_COLLECTION_MOVE
+        && KAYA_TX_VARIANT_CASE == wire::TX_VARIANT_CASE
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -512,6 +514,7 @@ mod tests {
             ("template_end", KAYA_TX_TEMPLATE_END),
             ("collection_update_field", KAYA_TX_COLLECTION_UPDATE_FIELD),
             ("collection_move", KAYA_TX_COLLECTION_MOVE),
+            ("variant_case", KAYA_TX_VARIANT_CASE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

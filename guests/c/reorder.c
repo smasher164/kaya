@@ -43,7 +43,8 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_LIFT, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_LIFT, "lift");
 
-    kaya_tx_create_collection(&tx, C_ITEMS, (uint32_t[]){KAYA_VALUE_STR}, 1);
+    kaya_tx_create_collection(&tx, C_ITEMS,
+                              (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_ITEMS, C_ITEMS);
     kaya_tx_create_widget(&tx, N_TITLE, KAYA_KIND_LABEL);
     kaya_tx_bind_text_element(&tx, N_TITLE, 0, F_TITLE);
@@ -55,7 +56,7 @@ static void build_scene(void) {
     kaya_tx_mount(&tx, 0, W_ROW); /* window 0: the default */
 
     for (unsigned i = 0; i < N_ITEMS; i++)
-        kaya_tx_collection_insert(&tx, C_ITEMS, 0, 0, kaya_str(order[i]),
+        kaya_tx_collection_insert(&tx, C_ITEMS, 0, 0, kaya_str(order[i]), 0,
                                   (KayaVal[]){kaya_str(order[i])}, 1);
 
     kaya_submit(tx.buf, tx.len);

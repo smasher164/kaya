@@ -400,7 +400,7 @@ SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
-        --example milestone2 --example entry --example gallery --example todos --example reorder
+        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed
     timing build-rust
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
     queue_leg run_bundle_on rust "$APP" dev.kaya.milestone2 rust
@@ -412,6 +412,8 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     queue_leg run_bundle_on todos-rust "$APP" dev.kaya.todos todos-rust todos
     APP=$(make_bundle reorder dev.kaya.reorder "$TARGET_DIR/examples/reorder")
     queue_leg run_bundle_on reorder-rust "$APP" dev.kaya.reorder reorder-rust reorder
+    APP=$(make_bundle feed dev.kaya.feed "$TARGET_DIR/examples/feed")
+    queue_leg run_bundle_on feed-rust "$APP" dev.kaya.feed feed-rust feed
     drain
     timing legs-rust
 fi
@@ -425,7 +427,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -437,7 +439,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -449,7 +451,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -461,7 +463,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
@@ -473,13 +475,25 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
         -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift "$BUNDLES/main.swift" \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
         -L "$TARGET_DIR" -lkaya \
         -framework UIKit -framework Foundation -framework CoreFoundation \
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/reorderswift-bin"
     APP=$(make_bundle reorderswift dev.kaya.reorderswift "$BUNDLES/reorderswift-bin")
     queue_leg run_bundle_on reorder-swift "$APP" dev.kaya.reorderswift reorder-swift reorder
+
+    cp guests/swift/feed.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/feedswift-bin"
+    APP=$(make_bundle feedswift dev.kaya.feedswift "$BUNDLES/feedswift-bin")
+    queue_leg run_bundle_on feed-swift "$APP" dev.kaya.feedswift feed-swift feed
     drain
     timing swift-build+legs
 fi
@@ -524,6 +538,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle reorderrs-swiftui dev.kaya.reorderswiftui "$TARGET_DIR/examples/reorder")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on reorder-swiftui "$APP" dev.kaya.reorderswiftui reorder-swiftui reorder reorder
+
+    # The feed scene against the SwiftUI backend, same embedded dylib.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example feed
+    APP=$(make_bundle feedrs-swiftui dev.kaya.feedswiftui "$TARGET_DIR/examples/feed")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on feed-swiftui "$APP" dev.kaya.feedswiftui feed-swiftui feed feed
     drain
     timing swiftui-build+legs
 fi

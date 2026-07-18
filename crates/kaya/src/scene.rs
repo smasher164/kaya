@@ -45,7 +45,9 @@ enum TplOp {
     SetProp { node: u64, prop: Prop, value: PropValue },
     AddChild { parent: u64, child: u64 },
     Collection { id: CollectionId },
-    For { node: u64, collection: CollectionId, body: Arc<TplBody> },
+    /// One body per variant of the collection's element sum, indexed by
+    /// discriminant; a For over a record collection has exactly one.
+    For { node: u64, collection: CollectionId, bodies: Vec<Arc<TplBody>> },
     When { node: u64, signal: SignalId, body: Arc<TplBody> },
 }
 
@@ -57,16 +59,52 @@ struct TplBody {
     roots: Vec<u64>,
 }
 
+/// One variant case being parsed: the section of a For scope between
+/// VariantCase records (or the whole scope when no case is declared —
+/// the one-variant For).
+struct TplSection {
+    variant: u32,
+    ops: Vec<TplOp>,
+    /// Node ids declared in this section; AddChild/SetProp may only
+    /// reference these — a case is a complete blueprint, so nodes never
+    /// cross case boundaries.
+    declared: Vec<u64>,
+    /// Of `declared`, the ones already claimed as someone's child.
+    childed: Vec<u64>,
+}
+
+impl TplSection {
+    fn new(variant: u32) -> Self {
+        TplSection {
+            variant,
+            ops: Vec::new(),
+            declared: Vec::new(),
+            childed: Vec::new(),
+        }
+    }
+
+    fn into_body(self) -> (u32, Arc<TplBody>) {
+        let roots = self
+            .declared
+            .iter()
+            .filter(|n| !self.childed.contains(n))
+            .copied()
+            .collect();
+        (self.variant, Arc::new(TplBody { ops: self.ops, roots }))
+    }
+}
+
 /// A declaration scope being parsed (between CreateFor/CreateWhen and
 /// its TemplateEnd).
 struct TplScope {
     header: ScopeHeader,
-    ops: Vec<TplOp>,
-    /// Node ids declared in this scope; AddChild/SetProp may only
-    /// reference these.
-    declared: Vec<u64>,
-    /// Of `declared`, the ones already claimed as someone's child.
-    childed: Vec<u64>,
+    /// Cases already closed by a VariantCase record that followed them.
+    closed: Vec<(u32, Arc<TplBody>)>,
+    /// The section currently accepting records.
+    current: TplSection,
+    /// Whether any VariantCase record was seen: distinguishes the
+    /// implicit one-variant scope from explicit case declarations.
+    explicit_cases: bool,
     /// Unique id of this scope, for same-scope collection validation.
     scope: u64,
 }
@@ -76,28 +114,41 @@ enum ScopeHeader {
     When { id: u64, signal: SignalId },
 }
 
+/// A closed scope's assembled blueprint(s), ready to fold into the
+/// parent template or start rendering live.
+enum ClosedScope {
+    For { id: u64, collection: CollectionId, bodies: Vec<Arc<TplBody>> },
+    When { id: u64, signal: SignalId, body: Arc<TplBody> },
+}
+
 struct CollDecl {
     /// The declaration scope (0 = live zone); a For may only bind a
     /// collection declared in its own scope.
     scope: u64,
     bound: bool,
-    /// The ordered field types every entry must match; a scalar
-    /// collection is the one-field case.
-    schema: Vec<ValueType>,
+    /// One ordered field-type list per variant of the element sum; a
+    /// record collection is the one-variant case and a scalar
+    /// collection the one-variant one-field case.
+    variants: Vec<Vec<ValueType>>,
 }
 
 #[derive(Default)]
 struct CollInstance {
     order: Vec<Key>,
-    entries: HashMap<Key, Record>,
+    /// Each entry: the variant it currently holds, and that variant's
+    /// fields. The variant is the eliminator's discriminant — stamping
+    /// picks the case blueprint by it, and update_field's witnessed
+    /// variant is asserted against it.
+    entries: HashMap<Key, (u32, Record)>,
 }
 
 /// A live rendering site of a For: the (collection, instance path) it
 /// renders, its container widget, and the element chain it was stamped
-/// under.
+/// under. One body per variant; stamping picks by the entry's
+/// discriminant.
 struct ForSite {
     container: WidgetId,
-    body: Arc<TplBody>,
+    bodies: Vec<Arc<TplBody>>,
     chain: Vec<EntryRef>,
 }
 
@@ -345,11 +396,8 @@ impl Scene {
                     self.mounted = true;
                     out.push(ApplyOp::Mount { window, root });
                 }
-                TxOp::CreateCollection { id, schema } => {
-                    assert!(
-                        !schema.is_empty(),
-                        "kaya: collection {id:?} declares an empty schema"
-                    );
+                TxOp::CreateCollection { id, variants } => {
+                    Self::check_variants(id, &variants);
                     let clash = self
                         .collections
                         .insert(
@@ -357,7 +405,7 @@ impl Scene {
                             CollDecl {
                                 scope: 0,
                                 bound: false,
-                                schema,
+                                variants,
                             },
                         )
                         .is_some();
@@ -371,21 +419,24 @@ impl Scene {
                     id,
                     path,
                     key,
+                    variant,
                     record,
-                } => self.insert_entry(id, path, key, record, &mut out),
+                } => self.insert_entry(id, path, key, variant, record, &mut out),
                 TxOp::CollectionUpdate {
                     id,
                     path,
                     key,
+                    variant,
                     record,
-                } => self.update_entry(id, path, key, record, &mut out),
+                } => self.update_entry(id, path, key, variant, record, &mut out),
                 TxOp::CollectionUpdateField {
                     id,
                     path,
                     key,
+                    variant,
                     field,
                     value,
-                } => self.update_field_entry(id, path, key, field, value, &mut out),
+                } => self.update_field_entry(id, path, key, variant, field, value, &mut out),
                 TxOp::CollectionRemove { id, path, key } => {
                     self.remove_entry(id, path, key, &mut out)
                 }
@@ -414,9 +465,9 @@ impl Scene {
                     self.next_scope += 1;
                     scopes.push(TplScope {
                         header: ScopeHeader::For { id, collection },
-                        ops: Vec::new(),
-                        declared: Vec::new(),
-                        childed: Vec::new(),
+                        closed: Vec::new(),
+                        current: TplSection::new(0),
+                        explicit_cases: false,
                         scope: self.next_scope,
                     });
                 }
@@ -444,11 +495,14 @@ impl Scene {
                     self.next_scope += 1;
                     scopes.push(TplScope {
                         header: ScopeHeader::When { id, signal },
-                        ops: Vec::new(),
-                        declared: Vec::new(),
-                        childed: Vec::new(),
+                        closed: Vec::new(),
+                        current: TplSection::new(0),
+                        explicit_cases: false,
                         scope: self.next_scope,
                     });
+                }
+                TxOp::VariantCase { .. } => {
+                    panic!("kaya: variant_case outside a template scope")
                 }
                 TxOp::TemplateEnd => panic!("kaya: TemplateEnd outside a template scope"),
             }
@@ -484,8 +538,8 @@ impl Scene {
             TxOp::CreateWidget { id, kind } => {
                 let clash = self.template_nodes.insert(id.0, kind).is_some();
                 assert!(!clash, "kaya: template node id {} already exists", id.0);
-                top.declared.push(id.0);
-                top.ops.push(TplOp::Widget { node: id.0, kind });
+                top.current.declared.push(id.0);
+                top.current.ops.push(TplOp::Widget { node: id.0, kind });
             }
             TxOp::SetProperty {
                 widget,
@@ -493,8 +547,8 @@ impl Scene {
                 value,
             } => {
                 assert!(
-                    top.declared.contains(&widget.0),
-                    "kaya: property on node {} not declared in this template",
+                    top.current.declared.contains(&widget.0),
+                    "kaya: property on node {} not declared in this template case",
                     widget.0
                 );
                 check_prop(self.template_nodes[&widget.0], prop);
@@ -516,34 +570,38 @@ impl Scene {
                             "kaya: element level {level} exceeds For nesting depth {depth}"
                         );
                         // The For `level` Fors up names a collection whose
-                        // schema is already declared, so a field binding is
-                        // validated here — before anything ever stamps:
-                        // index in bounds, field type against prop type.
-                        let collection = scopes
+                        // schema is already declared — and the case being
+                        // parsed there names which variant's schema this
+                        // binding sees. Validated here, before anything
+                        // ever stamps: index in bounds, field type
+                        // against prop type, within that variant.
+                        let (collection, variant) = scopes
                             .iter()
                             .rev()
                             .filter_map(|s| match s.header {
-                                ScopeHeader::For { collection, .. } => Some(collection),
+                                ScopeHeader::For { collection, .. } => {
+                                    Some((collection, s.current.variant))
+                                }
                                 ScopeHeader::When { .. } => None,
                             })
                             .nth(*level as usize)
                             .expect("level checked against For depth above");
-                        let schema = &self.collections[&collection].schema;
+                        let schema = &self.collections[&collection].variants[variant as usize];
                         assert!(
                             (*field as usize) < schema.len(),
-                            "kaya: field {field} out of bounds for {collection:?} \
-                             ({} fields)",
+                            "kaya: field {field} out of bounds for variant {variant} of \
+                             {collection:?} ({} fields)",
                             schema.len()
                         );
                         assert!(
                             schema[*field as usize] == prop_value_type(prop),
-                            "kaya: {prop:?} cannot bind field {field} of {collection:?} \
-                             (a {:?} field)",
+                            "kaya: {prop:?} cannot bind field {field} of variant {variant} \
+                             of {collection:?} (a {:?} field)",
                             schema[*field as usize]
                         );
                         // Re-borrow after the immutable walk above.
                         let top = scopes.last_mut().unwrap();
-                        top.ops.push(TplOp::SetProp {
+                        top.current.ops.push(TplOp::SetProp {
                             node: widget.0,
                             prop,
                             value,
@@ -552,7 +610,7 @@ impl Scene {
                     }
                 }
                 let top = scopes.last_mut().unwrap();
-                top.ops.push(TplOp::SetProp {
+                top.current.ops.push(TplOp::SetProp {
                     node: widget.0,
                     prop,
                     value,
@@ -560,27 +618,25 @@ impl Scene {
             }
             TxOp::AddChild { parent, child } => {
                 assert!(
-                    top.declared.contains(&parent.0) && top.declared.contains(&child.0),
-                    "kaya: add_child across template scopes ({} <- {})",
+                    top.current.declared.contains(&parent.0)
+                        && top.current.declared.contains(&child.0),
+                    "kaya: add_child across template cases ({} <- {})",
                     parent.0,
                     child.0
                 );
                 assert!(
-                    !top.childed.contains(&child.0),
+                    !top.current.childed.contains(&child.0),
                     "kaya: template node {} already has a parent",
                     child.0
                 );
-                top.childed.push(child.0);
-                top.ops.push(TplOp::AddChild {
+                top.current.childed.push(child.0);
+                top.current.ops.push(TplOp::AddChild {
                     parent: parent.0,
                     child: child.0,
                 });
             }
-            TxOp::CreateCollection { id, schema } => {
-                assert!(
-                    !schema.is_empty(),
-                    "kaya: collection {id:?} declares an empty schema"
-                );
+            TxOp::CreateCollection { id, variants } => {
+                Self::check_variants(id, &variants);
                 let scope = top.scope;
                 let clash = self
                     .collections
@@ -589,12 +645,12 @@ impl Scene {
                         CollDecl {
                             scope,
                             bound: false,
-                            schema,
+                            variants,
                         },
                     )
                     .is_some();
                 assert!(!clash, "kaya: collection id {id:?} already exists");
-                top.ops.push(TplOp::Collection { id });
+                top.current.ops.push(TplOp::Collection { id });
             }
             TxOp::CreateFor { id, collection } => {
                 let clash = self
@@ -603,14 +659,14 @@ impl Scene {
                     .is_some();
                 assert!(!clash, "kaya: template node id {id} already exists");
                 let scope = top.scope;
-                top.declared.push(id);
+                top.current.declared.push(id);
                 self.bind_collection(collection, scope);
                 self.next_scope += 1;
                 scopes.push(TplScope {
                     header: ScopeHeader::For { id, collection },
-                    ops: Vec::new(),
-                    declared: Vec::new(),
-                    childed: Vec::new(),
+                    closed: Vec::new(),
+                    current: TplSection::new(0),
+                    explicit_cases: false,
                     scope: self.next_scope,
                 });
             }
@@ -628,49 +684,78 @@ impl Scene {
                     matches!(current, Value::Bool(_)),
                     "kaya: When must bind a Bool signal, {signal:?} is not"
                 );
-                top.declared.push(id);
+                top.current.declared.push(id);
                 self.next_scope += 1;
                 scopes.push(TplScope {
                     header: ScopeHeader::When { id, signal },
-                    ops: Vec::new(),
-                    declared: Vec::new(),
-                    childed: Vec::new(),
+                    closed: Vec::new(),
+                    current: TplSection::new(0),
+                    explicit_cases: false,
                     scope: self.next_scope,
                 });
             }
+            TxOp::VariantCase { variant } => {
+                let ScopeHeader::For { collection, .. } = top.header else {
+                    panic!("kaya: variant_case inside a When (only For eliminates a sum)");
+                };
+                let count = self.collections[&collection].variants.len() as u32;
+                assert!(
+                    variant < count,
+                    "kaya: variant_case {variant} out of bounds for {collection:?} \
+                     ({count} variants)"
+                );
+                if top.explicit_cases {
+                    // Close the previous case; its blueprint is done.
+                    let section = std::mem::replace(&mut top.current, TplSection::new(variant));
+                    top.closed.push(section.into_body());
+                } else {
+                    // First case of the scope: nothing may precede it —
+                    // records before the first variant_case would belong
+                    // to no constructor.
+                    assert!(
+                        top.current.ops.is_empty() && top.current.declared.is_empty(),
+                        "kaya: template records before the first variant_case of \
+                         {collection:?}"
+                    );
+                    top.explicit_cases = true;
+                    top.current = TplSection::new(variant);
+                }
+                assert!(
+                    !top.closed.iter().any(|(v, _)| *v == variant),
+                    "kaya: variant_case {variant} declared twice for {collection:?}"
+                );
+            }
             TxOp::TemplateEnd => {
                 let closed = scopes.pop().unwrap();
-                let roots = closed
-                    .declared
-                    .iter()
-                    .filter(|n| !closed.childed.contains(n))
-                    .copied()
-                    .collect();
-                let body = Arc::new(TplBody {
-                    ops: closed.ops,
-                    roots,
-                });
-                match (scopes.last_mut(), closed.header) {
+                let bodies = self.close_scope_bodies(closed);
+                match (scopes.last_mut(), bodies) {
                     // Nested: fold into the parent template.
-                    (Some(parent), ScopeHeader::For { id, collection }) => {
-                        parent.ops.push(TplOp::For {
+                    (Some(parent), ClosedScope::For { id, collection, bodies }) => {
+                        parent.current.ops.push(TplOp::For {
                             node: id,
                             collection,
-                            body,
+                            bodies,
                         });
                     }
-                    (Some(parent), ScopeHeader::When { id, signal }) => {
-                        parent.ops.push(TplOp::When {
+                    (Some(parent), ClosedScope::When { id, signal, body }) => {
+                        parent.current.ops.push(TplOp::When {
                             node: id,
                             signal,
                             body,
                         });
                     }
                     // Top level: the live site starts rendering now.
-                    (None, ScopeHeader::For { id, collection }) => {
-                        self.register_for_site(collection, vec![], WidgetId(id), body, vec![], out);
+                    (None, ClosedScope::For { id, collection, bodies }) => {
+                        self.register_for_site(
+                            collection,
+                            vec![],
+                            WidgetId(id),
+                            bodies,
+                            vec![],
+                            out,
+                        );
                     }
-                    (None, ScopeHeader::When { id, signal }) => {
+                    (None, ClosedScope::When { id, signal, body }) => {
                         self.register_when_site(
                             signal,
                             WidgetId(id),
@@ -684,6 +769,75 @@ impl Scene {
             }
             other => panic!("kaya: {other:?} is not valid inside a template"),
         }
+    }
+
+    /// Assemble a closed scope's blueprint(s). A For's cases must be
+    /// total — one body per variant of its collection's sum, in
+    /// discriminant order — with the caseless scope standing for the
+    /// one-variant For. An empty case is the explicit way to render a
+    /// constructor as nothing; a missing one dies here, at declaration,
+    /// not on the first insert of the unlucky variant.
+    fn close_scope_bodies(&self, scope: TplScope) -> ClosedScope {
+        let TplScope { header, closed, current, explicit_cases, .. } = scope;
+        match header {
+            ScopeHeader::For { id, collection } => {
+                let count = self.collections[&collection].variants.len();
+                let mut cases = closed;
+                let explicit = explicit_cases;
+                cases.push(current.into_body());
+                let bodies = if explicit {
+                    let mut bodies: Vec<Option<Arc<TplBody>>> = vec![None; count];
+                    for (variant, body) in cases {
+                        bodies[variant as usize] = Some(body);
+                    }
+                    bodies
+                        .into_iter()
+                        .enumerate()
+                        .map(|(variant, body)| {
+                            body.unwrap_or_else(|| {
+                                panic!(
+                                    "kaya: For over {collection:?} declares no case for \
+                                     variant {variant} (an empty case renders nothing; \
+                                     a missing one is a hole in the eliminator)"
+                                )
+                            })
+                        })
+                        .collect()
+                } else {
+                    assert!(
+                        count == 1,
+                        "kaya: For over {collection:?} needs a variant_case per variant \
+                         ({count} variants, none declared)"
+                    );
+                    cases.into_iter().map(|(_, body)| body).collect()
+                };
+                ClosedScope::For { id, collection, bodies }
+            }
+            ScopeHeader::When { id, signal } => {
+                assert!(
+                    !explicit_cases,
+                    "kaya: variant_case inside a When (only For eliminates a sum)"
+                );
+                let (_, body) = current.into_body();
+                ClosedScope::When { id, signal, body }
+            }
+        }
+    }
+
+    /// The schema-shape checks shared by live and template collection
+    /// declarations. A unit variant (no fields) is legal inside a real
+    /// sum — a `Divider` constructor carries no data — but the
+    /// one-variant zero-field collection stays an error, as it always
+    /// was: a record with no fields holds nothing.
+    fn check_variants(id: CollectionId, variants: &[Vec<ValueType>]) {
+        assert!(
+            !variants.is_empty(),
+            "kaya: collection {id:?} declares no variants"
+        );
+        assert!(
+            !(variants.len() == 1 && variants[0].is_empty()),
+            "kaya: collection {id:?} declares an empty schema"
+        );
     }
 
     fn bind_collection(&mut self, collection: CollectionId, scope: u64) {
@@ -709,7 +863,7 @@ impl Scene {
         collection: CollectionId,
         path: PathKey,
         container: WidgetId,
-        body: Arc<TplBody>,
+        bodies: Vec<Arc<TplBody>>,
         chain: Vec<EntryRef>,
         out: &mut Vec<ApplyOp>,
     ) {
@@ -725,7 +879,7 @@ impl Scene {
             (collection, path.clone()),
             ForSite {
                 container,
-                body: body.clone(),
+                bodies,
                 chain: chain.clone(),
             },
         );
@@ -777,12 +931,22 @@ impl Scene {
             })
     }
 
-    fn schema_of(&self, id: CollectionId) -> Vec<ValueType> {
+    fn variants_of(&self, id: CollectionId) -> Vec<Vec<ValueType>> {
         self.collections
             .get(&id)
             .unwrap_or_else(|| panic!("kaya: delta on unknown collection {id:?}"))
-            .schema
+            .variants
             .clone()
+    }
+
+    fn variant_schema(&self, id: CollectionId, variant: u32, what: &str) -> Vec<ValueType> {
+        let variants = self.variants_of(id);
+        assert!(
+            (variant as usize) < variants.len(),
+            "kaya: {what} names variant {variant} of {id:?} ({} variants)",
+            variants.len()
+        );
+        variants[variant as usize].clone()
     }
 
     fn insert_entry(
@@ -790,10 +954,11 @@ impl Scene {
         id: CollectionId,
         path: Vec<Value>,
         key: Value,
+        variant: u32,
         record: Record,
         out: &mut Vec<ApplyOp>,
     ) {
-        let schema = self.schema_of(id);
+        let schema = self.variant_schema(id, variant, "insert");
         check_record(&schema, &record, &format!("insert into {id:?}"));
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
@@ -803,7 +968,7 @@ impl Scene {
             "kaya: key {key:?} already present in {id:?} at {path:?} (update is explicit)"
         );
         inst.order.push(key.clone());
-        inst.entries.insert(key.clone(), record);
+        inst.entries.insert(key.clone(), (variant, record));
         self.stamp_entry(id, &path, &key, out);
     }
 
@@ -812,10 +977,11 @@ impl Scene {
         id: CollectionId,
         path: Vec<Value>,
         key: Value,
+        variant: u32,
         record: Record,
         out: &mut Vec<ApplyOp>,
     ) {
-        let schema = self.schema_of(id);
+        let schema = self.variant_schema(id, variant, "update");
         check_record(&schema, &record, &format!("update of {id:?}"));
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
@@ -824,9 +990,22 @@ impl Scene {
             .entries
             .get_mut(&key)
             .unwrap_or_else(|| panic!("kaya: update of missing key {key:?} in {id:?}"));
-        *current = record.clone();
-        // The data changed; every property fed by this entry follows,
-        // each from its own field.
+        let was = current.0;
+        *current = (variant, record.clone());
+        if was != variant {
+            // The entry changed constructor: its copy is a different
+            // blueprint now. Tear down, restamp from the new case, and
+            // put the fresh copy back in the entry's slot — the key
+            // kept its position in the order; only the shape changed.
+            if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
+                self.teardown(stamp, out);
+            }
+            self.stamp_entry(id, &path, &key, out);
+            self.reposition_restamp(id, &path, &key, out);
+            return;
+        }
+        // Same constructor: the data changed; every property fed by
+        // this entry follows, each from its own field.
         if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
             for (widget, prop, field) in bound {
                 out.push(ApplyOp::SetProp {
@@ -838,35 +1017,85 @@ impl Scene {
         }
     }
 
+    /// A restamped copy was appended to its container; move it back to
+    /// the entry's position by anchoring before the next stamped
+    /// neighbor in the order (None when the entry is last).
+    fn reposition_restamp(
+        &mut self,
+        id: CollectionId,
+        path: &PathKey,
+        key: &Key,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let Some(site) = self.for_sites.get(&(id, path.clone())) else {
+            return;
+        };
+        let container = site.container;
+        let inst = &self.coll_instances[&(id, path.clone())];
+        let at = inst
+            .order
+            .iter()
+            .position(|k| k == key)
+            .expect("restamped entry is in the order");
+        let anchor_widget = inst.order[at + 1..].iter().find_map(|next| {
+            self.stamps
+                .get(&(id, path.clone(), next.clone()))
+                .and_then(|s| s.roots.first().copied())
+        });
+        let Some(anchor_widget) = anchor_widget else {
+            return; // last stamped entry: the append already placed it
+        };
+        let Some(stamp) = self.stamps.get(&(id, path.clone(), key.clone())) else {
+            return;
+        };
+        for child in stamp.roots.clone() {
+            out.push(ApplyOp::MoveChild {
+                parent: container,
+                child,
+                before: Some(anchor_widget),
+            });
+        }
+    }
+
     /// One field's delta: only bindings on that field re-resolve — the
-    /// O(change) doctrine applied within an entry.
+    /// O(change) doctrine applied within an entry. `variant` is the
+    /// discriminant the guest witnessed in the match that produced this
+    /// write; a mismatch with the stored one means the binding's model
+    /// has drifted from the core, and dies here rather than writing a
+    /// type-correct field of the wrong constructor.
     fn update_field_entry(
         &mut self,
         id: CollectionId,
         path: Vec<Value>,
         key: Value,
+        variant: u32,
         field: u32,
         value: Value,
         out: &mut Vec<ApplyOp>,
     ) {
-        let schema = self.schema_of(id);
+        let schema = self.variant_schema(id, variant, "update_field");
         assert!(
             (field as usize) < schema.len(),
-            "kaya: field {field} out of bounds for {id:?} ({} fields)",
+            "kaya: field {field} out of bounds for variant {variant} of {id:?} ({} fields)",
             schema.len()
         );
         assert!(
             value.type_of() == schema[field as usize],
-            "kaya: field {field} of {id:?} is {:?}, cannot hold {value:?}",
+            "kaya: field {field} of variant {variant} of {id:?} is {:?}, cannot hold {value:?}",
             schema[field as usize]
         );
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
         let inst = self.instance_mut(id, &path);
-        let current = inst
+        let (stored, current) = inst
             .entries
             .get_mut(&key)
             .unwrap_or_else(|| panic!("kaya: update of missing key {key:?} in {id:?}"));
+        assert!(
+            *stored == variant,
+            "kaya: update_field witnessed variant {variant} but {key:?} in {id:?} holds \
+             variant {stored} (update, not update_field, changes a constructor)"
+        );
         current[field as usize] = value.clone();
         if let Some(bound) = self.element_bindings.get(&(id, path, key)) {
             for (widget, prop, bound_field) in bound {
@@ -981,7 +1210,12 @@ impl Scene {
             return; // data without a For yet; stamped when one binds
         };
         let container = site.container;
-        let body = site.body.clone();
+        // The eliminator applied: the entry's discriminant picks its
+        // case blueprint. Totality was checked at declaration, so the
+        // index is always in bounds.
+        let variant = self.coll_instances[&(id, path.clone())].entries[key].0;
+        let site = &self.for_sites[&(id, path.clone())];
+        let body = site.bodies[variant as usize].clone();
         let mut chain = site.chain.clone();
         chain.push((id, path.clone(), key.clone()));
         let mut copy_path = path.clone();
@@ -1051,7 +1285,8 @@ impl Scene {
                         PropValue::Element { level, field } => {
                             let entry = chain[chain.len() - 1 - *level as usize].clone();
                             let current = self.coll_instances[&(entry.0, entry.1.clone())]
-                                .entries[&entry.2][*field as usize]
+                                .entries[&entry.2]
+                                .1[*field as usize]
                                 .clone();
                             self.element_bindings
                                 .entry(entry.clone())
@@ -1078,7 +1313,7 @@ impl Scene {
                 TplOp::For {
                     node,
                     collection,
-                    body,
+                    bodies,
                 } => {
                     let container = self.alloc_internal();
                     node_map.insert(*node, container);
@@ -1093,7 +1328,7 @@ impl Scene {
                         *collection,
                         copy_path.clone(),
                         container,
-                        body.clone(),
+                        bodies.clone(),
                         chain.to_vec(),
                         out,
                     );
@@ -1236,7 +1471,7 @@ mod tests {
                 value: PropValue::Const(v("extras")),
             },
             TxOp::TemplateEnd,
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 3,
                 collection: CollectionId(1),
@@ -1258,7 +1493,7 @@ mod tests {
                 parent: WidgetId(20),
                 child: WidgetId(21),
             },
-            TxOp::CreateCollection { id: CollectionId(2), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(2), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 22,
                 collection: CollectionId(2),
@@ -1307,6 +1542,7 @@ mod tests {
             id: CollectionId(id),
             path,
             key: v(key),
+            variant: 0,
             record: vec![v(value)],
         }
     }
@@ -1399,6 +1635,7 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("g1"),
+            variant: 0,
             record: vec![v("Home")],
         }]);
         assert_eq!(ops.len(), 1);
@@ -1467,7 +1704,7 @@ mod tests {
                 id: SignalId(1),
                 initial: v("tick"),
             },
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1509,7 +1746,7 @@ mod tests {
     fn data_before_for_stamps_at_bind_time() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             insert(1, vec![], "a", "early"),
         ]);
         let ops = scene.apply(vec![
@@ -1543,12 +1780,12 @@ mod tests {
         // An item row shows its group's name: element level 1.
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
             },
-            TxOp::CreateCollection { id: CollectionId(2), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(2), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 10,
                 collection: CollectionId(2),
@@ -1580,6 +1817,7 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("g1"),
+            variant: 0,
             record: vec![v("Home")],
         }]);
         assert!(ops.iter().any(|op| matches!(
@@ -1597,7 +1835,7 @@ mod tests {
         scene.apply(vec![
             TxOp::CreateCollection {
                 id: CollectionId(1),
-                schema: vec![ValueType::Str, ValueType::Bool],
+                variants: vec![vec![ValueType::Str, ValueType::Bool]],
             },
             TxOp::CreateFor { id: 1, collection: CollectionId(1) },
             TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
@@ -1619,6 +1857,7 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("a"),
+            variant: 0,
             record: vec![v("buy milk"), Value::Bool(false)],
         }]);
         // Stamping resolved each field to its own binding.
@@ -1637,6 +1876,7 @@ mod tests {
             id: CollectionId(1),
             path: vec![],
             key: v("a"),
+            variant: 0,
             field: 1,
             value: Value::Bool(true),
         }]);
@@ -1657,12 +1897,13 @@ mod tests {
         scene.apply(vec![
             TxOp::CreateCollection {
                 id: CollectionId(1),
-                schema: vec![ValueType::Str, ValueType::Bool],
+                variants: vec![vec![ValueType::Str, ValueType::Bool]],
             },
             TxOp::CollectionInsert {
                 id: CollectionId(1),
                 path: vec![],
                 key: v("a"),
+                variant: 0,
                 record: vec![v("buy milk"), v("not a bool")],
             },
         ]);
@@ -1677,7 +1918,7 @@ mod tests {
         scene.apply(vec![
             TxOp::CreateCollection {
                 id: CollectionId(1),
-                schema: vec![ValueType::Str, ValueType::Bool],
+                variants: vec![vec![ValueType::Str, ValueType::Bool]],
             },
             TxOp::CreateFor { id: 1, collection: CollectionId(1) },
             TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Checkbox },
@@ -1698,7 +1939,7 @@ mod tests {
         scene.apply(vec![
             TxOp::CreateCollection {
                 id: CollectionId(1),
-                schema: vec![ValueType::Str],
+                variants: vec![vec![ValueType::Str]],
             },
             TxOp::CreateFor { id: 1, collection: CollectionId(1) },
             TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
@@ -1760,7 +2001,7 @@ mod tests {
     fn duplicate_insert_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             insert(1, vec![], "a", "x"),
             insert(1, vec![], "a", "y"),
         ]);
@@ -1771,7 +2012,7 @@ mod tests {
     fn cross_scope_for_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1791,7 +2032,7 @@ mod tests {
     fn element_level_out_of_range_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1814,7 +2055,7 @@ mod tests {
     fn unterminated_template_fails_loudly() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateCollection { id: CollectionId(1), schema: vec![ValueType::Str] },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
             TxOp::CreateFor {
                 id: 1,
                 collection: CollectionId(1),
@@ -1968,5 +2209,266 @@ mod tests {
                 value: PropValue::Const(v("x")),
             },
         ]);
+    }
+
+    /// The sum happy path: a Note{Str} | Todo{Str,Bool} feed, one case
+    /// per constructor. Stamping picks the case by the entry's
+    /// discriminant, and an update with a different tag restamps the
+    /// entry in place — same key, same slot, new shape.
+    #[test]
+    fn sum_stamps_per_variant_and_restamps_on_change() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![
+                    vec![ValueType::Str],
+                    vec![ValueType::Str, ValueType::Bool],
+                ],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::VariantCase { variant: 1 },
+            TxOp::CreateWidget { id: WidgetId(20), kind: WidgetKind::Checkbox },
+            TxOp::SetProperty {
+                widget: WidgetId(20),
+                prop: Prop::Checked,
+                value: PropValue::Element { level: 0, field: 1 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+
+        // A note stamps the label case; a todo stamps the checkbox case.
+        let ops = scene.apply(vec![
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                record: vec![v("jot")],
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("b"),
+                variant: 1,
+                record: vec![v("buy milk"), Value::Bool(false)],
+            },
+        ]);
+        let creates = |ops: &[ApplyOp], kind: WidgetKind| {
+            ops.iter()
+                .filter(|op| matches!(op, ApplyOp::Create { kind: k, .. } if *k == kind))
+                .count()
+        };
+        assert_eq!(creates(&ops, WidgetKind::Label), 1);
+        assert_eq!(creates(&ops, WidgetKind::Checkbox), 1);
+
+        // Promoting the note re-eliminates: old copy destroyed, the
+        // todo case stamped, and the fresh copy moved back before b's.
+        let ops = scene.apply(vec![TxOp::CollectionUpdate {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 1,
+            record: vec![v("jot"), Value::Bool(true)],
+        }]);
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::Destroy { .. })));
+        assert_eq!(creates(&ops, WidgetKind::Checkbox), 1);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::MoveChild { before: Some(_), .. }
+            )),
+            "restamp must reposition into the entry's slot, not append"
+        );
+
+        // The witnessed field write reaches the new constructor.
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 1,
+            field: 1,
+            value: Value::Bool(false),
+        }]);
+        assert_eq!(ops.len(), 1);
+    }
+
+    /// Totality is checked where the eliminator is declared: a For
+    /// over a sum with a missing case dies at template_end, naming the
+    /// hole — not on the first insert of the unlucky constructor.
+    #[test]
+    #[should_panic(expected = "declares no case for variant 1")]
+    fn missing_case_dies_at_declaration() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str], vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// A caseless For over a sum is the same hole.
+    #[test]
+    #[should_panic(expected = "needs a variant_case per variant")]
+    fn caseless_for_over_sum_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str], vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// Records before the first variant_case belong to no constructor.
+    #[test]
+    #[should_panic(expected = "before the first variant_case")]
+    fn records_before_first_case_die() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str], vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// Declaring the same case twice is a contradiction, not a merge.
+    #[test]
+    #[should_panic(expected = "declared twice")]
+    fn duplicate_case_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str], vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::VariantCase { variant: 1 },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// The witnessed discriminant must match the entry's stored one: a
+    /// binding whose model drifted from the core dies here instead of
+    /// writing a type-correct field of the wrong constructor.
+    #[test]
+    #[should_panic(expected = "holds variant 0")]
+    fn witnessed_variant_mismatch_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![
+                    vec![ValueType::Str],
+                    vec![ValueType::Str, ValueType::Bool],
+                ],
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                record: vec![v("jot")],
+            },
+            TxOp::CollectionUpdateField {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 1,
+                field: 1,
+                value: Value::Bool(true),
+            },
+        ]);
+    }
+
+    /// An element binding inside a case sees that variant's schema:
+    /// field 1 of a one-field constructor dies at declaration.
+    #[test]
+    #[should_panic(expected = "out of bounds for variant 0")]
+    fn case_binding_validates_against_its_variant() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![
+                    vec![ValueType::Str],
+                    vec![ValueType::Str, ValueType::Bool],
+                ],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 1 },
+            },
+            TxOp::VariantCase { variant: 1 },
+            TxOp::TemplateEnd,
+        ]);
+    }
+
+    /// An empty case is the explicit "render nothing" for a
+    /// constructor: the entry stamps no widgets and tears down clean.
+    #[test]
+    fn empty_case_renders_nothing() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str], vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::VariantCase { variant: 0 },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::VariantCase { variant: 1 },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let ops = scene.apply(vec![TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("quiet"),
+            variant: 1,
+            record: vec![v("hidden")],
+        }]);
+        assert!(
+            ops.is_empty(),
+            "an empty case stamps nothing, explicitly: {ops:?}"
+        );
+        let ops = scene.apply(vec![TxOp::CollectionRemove {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("quiet"),
+        }]);
+        assert!(ops.is_empty());
     }
 }

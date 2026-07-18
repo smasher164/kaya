@@ -7,7 +7,7 @@
 type value = Bool of bool | I64 of int64 | F64 of float | Str of string
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x378d164e75be3006L
+let spec_hash = 0x3549f42a1a09369eL
 
 let value_bool = 1
 let value_i64 = 2
@@ -48,6 +48,7 @@ let tx_kind_create_when = 12
 let tx_kind_template_end = 13
 let tx_kind_collection_move = 15
 let tx_kind_collection_update_field = 14
+let tx_kind_variant_case = 16
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -92,11 +93,16 @@ let encode_values b vals =
   Buffer.add_int32_le b 0l;
   List.iter (encode_value b) vals
 
-(* A collection schema: counted value-type tags, padded to 8. *)
-let encode_type_tags b tags =
-  Buffer.add_int32_le b (Int32.of_int (List.length tags));
+(* A collection's element sum: per variant, counted value-type tags,
+   padded to 8. A record collection is the one-variant case. *)
+let encode_variant_schemas b variants =
+  Buffer.add_int32_le b (Int32.of_int (List.length variants));
   Buffer.add_int32_le b 0l;
-  List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) tags;
+  List.iter
+    (fun schema ->
+      Buffer.add_int32_le b (Int32.of_int (List.length schema));
+      List.iter (fun t -> Buffer.add_int32_le b (Int32.of_int t)) schema)
+    variants;
   pad8 b
 
 let finish kind fill =
@@ -141,26 +147,30 @@ let tx_mount window root =
       Buffer.add_int64_le b window;
       Buffer.add_int64_le b root)
 
-(* Declare a collection and its schema — the ordered field types every entry must match; a scalar collection is the one-field case. A blueprint when inside a template. *)
-let tx_create_collection collection_id schema =
+(* Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. *)
+let tx_create_collection collection_id variants =
   finish tx_kind_create_collection (fun b ->
       Buffer.add_int64_le b collection_id;
-      encode_type_tags b schema)
+      encode_variant_schemas b variants)
 
-(* Insert an entry into the instance at `path`; the fields match the schema positionally. Stamps a copy. *)
-let tx_collection_insert collection_id path key fields =
+(* Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. *)
+let tx_collection_insert collection_id path key variant fields =
   finish tx_kind_collection_insert (fun b ->
       Buffer.add_int64_le b collection_id;
       encode_values b path;
       encode_value b key;
+      Buffer.add_int32_le b (Int32.of_int variant);
+      Buffer.add_int32_le b 0l;
       encode_values b fields)
 
-(* Replace an entry's record; every element binding follows. *)
-let tx_collection_update collection_id path key fields =
+(* Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. *)
+let tx_collection_update collection_id path key variant fields =
   finish tx_kind_collection_update (fun b ->
       Buffer.add_int64_le b collection_id;
       encode_values b path;
       encode_value b key;
+      Buffer.add_int32_le b (Int32.of_int variant);
+      Buffer.add_int32_le b 0l;
       encode_values b fields)
 
 (* Remove an entry; its stamped copy tears down. *)
@@ -195,15 +205,21 @@ let tx_collection_move collection_id path key before =
       encode_value b key;
       encode_values b before)
 
-(* Set one field of an entry's record; only bindings on that field re-resolve. *)
-let tx_collection_update_field collection_id path key field value =
+(* Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). *)
+let tx_collection_update_field collection_id path key field variant value =
   finish tx_kind_collection_update_field (fun b ->
       Buffer.add_int64_le b collection_id;
       encode_values b path;
       encode_value b key;
       Buffer.add_int32_le b (Int32.of_int field);
-      Buffer.add_int32_le b 0l;
+      Buffer.add_int32_le b (Int32.of_int variant);
       encode_value b value)
+
+(* Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. *)
+let tx_variant_case variant =
+  finish tx_kind_variant_case (fun b ->
+      Buffer.add_int32_le b (Int32.of_int variant);
+      Buffer.add_int32_le b 0l)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

@@ -69,7 +69,10 @@ func wireTag(t reflect.Type) (uint32, bool) {
 var recordInfos sync.Map // reflect.Type -> *recordInfo
 
 func recordInfoOf[T any]() *recordInfo {
-	t := reflect.TypeFor[T]()
+	return recordInfoOfType(reflect.TypeFor[T]())
+}
+
+func recordInfoOfType(t reflect.Type) *recordInfo {
 	if cached, ok := recordInfos.Load(t); ok {
 		return cached.(*recordInfo)
 	}
@@ -103,7 +106,7 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	tx.records = append(tx.records, TxCreateCollection(c.id, info.schema))
+	tx.records = append(tx.records, TxCreateCollection(c.id, [][]uint32{info.schema}))
 	return RecordCollection[K, T]{c, info}
 }
 
@@ -140,14 +143,14 @@ func (info *recordInfo) values(value any) []any {
 // fields positionally.
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, c.info.values(value)))
+	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, 0, c.info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
 // Update replaces a record wholesale; UpdateField is the one-field way.
 func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, c.info.values(value)))
+	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, 0, c.info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -217,7 +220,7 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 			break
 		}
 	}
-	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, value))
+	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, 0, value))
 	tx.recomputeDerived(c.id, c.path)
 }
 

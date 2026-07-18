@@ -49,6 +49,7 @@ core never calls into the guest. The wire vocabulary underneath
 import dataclasses
 import operator
 import threading
+import types
 
 import kaya
 import kaya_wire as wire
@@ -237,6 +238,61 @@ class Element:
         return FieldRef(self, fields[name])
 
 
+class _Cases:
+    """The eliminator over a sum collection, yielded by its for_each:
+    one `with cases.case(Cls) as el:` block per constructor of the
+    union, in any order. The scene holds the arms to totality at
+    declaration — a missing constructor is a startup error naming it,
+    and an empty block is the explicit way to render one as nothing."""
+
+    def __init__(self, for_index, coll):
+        self._for_index = for_index
+        self._coll = coll
+
+    def case(self, cls):
+        for variant, spec in enumerate(self._coll._variants):
+            if spec.cls is cls:
+                return _CaseScope(self._for_index, self._coll, variant)
+        raise TypeError(
+            f"kaya: {cls.__name__} is not a constructor of this collection's union"
+        )
+
+
+class _CaseScope:
+    def __init__(self, for_index, coll, variant):
+        self._for_index = for_index
+        self._coll = coll
+        self._variant = variant
+
+    def __enter__(self):
+        _records().append(wire.tx_variant_case(self._variant))
+        return _CaseElement(self._for_index, self._coll, self._variant)
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class _CaseElement:
+    """The element proxy refined to one constructor: field projections
+    resolve against that variant's schema."""
+
+    def __init__(self, for_index, coll, variant):
+        self._for_index = for_index
+        self._coll = coll
+        self._variant = variant
+
+    def _level(self):
+        return len(_for_stack) - 1 - self._for_index
+
+    def __getattr__(self, name):
+        coll = object.__getattribute__(self, "_coll")
+        variant = object.__getattribute__(self, "_variant")
+        fields = coll._variants[variant].fields
+        if name.startswith("_") or fields is None or name not in fields:
+            raise AttributeError(name)
+        return FieldRef(self, fields[name])
+
+
 class FieldRef:
     """One field of an element: index plus level, ready to bind."""
 
@@ -268,13 +324,14 @@ class _BoundCollection:
         return owner._instances.setdefault(tuple(self._path), {})
 
     def _encode(self, value):
-        """The entry's wire fields, in schema order. The model keeps the
-        value itself (a dataclass instance for record collections, the
-        scalar otherwise); only wire fields travel."""
-        getters = self._owner._wire_getters
-        if getters is None:
-            return [value]
-        return [g(value) for g in getters]
+        """The entry's constructor index and wire fields, in that
+        variant's schema order. The model keeps the value itself (a
+        dataclass instance, the scalar otherwise); only wire fields
+        travel."""
+        variant, spec = self._owner._variant_for(value)
+        if spec.getters is None:
+            return variant, [value]
+        return variant, [g(value) for g in spec.getters]
 
     def derive(self, compute):
         """A signal the binding recomputes from this collection's
@@ -302,17 +359,19 @@ class _BoundCollection:
                 derived._recompute()
 
     def insert(self, key, value):
+        variant, fields = self._encode(value)
         _records().append(
             wire.tx_collection_insert(self._owner._id, self._path, key,
-                                      self._encode(value))
+                                      variant, fields)
         )
         self._mirror()[key] = value
         self._recompute_derived()
 
     def update(self, key, value):
+        variant, fields = self._encode(value)
         _records().append(
             wire.tx_collection_update(self._owner._id, self._path, key,
-                                      self._encode(value))
+                                      variant, fields)
         )
         self._mirror()[key] = value
         self._recompute_derived()
@@ -320,15 +379,24 @@ class _BoundCollection:
     def patch(self, key, **fields):
         """Field-level deltas: `todos.patch(k, done=True)` sends one
         update_field per kwarg and mutates the model instance in place —
-        toggling `done` never resends `title`."""
+        toggling `done` never resends `title`. On a sum, the entry's
+        current constructor is the witness: names resolve against it,
+        the wire carries its discriminant, and a kwarg the constructor
+        lacks raises here — so the isinstance (or match) that guards
+        the patch is the refinement, checked, not trusted."""
         entry = self._mirror()[key]
-        owner_fields = self._owner._fields
-        if owner_fields is None:
+        variant, spec = self._owner._variant_for(entry)
+        if spec.fields is None:
             raise TypeError("kaya: patch() needs a record collection")
         for name, value in fields.items():
+            if name not in spec.fields:
+                raise KeyError(
+                    f"kaya: {type(entry).__name__} has no wire field {name!r}"
+                )
             _records().append(
                 wire.tx_collection_update_field(
-                    self._owner._id, self._path, key, owner_fields[name], value
+                    self._owner._id, self._path, key, spec.fields[name],
+                    variant, value
                 )
             )
             setattr(entry, name, value)
@@ -419,6 +487,13 @@ class _BoundCollection:
         ambient transaction; the scope is syntax, not a barrier."""
         return _Draft(self)
 
+    def get(self, key, default=None):
+        """The entry's current value — the model's copy, for the match
+        or isinstance that precedes a sum's patch. Transition code
+        only; template position raises."""
+        _guard_mirror_read("get()")
+        return self._mirror().get(key, default)
+
     def items(self):
         """The model: what this guest wrote, in insertion order.
         Transition code only; template position raises."""
@@ -468,6 +543,32 @@ class _Draft:
         return key in self._bound._mirror()
 
 
+class _Variant:
+    """One constructor's wire shape: the dataclass, its wire-typed
+    fields in declaration order, and precompiled accessors — the
+    per-insert path is a loop over getters. cls None is the scalar."""
+
+    def __init__(self, cls):
+        self.cls = cls
+        if cls is None:
+            self.fields = None
+            self.schema = [wire.VALUE_STR]
+            self.getters = None
+            return
+        self.fields = {}
+        self.schema = []
+        self.getters = []
+        for f in dataclasses.fields(cls):
+            tag = _wire_tag(f.type)
+            if tag is None:
+                continue
+            self.fields[f.name] = len(self.schema)
+            self.schema.append(tag)
+            self.getters.append(operator.attrgetter(f.name))
+        if not self.schema:
+            raise TypeError(f"kaya: {cls.__name__} has no wire-typed fields")
+
+
 class Collection(_BoundCollection):
     def __init__(self, id, record_type=None):
         self._id = id
@@ -475,31 +576,32 @@ class Collection(_BoundCollection):
         self._children = []  # collections declared inside our template
         self._derived = []  # signals recomputed from this collection
         self._record_type = record_type
+        # The type is the schema: a dataclass is the one-variant case,
+        # and a union of dataclasses (Note | Todo) is the sum — one
+        # variant per member, in the union's declaration order.
         if record_type is None:
-            # A scalar collection: one Str field, bound as field 0.
-            self._fields = None
-            self._schema = [wire.VALUE_STR]
-            self._wire_getters = None
+            self._variants = [_Variant(None)]
+        elif isinstance(record_type, types.UnionType):
+            self._variants = [_Variant(cls) for cls in record_type.__args__]
         else:
-            # The dataclass is the schema: wire-typed fields in
-            # declaration order; anything else (a handler) is
-            # guest-only. The accessor list is built once, here — the
-            # per-insert path is a loop over precompiled getters.
-            self._fields = {}
-            self._schema = []
-            self._wire_getters = []
-            for f in dataclasses.fields(record_type):
-                tag = _wire_tag(f.type)
-                if tag is None:
-                    continue
-                self._fields[f.name] = len(self._schema)
-                self._schema.append(tag)
-                self._wire_getters.append(operator.attrgetter(f.name))
-            if not self._schema:
-                raise TypeError(
-                    f"kaya: {record_type.__name__} has no wire-typed fields"
-                )
+            self._variants = [_Variant(record_type)]
+        # The record paths (element proxies, patch-by-name) read the
+        # one variant; a sum leaves them None so a bare `element.field`
+        # or unmatched patch cannot bypass the case analysis.
+        only = self._variants[0] if len(self._variants) == 1 else None
+        self._fields = only.fields if only else None
         super().__init__(self, [])
+
+    def _variant_for(self, value):
+        """The constructor a model value holds — the discriminant every
+        write witnesses."""
+        for variant, spec in enumerate(self._variants):
+            if spec.cls is None or isinstance(value, spec.cls):
+                return variant, spec
+        raise TypeError(
+            f"kaya: {type(value).__name__} is not a constructor of this "
+            "collection's union"
+        )
 
     def at(self, *path):
         """The instance of this (template-declared) collection inside
@@ -568,6 +670,8 @@ class _Template(_Scope):
         if self._is_for:
             _for_stack.append(len(_for_stack))
             _for_collections.append(self._coll)
+            if len(self._coll._variants) > 1:
+                return _Cases(_for_stack[-1], self._coll)
             return Element(_for_stack[-1], self._coll)
         return None
 
@@ -608,7 +712,10 @@ def collection(record_type=None):
     dataclass IS the schema (wire-typed fields, declaration order), and
     `element.field` / `patch(key, field=...)` project it."""
     handle = Collection(_app._next("collection"), record_type)
-    _records().append(wire.tx_create_collection(handle._id, handle._schema))
+    _records().append(
+        wire.tx_create_collection(handle._id,
+                                  [v.schema for v in handle._variants])
+    )
     # Declared inside a For's template: entries removed from the parent
     # tear down our instances, so the mirror bookkeeping needs the edge.
     if _for_collections:

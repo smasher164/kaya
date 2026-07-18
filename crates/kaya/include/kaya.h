@@ -50,6 +50,8 @@
 
 #define TX_COLLECTION_MOVE 15
 
+#define TX_VARIANT_CASE 16
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -176,6 +178,8 @@
 #define KAYA_TX_COLLECTION_UPDATE_FIELD 14
 
 #define KAYA_TX_COLLECTION_MOVE 15
+
+#define KAYA_TX_VARIANT_CASE 16
 
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).

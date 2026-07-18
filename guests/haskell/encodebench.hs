@@ -24,6 +24,7 @@ main = do
               (toLazyByteString
                  (txCollectionInsert 1 []
                     (VStr ("k" ++ show (i `mod` 1024)))
+                    0
                     [VStr "send report", VBool False]))
           | i <- [0 .. n - 1]
           ]
