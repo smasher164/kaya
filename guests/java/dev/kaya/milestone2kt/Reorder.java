@@ -44,8 +44,8 @@ final class Reorder {
                         List<KayaRecords.Entry<String, Item>> entries = items.items(t);
                         items.moveToFront(t, entries.get(entries.size() - 1).key);
                     }),
-                    tx.forEach(items.handle, t -> {
-                        items.label(t, Item::title);
+                    ItemKaya.each(tx, items, (t, row) -> {
+                        row.label(t, row.title);
                     })));
             for (String key : new String[] { "a", "b", "c" }) {
                 items.insert(tx, key, new Item(key));

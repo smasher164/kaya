@@ -15,6 +15,27 @@ static class TodoKaya
 
     public static TodoKayaPatch Patch(Tx tx, RecordCollection<Todo> c, object key) =>
         new TodoKayaPatch(c.Patch(tx, key));
+
+    /// <summary>The record template: the body runs once, authoring
+    /// the blueprint with the typed row surface (exact-index
+    /// tokens, no probes); stamping is the core's replay.</summary>
+    public static Widget Each(Tx tx, RecordCollection<Todo> c,
+        System.Action<Tpl, TodoRow> body) =>
+        tx.Each(c.Collection, t => body(t, new TodoRow()));
+}
+
+/// <summary>The row surface: one token per wire field, and the
+/// template constructors that consume them.</summary>
+sealed class TodoRow
+{
+    public readonly Field<string> Title = TodoKaya.Title;
+    public readonly Field<bool> Done = TodoKaya.Done;
+
+    public Node Label(Tpl t, Field<string> f) => t.Label(f);
+
+    public Node Checkbox(Tpl t, Field<bool> f,
+        System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
+        t.Checkbox(f, onToggle);
 }
 
 sealed class TodoKayaPatch

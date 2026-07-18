@@ -26,3 +26,31 @@ func (p itemPatchBuilder) Title(v string) itemPatchBuilder {
 	p.p.Set(func(t *Item) *string { return &t.Title }, v)
 	return p
 }
+
+// ItemEach is the record template: the body runs once, authoring the
+// blueprint with the typed row surface (exact-index tokens, no
+// probes); stamping is the core's replay.
+func ItemEach(tx *kaya.Tx, c kaya.RecordCollection[string, Item], body func(itemRow)) kaya.Widget {
+	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
+		body(itemRow{t: t, c: c})
+	})
+}
+
+// The row surface: one token per wire field, and the template
+// constructors that consume them.
+type itemRow struct {
+	t *kaya.Tpl
+	c kaya.RecordCollection[string, Item]
+}
+
+func (r itemRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
+
+func (r itemRow) Row(children ...kaya.Node) kaya.Node { return r.t.Row(children...) }
+
+func (r itemRow) Column(children ...kaya.Node) kaya.Node { return r.t.Column(children...) }
+
+func (r itemRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
+
+func (r itemRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
+	return r.c.Checkbox(r.t, f, onToggle)
+}

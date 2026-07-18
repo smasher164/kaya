@@ -31,3 +31,33 @@ func (p todoPatchBuilder) Done(v bool) todoPatchBuilder {
 	p.p.Set(func(t *Todo) *bool { return &t.Done }, v)
 	return p
 }
+
+// TodoEach is the record template: the body runs once, authoring the
+// blueprint with the typed row surface (exact-index tokens, no
+// probes); stamping is the core's replay.
+func TodoEach(tx *kaya.Tx, c kaya.RecordCollection[string, Todo], body func(todoRow)) kaya.Widget {
+	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
+		body(todoRow{t: t, c: c})
+	})
+}
+
+// The row surface: one token per wire field, and the template
+// constructors that consume them.
+type todoRow struct {
+	t *kaya.Tpl
+	c kaya.RecordCollection[string, Todo]
+}
+
+func (r todoRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
+
+func (r todoRow) Done() kaya.Field[bool] { return kaya.FieldAt[bool](1) }
+
+func (r todoRow) Row(children ...kaya.Node) kaya.Node { return r.t.Row(children...) }
+
+func (r todoRow) Column(children ...kaya.Node) kaya.Node { return r.t.Column(children...) }
+
+func (r todoRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
+
+func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
+	return r.c.Checkbox(r.t, f, onToggle)
+}

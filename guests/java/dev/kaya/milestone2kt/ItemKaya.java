@@ -34,5 +34,37 @@ final class ItemKaya {
         }
     }
 
+    /** The record template: the body runs once, authoring the
+     * blueprint with the typed row surface (exact-index tokens,
+     * no probes); stamping is the core's replay. */
+    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<String, Reorder.Item> c,
+            java.util.function.BiConsumer<KayaApp.Tpl, Row> body) {
+        // A block body: an expression lambda is ambiguous between
+        // the Consumer and Function forEach overloads.
+        return tx.forEach(c.handle, t -> {
+            body.accept(t, new Row(c));
+        });
+    }
+
+    /** The row surface: one token per wire field, and the template
+     * constructors that consume them. */
+    static final class Row {
+        private final KayaRecords.Collection<String, Reorder.Item> c;
+        final KayaRecords.Field<String> title = TITLE;
+
+        Row(KayaRecords.Collection<String, Reorder.Item> c) {
+            this.c = c;
+        }
+
+        KayaApp.Node label(KayaApp.Tpl t, KayaRecords.Field<String> f) {
+            return c.label(t, f);
+        }
+
+        KayaApp.Node checkbox(KayaApp.Tpl t, KayaRecords.Field<Boolean> f,
+                KayaRecords.Collection.ToggleHandler<String> onToggle) {
+            return c.checkbox(t, f, onToggle);
+        }
+    }
+
     private ItemKaya() {}
 }

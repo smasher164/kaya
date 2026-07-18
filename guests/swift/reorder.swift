@@ -35,8 +35,8 @@ app.build { tx in
             let entries = items.items(tx)
             items.moveToFront(tx, entries[entries.count - 1].key)
         }
-        tx.each(items.collection) { t in
-            _ = items.label(t, \.title)
+        for row in items.rows {
+            row.label(row.title)
         }
     }
     tx.mount(root)

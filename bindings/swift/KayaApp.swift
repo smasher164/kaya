@@ -24,6 +24,114 @@ import Foundation
 
 struct KayaSignal {
     let id: UInt64
+
+    /// Mint a derived signal: recomputed when the source is written,
+    /// the write batched into the same transaction; the core sees an
+    /// ordinary signal. Reaches the open transaction ambiently — the
+    /// comparison operators are static, and a signal is only an id.
+    func derive(_ compute: @escaping (KayaValue) -> KayaValue) -> KayaSignal {
+        guard let app = KayaApp.ambient, let tx = app.currentTx else {
+            preconditionFailure(
+                "kaya: a derived signal is minted inside a transaction (build or handler)")
+        }
+        let source = self
+        let d = tx.signal(compute(app.signalMirrors[source.id]!))
+        app.signalDeps[source.id, default: []].append { t in
+            let v = compute(t.app.signalMirrors[source.id]!)
+            if v != t.app.signalMirrors[d.id]! {
+                t.write(d, v)
+            }
+        }
+        return d
+    }
+
+    /// The derive vocabulary (the cross-language canon: eq, ne, lt,
+    /// …); the comparison operators below are these methods in
+    /// operator clothes.
+    func eq(_ other: KayaValue) -> KayaSignal { derive { .bool($0 == other) } }
+
+    func ne(_ other: KayaValue) -> KayaSignal { derive { .bool($0 != other) } }
+
+    func lt(_ other: KayaValue) -> KayaSignal {
+        derive { .bool(kayaOrder($0, other) < 0) }
+    }
+
+    func gt(_ other: KayaValue) -> KayaSignal {
+        derive { .bool(kayaOrder($0, other) > 0) }
+    }
+
+    func le(_ other: KayaValue) -> KayaSignal {
+        derive { .bool(kayaOrder($0, other) <= 0) }
+    }
+
+    func ge(_ other: KayaValue) -> KayaSignal {
+        derive { .bool(kayaOrder($0, other) >= 0) }
+    }
+
+    static func == <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.eq(v.kayaValue)
+    }
+
+    static func != <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.ne(v.kayaValue)
+    }
+
+    static func < <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.lt(v.kayaValue)
+    }
+
+    static func > <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.gt(v.kayaValue)
+    }
+
+    static func <= <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.le(v.kayaValue)
+    }
+
+    static func >= <V: KayaValueConvertible>(s: KayaSignal, v: V) -> KayaSignal {
+        s.ge(v.kayaValue)
+    }
+}
+
+/// The plain values the comparison operators accept on their right:
+/// `stepCount == 1` wraps into the wire scalar itself.
+protocol KayaValueConvertible {
+    var kayaValue: KayaValue { get }
+}
+
+extension Int: KayaValueConvertible {
+    var kayaValue: KayaValue { .i64(Int64(self)) }
+}
+
+extension Int64: KayaValueConvertible {
+    var kayaValue: KayaValue { .i64(self) }
+}
+
+extension String: KayaValueConvertible {
+    var kayaValue: KayaValue { .str(self) }
+}
+
+extension Bool: KayaValueConvertible {
+    var kayaValue: KayaValue { .bool(self) }
+}
+
+extension Double: KayaValueConvertible {
+    var kayaValue: KayaValue { .f64(self) }
+}
+
+/// Wire scalars order within their own kind (i64/f64 also across the
+/// two numeric kinds); anything else is a declaration bug, loudly.
+func kayaOrder(_ a: KayaValue, _ b: KayaValue) -> Int {
+    func cmp<T: Comparable>(_ x: T, _ y: T) -> Int { x == y ? 0 : (x < y ? -1 : 1) }
+    switch (a, b) {
+    case (.i64(let x), .i64(let y)): return cmp(x, y)
+    case (.f64(let x), .f64(let y)): return cmp(x, y)
+    case (.i64(let x), .f64(let y)): return cmp(Double(x), y)
+    case (.f64(let x), .i64(let y)): return cmp(x, Double(y))
+    case (.str(let x), .str(let y)): return cmp(x, y)
+    default:
+        preconditionFailure("kaya: \(a) and \(b) have no order")
+    }
 }
 
 /// A live widget: exactly one thing on screen.
@@ -92,6 +200,24 @@ final class KayaApp {
     // (items, count) are exactly the writes. childCollections records
     // the declared-inside-a-For edges the model purges along when a
     // parent entry's copy is torn down.
+    // Ambient state for the operator/derive and for-in sugar: one app
+    // per guest process (the Python binding's own assumption), and the
+    // operators/tracers are static code — a signal or collection is
+    // only an id, so the sugar reaches the open transaction here.
+    static var ambient: KayaApp?
+    var currentTx: KayaAppTx?
+    var signalMirrors: [UInt64: KayaValue] = [:]
+    var signalDeps: [UInt64: [(KayaAppTx) -> Void]] = [:]
+    // Container builders collect children ambiently, in evaluation
+    // order (a frame per open container); a for-in row trace appends
+    // its For widget to the top frame at close.
+    var childFrames: [[UInt64]] = []
+    var openTraces = 0
+
+    init() {
+        KayaApp.ambient = self
+    }
+
     private var model: [UInt64: [KayaInstance]] = [:]
     private var childCollections: [UInt64: [UInt64]] = [:]
     fileprivate var openFors: [UInt64] = []
@@ -322,19 +448,95 @@ final class KayaApp {
 
 /// One transaction: everything queued inside build (or a handler)
 /// applies atomically when it returns.
-/// The container builder: collects child handles from a block; the
-/// block runs eagerly like any closure.
+/// The container builder: each expression appends its handle to the
+/// enclosing container's ambient frame, in evaluation order — which
+/// lets a `for row in todos.rows { … }` statement stand between
+/// siblings (the tracer appends the For widget itself at close; the
+/// loop contributes nothing through the builder).
 @resultBuilder
 enum KayaChildren {
-    static func buildBlock(_ children: KayaWidget...) -> [KayaWidget] {
-        Array(children)
+    static func buildExpression(_ w: KayaWidget) {
+        guard let app = KayaApp.ambient, !app.childFrames.isEmpty else {
+            preconditionFailure("kaya: a container builder has no open frame")
+        }
+        app.childFrames[app.childFrames.count - 1].append(w.id)
     }
+
+    // A template node at statement position inside a live container:
+    // legal only as a for-in row trace's body (the node is already
+    // template-rooted; the builder discards the handle).
+    static func buildExpression(_ n: KayaNodeHandle) {
+        guard let app = KayaApp.ambient, app.openTraces > 0 else {
+            preconditionFailure(
+                "kaya: a template node cannot parent into a live container "
+                    + "— it belongs to a for-in row trace's body")
+        }
+        _ = n
+    }
+
+    static func buildBlock(_: Void...) {}
+
+    static func buildArray(_: [Void]) {}
 }
 
 @resultBuilder
 enum KayaNodeChildren {
-    static func buildBlock(_ children: KayaNodeHandle...) -> [KayaNodeHandle] {
-        Array(children)
+    static func buildExpression(_ n: KayaNodeHandle) {
+        guard let app = KayaApp.ambient, !app.childFrames.isEmpty else {
+            preconditionFailure("kaya: a container builder has no open frame")
+        }
+        app.childFrames[app.childFrames.count - 1].append(n.id)
+    }
+
+    static func buildBlock(_: Void...) {}
+
+    static func buildArray(_: [Void]) {}
+}
+
+/// The for-statement tracer over a record collection's rows (the
+/// generated `todos.rows` returns one): the loop body runs once,
+/// authoring the For's template; the tracer opens the template on the
+/// first element and closes it — appending the For widget to the
+/// enclosing container's ambient frame — when the loop asks for a
+/// second. Statement-position iteration needs a container builder
+/// around it; stamping is the core's replay, never Swift iteration.
+struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
+    let collection: KayaCollection
+    let makeRow: (KayaTpl) -> Row
+    private var state = 0
+    private var forId: UInt64 = 0
+
+    init(collection: KayaCollection, makeRow: @escaping (KayaTpl) -> Row) {
+        self.collection = collection
+        self.makeRow = makeRow
+    }
+
+    mutating func next() -> Row? {
+        guard let app = KayaApp.ambient, let tx = app.currentTx else {
+            preconditionFailure(
+                "kaya: rows iterates at record time, inside a transaction")
+        }
+        if state == 0 {
+            state = 1
+            collection.assertRoot()
+            let w = app.nextWidget()
+            forId = w.id
+            tx.tx.createFor(w.id, collection.id)
+            app.openFors.append(collection.id)
+            app.openTraces += 1
+            return makeRow(KayaTpl(tx: tx))
+        }
+        if state == 1 {
+            state = 2
+            app.openFors.removeLast()
+            tx.tx.templateEnd()
+            app.openTraces -= 1
+            precondition(
+                !app.childFrames.isEmpty,
+                "kaya: a for-in over rows needs an enclosing container builder")
+            app.childFrames[app.childFrames.count - 1].append(forId)
+        }
+        return nil
     }
 }
 
@@ -344,9 +546,14 @@ final class KayaAppTx {
 
     init(app: KayaApp) {
         self.app = app
+        app.currentTx = self
     }
 
     func submitIfAny() {
+        precondition(
+            app.openTraces == 0,
+            "kaya: a for-in over rows was exited early (break?) — the template never closed")
+        app.currentTx = nil
         if !tx.bytes.isEmpty {
             tx.submit()
         }
@@ -355,11 +562,19 @@ final class KayaAppTx {
     func signal(_ initial: KayaValue) -> KayaSignal {
         let s = app.nextSignal()
         tx.createSignal(s.id, initial)
+        app.signalMirrors[s.id] = initial
         return s
     }
 
     func write(_ s: KayaSignal, _ value: KayaValue) {
         tx.writeSignal(s.id, value)
+        app.signalMirrors[s.id] = value
+        // The dependents recompute now, batched into this transaction
+        // (a derived write chains through here again for its own
+        // dependents).
+        for recompute in app.signalDeps[s.id, default: []] {
+            recompute(self)
+        }
     }
 
     func widget(_ kind: UInt32) -> KayaWidget {
@@ -438,17 +653,22 @@ final class KayaAppTx {
         return w
     }
 
-    func column(@KayaChildren _ children: () -> [KayaWidget]) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_COLUMN), children())
+    func column(@KayaChildren _ children: () -> Void) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_COLUMN), children)
     }
 
-    func row(@KayaChildren _ children: () -> [KayaWidget]) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_ROW), children())
+    func row(@KayaChildren _ children: () -> Void) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_ROW), children)
     }
 
-    private func containerOf(_ kind: UInt32, _ children: [KayaWidget]) -> KayaWidget {
+    private func containerOf(_ kind: UInt32, _ children: () -> Void) -> KayaWidget {
+        app.childFrames.append([])
+        children()
+        let ids = app.childFrames.removeLast()
+        // The parent is created after its children, as before the
+        // ambient frames: creation order is observable (column#N).
         let parent = widget(kind)
-        for child in children { addChild(parent, child) }
+        for id in ids { tx.addChild(parent.id, id) }
         return parent
     }
 
@@ -711,17 +931,20 @@ final class KayaTpl {
         return n
     }
 
-    func row(@KayaNodeChildren _ children: () -> [KayaNodeHandle]) -> KayaNodeHandle {
-        nodeContainerOf(UInt32(KAYA_KIND_ROW), children())
+    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_ROW), children)
     }
 
-    func column(@KayaNodeChildren _ children: () -> [KayaNodeHandle]) -> KayaNodeHandle {
-        nodeContainerOf(UInt32(KAYA_KIND_COLUMN), children())
+    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_COLUMN), children)
     }
 
-    private func nodeContainerOf(_ kind: UInt32, _ children: [KayaNodeHandle]) -> KayaNodeHandle {
+    private func nodeContainerOf(_ kind: UInt32, _ children: () -> Void) -> KayaNodeHandle {
+        tx.app.childFrames.append([])
+        children()
+        let ids = tx.app.childFrames.removeLast()
         let parent = widget(kind)
-        for child in children { addChild(parent, child) }
+        for id in ids { tx.tx.addChild(parent.id, id) }
         return parent
     }
 

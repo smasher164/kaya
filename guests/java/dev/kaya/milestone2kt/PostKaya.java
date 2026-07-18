@@ -56,5 +56,70 @@ final class PostKaya {
         }
     }
 
+    /** asNote re-eliminates at call time: the Optional is the
+     * refinement, fresh at write time — a stale occurrence folds
+     * into the empty — and each setter's update carries Note as
+     * its witness, asserted again by the scene. */
+    static java.util.Optional<NotePatch> asNote(KayaApp.Tx tx,
+            KayaSums.SumCollection<String, Feed.Post> c, String key) {
+        return c.get(tx, key) instanceof Feed.Note
+                ? java.util.Optional.of(new NotePatch(tx, c, key))
+                : java.util.Optional.empty();
+    }
+
+    /** Note's refined patch: named setters over the witnessed
+     * update. */
+    static final class NotePatch {
+        private final KayaApp.Tx tx;
+        private final KayaSums.SumCollection<String, Feed.Post> c;
+        private final String key;
+
+        NotePatch(KayaApp.Tx tx, KayaSums.SumCollection<String, Feed.Post> c, String key) {
+            this.tx = tx;
+            this.c = c;
+            this.key = key;
+        }
+
+        NotePatch text(String v) {
+            c.updateField(tx, key, Feed.Note.class, Feed.Note::text, v);
+            return this;
+        }
+    }
+
+    /** asTodo re-eliminates at call time: the Optional is the
+     * refinement, fresh at write time — a stale occurrence folds
+     * into the empty — and each setter's update carries Todo as
+     * its witness, asserted again by the scene. */
+    static java.util.Optional<TodoPatch> asTodo(KayaApp.Tx tx,
+            KayaSums.SumCollection<String, Feed.Post> c, String key) {
+        return c.get(tx, key) instanceof Feed.Todo
+                ? java.util.Optional.of(new TodoPatch(tx, c, key))
+                : java.util.Optional.empty();
+    }
+
+    /** Todo's refined patch: named setters over the witnessed
+     * update. */
+    static final class TodoPatch {
+        private final KayaApp.Tx tx;
+        private final KayaSums.SumCollection<String, Feed.Post> c;
+        private final String key;
+
+        TodoPatch(KayaApp.Tx tx, KayaSums.SumCollection<String, Feed.Post> c, String key) {
+            this.tx = tx;
+            this.c = c;
+            this.key = key;
+        }
+
+        TodoPatch title(String v) {
+            c.updateField(tx, key, Feed.Todo.class, Feed.Todo::title, v);
+            return this;
+        }
+
+        TodoPatch done(boolean v) {
+            c.updateField(tx, key, Feed.Todo.class, Feed.Todo::done, v);
+            return this;
+        }
+    }
+
     private PostKaya() {}
 }

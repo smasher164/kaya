@@ -53,8 +53,8 @@ func main() {
 				entries := items.Items(tx)
 				items.MoveToFront(tx, entries[len(entries)-1].Key)
 			}),
-			tx.ForEach(items.Collection, func(t *kaya.Tpl) {
-				items.Label(t, func(i *Item) *string { return &i.Title })
+			ItemEach(tx, items, func(row itemRow) {
+				row.Label(row.Title())
 			}),
 		))
 		for _, key := range []string{"a", "b", "c"} {

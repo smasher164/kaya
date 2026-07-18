@@ -28,3 +28,56 @@ func PostEachSum(
 		c.Case[Todo](t, todo)
 	})
 }
+
+// PostAsNote re-eliminates at call time: the comma-ok is the
+// refinement, fresh at write time — a stale occurrence folds into
+// the !ok arm — and each setter's update carries Note as its
+// witness, asserted again by the scene.
+func PostAsNote(tx *kaya.Tx, c kaya.SumCollection[string, Post], key string) (postNotePatch, bool) {
+	if v, ok := c.Get(tx, key); ok {
+		if _, is := v.(Note); is {
+			return postNotePatch{tx: tx, c: c, key: key}, true
+		}
+	}
+	return postNotePatch{}, false
+}
+
+type postNotePatch struct {
+	tx  *kaya.Tx
+	c   kaya.SumCollection[string, Post]
+	key string
+}
+
+func (p postNotePatch) Text(v string) postNotePatch {
+	p.c.UpdateField(p.tx, p.key, func(t *Note) *string { return &t.Text }, v)
+	return p
+}
+
+// PostAsTodo re-eliminates at call time: the comma-ok is the
+// refinement, fresh at write time — a stale occurrence folds into
+// the !ok arm — and each setter's update carries Todo as its
+// witness, asserted again by the scene.
+func PostAsTodo(tx *kaya.Tx, c kaya.SumCollection[string, Post], key string) (postTodoPatch, bool) {
+	if v, ok := c.Get(tx, key); ok {
+		if _, is := v.(Todo); is {
+			return postTodoPatch{tx: tx, c: c, key: key}, true
+		}
+	}
+	return postTodoPatch{}, false
+}
+
+type postTodoPatch struct {
+	tx  *kaya.Tx
+	c   kaya.SumCollection[string, Post]
+	key string
+}
+
+func (p postTodoPatch) Title(v string) postTodoPatch {
+	p.c.UpdateField(p.tx, p.key, func(t *Todo) *string { return &t.Title }, v)
+	return p
+}
+
+func (p postTodoPatch) Done(v bool) postTodoPatch {
+	p.c.UpdateField(p.tx, p.key, func(t *Todo) *bool { return &t.Done }, v)
+	return p
+}

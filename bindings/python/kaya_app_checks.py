@@ -145,4 +145,91 @@ with app.build():
     check("abandoned tx rolls back collection mirror", "g9" not in c)
     check("derived mirror rolled back too", derived._mirror is False)
 
+# The tracing tier (DESIGN's JAX-style sugar): the for statement
+# traces to a For, comparisons are the derive vocabulary in operator
+# clothes, and everything that cannot be traced fails loud at the
+# exact wall JAX named (lax.cond: statement branching has no truth
+# value at record time).
+from dataclasses import dataclass
+
+
+@dataclass
+class TracedTodo:
+    title: str
+    done: bool
+
+
+@dataclass
+class TracedNote:
+    text: str
+
+
+app2 = kaya.App()
+escaped = []
+with app2.window():
+    sig = kaya.signal(1)
+    eq = sig == 1
+    check("operator eq mints a derived signal",
+          isinstance(eq, kaya.Signal) and eq._mirror is True)
+    ge = sig >= 2
+    check("operator ge mints a derived signal", ge._mirror is False)
+    try:
+        if sig:
+            pass
+        check("if-on-signal raises at the lax.cond wall", False)
+    except RuntimeError:
+        check("if-on-signal raises at the lax.cond wall", True)
+
+    traced = kaya.collection(TracedTodo)
+    bodies = 0
+    with kaya.column():
+        for el in traced:
+            bodies += 1
+            escaped.append(el)
+            kaya.checkbox(checked=el.done)
+            try:
+                if el.done:
+                    pass
+                check("if-on-field raises at the wall", False)
+            except RuntimeError:
+                check("if-on-field raises at the wall", True)
+    check("for-trace body runs exactly once", bodies == 1)
+
+    feed = kaya.collection(TracedNote | TracedTodo)
+    try:
+        for _ in feed:
+            pass
+        check("sum for-trace raises at the lax.switch wall", False)
+    except TypeError:
+        check("sum for-trace raises at the lax.switch wall", True)
+
+with app2.build():
+    sig.set(2)
+    check("operator-derived recomputes", eq._mirror is False and ge._mirror is True)
+    try:
+        for _ in traced:
+            pass
+        check("model iteration is items(), loudly", False)
+    except TypeError:
+        check("model iteration is items(), loudly", True)
+    try:
+        escaped[0].done
+        check("escaped tracer raises", False)
+    except RuntimeError:
+        check("escaped tracer raises", True)
+
+# A break abandons the For template mid-trace; the transaction exit
+# refuses to ship the half-authored blueprint.
+app3 = kaya.App()
+try:
+    with app3.window():
+        broken = kaya.collection(TracedTodo)
+        with kaya.column():
+            for el in broken:
+                kaya.label(bind=el.title)
+                break
+    check("break inside a for-trace raises", False)
+except RuntimeError:
+    check("break inside a for-trace raises", True)
+
 sys.exit(1 if failures else 0)

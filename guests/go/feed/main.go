@@ -84,14 +84,13 @@ func main() {
 					todo.Row(
 						todo.Checkbox(func(td *Todo) *bool { return &td.Done },
 							func(tx *kaya.Tx, key string, checked bool) {
-								// The type switch is the refinement;
-								// UpdateField witnesses it. A stale
-								// occurrence lands in the else.
-								if post, ok := feed.Get(tx, key); ok {
-									if _, isTodo := post.(Todo); isTodo {
-										feed.UpdateField(tx, key,
-											func(td *Todo) *bool { return &td.Done }, checked)
-									}
+								// The generated refined patch: the
+								// comma-ok re-eliminates at write time
+								// (a stale occurrence folds into the
+								// !ok arm), and the update stays
+								// witnessed underneath.
+								if todo, ok := PostAsTodo(tx, feed, key); ok {
+									todo.Done(checked)
 								}
 							}),
 						todo.Label(func(td *Todo) *string { return &td.Title }),

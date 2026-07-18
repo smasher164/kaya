@@ -145,6 +145,62 @@ public final class KayaProcessor extends AbstractProcessor {
             w(b, "        }");
             w(b, "    }");
         }
+        // The refined per-constructor patches: re-eliminate at call
+        // time, then write through the witnessed update.
+        for (TypeMirror sub : permitted) {
+            TypeElement subElement =
+                    (TypeElement) processingEnv.getTypeUtils().asElement(sub);
+            String subRef = refOf(sub, pkg);
+            String subName = simpleOf(sub);
+            List<String[]> fields = new java.util.ArrayList<>();
+            for (var component : subElement.getRecordComponents()) {
+                String token = wireTokenType(component.asType().toString());
+                if (token != null) {
+                    fields.add(new String[] {
+                            component.getSimpleName().toString(),
+                            component.asType().toString().startsWith("java.lang.")
+                                    ? token
+                                    : component.asType().toString()});
+                }
+            }
+            if (fields.isEmpty()) {
+                continue;
+            }
+            w(b, "");
+            w(b, "    /** as%s re-eliminates at call time: the Optional is the", subName);
+            w(b, "     * refinement, fresh at write time — a stale occurrence folds");
+            w(b, "     * into the empty — and each setter's update carries %s as", subName);
+            w(b, "     * its witness, asserted again by the scene. */");
+            w(b, "    static java.util.Optional<%sPatch> as%s(KayaApp.Tx tx,", subName, subName);
+            w(b, "            KayaSums.SumCollection<%s, %s> c, %s key) {", key, sumRef, key);
+            w(b, "        return c.get(tx, key) instanceof %s", subRef);
+            w(b, "                ? java.util.Optional.of(new %sPatch(tx, c, key))", subName);
+            w(b, "                : java.util.Optional.empty();");
+            w(b, "    }");
+            w(b, "");
+            w(b, "    /** %s's refined patch: named setters over the witnessed", subName);
+            w(b, "     * update. */");
+            w(b, "    static final class %sPatch {", subName);
+            w(b, "        private final KayaApp.Tx tx;");
+            w(b, "        private final KayaSums.SumCollection<%s, %s> c;", key, sumRef);
+            w(b, "        private final %s key;", key);
+            w(b, "");
+            w(b, "        %sPatch(KayaApp.Tx tx, KayaSums.SumCollection<%s, %s> c, %s key) {",
+                    subName, key, sumRef, key);
+            w(b, "            this.tx = tx;");
+            w(b, "            this.c = c;");
+            w(b, "            this.key = key;");
+            w(b, "        }");
+            for (String[] f : fields) {
+                w(b, "");
+                w(b, "        %sPatch %s(%s v) {", subName, f[0], f[1]);
+                w(b, "            c.updateField(tx, key, %s.class, %s::%s, v);",
+                        subRef, subRef, f[0]);
+                w(b, "            return this;");
+                w(b, "        }");
+            }
+            w(b, "    }");
+        }
         w(b, "");
         w(b, "    private %sKaya() {}", simple);
         w(b, "}");
@@ -240,6 +296,42 @@ public final class KayaProcessor extends AbstractProcessor {
             w(b, "            return this;");
             w(b, "        }");
         }
+        w(b, "    }");
+        w(b, "");
+        w(b, "    /** The record template: the body runs once, authoring the");
+        w(b, "     * blueprint with the typed row surface (exact-index tokens,");
+        w(b, "     * no probes); stamping is the core's replay. */");
+        w(b, "    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<%s, %s> c,",
+                key, recRef);
+        w(b, "            java.util.function.BiConsumer<KayaApp.Tpl, Row> body) {");
+        w(b, "        // A block body: an expression lambda is ambiguous between");
+        w(b, "        // the Consumer and Function forEach overloads.");
+        w(b, "        return tx.forEach(c.handle, t -> {");
+        w(b, "            body.accept(t, new Row(c));");
+        w(b, "        });");
+        w(b, "    }");
+        w(b, "");
+        w(b, "    /** The row surface: one token per wire field, and the template");
+        w(b, "     * constructors that consume them. */");
+        w(b, "    static final class Row {");
+        w(b, "        private final KayaRecords.Collection<%s, %s> c;", key, recRef);
+        for (WireField f : fields) {
+            w(b, "        final KayaRecords.Field<%s> %s = %s;",
+                    f.token(), f.name(), upperSnake(f.name()));
+        }
+        w(b, "");
+        w(b, "        Row(KayaRecords.Collection<%s, %s> c) {", key, recRef);
+        w(b, "            this.c = c;");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        KayaApp.Node label(KayaApp.Tpl t, KayaRecords.Field<String> f) {");
+        w(b, "            return c.label(t, f);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        KayaApp.Node checkbox(KayaApp.Tpl t, KayaRecords.Field<Boolean> f,");
+        w(b, "                KayaRecords.Collection.ToggleHandler<%s> onToggle) {", key);
+        w(b, "            return c.checkbox(t, f, onToggle);");
+        w(b, "        }");
         w(b, "    }");
         w(b, "");
         w(b, "    private %sKaya() {}", simple);

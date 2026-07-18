@@ -20,6 +20,12 @@ import (
 // setters at write).
 type Field[V any] struct{ index uint32 }
 
+// FieldAt mints the token at a known wire index, for generated code
+// only (kaya-gen computes indices from the struct declaration;
+// hand-written code should use the checked selector forms instead —
+// a hand-minted index is unchecked).
+func FieldAt[V any](index uint32) Field[V] { return Field[V]{index: index} }
+
 // Key is the collection-key constraint: the protocol admits string and
 // int64 identities (a float is not an identity; a bool key is a When
 // in disguise).

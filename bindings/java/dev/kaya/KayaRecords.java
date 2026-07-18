@@ -293,6 +293,23 @@ public final class KayaRecords {
             return t.label(this.<String>resolve(selector));
         }
 
+        /** The token routes, for the generated row surface: exact-index
+         * tokens, no probe resolution. */
+        @SuppressWarnings("unchecked")
+        public KayaApp.Node checkbox(KayaApp.Tpl t, Field<Boolean> f,
+                ToggleHandler<K> onToggle) {
+            KayaApp.Node n = t.checkbox(f);
+            if (onToggle != null) {
+                t.onToggleNode(n, (tx, keys, checked) ->
+                        onToggle.accept(tx, (K) keys.get(0), checked));
+            }
+            return n;
+        }
+
+        public KayaApp.Node label(KayaApp.Tpl t, Field<String> f) {
+            return t.label(f);
+        }
+
         @SuppressWarnings("unchecked")
         private <V> Field<V> resolve(java.util.function.Function<T, V> selector) {
             return fieldOf((Class<T>) info.ctor.getDeclaringClass(), selector);

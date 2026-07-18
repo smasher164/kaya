@@ -62,13 +62,18 @@ with app.window():
     with kaya.column():
         kaya.button("step", on_click=on_step)
         kaya.label(bind=status)
-        with kaya.when(steps.eq(1)):
+        # Operator sugar: `steps == 1` is steps.eq(1), a derived Bool
+        # signal (`if steps:` raises, pointing at kaya.when — the
+        # branch must be traced, not taken).
+        with kaya.when(steps == 1):
             kaya.label("extras on")
-        with kaya.for_each(groups) as group:
+        # The tracing tier: nested for statements trace to nested Fors;
+        # each body runs once.
+        for group in groups:
             with kaya.column():
                 kaya.label(bind=group)
                 items = kaya.collection()
-                with kaya.for_each(items) as item:
+                for item in items:
                     with kaya.column():
                         kaya.label(bind=item)
                         kaya.button("remove", on_click=on_remove)

@@ -70,7 +70,10 @@ with app.window():
         kaya.entry(on_change=on_change)
         kaya.button("Add", on_click=on_add)
         kaya.label(bind=items_left)
-        with kaya.for_each(todos) as todo:
+        # The tracing tier: the for statement IS the For — the body
+        # runs once, authoring the blueprint; stamping is the core's
+        # replay.
+        for todo in todos:
             with kaya.row():
                 kaya.checkbox(checked=todo.done, on_toggle=on_toggle)
                 kaya.label(bind=todo.title)

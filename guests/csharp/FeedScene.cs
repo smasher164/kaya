@@ -63,11 +63,12 @@ static class FeedScene
                     todo: (t, todo) => t.Row(
                         todo.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
                         {
-                            // The pattern match is the refinement;
-                            // UpdateField witnesses it. A stale
-                            // occurrence lands in the else.
-                            if (feed.Get(t2, keys[0]) is Todo)
-                                feed.UpdateField<Todo, bool>(t2, keys[0], x => x.Done, isChecked);
+                            // The generated refined patch: ?. is the
+                            // refinement, re-eliminated at write time
+                            // (a stale occurrence folds into null),
+                            // and the update stays witnessed
+                            // underneath.
+                            PostKaya.AsTodo(t2, feed, keys[0])?.Done(isChecked);
                         }),
                         todo.Label(t, x => x.Title)))));
 

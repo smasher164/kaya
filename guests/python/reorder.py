@@ -55,7 +55,7 @@ with app.window():
     with kaya.row():
         kaya.button("rotate", on_click=on_rotate)
         kaya.button("lift", on_click=on_lift)
-        with kaya.for_each(items) as item:
+        for item in items:
             kaya.label(bind=item.title)
     for key in ["a", "b", "c"]:
         items.insert(key, Item(title=key))

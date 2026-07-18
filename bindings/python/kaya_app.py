@@ -71,6 +71,9 @@ _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
 _parents = []  # the container stack; None marks a template body's floor
 _for_stack = []  # depth indices of enclosing Fors, for element levels
+# for-statement tracers whose template scope is still open; a break
+# leaves one behind, caught at transaction exit.
+_open_traces = []
 _for_collections = []  # the enclosing Fors' collections, for mirror parentage
 _tpl_depth = 0  # 0 = live zone; >0 = declaring a blueprint
 _pending_root = None  # the top-level container window() will mount
@@ -92,8 +95,23 @@ def _journal_once(obj, restore):
     handler that raises abandons its records, and the mirrors must
     abandon the same writes — `.value()` means "what I wrote", never
     "what I almost wrote"."""
-    if _journal is not None and obj not in _journal:
-        _journal[obj] = restore
+    # Keyed by id(): signals overload __eq__ into derived signals (the
+    # tracing tier), so an object-keyed dict would truth-test one on a
+    # hash collision.
+    if _journal is not None and id(obj) not in _journal:
+        _journal[id(obj)] = restore
+
+
+def _guard_tracer_escape():
+    """Element tracers are record-time blueprints; one captured into a
+    handler is a stale reference to the template, not to any stamped
+    copy's data."""
+    if not (_recording or _tpl_depth > 0):
+        raise RuntimeError(
+            "kaya: element tracers exist at record time only — a handler "
+            "receives the stamped copy's keys and reads the model "
+            "(get()/items()), never the tracer"
+        )
 
 
 def _auto_parent(child_id):
@@ -149,9 +167,51 @@ class Signal:
     def gt(self, other):
         return self._derive(lambda v: v > other)
 
+    def le(self, other):
+        return self._derive(lambda v: v <= other)
+
+    def ge(self, other):
+        return self._derive(lambda v: v >= other)
+
     def fmt(self, template):
         """A derived Str signal: template.format(value)."""
         return self._derive(lambda v: template.format(v))
+
+    # The tracing tier: comparison operators are the method vocabulary
+    # in operator clothes — `count == 0` is `count.eq(0)`, a derived
+    # Bool signal. The documented sharp edge (the SQLAlchemy/pandas
+    # trade-off): == no longer answers identity, so signals keep
+    # identity hashing and membership tests will truth-test a derived —
+    # which raises, pointing here.
+    __hash__ = object.__hash__
+
+    def __eq__(self, other):
+        return self.eq(other)
+
+    def __ne__(self, other):
+        return self.ne(other)
+
+    def __lt__(self, other):
+        return self.lt(other)
+
+    def __gt__(self, other):
+        return self.gt(other)
+
+    def __le__(self, other):
+        return self.le(other)
+
+    def __ge__(self, other):
+        return self.ge(other)
+
+    def __bool__(self):
+        # The lax.cond wall: Python cannot overload statement
+        # branching, so an `if` on a signal cannot trace to a template.
+        raise RuntimeError(
+            "kaya: a signal has no truth value at record time — branch "
+            "with `with kaya.when(sig):` (build the condition with "
+            "sig.eq(...) / sig == ...); handlers fold occurrences into "
+            "your own state, never widget reads"
+        )
 
 
 class _Derived(Signal):
@@ -232,8 +292,11 @@ class Element:
         return len(_for_stack) - 1 - self._for_index
 
     def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        _guard_tracer_escape()
         fields = object.__getattribute__(self, "_coll")._fields
-        if name.startswith("_") or fields is None or name not in fields:
+        if fields is None or name not in fields:
             raise AttributeError(name)
         return FieldRef(self, fields[name])
 
@@ -285,10 +348,13 @@ class _CaseElement:
         return len(_for_stack) - 1 - self._for_index
 
     def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        _guard_tracer_escape()
         coll = object.__getattribute__(self, "_coll")
         variant = object.__getattribute__(self, "_variant")
         fields = coll._variants[variant].fields
-        if name.startswith("_") or fields is None or name not in fields:
+        if fields is None or name not in fields:
             raise AttributeError(name)
         return FieldRef(self, fields[name])
 
@@ -302,6 +368,16 @@ class FieldRef:
 
     def _level(self):
         return self._element._level()
+
+    def __bool__(self):
+        # The lax.cond wall, element edition: a field projection is a
+        # blueprint reference, not a value.
+        raise RuntimeError(
+            "kaya: an element's field has no truth value — bind it "
+            "(checkbox(checked=el.field)) or, for per-constructor "
+            "branches, declare a sum and its case arms; handlers read "
+            "the model (get()/items()), never the tracer"
+        )
 
 
 class _BoundCollection:
@@ -592,6 +668,25 @@ class Collection(_BoundCollection):
         self._fields = only.fields if only else None
         super().__init__(self, [])
 
+    def __iter__(self):
+        """The tracing tier: in template position, `for t in todos:`
+        traces to a For — the loop body runs once, authoring the
+        blueprint. (Transition code iterates the model: items().)"""
+        if not (_recording or _tpl_depth > 0):
+            raise TypeError(
+                "kaya: `for t in coll:` is template tracing, record time "
+                "only — handlers iterate the model with items()"
+            )
+        if len(self._variants) > 1:
+            # The lax.switch wall: a for-loop body is one arm, but a
+            # sum's template is a record of case arms.
+            raise TypeError(
+                "kaya: a sum collection's template is its case arms — "
+                "use `with kaya.for_each(c) as cases:` and one "
+                "`with cases.case(Cls) as el:` per constructor"
+            )
+        return _ForTrace(self)
+
     def _variant_for(self, value):
         """The constructor a model value holds — the discriminant every
         write witnesses."""
@@ -685,6 +780,41 @@ class _Template(_Scope):
         _records().append(wire.tx_template_end())
         if self._parent is not None:
             _records().append(wire.tx_add_child(self._parent, self.handle.id))
+
+
+class _ForTrace:
+    """The for-statement tracer (DESIGN's JAX-style tier): `for t in
+    todos:` opens the For template, hands the loop body one element
+    tracer, and closes the template when the loop asks for a second
+    element. The body runs once — it authors the blueprint; stamping is
+    the core's replay, never Python iteration."""
+
+    def __init__(self, coll):
+        self._template = _Template(
+            wire.tx_create_for, coll._id, is_for=True, coll=coll)
+        self._state = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._state == 0:
+            self._state = 1
+            element = self._template._enter()
+            _open_traces.append(self)
+            return element
+        if self._state == 1:
+            self._state = 2
+            # Traces close innermost-first; anything else means the
+            # loop bodies interleaved template scopes.
+            if not _open_traces or _open_traces[-1] is not self:
+                raise RuntimeError(
+                    "kaya: nested for-loops over collections must close "
+                    "innermost-first"
+                )
+            _open_traces.pop()
+            self._template._exit()
+        raise StopIteration
 
 
 def _alloc_widget_or_node():
@@ -862,11 +992,21 @@ class _TxScope:
         _recording = False
         records, _tx = _tx, None
         journal, _journal = _journal, None
+        abandoned, _open_traces[:] = list(_open_traces), []
         if exc_type is not None:
             # The records are abandoned; the mirrors abandon them too.
             for restore in journal.values():
                 restore()
             return False
+        if abandoned:
+            # A break (or early return) left a For template open: the
+            # body must run to completion — it authors the blueprint,
+            # it does not iterate entries.
+            raise RuntimeError(
+                "kaya: a `for t in coll:` template never closed — the "
+                "loop body must run to completion (no break/return); "
+                "conditional rendering is kaya.when"
+            )
         if self._mount:
             if _pending_root is None:
                 raise RuntimeError("kaya: window() body declared no root container")

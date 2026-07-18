@@ -65,12 +65,14 @@ final class Feed {
                                 t.row(
                                         todo.checkbox(t, Todo::done,
                                                 (KayaApp.Tx t2, String key, boolean checked) -> {
-                                                    // instanceof is the refinement;
-                                                    // updateField witnesses it.
-                                                    if (feed.get(t2, key) instanceof Todo) {
-                                                        feed.updateField(t2, key, Todo.class,
-                                                                Todo::done, checked);
-                                                    }
+                                                    // The generated refined patch:
+                                                    // the Optional re-eliminates at
+                                                    // write time (a stale occurrence
+                                                    // folds into the empty), and the
+                                                    // update stays witnessed
+                                                    // underneath.
+                                                    PostKaya.asTodo(t2, feed, key)
+                                                            .ifPresent(p -> p.done(checked));
                                                 }),
                                         todo.label(t, Todo::title));
                             })));

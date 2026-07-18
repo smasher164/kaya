@@ -50,14 +50,17 @@ static class TodosScene
                     todos.Insert(t, $"t{nextKey}", new Todo(draft, false));
                 }),
                 tx.Label(bind: itemsLeft),
-                tx.Each(todos.Collection, t => t.Row(
-                    todos.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
+                // The generated row surface: exact-index tokens, no
+                // expression trees or probes; the body runs once,
+                // authoring the blueprint.
+                TodoKaya.Each(tx, todos, (t, row) => t.Row(
+                    row.Checkbox(t, row.Done, (t2, keys, isChecked) =>
                     {
                         // One field's delta: the title never travels;
                         // the derived signal updates itself.
                         TodoKaya.Patch(t2, todos, keys[0]).Done(isChecked);
                     }),
-                    todos.Label(t, x => x.Title)))));
+                    row.Label(t, row.Title)))));
         });
 
         System.Environment.Exit(app.Run());

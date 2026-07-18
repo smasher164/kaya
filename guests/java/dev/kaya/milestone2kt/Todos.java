@@ -51,16 +51,19 @@ final class Todos {
                         todos.insert(t, "t" + nextKey, new Todo(draft, false));
                     }),
                     tx.label(itemsLeft),
-                    tx.forEach(todos.handle, t -> {
+                    // The generated row surface: exact-index tokens,
+                    // no probes; the body runs once, authoring the
+                    // blueprint.
+                    TodoKaya.each(tx, todos, (t, row) -> {
                         t.row(
-                                todos.checkbox(t, Todo::done, (t2, key, checked) -> {
+                                row.checkbox(t, row.done, (t2, key, checked) -> {
                                     // One field's delta through the
                                     // generated named setter: the title
                                     // never travels; the derived signal
                                     // updates itself.
                                     TodoKaya.patch(t2, todos, key).done(checked);
                                 }),
-                                todos.label(t, Todo::title));
+                                row.label(t, row.title));
                     })));
             return null;
         });

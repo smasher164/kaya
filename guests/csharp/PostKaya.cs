@@ -16,4 +16,71 @@ static class PostKaya
         System.Action<Tpl, SumCase<Note>> note,
         System.Action<Tpl, SumCase<Todo>> todo) =>
         tx.EachSum(c, c.Arm<Note>(note), c.Arm<Todo>(todo));
+
+    /// <summary>AsNote re-eliminates at call time: the null
+    /// is the refinement, fresh at write time — a stale occurrence
+    /// folds into ?. — and each setter's update carries Note
+    /// as its witness, asserted again by the scene.</summary>
+    public static PostNotePatch AsNote(Tx tx, SumCollection<Post> c, object key) =>
+        tx != null && c.Get(tx, key) is Note
+            ? new PostNotePatch(tx, c, key) : null;
+
+    /// <summary>AsTodo re-eliminates at call time: the null
+    /// is the refinement, fresh at write time — a stale occurrence
+    /// folds into ?. — and each setter's update carries Todo
+    /// as its witness, asserted again by the scene.</summary>
+    public static PostTodoPatch AsTodo(Tx tx, SumCollection<Post> c, object key) =>
+        tx != null && c.Get(tx, key) is Todo
+            ? new PostTodoPatch(tx, c, key) : null;
+
+}
+
+/// <summary>Note's refined patch: named setters over the
+/// witnessed update.</summary>
+sealed class PostNotePatch
+{
+    readonly Tx tx;
+    readonly SumCollection<Post> c;
+    readonly object key;
+
+    internal PostNotePatch(Tx tx, SumCollection<Post> c, object key)
+    {
+        this.tx = tx;
+        this.c = c;
+        this.key = key;
+    }
+
+    public PostNotePatch Text(string v)
+    {
+        c.UpdateField<Note, string>(tx, key, x => x.Text, v);
+        return this;
+    }
+}
+
+/// <summary>Todo's refined patch: named setters over the
+/// witnessed update.</summary>
+sealed class PostTodoPatch
+{
+    readonly Tx tx;
+    readonly SumCollection<Post> c;
+    readonly object key;
+
+    internal PostTodoPatch(Tx tx, SumCollection<Post> c, object key)
+    {
+        this.tx = tx;
+        this.c = c;
+        this.key = key;
+    }
+
+    public PostTodoPatch Title(string v)
+    {
+        c.UpdateField<Todo, string>(tx, key, x => x.Title, v);
+        return this;
+    }
+
+    public PostTodoPatch Done(bool v)
+    {
+        c.UpdateField<Todo, bool>(tx, key, x => x.Done, v);
+        return this;
+    }
 }

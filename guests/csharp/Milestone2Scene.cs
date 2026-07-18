@@ -23,9 +23,13 @@ static class Milestone2Scene
         app.Build(tx =>
         {
             status = tx.Signal("step 0");
-            var extras = tx.Signal(false);
+            // The step count as a signal, so the banner's condition is
+            // a derived signal: `stepCount == 1` is Eq in operator
+            // clothes, recomputed on every write — no hand-maintained
+            // Bool, no handler line for it.
+            var stepCount = tx.Signal(0);
 
-            Widget banner = tx.When(extras, t =>
+            Widget banner = tx.When(stepCount == 1, t =>
             {
                 Node bannerLabel = t.Widget(KayaWire.KindLabel);
                 t.SetText(bannerLabel, "extras on");
@@ -66,7 +70,7 @@ static class Milestone2Scene
                         t.Insert(items.At("g2"), "a", "water plants");
                         t.Update(groups, "g1", "Office");
                     }
-                    t.Write(extras, steps == 1);
+                    t.Write(stepCount, steps);
                     t.Write(status, $"step {steps}");
                 }),
                 tx.Label(bind: status),

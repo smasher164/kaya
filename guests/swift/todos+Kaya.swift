@@ -24,3 +24,49 @@ enum TodoFields {
 func todoCollection(_ tx: KayaAppTx) -> KayaRecordCollection<Todo> {
     tx.collection(of: Todo.self)
 }
+
+/// The row surface: the template handle plus one token per wire
+/// field, and the constructors that consume them.
+struct TodoRow {
+    let t: KayaTpl
+    let title = TodoFields.title
+    let done = TodoFields.done
+
+    func label(_ f: KayaField<String>) -> KayaNodeHandle {
+        t.label(f)
+    }
+
+    func checkbox(
+        _ f: KayaField<Bool>,
+        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+    ) -> KayaNodeHandle {
+        t.checkbox(f, onToggle: onToggle)
+    }
+
+    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.row(children)
+    }
+
+    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.column(children)
+    }
+}
+
+extension KayaRecordCollection where T == Todo {
+    /// The for-statement form: `for row in todos.rows { … }`
+    /// traces the record template — the body runs once, and the
+    /// tracer plants the For in the enclosing container builder.
+    var rows: KayaRowTrace<TodoRow> {
+        KayaRowTrace(collection: collection) { TodoRow(t: $0) }
+    }
+}
+
+/// The record template, expression form: the body runs once,
+/// authoring the blueprint with the typed row surface; stamping is
+/// the core's replay.
+func todoEach(
+    _ tx: KayaAppTx, _ c: KayaRecordCollection<Todo>,
+    _ body: @escaping (TodoRow) -> Void
+) -> KayaWidget {
+    tx.each(c.collection) { t in body(TodoRow(t: t)) }
+}

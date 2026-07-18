@@ -17,9 +17,13 @@ var steps = 0
 let (status, items, removeButton) = app.build {
     tx -> (KayaSignal, KayaCollection, KayaNodeHandle) in
     let status = tx.signal(.str("step 0"))
-    let extras = tx.signal(.bool(false))
+    // The step count as a signal, so the banner's condition is a
+    // derived signal: `stepCount == 1` is eq in operator clothes,
+    // recomputed on every write — no hand-maintained Bool, no handler
+    // line for it.
+    let stepCount = tx.signal(.i64(0))
 
-    let (banner, _) = tx.when(extras) { t in
+    let (banner, _) = tx.when(stepCount == 1) { t in
         let bannerLabel = t.widget(UInt32(KAYA_KIND_LABEL))
         t.setText(bannerLabel, "extras on")
     }
@@ -62,7 +66,7 @@ let (status, items, removeButton) = app.build {
                 t.insert(items.at(.str("g2")), .str("a"), .str("water plants"))
                 t.update(groups, .str("g1"), .str("Office"))
             }
-            t.write(extras, .bool(steps == 1))
+            t.write(stepCount, .i64(Int64(steps)))
             t.write(status, .str("step \(steps)"))
         }
         tx.label(bind: status)

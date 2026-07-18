@@ -42,7 +42,7 @@ static class ReorderScene
                     var entries = items.Items(t);
                     items.MoveToFront(t, entries[entries.Count - 1].Key);
                 }),
-                tx.Each(items.Collection, t => items.Label(t, x => x.Title))));
+                ItemKaya.Each(tx, items, (t, row) => row.Label(t, row.Title))));
             foreach (var key in new[] { "a", "b", "c" })
                 items.Insert(tx, key, new Item(key));
         });

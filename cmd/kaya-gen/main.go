@@ -210,7 +210,75 @@ func generateSum(w func(string, ...any), pkg *ast.Package, iface *ast.InterfaceT
 	}
 	w("\t})")
 	w("}")
+
+	// The refined per-constructor patches: re-eliminate at call time,
+	// then write through the witnessed update.
+	for _, v := range variants {
+		fields := wireFieldsOf(pkg, v.name)
+		if len(fields) == 0 {
+			continue
+		}
+		w("")
+		w("// %sAs%s re-eliminates at call time: the comma-ok is the", sum, v.name)
+		w("// refinement, fresh at write time — a stale occurrence folds into")
+		w("// the !ok arm — and each setter's update carries %s as its", v.name)
+		w("// witness, asserted again by the scene.")
+		w("func %sAs%s(tx *kaya.Tx, c kaya.SumCollection[%s, %s], key %s) (%s%sPatch, bool) {", sum, v.name, key, sum, key, lowerFirst(sum), v.name)
+		w("\tif v, ok := c.Get(tx, key); ok {")
+		w("\t\tif _, is := v.(%s); is {", v.name)
+		w("\t\t\treturn %s%sPatch{tx: tx, c: c, key: key}, true", lowerFirst(sum), v.name)
+		w("\t\t}")
+		w("\t}")
+		w("\treturn %s%sPatch{}, false", lowerFirst(sum), v.name)
+		w("}")
+		w("")
+		w("type %s%sPatch struct {", lowerFirst(sum), v.name)
+		w("\ttx  *kaya.Tx")
+		w("\tc   kaya.SumCollection[%s, %s]", key, sum)
+		w("\tkey %s", key)
+		w("}")
+		for _, f := range fields {
+			w("")
+			w("func (p %s%sPatch) %s(v %s) %s%sPatch {", lowerFirst(sum), v.name, f.name, f.typ, lowerFirst(sum), v.name)
+			w("\tp.c.UpdateField(p.tx, p.key, func(t *%s) *%s { return &t.%s }, v)", v.name, f.typ, f.name)
+			w("\treturn p")
+			w("}")
+		}
+	}
 	return len(variants)
+}
+
+// wireFieldsOf lists a named struct's exported wire-typed fields, in
+// declaration order.
+func wireFieldsOf(pkg *ast.Package, name string) []struct{ name, typ string } {
+	var fields []struct{ name, typ string }
+	for _, file := range pkg.Files {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				ts := spec.(*ast.TypeSpec)
+				strct, ok := ts.Type.(*ast.StructType)
+				if !ok || ts.Name.Name != name {
+					continue
+				}
+				for _, f := range strct.Fields.List {
+					id, ok := f.Type.(*ast.Ident)
+					if !ok || !wireTypes[id.Name] {
+						continue
+					}
+					for _, n := range f.Names {
+						if n.IsExported() {
+							fields = append(fields, struct{ name, typ string }{n.Name, id.Name})
+						}
+					}
+				}
+			}
+		}
+	}
+	return fields
 }
 
 func generateRecord(w func(string, ...any), strct *ast.StructType, name, key string) int {
@@ -254,6 +322,36 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 		w("\treturn p")
 		w("}")
 	}
+	w("")
+	w("// %sEach is the record template: the body runs once, authoring the", name)
+	w("// blueprint with the typed row surface (exact-index tokens, no")
+	w("// probes); stamping is the core's replay.")
+	w("func %sEach(tx *kaya.Tx, c kaya.RecordCollection[%s, %s], body func(%sRow)) kaya.Widget {", name, key, name, lowerFirst(name))
+	w("\treturn tx.ForEach(c.Collection, func(t *kaya.Tpl) {")
+	w("\t\tbody(%sRow{t: t, c: c})", lowerFirst(name))
+	w("\t})")
+	w("}")
+	w("")
+	w("// The row surface: one token per wire field, and the template")
+	w("// constructors that consume them.")
+	w("type %sRow struct {", lowerFirst(name))
+	w("\tt *kaya.Tpl")
+	w("\tc kaya.RecordCollection[%s, %s]", key, name)
+	w("}")
+	for i, f := range fields {
+		w("")
+		w("func (r %sRow) %s() kaya.Field[%s] { return kaya.FieldAt[%s](%d) }", lowerFirst(name), f.name, f.typ, f.typ, i)
+	}
+	w("")
+	w("func (r %sRow) Row(children ...kaya.Node) kaya.Node { return r.t.Row(children...) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) Column(children ...kaya.Node) kaya.Node { return r.t.Column(children...) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, %s, bool)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.Checkbox(r.t, f, onToggle)")
+	w("}")
 	return len(fields)
 }
 

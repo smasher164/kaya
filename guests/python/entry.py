@@ -54,7 +54,7 @@ with app.window():
         kaya.entry(on_change=on_change)
         kaya.button("add", on_click=on_add)
         kaya.label(bind=status)
-        with kaya.for_each(todos) as todo:
+        for todo in todos:
             kaya.label(bind=todo)
 
 sys.exit(app.run())

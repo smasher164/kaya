@@ -43,22 +43,19 @@ app.build { tx in
     // error. The arms' tokens are typed; no label strings.
     let list = postEachSum(
         tx, feed,
-        note: { t, note in
-            _ = note.label(t, note.text)
+        note: { note in
+            _ = note.label(note.text)
         },
-        todo: { t, todo in
-            _ = t.row {
-                todo.checkbox(t, todo.done) { tx, keys, checked in
-                    // `if case` is the refinement; updateField
-                    // witnesses it. A stale occurrence folds into
-                    // nothing.
-                    if case .todo = feed.get(tx, keys[0]) {
-                        feed.updateField(
-                            tx, keys[0], of: .todo(title: "", done: false),
-                            PostTodoFields.done, .bool(checked))
-                    }
+        todo: { todo in
+            _ = todo.row {
+                todo.checkbox(todo.done) { tx, keys, checked in
+                    // The generated refined patch: optional chaining
+                    // re-eliminates at write time (a stale occurrence
+                    // folds into nil), and the update stays witnessed
+                    // underneath.
+                    postAsTodo(tx, feed, keys[0])?.done(checked)
                 }
-                todo.label(t, todo.title)
+                todo.label(todo.title)
             }
         })
     let root = tx.row {

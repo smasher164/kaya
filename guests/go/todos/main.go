@@ -70,16 +70,19 @@ func main() {
 				todos.Insert(tx, fmt.Sprintf("t%d", nextKey), Todo{Title: draft})
 			}),
 			tx.Label(itemsLeft),
-			tx.ForEach(todos.Collection, func(t *kaya.Tpl) {
-				t.Row(
-					todos.Checkbox(t, func(t *Todo) *bool { return &t.Done },
+			// The generated row surface: exact-index tokens, no
+			// selectors or probes; the body runs once, authoring the
+			// blueprint.
+			TodoEach(tx, todos, func(row todoRow) {
+				row.Row(
+					row.Checkbox(row.Done(),
 						func(tx *kaya.Tx, key string, checked bool) {
 							// One field's delta through the generated
 							// named setter: the title never travels;
 							// the derived signal updates itself.
 							TodoPatch(todos, tx, key).Done(checked)
 						}),
-					todos.Label(t, func(t *Todo) *string { return &t.Title }),
+					row.Label(row.Title()),
 				)
 			}),
 		))

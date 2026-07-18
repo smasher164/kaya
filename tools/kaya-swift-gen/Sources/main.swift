@@ -175,24 +175,35 @@ func generateSum(_ name: String, _ cases: [Case]) -> String {
         line("")
     }
 
-    // The refined arm vocabularies: the tokens plus the template
-    // surface, typed end to end.
+    // The refined arm vocabularies: each arm carries its template
+    // handle, so the surface is tokens plus constructors — nothing
+    // threaded by hand.
     for c in cases {
         line("/// \(c.name)'s refined arm vocabulary: typed tokens, no label")
         line("/// strings.")
         line("struct \(name)\(upper(c.name))Arm {")
+        line("    let t: KayaTpl")
         for f in c.fields {
             line("    let \(f.label) = \(name)\(upper(c.name))Fields.\(f.label)")
         }
-        line("    func label(_ t: KayaTpl, _ f: KayaField<String>) -> KayaNodeHandle {")
+        line("")
+        line("    func label(_ f: KayaField<String>) -> KayaNodeHandle {")
         line("        t.label(f)")
         line("    }")
         line("")
         line("    func checkbox(")
-        line("        _ t: KayaTpl, _ f: KayaField<Bool>,")
+        line("        _ f: KayaField<Bool>,")
         line("        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil")
         line("    ) -> KayaNodeHandle {")
         line("        t.checkbox(f, onToggle: onToggle)")
+        line("    }")
+        line("")
+        line("    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")
+        line("        t.row(children)")
+        line("    }")
+        line("")
+        line("    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")
+        line("        t.column(children)")
         line("    }")
         line("}")
         line("")
@@ -210,17 +221,53 @@ func generateSum(_ name: String, _ cases: [Case]) -> String {
     line("    _ tx: KayaAppTx, _ c: KayaSumCollection<\(name)>,")
     for (i, c) in cases.enumerated() {
         let comma = i == cases.count - 1 ? "" : ","
-        line("    \(c.name): @escaping (KayaTpl, \(name)\(upper(c.name))Arm) -> Void\(comma)")
+        line("    \(c.name): @escaping (\(name)\(upper(c.name))Arm) -> Void\(comma)")
     }
     line(") -> KayaWidget {")
     line("    tx.eachSum(")
     line("        c,")
     line("        arms: [")
     for c in cases {
-        line("            c.arm(\(zeroCall(".\(c.name)", c.fields))) { t, _ in \(c.name)(t, \(name)\(upper(c.name))Arm()) },")
+        line("            c.arm(\(zeroCall(".\(c.name)", c.fields))) { t, _ in \(c.name)(\(name)\(upper(c.name))Arm(t: t)) },")
     }
     line("        ])")
     line("}")
+
+    // The refined per-constructor patches: re-eliminate at call time,
+    // then write through the witnessed update.
+    for (i, c) in cases.enumerated() where !c.fields.isEmpty {
+        line("")
+        line("/// \(lower(name))As\(upper(c.name)) re-eliminates at call time: the optional is")
+        line("/// the refinement, fresh at write time — a stale occurrence folds")
+        line("/// into nil — and each setter's update witnesses \(c.name), asserted")
+        line("/// again by the scene.")
+        line("func \(lower(name))As\(upper(c.name))(")
+        line("    _ tx: KayaAppTx, _ c: KayaSumCollection<\(name)>, _ key: KayaValue")
+        line(") -> \(name)\(upper(c.name))Patch? {")
+        line("    guard let current = c.get(tx, key), current.kayaVariant == \(i) else {")
+        line("        return nil")
+        line("    }")
+        line("    return \(name)\(upper(c.name))Patch(tx: tx, c: c, key: key)")
+        line("}")
+        line("")
+        line("/// \(c.name)'s refined patch: named setters over the witnessed")
+        line("/// update.")
+        line("struct \(name)\(upper(c.name))Patch {")
+        line("    let tx: KayaAppTx")
+        line("    let c: KayaSumCollection<\(name)>")
+        line("    let key: KayaValue")
+        for f in c.fields {
+            line("")
+            line("    @discardableResult")
+            line("    func \(f.label)(_ v: \(f.type)) -> \(name)\(upper(c.name))Patch {")
+            line("        c.updateField(")
+            line("            tx, key, of: \(zeroCall(".\(c.name)", c.fields)),")
+            line("            \(name)\(upper(c.name))Fields.\(f.label), .\(wire[f.type]!.valueCase)(v))")
+            line("        return self")
+            line("    }")
+        }
+        line("}")
+    }
     return b
 }
 
@@ -251,6 +298,53 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("/// The collection factory; the struct is the schema.")
     line("func \(lower(name))Collection(_ tx: KayaAppTx) -> KayaRecordCollection<\(name)> {")
     line("    tx.collection(of: \(name).self)")
+    line("}")
+    line("")
+    line("/// The row surface: the template handle plus one token per wire")
+    line("/// field, and the constructors that consume them.")
+    line("struct \(name)Row {")
+    line("    let t: KayaTpl")
+    for f in fields {
+        line("    let \(f.label) = \(name)Fields.\(f.label)")
+    }
+    line("")
+    line("    func label(_ f: KayaField<String>) -> KayaNodeHandle {")
+    line("        t.label(f)")
+    line("    }")
+    line("")
+    line("    func checkbox(")
+    line("        _ f: KayaField<Bool>,")
+    line("        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil")
+    line("    ) -> KayaNodeHandle {")
+    line("        t.checkbox(f, onToggle: onToggle)")
+    line("    }")
+    line("")
+    line("    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")
+    line("        t.row(children)")
+    line("    }")
+    line("")
+    line("    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {")
+    line("        t.column(children)")
+    line("    }")
+    line("}")
+    line("")
+    line("extension KayaRecordCollection where T == \(name) {")
+    line("    /// The for-statement form: `for row in \(lower(name))s.rows { … }`")
+    line("    /// traces the record template — the body runs once, and the")
+    line("    /// tracer plants the For in the enclosing container builder.")
+    line("    var rows: KayaRowTrace<\(name)Row> {")
+    line("        KayaRowTrace(collection: collection) { \(name)Row(t: $0) }")
+    line("    }")
+    line("}")
+    line("")
+    line("/// The record template, expression form: the body runs once,")
+    line("/// authoring the blueprint with the typed row surface; stamping is")
+    line("/// the core's replay.")
+    line("func \(lower(name))Each(")
+    line("    _ tx: KayaAppTx, _ c: KayaRecordCollection<\(name)>,")
+    line("    _ body: @escaping (\(name)Row) -> Void")
+    line(") -> KayaWidget {")
+    line("    tx.each(c.collection) { t in body(\(name)Row(t: t)) }")
     line("}")
     return b
 }

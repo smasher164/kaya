@@ -22,6 +22,80 @@ using System.Threading;
 
 readonly struct Signal
 {
+    /// Mint a derived signal: recomputed when the source is written,
+    /// the write batched into the same transaction; the core sees an
+    /// ordinary signal. Reaches the open transaction ambiently — the
+    /// operators below are static, and a Signal is only an id.
+    public Signal Derive(Func<object, object> compute)
+    {
+        var app = KayaApp.Ambient;
+        var tx = app?.CurrentTx ?? throw new InvalidOperationException(
+            "kaya: a derived signal is minted inside a transaction (build or handler)");
+        var source = this;
+        var d = tx.Signal(compute(app.SignalMirrors[source.Id]));
+        tx.RegisterSignalDep(source.Id, t =>
+        {
+            object v = compute(app.SignalMirrors[source.Id]);
+            if (!Equals(v, app.SignalMirrors[d.Id]))
+                t.Write(d, v);
+        });
+        return d;
+    }
+
+    /// The derive vocabulary (the cross-language canon: eq, ne, lt,
+    /// fmt, …); the comparison operators below are these methods in
+    /// operator clothes.
+    public Signal Eq(object other) => Derive(v => ValuesEqual(v, other));
+
+    public Signal Ne(object other) => Derive(v => !ValuesEqual(v, other));
+
+    public Signal Lt(object other) => Derive(v => CompareValues(v, other) < 0);
+
+    public Signal Gt(object other) => Derive(v => CompareValues(v, other) > 0);
+
+    public Signal Le(object other) => Derive(v => CompareValues(v, other) <= 0);
+
+    public Signal Ge(object other) => Derive(v => CompareValues(v, other) >= 0);
+
+    public Signal Fmt(string template) => Derive(v => string.Format(template, v));
+
+    // Wire scalars compare across numeric representations: a guest
+    // that wrote an int and compares to a long must not get a silent
+    // false.
+    static bool IsNumber(object v) =>
+        v is sbyte or byte or short or ushort or int or uint or long or ulong
+            or float or double or decimal;
+
+    static bool ValuesEqual(object a, object b) =>
+        IsNumber(a) && IsNumber(b)
+            ? Convert.ToDouble(a) == Convert.ToDouble(b)
+            : Equals(a, b);
+
+    static int CompareValues(object a, object b) =>
+        IsNumber(a) && IsNumber(b)
+            ? Convert.ToDouble(a).CompareTo(Convert.ToDouble(b))
+            : Comparer<object>.Default.Compare(a, b);
+
+    // The documented sharp edge (the SQLAlchemy/pandas trade-off):
+    // == no longer answers identity, so `signal == null` mints a
+    // derived — reference checks use `is null`, which bypasses user
+    // operators.
+    public static Signal operator ==(Signal s, object v) => s.Eq(v);
+
+    public static Signal operator !=(Signal s, object v) => s.Ne(v);
+
+    public static Signal operator <(Signal s, object v) => s.Lt(v);
+
+    public static Signal operator >(Signal s, object v) => s.Gt(v);
+
+    public static Signal operator <=(Signal s, object v) => s.Le(v);
+
+    public static Signal operator >=(Signal s, object v) => s.Ge(v);
+
+    public override bool Equals(object obj) => obj is Signal other && Id == other.Id;
+
+    public override int GetHashCode() => Id.GetHashCode();
+
     internal readonly ulong Id;
 
     internal Signal(ulong id) => Id = id;
@@ -118,10 +192,22 @@ sealed class KayaApp
     // declared-inside-a-For edges the model purges along when a parent
     // entry's copy is torn down.
     internal readonly Dictionary<ulong, List<KayaInstance>> Model = new();
+    // Signal mirrors and dependents, for binding-maintained derived
+    // signals; the ambient app/tx pair exists because the comparison
+    // operators are static and a Signal is only an id (one app per
+    // guest process, the Python binding's own assumption).
+    internal static KayaApp Ambient;
+    internal Tx CurrentTx;
+    internal readonly Dictionary<ulong, object> SignalMirrors = new();
+    internal readonly Dictionary<ulong, List<Action<Tx>>> SignalDeps = new();
     internal readonly Dictionary<ulong, List<ulong>> Children = new();
     internal readonly List<ulong> OpenFors = new();
 
-    public KayaApp() => Kaya.Init();
+    public KayaApp()
+    {
+        Ambient = this;
+        Kaya.Init();
+    }
 
     internal Signal NextSignal() => new(++signals);
 
@@ -169,6 +255,7 @@ sealed class KayaApp
     public void Build(Action<Tx> build)
     {
         var tx = new Tx(this);
+        CurrentTx = tx;
         try
         {
             build(tx);
@@ -177,6 +264,10 @@ sealed class KayaApp
         {
             tx.Rollback();
             throw;
+        }
+        finally
+        {
+            CurrentTx = null;
         }
         tx.SubmitIfAny();
     }
@@ -288,6 +379,12 @@ sealed class Tx
     // signals were never created).
     readonly List<(ulong Coll, Action<Tx> Recompute)> pendingDerived = new();
 
+    // Signal-derived twins of the above, keyed by the source signal,
+    // plus the mirror journal (what to restore on rollback; absent =
+    // the mirror was created this transaction).
+    readonly List<(ulong Source, Action<Tx> Recompute)> pendingSignalDeps = new();
+    readonly Dictionary<ulong, (bool Existed, object Old)> signalJournal = new();
+
     internal Tx(KayaApp app) => App = app;
 
     internal void SubmitIfAny()
@@ -299,6 +396,13 @@ sealed class Tx
             list.Add(recompute);
         }
         pendingDerived.Clear();
+        foreach (var (source, recompute) in pendingSignalDeps)
+        {
+            if (!App.SignalDeps.TryGetValue(source, out var list))
+                App.SignalDeps[source] = list = new List<Action<Tx>>();
+            list.Add(recompute);
+        }
+        pendingSignalDeps.Clear();
         if (Records.Count > 0)
             Kaya.Submit(Records.ToArray());
     }
@@ -307,6 +411,24 @@ sealed class Tx
     {
         foreach (var (id, snapshot) in journal)
             App.Model[id] = snapshot;
+        foreach (var (id, (existed, old)) in signalJournal)
+        {
+            if (existed)
+                App.SignalMirrors[id] = old;
+            else
+                App.SignalMirrors.Remove(id);
+        }
+    }
+
+    internal void RegisterSignalDep(ulong source, Action<Tx> recompute) =>
+        pendingSignalDeps.Add((source, recompute));
+
+    void TouchSignal(ulong id)
+    {
+        if (!signalJournal.ContainsKey(id))
+            signalJournal[id] = App.SignalMirrors.TryGetValue(id, out var old)
+                ? (true, old)
+                : (false, null);
     }
 
     void Touch(ulong coll)
@@ -400,10 +522,26 @@ sealed class Tx
     {
         var s = App.NextSignal();
         Records.Add(KayaWire.TxCreateSignal(s.Id, initial));
+        TouchSignal(s.Id);
+        App.SignalMirrors[s.Id] = initial;
         return s;
     }
 
-    public void Write(Signal s, object value) => Records.Add(KayaWire.TxWriteSignal(s.Id, value));
+    public void Write(Signal s, object value)
+    {
+        TouchSignal(s.Id);
+        Records.Add(KayaWire.TxWriteSignal(s.Id, value));
+        App.SignalMirrors[s.Id] = value;
+        // The dependents recompute now, batched into this transaction
+        // (a derived write chains through here again for its own
+        // dependents).
+        if (App.SignalDeps.TryGetValue(s.Id, out var deps))
+            foreach (var recompute in deps)
+                recompute(this);
+        foreach (var (source, recompute) in pendingSignalDeps)
+            if (source == s.Id)
+                recompute(this);
+    }
 
     public Widget Widget(uint kind)
     {

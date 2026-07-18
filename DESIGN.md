@@ -272,7 +272,21 @@ rules so far:
   translate line for line. Operator overloading (Python's `count == 0`) is
   optional per-language sugar, and its sharp edges get documented:
   hijacking `__eq__` breaks naive hashing and identity comparison, the
-  familiar SQLAlchemy and pandas trade-off. Derived signals are maintained
+  familiar SQLAlchemy and pandas trade-off. Python, C#, and Swift wear
+  the operator clothes today (signals keep identity hashing; in C#,
+  reference checks use `is null`, which bypasses user operators); Java
+  and Go have no operator overloading, and Haskell's `(==)` pins its
+  return type to Bool — its idiomatic form would be dotted operators,
+  the esqueleto precedent, when a scene wants them. Statement
+  iteration (`for t in todos:` tracing to a For) needs
+  statement-shaped construction: Python has it via with-block
+  containers, Swift via result-builder containers (whose children
+  collect through an ambient frame precisely so a for-in row trace can
+  plant its For between siblings), and Haskell's do-notation is past
+  the wall by construction; C#'s duck-typed foreach and Go's
+  range-over-func (whose post-break control makes the close structural
+  rather than guarded) are recorded here as the mechanisms waiting on
+  an ambient-container decision for those bindings. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them. A derived signal's source
   can also be a collection — `todos.derive(|items| ...)` — recomputed
@@ -1121,8 +1135,14 @@ feature rather than reconstructed per backend afterward.
   wherever the language's metaprogramming can mint one. The marker is
   ONE NAME in every language that has one — KayaGen — and the marked
   declaration's shape decides what derives: a product type is a record
-  (factory, typed field tokens, a named-setter patch), a sum type is a
-  sum (factory plus the compile-total eliminator). Rust
+  (factory, typed field tokens, a named-setter patch, and the typed
+  row surface — the record template's arm, tokens plus the
+  constructors that consume them, no probes at bind time), a sum type
+  is a sum (factory, the compile-total eliminator, and one refined
+  patch per constructor: asTodo re-eliminates at call time in the
+  language's own refinement idiom — comma-ok, ?., Optional, optional
+  chaining — so a stale occurrence folds into nothing, with the
+  witnessed update underneath). Rust
   (`#[derive(KayaGen)]`) and OCaml (`[@@deriving kaya_gen]`) derive
   natively at compile time; four generators cover the rest, each
   reading the guest's own declaration (the type is the schema; nothing

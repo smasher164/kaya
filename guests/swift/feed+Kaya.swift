@@ -43,33 +43,53 @@ enum PostTodoFields {
 /// note's refined arm vocabulary: typed tokens, no label
 /// strings.
 struct PostNoteArm {
+    let t: KayaTpl
     let text = PostNoteFields.text
-    func label(_ t: KayaTpl, _ f: KayaField<String>) -> KayaNodeHandle {
+
+    func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
     }
 
     func checkbox(
-        _ t: KayaTpl, _ f: KayaField<Bool>,
+        _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
     ) -> KayaNodeHandle {
         t.checkbox(f, onToggle: onToggle)
+    }
+
+    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.row(children)
+    }
+
+    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.column(children)
     }
 }
 
 /// todo's refined arm vocabulary: typed tokens, no label
 /// strings.
 struct PostTodoArm {
+    let t: KayaTpl
     let title = PostTodoFields.title
     let done = PostTodoFields.done
-    func label(_ t: KayaTpl, _ f: KayaField<String>) -> KayaNodeHandle {
+
+    func label(_ f: KayaField<String>) -> KayaNodeHandle {
         t.label(f)
     }
 
     func checkbox(
-        _ t: KayaTpl, _ f: KayaField<Bool>,
+        _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
     ) -> KayaNodeHandle {
         t.checkbox(f, onToggle: onToggle)
+    }
+
+    func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.row(children)
+    }
+
+    func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        t.column(children)
     }
 }
 
@@ -83,13 +103,79 @@ func postCollection(_ tx: KayaAppTx) -> KayaSumCollection<Post> {
 /// per constructor, with the scene checking totality again.
 func postEachSum(
     _ tx: KayaAppTx, _ c: KayaSumCollection<Post>,
-    note: @escaping (KayaTpl, PostNoteArm) -> Void,
-    todo: @escaping (KayaTpl, PostTodoArm) -> Void
+    note: @escaping (PostNoteArm) -> Void,
+    todo: @escaping (PostTodoArm) -> Void
 ) -> KayaWidget {
     tx.eachSum(
         c,
         arms: [
-            c.arm(.note(text: "")) { t, _ in note(t, PostNoteArm()) },
-            c.arm(.todo(title: "", done: false)) { t, _ in todo(t, PostTodoArm()) },
+            c.arm(.note(text: "")) { t, _ in note(PostNoteArm(t: t)) },
+            c.arm(.todo(title: "", done: false)) { t, _ in todo(PostTodoArm(t: t)) },
         ])
+}
+
+/// postAsNote re-eliminates at call time: the optional is
+/// the refinement, fresh at write time — a stale occurrence folds
+/// into nil — and each setter's update witnesses note, asserted
+/// again by the scene.
+func postAsNote(
+    _ tx: KayaAppTx, _ c: KayaSumCollection<Post>, _ key: KayaValue
+) -> PostNotePatch? {
+    guard let current = c.get(tx, key), current.kayaVariant == 0 else {
+        return nil
+    }
+    return PostNotePatch(tx: tx, c: c, key: key)
+}
+
+/// note's refined patch: named setters over the witnessed
+/// update.
+struct PostNotePatch {
+    let tx: KayaAppTx
+    let c: KayaSumCollection<Post>
+    let key: KayaValue
+
+    @discardableResult
+    func text(_ v: String) -> PostNotePatch {
+        c.updateField(
+            tx, key, of: .note(text: ""),
+            PostNoteFields.text, .str(v))
+        return self
+    }
+}
+
+/// postAsTodo re-eliminates at call time: the optional is
+/// the refinement, fresh at write time — a stale occurrence folds
+/// into nil — and each setter's update witnesses todo, asserted
+/// again by the scene.
+func postAsTodo(
+    _ tx: KayaAppTx, _ c: KayaSumCollection<Post>, _ key: KayaValue
+) -> PostTodoPatch? {
+    guard let current = c.get(tx, key), current.kayaVariant == 1 else {
+        return nil
+    }
+    return PostTodoPatch(tx: tx, c: c, key: key)
+}
+
+/// todo's refined patch: named setters over the witnessed
+/// update.
+struct PostTodoPatch {
+    let tx: KayaAppTx
+    let c: KayaSumCollection<Post>
+    let key: KayaValue
+
+    @discardableResult
+    func title(_ v: String) -> PostTodoPatch {
+        c.updateField(
+            tx, key, of: .todo(title: "", done: false),
+            PostTodoFields.title, .str(v))
+        return self
+    }
+
+    @discardableResult
+    func done(_ v: Bool) -> PostTodoPatch {
+        c.updateField(
+            tx, key, of: .todo(title: "", done: false),
+            PostTodoFields.done, .bool(v))
+        return self
+    }
 }

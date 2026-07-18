@@ -37,14 +37,18 @@ app.build { tx in
             todos.insert(tx, .str("t\(nextKey)"), Todo(title: draft, done: false))
         }
         tx.label(bind: itemsLeft)
-        tx.each(todos.collection) { t in
-            _ = t.row {
-                todos.checkbox(t, \.done) { tx, keys, checked in
+        // The tracing tier: the for statement IS the For — the body
+        // runs once over the generated row surface (exact-index
+        // tokens, no key paths at bind time), and stamping is the
+        // core's replay.
+        for row in todos.rows {
+            row.row {
+                row.checkbox(row.done) { tx, keys, checked in
                     // One field's delta: the title never travels; the
                     // derived signal updates itself.
                     todos.patch(tx, keys[0]).set(\.done, checked)
                 }
-                todos.label(t, \.title)
+                row.label(row.title)
             }
         }
     }
