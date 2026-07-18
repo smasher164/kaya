@@ -41,6 +41,17 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
+    // The ambient parent stack: containers push their id around their
+    // body, constructors parent to the top, and 0 is the template-root
+    // sentinel (template bodies root themselves; a cross-zone addChild
+    // is structurally impossible). The ambient app/tx pair exists for
+    // the generated row traces — an Iterable is static code, and a
+    // collection is only an id (one app per guest process, the Python
+    // binding's own assumption).
+    static KayaApp ambient;
+    Tx currentTx;
+    final java.util.List<Long> parents = new java.util.ArrayList<>();
+    int openTraces;
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
     private final Map<Long, List<Consumer<Tx>>> derived = new HashMap<>();
@@ -195,6 +206,22 @@ public final class KayaApp {
      * inside the template (nested collections, buttons) reach the
      * handlers, since Java lambdas cannot assign captured locals.
      */
+    /** An open generated row trace: the Tpl the loop body records
+     * against, and the close that ends the template. */
+    public static final class RowTrace {
+        public final Tpl tpl;
+        private final Runnable close;
+
+        RowTrace(Tpl tpl, Runnable close) {
+            this.tpl = tpl;
+            this.close = close;
+        }
+
+        public void close() {
+            close.run();
+        }
+    }
+
     public static final class Stamped<H, R> {
         public final H handle;
         public final R out;
@@ -244,6 +271,12 @@ public final class KayaApp {
         }
 
         void submitIfAny() {
+            if (openTraces != 0) {
+                openTraces = 0;
+                throw new IllegalStateException(
+                        "kaya: a for-each over rows was exited early (break?)"
+                                + " — the template never closed");
+            }
             for (Map.Entry<Long, Consumer<Tx>> entry : pendingDerived) {
                 derived.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
             }
@@ -254,6 +287,8 @@ public final class KayaApp {
         }
 
         void rollback() {
+            openTraces = 0;
+            parents.clear();
             model.putAll(journal);
         }
 
@@ -377,7 +412,21 @@ public final class KayaApp {
         public Widget widget(int kind) {
             Widget w = new Widget(++widgets);
             records.add(KayaWire.txCreateWidget(w.id, kind));
+            autoParent(w.id);
             return w;
+        }
+
+        // The current ambient parent (0 when the scope roots itself:
+        // template bodies, or no open container).
+        long currentParent() {
+            return parents.isEmpty() ? 0 : parents.get(parents.size() - 1);
+        }
+
+        void autoParent(long id) {
+            long p = currentParent();
+            if (p != 0) {
+                records.add(KayaWire.txAddChild(p, id));
+            }
         }
 
         public void setText(Widget w, String text) {
@@ -396,23 +445,28 @@ public final class KayaApp {
             records.add(KayaWire.txBindText(w.id, s.id));
         }
 
-        // Construction sugar: containers take their children
-        // (varargs), and the common constructors carry their essential
-        // prop, so the build body reads as the tree. Handler
-        // registration stays explicit (app.onClick), the Java idiom.
-        public Widget column(Widget... children) {
-            return containerOf(KayaWire.KIND_COLUMN, children);
+        // Construction sugar: containers take their body as a
+        // Runnable and parent everything declared inside it (the
+        // ambient stack); the common constructors carry their
+        // essential prop, so the build body reads as the tree.
+        // Statement position is the point: a for-each over a generated
+        // row trace stands between siblings. Handler registration
+        // stays explicit (app.onClick), the Java idiom.
+        public Widget column(Runnable body) {
+            return containerOf(KayaWire.KIND_COLUMN, body);
         }
 
-        public Widget row(Widget... children) {
-            return containerOf(KayaWire.KIND_ROW, children);
+        public Widget row(Runnable body) {
+            return containerOf(KayaWire.KIND_ROW, body);
         }
 
-        private Widget containerOf(int kind, Widget[] children) {
+        private Widget containerOf(int kind, Runnable body) {
             Widget parent = widget(kind);
-            for (Widget child : children) {
-                addChild(parent, child);
+            parents.add(parent.id);
+            if (body != null) {
+                body.run();
             }
+            parents.remove(parents.size() - 1);
             return parent;
         }
 
@@ -505,12 +559,44 @@ public final class KayaApp {
                 Collection c, java.util.function.Function<Tpl, R> body) {
             c.assertRoot();
             Widget w = new Widget(++widgets);
+            // The For parents into the enclosing scope, but the record
+            // must land after template_end — an addChild inside the
+            // blueprint would cross zones.
+            long parent = currentParent();
             records.add(KayaWire.txCreateFor(w.id, c.id));
             openFors.add(c.id);
+            parents.add(0L);
             R out = body.apply(new Tpl(this));
+            parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
             records.add(KayaWire.txTemplateEnd());
+            if (parent != 0) {
+                records.add(KayaWire.txAddChild(parent, w.id));
+            }
             return new Stamped<>(w, out);
+        }
+
+        /** Open a For template for a generated row trace; the trace
+         * hands the loop body the Tpl once, then close() ends the
+         * template and parents the For into the enclosing scope. A
+         * break leaves the trace open — caught at submit. */
+        RowTrace beginRowTrace(Collection c) {
+            c.assertRoot();
+            Widget w = new Widget(++widgets);
+            long parent = currentParent();
+            records.add(KayaWire.txCreateFor(w.id, c.id));
+            openFors.add(c.id);
+            parents.add(0L);
+            openTraces++;
+            return new RowTrace(new Tpl(this), () -> {
+                parents.remove(parents.size() - 1);
+                openFors.remove(openFors.size() - 1);
+                records.add(KayaWire.txTemplateEnd());
+                openTraces--;
+                if (parent != 0) {
+                    records.add(KayaWire.txAddChild(parent, w.id));
+                }
+            });
         }
 
         /** A When over a Bool signal: stamps on true, unstamps on false. */
@@ -523,9 +609,15 @@ public final class KayaApp {
 
         public <R> Stamped<Widget, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Widget w = new Widget(++widgets);
+            long parent = currentParent();
             records.add(KayaWire.txCreateWhen(w.id, s.id));
+            parents.add(0L);
             R out = body.apply(new Tpl(this));
+            parents.remove(parents.size() - 1);
             records.add(KayaWire.txTemplateEnd());
+            if (parent != 0) {
+                records.add(KayaWire.txAddChild(parent, w.id));
+            }
             return new Stamped<>(w, out);
         }
 
@@ -693,6 +785,7 @@ public final class KayaApp {
         public Node widget(int kind) {
             Node n = new Node(++nodes);
             tx.records.add(KayaWire.txCreateWidget(n.id, kind));
+            tx.autoParent(n.id);
             return n;
         }
 
@@ -720,20 +813,23 @@ public final class KayaApp {
             tx.records.add(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
 
-        // The template flavor of the sugar: bindings take field tokens.
-        public Node row(Node... children) {
-            return containerOf(KayaWire.KIND_ROW, children);
+        // The template flavor of the sugar: bindings take field
+        // tokens, containers take their body.
+        public Node row(Runnable body) {
+            return containerOf(KayaWire.KIND_ROW, body);
         }
 
-        public Node column(Node... children) {
-            return containerOf(KayaWire.KIND_COLUMN, children);
+        public Node column(Runnable body) {
+            return containerOf(KayaWire.KIND_COLUMN, body);
         }
 
-        private Node containerOf(int kind, Node[] children) {
+        private Node containerOf(int kind, Runnable body) {
             Node parent = widget(kind);
-            for (Node child : children) {
-                addChild(parent, child);
+            parents.add(parent.id);
+            if (body != null) {
+                body.run();
             }
+            parents.remove(parents.size() - 1);
             return parent;
         }
 
@@ -790,11 +886,17 @@ public final class KayaApp {
                 Collection c, java.util.function.Function<Tpl, R> body) {
             c.assertRoot();
             Node n = new Node(++nodes);
+            long parent = tx.currentParent();
             tx.records.add(KayaWire.txCreateFor(n.id, c.id));
             openFors.add(c.id);
+            parents.add(0L);
             R out = body.apply(new Tpl(tx));
+            parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
+            if (parent != 0) {
+                tx.records.add(KayaWire.txAddChild(parent, n.id));
+            }
             return new Stamped<>(n, out);
         }
 
@@ -807,9 +909,15 @@ public final class KayaApp {
 
         public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Node n = new Node(++nodes);
+            long parent = tx.currentParent();
             tx.records.add(KayaWire.txCreateWhen(n.id, s.id));
+            parents.add(0L);
             R out = body.apply(new Tpl(tx));
+            parents.remove(parents.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
+            if (parent != 0) {
+                tx.records.add(KayaWire.txAddChild(parent, n.id));
+            }
             return new Stamped<>(n, out);
         }
     }
@@ -833,6 +941,8 @@ public final class KayaApp {
      */
     public <R> R build(java.util.function.Function<Tx, R> build) {
         Tx tx = new Tx();
+        ambient = this;
+        currentTx = tx;
         R out;
         try {
             out = build.apply(tx);

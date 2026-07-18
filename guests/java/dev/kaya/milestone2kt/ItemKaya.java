@@ -34,35 +34,53 @@ final class ItemKaya {
         }
     }
 
-    /** The record template: the body runs once, authoring the
-     * blueprint with the typed row surface (exact-index tokens,
-     * no probes); stamping is the core's replay. */
+    /** The record template, expression form: the body runs once,
+     * authoring the blueprint with the typed row surface
+     * (exact-index tokens, no probes); stamping is the core's
+     * replay. */
     static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<String, Reorder.Item> c,
-            java.util.function.BiConsumer<KayaApp.Tpl, Row> body) {
+            java.util.function.Consumer<Row> body) {
         // A block body: an expression lambda is ambiguous between
         // the Consumer and Function forEach overloads.
         return tx.forEach(c.handle, t -> {
-            body.accept(t, new Row(c));
+            body.accept(new Row(t, c));
         });
     }
 
-    /** The row surface: one token per wire field, and the template
-     * constructors that consume them. */
+    /** The for-each form: `for (var row : ItemKaya.rows(c))` traces
+     * the record template — the body runs once, and a break is
+     * caught at submit. */
+    static Iterable<Row> rows(KayaRecords.Collection<String, Reorder.Item> c) {
+        return KayaRecords.rowTrace(c, t -> new Row(t, c));
+    }
+
+    /** The row surface: the template handle plus one token per
+     * wire field, and the constructors that consume them. */
     static final class Row {
+        private final KayaApp.Tpl t;
         private final KayaRecords.Collection<String, Reorder.Item> c;
         final KayaRecords.Field<String> title = TITLE;
 
-        Row(KayaRecords.Collection<String, Reorder.Item> c) {
+        Row(KayaApp.Tpl t, KayaRecords.Collection<String, Reorder.Item> c) {
+            this.t = t;
             this.c = c;
         }
 
-        KayaApp.Node label(KayaApp.Tpl t, KayaRecords.Field<String> f) {
+        KayaApp.Node label(KayaRecords.Field<String> f) {
             return c.label(t, f);
         }
 
-        KayaApp.Node checkbox(KayaApp.Tpl t, KayaRecords.Field<Boolean> f,
+        KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,
                 KayaRecords.Collection.ToggleHandler<String> onToggle) {
             return c.checkbox(t, f, onToggle);
+        }
+
+        KayaApp.Node row(Runnable body) {
+            return t.row(body);
+        }
+
+        KayaApp.Node column(Runnable body) {
+            return t.column(body);
         }
     }
 

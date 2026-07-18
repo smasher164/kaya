@@ -32,22 +32,22 @@ func main() {
 		status := tx.Signal("urgent: false")
 		volume := tx.Signal("volume: 50%")
 
-		tx.Mount(tx.Column(
-			tx.Row(
+		tx.Mount(tx.Column(func() {
+			tx.Row(func() {
 				tx.Checkbox("urgent", func(tx *kaya.Tx, checked bool) {
 					tx.Write(status, fmt.Sprintf("urgent: %t", checked))
-				}),
-				tx.Label(status),
-			),
-			tx.Row(
+				})
+				tx.Label(status)
+			})
+			tx.Row(func() {
 				tx.Slider(0.0, 1.0, 0.5, func(tx *kaya.Tx, value float64) {
 					// Integer percent, so every language's formatting
 					// agrees.
 					tx.Write(volume, fmt.Sprintf("volume: %d%%", int(value*100+0.5)))
-				}),
-				tx.Label(volume),
-			),
-		))
+				})
+				tx.Label(volume)
+			})
+		}))
 	})
 
 	os.Exit(app.Run())

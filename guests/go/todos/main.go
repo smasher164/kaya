@@ -61,31 +61,32 @@ func main() {
 			return fmt.Sprintf("%d items left", n)
 		})
 
-		tx.Mount(tx.Column(
+		tx.Mount(tx.Column(func() {
 			tx.Entry(func(tx *kaya.Tx, text string) {
 				draft = text
-			}),
+			})
 			tx.Button("Add", func(tx *kaya.Tx) {
 				nextKey++
 				todos.Insert(tx, fmt.Sprintf("t%d", nextKey), Todo{Title: draft})
-			}),
-			tx.Label(itemsLeft),
-			// The generated row surface: exact-index tokens, no
-			// selectors or probes; the body runs once, authoring the
-			// blueprint.
-			TodoEach(tx, todos, func(row todoRow) {
-				row.Row(
+			})
+			tx.Label(itemsLeft)
+			// The tracing tier: the for statement IS the For — the
+			// body runs once over the generated row surface
+			// (exact-index tokens, no probes), and range-over-func
+			// makes the close structural, even on break.
+			for row := range TodoRows(tx, todos) {
+				row.Row(func() {
 					row.Checkbox(row.Done(),
 						func(tx *kaya.Tx, key string, checked bool) {
 							// One field's delta through the generated
 							// named setter: the title never travels;
 							// the derived signal updates itself.
 							TodoPatch(todos, tx, key).Done(checked)
-						}),
-					row.Label(row.Title()),
-				)
-			}),
-		))
+						})
+					row.Label(row.Title())
+				})
+			}
+		}))
 	})
 
 	os.Exit(app.Run())

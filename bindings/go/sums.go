@@ -169,11 +169,12 @@ type SumCase[K Key, V any] struct {
 	info *recordInfo
 }
 
-// Row is the template container sugar, on the arm's own recorder.
-func (sc SumCase[K, V]) Row(children ...Node) Node { return sc.t.Row(children...) }
+// Row is the template container sugar, on the arm's own recorder:
+// the body's constructors parent into it ambiently.
+func (sc SumCase[K, V]) Row(body func()) Node { return sc.t.Row(body) }
 
 // Column likewise.
-func (sc SumCase[K, V]) Column(children ...Node) Node { return sc.t.Column(children...) }
+func (sc SumCase[K, V]) Column(body func()) Node { return sc.t.Column(body) }
 
 // Label bound to the field the selector names.
 func (sc SumCase[K, V]) Label(sel func(*V) *string) Node {

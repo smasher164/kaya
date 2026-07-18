@@ -35,7 +35,8 @@ static class FeedScene
             var doneCount = feed.Derive(tx, items =>
                 $"{items.Count(e => e.Value is Todo { Done: true })} done");
 
-            tx.Mount(tx.Row(
+            tx.Mount(tx.Row(() =>
+            {
                 tx.Button("promote", t =>
                 {
                     // The first note, promoted to a finished todo: the
@@ -50,8 +51,8 @@ static class FeedScene
                             break;
                         }
                     }
-                }),
-                tx.Label(bind: doneCount),
+                });
+                tx.Label(bind: doneCount);
                 // The generated eliminator: one required delegate per
                 // constructor, so a missing arm is a missing argument
                 // — a compile error. The names are named arguments.
@@ -60,7 +61,8 @@ static class FeedScene
                     {
                         note.Label(t, x => x.Text);
                     },
-                    todo: (t, todo) => t.Row(
+                    todo: (t, todo) => t.Row(() =>
+                    {
                         todo.Checkbox(t, x => x.Done, (t2, keys, isChecked) =>
                         {
                             // The generated refined patch: ?. is the
@@ -69,8 +71,10 @@ static class FeedScene
                             // and the update stays witnessed
                             // underneath.
                             PostKaya.AsTodo(t2, feed, keys[0])?.Done(isChecked);
-                        }),
-                        todo.Label(t, x => x.Title)))));
+                        });
+                        todo.Label(t, x => x.Title);
+                    }));
+            }));
 
             feed.Insert(tx, "a", new Note("jot one"));
             feed.Insert(tx, "b", new Todo("buy milk", false));

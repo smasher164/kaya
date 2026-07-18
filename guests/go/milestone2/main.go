@@ -36,28 +36,28 @@ func main() {
 		status = tx.Signal("step 0")
 		extras := tx.Signal(false)
 
-		banner := tx.When(extras, func(t *kaya.Tpl) {
-			bannerLabel := t.Widget(kaya.KindLabel)
-			t.SetText(bannerLabel, "extras on")
-		})
-
 		groups := tx.Collection()
-		groupList := tx.ForEach(groups, func(t *kaya.Tpl) {
-			name := t.Widget(kaya.KindLabel)
-			t.BindTextElement(name, 0)
+		buildGroupList := func(t *kaya.Tpl) {
+			t.Column(func() {
+				name := t.Widget(kaya.KindLabel)
+				t.BindTextElement(name, 0)
 
-			items = t.Collection()
-			itemList := t.ForEach(items, func(item *kaya.Tpl) {
-				text := item.Widget(kaya.KindLabel)
-				item.BindTextElement(text, 0)
-				removeButton = item.Widget(kaya.KindButton)
-				item.SetText(removeButton, "remove")
-				item.Column(text, removeButton)
+				items = t.Collection()
+				t.ForEach(items, func(item *kaya.Tpl) {
+					item.Column(func() {
+						text := item.Widget(kaya.KindLabel)
+						item.BindTextElement(text, 0)
+						removeButton = item.Widget(kaya.KindButton)
+						item.SetText(removeButton, "remove")
+					})
+				})
 			})
-			t.Column(name, itemList)
-		})
+		}
 
-		tx.Mount(tx.Column(
+		// Auto-parenting puts the templates where they stand: the When
+		// and the For are declared inside the column, between their
+		// siblings, and parent themselves there.
+		tx.Mount(tx.Column(func() {
 			tx.Button("step", func(tx *kaya.Tx) {
 				steps++
 				switch steps {
@@ -73,11 +73,14 @@ func main() {
 				}
 				tx.Write(extras, steps == 1)
 				tx.Write(status, fmt.Sprintf("step %d", steps))
-			}),
-			tx.Label(status),
-			banner,
-			groupList,
-		))
+			})
+			tx.Label(status)
+			tx.When(extras, func(t *kaya.Tpl) {
+				bannerLabel := t.Widget(kaya.KindLabel)
+				t.SetText(bannerLabel, "extras on")
+			})
+			tx.ForEach(groups, buildGroupList)
+		}))
 	})
 
 	app.OnClickNode(removeButton, func(tx *kaya.Tx, keys []any) {

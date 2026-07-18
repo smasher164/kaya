@@ -15,25 +15,82 @@ static class ItemKaya
     public static ItemKayaPatch Patch(Tx tx, RecordCollection<Item> c, object key) =>
         new ItemKayaPatch(c.Patch(tx, key));
 
-    /// <summary>The record template: the body runs once, authoring
-    /// the blueprint with the typed row surface (exact-index
-    /// tokens, no probes); stamping is the core's replay.</summary>
+    /// <summary>The record template, expression form: the body runs
+    /// once, authoring the blueprint with the typed row surface
+    /// (exact-index tokens, no probes); stamping is the core's
+    /// replay.</summary>
     public static Widget Each(Tx tx, RecordCollection<Item> c,
-        System.Action<Tpl, ItemRow> body) =>
-        tx.Each(c.Collection, t => body(t, new ItemRow()));
+        System.Action<ItemRow> body) =>
+        tx.Each(c.Collection, t => body(new ItemRow(t)));
+
+    /// <summary>The foreach form: `foreach (var row in todos.Rows())`
+    /// traces the record template — the body runs once, and the
+    /// enumerator's Dispose closes the template, so foreach makes the
+    /// close structural, even on break.</summary>
+    public static ItemRowSeq Rows(this RecordCollection<Item> c) =>
+        new ItemRowSeq(c);
 }
 
-/// <summary>The row surface: one token per wire field, and the
-/// template constructors that consume them.</summary>
+/// <summary>The row surface: the template handle plus one token per
+/// wire field, and the constructors that consume them.</summary>
 sealed class ItemRow
 {
+    readonly Tpl t;
     public readonly Field<string> Title = ItemKaya.Title;
 
-    public Node Label(Tpl t, Field<string> f) => t.Label(f);
+    internal ItemRow(Tpl t) => this.t = t;
 
-    public Node Checkbox(Tpl t, Field<bool> f,
+    public Node Label(Field<string> f) => t.Label(f);
+
+    public Node Checkbox(Field<bool> f,
         System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
         t.Checkbox(f, onToggle);
+
+    public Node Row(System.Action body) => t.Row(body);
+
+    public Node Column(System.Action body) => t.Column(body);
+}
+
+/// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,
+/// so LINQ never appears on a collection at record time.</summary>
+readonly struct ItemRowSeq
+{
+    readonly RecordCollection<Item> c;
+
+    internal ItemRowSeq(RecordCollection<Item> c) => this.c = c;
+
+    public ItemRowEnumerator GetEnumerator() => new ItemRowEnumerator(c);
+}
+
+sealed class ItemRowEnumerator : System.IDisposable
+{
+    int state;
+    System.Action close;
+    readonly RecordCollection<Item> c;
+
+    internal ItemRowEnumerator(RecordCollection<Item> c) => this.c = c;
+
+    public ItemRow Current { get; private set; }
+
+    public bool MoveNext()
+    {
+        if (state != 0)
+            return false;
+        state = 1;
+        var tx = KayaApp.Ambient?.CurrentTx
+            ?? throw new System.InvalidOperationException(
+                "kaya: Rows() iterates at record time, inside a transaction");
+        var (t, done) = tx.BeginRowTrace(c.Collection);
+        close = done;
+        Current = new ItemRow(t);
+        return true;
+    }
+
+    public void Dispose()
+    {
+        close?.Invoke();
+        close = null;
+    }
 }
 
 sealed class ItemKayaPatch

@@ -52,12 +52,24 @@ func (r todoRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
 
 func (r todoRow) Done() kaya.Field[bool] { return kaya.FieldAt[bool](1) }
 
-func (r todoRow) Row(children ...kaya.Node) kaya.Node { return r.t.Row(children...) }
+func (r todoRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
-func (r todoRow) Column(children ...kaya.Node) kaya.Node { return r.t.Column(children...) }
+func (r todoRow) Column(body func()) kaya.Node { return r.t.Column(body) }
 
 func (r todoRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
 func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
 	return r.c.Checkbox(r.t, f, onToggle)
+}
+
+// TodoRows traces the record template as a for statement: the loop
+// body runs once, authoring the blueprint, and the close is
+// structural — range-over-func regains control even on break. The
+// For parents into the enclosing container scope.
+func TodoRows(tx *kaya.Tx, c kaya.RecordCollection[string, Todo]) func(func(todoRow) bool) {
+	return func(yield func(todoRow) bool) {
+		t, done := kaya.BeginRowTrace(tx, c.Collection)
+		yield(todoRow{t: t, c: c})
+		done()
+	}
 }

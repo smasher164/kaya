@@ -298,39 +298,57 @@ public final class KayaProcessor extends AbstractProcessor {
         }
         w(b, "    }");
         w(b, "");
-        w(b, "    /** The record template: the body runs once, authoring the");
-        w(b, "     * blueprint with the typed row surface (exact-index tokens,");
-        w(b, "     * no probes); stamping is the core's replay. */");
+        w(b, "    /** The record template, expression form: the body runs once,");
+        w(b, "     * authoring the blueprint with the typed row surface");
+        w(b, "     * (exact-index tokens, no probes); stamping is the core's");
+        w(b, "     * replay. */");
         w(b, "    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<%s, %s> c,",
                 key, recRef);
-        w(b, "            java.util.function.BiConsumer<KayaApp.Tpl, Row> body) {");
+        w(b, "            java.util.function.Consumer<Row> body) {");
         w(b, "        // A block body: an expression lambda is ambiguous between");
         w(b, "        // the Consumer and Function forEach overloads.");
         w(b, "        return tx.forEach(c.handle, t -> {");
-        w(b, "            body.accept(t, new Row(c));");
+        w(b, "            body.accept(new Row(t, c));");
         w(b, "        });");
         w(b, "    }");
         w(b, "");
-        w(b, "    /** The row surface: one token per wire field, and the template");
-        w(b, "     * constructors that consume them. */");
+        w(b, "    /** The for-each form: `for (var row : %sKaya.rows(c))` traces", simple);
+        w(b, "     * the record template — the body runs once, and a break is");
+        w(b, "     * caught at submit. */");
+        w(b, "    static Iterable<Row> rows(KayaRecords.Collection<%s, %s> c) {", key, recRef);
+        w(b, "        return KayaRecords.rowTrace(c, t -> new Row(t, c));");
+        w(b, "    }");
+        w(b, "");
+        w(b, "    /** The row surface: the template handle plus one token per");
+        w(b, "     * wire field, and the constructors that consume them. */");
         w(b, "    static final class Row {");
+        w(b, "        private final KayaApp.Tpl t;");
         w(b, "        private final KayaRecords.Collection<%s, %s> c;", key, recRef);
         for (WireField f : fields) {
             w(b, "        final KayaRecords.Field<%s> %s = %s;",
                     f.token(), f.name(), upperSnake(f.name()));
         }
         w(b, "");
-        w(b, "        Row(KayaRecords.Collection<%s, %s> c) {", key, recRef);
+        w(b, "        Row(KayaApp.Tpl t, KayaRecords.Collection<%s, %s> c) {", key, recRef);
+        w(b, "            this.t = t;");
         w(b, "            this.c = c;");
         w(b, "        }");
         w(b, "");
-        w(b, "        KayaApp.Node label(KayaApp.Tpl t, KayaRecords.Field<String> f) {");
+        w(b, "        KayaApp.Node label(KayaRecords.Field<String> f) {");
         w(b, "            return c.label(t, f);");
         w(b, "        }");
         w(b, "");
-        w(b, "        KayaApp.Node checkbox(KayaApp.Tpl t, KayaRecords.Field<Boolean> f,");
+        w(b, "        KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,");
         w(b, "                KayaRecords.Collection.ToggleHandler<%s> onToggle) {", key);
         w(b, "            return c.checkbox(t, f, onToggle);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        KayaApp.Node row(Runnable body) {");
+        w(b, "            return t.row(body);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        KayaApp.Node column(Runnable body) {");
+        w(b, "            return t.column(body);");
         w(b, "        }");
         w(b, "    }");
         w(b, "");

@@ -29,31 +29,33 @@ static class Milestone2Scene
             // Bool, no handler line for it.
             var stepCount = tx.Signal(0);
 
-            Widget banner = tx.When(stepCount == 1, t =>
-            {
-                Node bannerLabel = t.Widget(KayaWire.KindLabel);
-                t.SetText(bannerLabel, "extras on");
-            });
-
             var groups = tx.Collection();
-            Widget groupList = tx.ForEach(groups, t =>
+            System.Action<Tpl> buildGroupList = t =>
             {
-                Node name = t.Widget(KayaWire.KindLabel);
-                t.BindTextElement(name);
-
-                items = t.Collection();
-                Node itemList = t.ForEach(items, item =>
+                t.Column(() =>
                 {
-                    Node text = item.Widget(KayaWire.KindLabel);
-                    item.BindTextElement(text);
-                    removeButton = item.Widget(KayaWire.KindButton);
-                    item.SetText(removeButton, "remove");
-                    item.Column(text, removeButton);
-                });
-                t.Column(name, itemList);
-            });
+                    Node name = t.Widget(KayaWire.KindLabel);
+                    t.BindTextElement(name);
 
-            tx.Mount(tx.Column(
+                    items = t.Collection();
+                    t.ForEach(items, item =>
+                    {
+                        item.Column(() =>
+                        {
+                            Node text = item.Widget(KayaWire.KindLabel);
+                            item.BindTextElement(text);
+                            removeButton = item.Widget(KayaWire.KindButton);
+                            item.SetText(removeButton, "remove");
+                        });
+                    });
+                });
+            };
+
+            // Auto-parenting puts the templates where they stand: the
+            // When and the For are declared inside the column, between
+            // their siblings, and parent themselves there.
+            tx.Mount(tx.Column(() =>
+            {
                 tx.Button("step", t =>
                 {
                     steps++;
@@ -72,10 +74,15 @@ static class Milestone2Scene
                     }
                     t.Write(stepCount, steps);
                     t.Write(status, $"step {steps}");
-                }),
-                tx.Label(bind: status),
-                banner,
-                groupList));
+                });
+                tx.Label(bind: status);
+                tx.When(stepCount == 1, t =>
+                {
+                    Node bannerLabel = t.Widget(KayaWire.KindLabel);
+                    t.SetText(bannerLabel, "extras on");
+                });
+                tx.ForEach(groups, buildGroupList);
+            }));
         });
 
         app.OnClick(removeButton, (tx, keys) =>

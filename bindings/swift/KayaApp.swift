@@ -662,12 +662,15 @@ final class KayaAppTx {
     }
 
     private func containerOf(_ kind: UInt32, _ children: () -> Void) -> KayaWidget {
+        // Parent before children: statement-shaped construction is
+        // parent-first in every language (expression trees are
+        // children-first because arguments evaluate before the call) —
+        // creation order is observable (column#N) and derivable from
+        // the construction style, never per-language trivia.
+        let parent = widget(kind)
         app.childFrames.append([])
         children()
         let ids = app.childFrames.removeLast()
-        // The parent is created after its children, as before the
-        // ambient frames: creation order is observable (column#N).
-        let parent = widget(kind)
         for id in ids { tx.addChild(parent.id, id) }
         return parent
     }
@@ -940,10 +943,10 @@ final class KayaTpl {
     }
 
     private func nodeContainerOf(_ kind: UInt32, _ children: () -> Void) -> KayaNodeHandle {
+        let parent = widget(kind)
         tx.app.childFrames.append([])
         children()
         let ids = tx.app.childFrames.removeLast()
-        let parent = widget(kind)
         for id in ids { tx.tx.addChild(parent.id, id) }
         return parent
     }

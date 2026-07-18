@@ -366,6 +366,49 @@ public final class KayaRecords {
     }
 
     /**
+     * The generic machinery behind the generated {@code rows()}
+     * Iterables: a one-element iterator that opens the For template on
+     * the first next(), closes it — parenting the For into the
+     * enclosing container scope — when the loop asks again, and makes
+     * the row from the template handle. A break leaves the trace open;
+     * the transaction refuses to submit.
+     */
+    public static <K, T, R> Iterable<R> rowTrace(
+            Collection<K, T> c, java.util.function.Function<KayaApp.Tpl, R> makeRow) {
+        return () -> new java.util.Iterator<R>() {
+            int state;
+            KayaApp.RowTrace trace;
+
+            @Override
+            public boolean hasNext() {
+                if (state == 0) {
+                    return true;
+                }
+                if (state == 1) {
+                    state = 2;
+                    trace.close();
+                }
+                return false;
+            }
+
+            @Override
+            public R next() {
+                if (state != 0) {
+                    throw new java.util.NoSuchElementException();
+                }
+                state = 1;
+                KayaApp app = KayaApp.ambient;
+                if (app == null || app.currentTx == null) {
+                    throw new IllegalStateException(
+                            "kaya: rows() iterates at record time, inside a transaction");
+                }
+                trace = app.currentTx.beginRowTrace(c.handle);
+                return makeRow.apply(trace.tpl);
+            }
+        };
+    }
+
+    /**
      * Declare a collection of T records; the record type is the
      * schema. Returns the typed root handle.
      */

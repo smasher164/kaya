@@ -39,49 +39,56 @@ final class Milestone2 {
             KayaApp.Signal<String> status = tx.signal("step 0");
             KayaApp.Signal<Boolean> extras = tx.signal(false);
 
-            KayaApp.Widget banner = tx.when(extras, t -> {
-                KayaApp.Node bannerLabel = t.widget(KayaWire.KIND_LABEL);
-                t.setText(bannerLabel, "extras on");
-            });
-
             KayaApp.Collection groups = tx.collection();
-            KayaApp.Stamped<KayaApp.Widget, Scene> groupList = tx.forEach(groups, t -> {
-                KayaApp.Node name = t.widget(KayaWire.KIND_LABEL);
-                t.bindTextElement(name, 0);
 
-                KayaApp.Collection items = t.collection();
-                KayaApp.Stamped<KayaApp.Node, KayaApp.Node> itemList = t.forEach(items, item -> {
-                    KayaApp.Node text = item.widget(KayaWire.KIND_LABEL);
-                    item.bindTextElement(text, 0);
-                    KayaApp.Node remove = item.widget(KayaWire.KIND_BUTTON);
-                    item.setText(remove, "remove");
-                    item.column(text, remove);
-                    return remove;
+            // Auto-parenting puts the templates where they stand: the
+            // When and the For are declared inside the column, between
+            // their siblings, and parent themselves there. Handles
+            // still escape through the For body's return value (one
+            // slot per handle, the lambda-capture idiom).
+            Scene[] built = new Scene[1];
+            tx.mount(tx.column(() -> {
+                tx.button("step", t -> {
+                    steps++;
+                    if (steps == 1) {
+                        t.insert(groups, "g1", "Work");
+                        KayaApp.Collection todos = built[0].items.at("g1");
+                        t.insert(todos, "a", "send report");
+                        t.insert(todos, "b", "buy milk");
+                    } else if (steps == 2) {
+                        t.insert(groups, "g2", "Home");
+                        t.insert(built[0].items.at("g2"), "a", "water plants");
+                        t.update(groups, "g1", "Office");
+                    }
+                    t.write(extras, steps == 1);
+                    t.write(status, "step " + steps);
                 });
-                t.column(name, itemList.handle);
-                return new Scene(status, items, itemList.out);
-            });
+                tx.label(status);
+                tx.when(extras, t -> {
+                    KayaApp.Node bannerLabel = t.widget(KayaWire.KIND_LABEL);
+                    t.setText(bannerLabel, "extras on");
+                });
+                built[0] = tx.forEach(groups, t -> {
+                    KayaApp.Collection[] items = new KayaApp.Collection[1];
+                    KayaApp.Node[] remove = new KayaApp.Node[1];
+                    t.column(() -> {
+                        KayaApp.Node name = t.widget(KayaWire.KIND_LABEL);
+                        t.bindTextElement(name, 0);
 
-            tx.mount(tx.column(
-                    tx.button("step", t -> {
-                        steps++;
-                        if (steps == 1) {
-                            t.insert(groups, "g1", "Work");
-                            KayaApp.Collection todos = groupList.out.items.at("g1");
-                            t.insert(todos, "a", "send report");
-                            t.insert(todos, "b", "buy milk");
-                        } else if (steps == 2) {
-                            t.insert(groups, "g2", "Home");
-                            t.insert(groupList.out.items.at("g2"), "a", "water plants");
-                            t.update(groups, "g1", "Office");
-                        }
-                        t.write(extras, steps == 1);
-                        t.write(status, "step " + steps);
-                    }),
-                    tx.label(status),
-                    banner,
-                    groupList.handle));
-            return groupList.out;
+                        items[0] = t.collection();
+                        t.forEach(items[0], item -> {
+                            item.column(() -> {
+                                KayaApp.Node text = item.widget(KayaWire.KIND_LABEL);
+                                item.bindTextElement(text, 0);
+                                remove[0] = item.widget(KayaWire.KIND_BUTTON);
+                                item.setText(remove[0], "remove");
+                            });
+                        });
+                    });
+                    return new Scene(status, items[0], remove[0]);
+                }).out;
+            }));
+            return built[0];
         });
 
         app.onClick(scene.removeButton, (tx, keys) -> {

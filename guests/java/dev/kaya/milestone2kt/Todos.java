@@ -44,27 +44,29 @@ final class Todos {
             // so no handler mentions it.
             KayaApp.Signal<String> itemsLeft = todos.derive(tx, Todos::itemsLeftText);
 
-            tx.mount(tx.column(
-                    tx.entry((t, text) -> draft = text),
-                    tx.button("Add", t -> {
-                        nextKey++;
-                        todos.insert(t, "t" + nextKey, new Todo(draft, false));
-                    }),
-                    tx.label(itemsLeft),
-                    // The generated row surface: exact-index tokens,
-                    // no probes; the body runs once, authoring the
-                    // blueprint.
-                    TodoKaya.each(tx, todos, (t, row) -> {
-                        t.row(
-                                row.checkbox(t, row.done, (t2, key, checked) -> {
-                                    // One field's delta through the
-                                    // generated named setter: the title
-                                    // never travels; the derived signal
-                                    // updates itself.
-                                    TodoKaya.patch(t2, todos, key).done(checked);
-                                }),
-                                row.label(t, row.title));
-                    })));
+            tx.mount(tx.column(() -> {
+                tx.entry((t, text) -> draft = text);
+                tx.button("Add", t -> {
+                    nextKey++;
+                    todos.insert(t, "t" + nextKey, new Todo(draft, false));
+                });
+                tx.label(itemsLeft);
+                // The tracing tier: the for-each IS the For — the body
+                // runs once over the generated row surface
+                // (exact-index tokens, no probes); a break is caught
+                // at submit.
+                for (var row : TodoKaya.rows(todos)) {
+                    row.row(() -> {
+                        row.checkbox(row.done, (t2, key, checked) -> {
+                            // One field's delta through the generated
+                            // named setter: the title never travels;
+                            // the derived signal updates itself.
+                            TodoKaya.patch(t2, todos, key).done(checked);
+                        });
+                        row.label(row.title);
+                    });
+                }
+            }));
             return null;
         });
 

@@ -58,7 +58,7 @@ func main() {
 			return fmt.Sprintf("%d done", n)
 		})
 
-		tx.Mount(tx.Row(
+		tx.Mount(tx.Row(func() {
 			tx.Button("promote", func(tx *kaya.Tx) {
 				// The first note, promoted to a finished todo: the
 				// model is asked which entry is a Note — the handler
@@ -70,8 +70,8 @@ func main() {
 						break
 					}
 				}
-			}),
-			tx.Label(doneCount),
+			})
+			tx.Label(doneCount)
 			// The generated eliminator: one required arm per
 			// constructor, so a missing arm is a missing argument — a
 			// compile error. The literals' parameter types are the arm
@@ -81,7 +81,7 @@ func main() {
 					note.Label(func(n *Note) *string { return &n.Text })
 				},
 				func(todo kaya.SumCase[string, Todo]) {
-					todo.Row(
+					todo.Row(func() {
 						todo.Checkbox(func(td *Todo) *bool { return &td.Done },
 							func(tx *kaya.Tx, key string, checked bool) {
 								// The generated refined patch: the
@@ -92,12 +92,12 @@ func main() {
 								if todo, ok := PostAsTodo(tx, feed, key); ok {
 									todo.Done(checked)
 								}
-							}),
-						todo.Label(func(td *Todo) *string { return &td.Title }),
-					)
+							})
+						todo.Label(func(td *Todo) *string { return &td.Title })
+					})
 				},
-			),
-		))
+			)
+		}))
 		for _, ins := range []struct {
 			key  string
 			post Post

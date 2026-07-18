@@ -101,6 +101,11 @@ type App struct {
 	// model needs the same edge to purge along.
 	children map[uint64][]uint64
 	openFors []uint64
+	// The ambient parent stack: containers push their id around their
+	// body, constructors parent to the top, and 0 is the template-root
+	// sentinel (template bodies root themselves; a cross-zone
+	// add_child is structurally impossible).
+	parents []uint64
 	// Signals recomputed from a collection after each of its
 	// mutations, written into the same transaction.
 	derived map[uint64][]func(*Tx)
@@ -283,7 +288,23 @@ func (tx *Tx) Widget(kind uint32) Widget {
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
 	tx.records = append(tx.records, TxCreateWidget(w.id, kind))
+	tx.autoParent(w.id)
 	return w
+}
+
+// The current ambient parent (0 when the scope roots itself: template
+// bodies, or no open container).
+func (tx *Tx) currentParent() uint64 {
+	if n := len(tx.app.parents); n > 0 {
+		return tx.app.parents[n-1]
+	}
+	return 0
+}
+
+func (tx *Tx) autoParent(id uint64) {
+	if p := tx.currentParent(); p != 0 {
+		tx.records = append(tx.records, TxAddChild(p, id))
+	}
 }
 
 func (tx *Tx) SetText(w Widget, text string) {
@@ -306,25 +327,29 @@ func (tx *Tx) AddChild(parent, child Widget) {
 	tx.records = append(tx.records, TxAddChild(parent.id, child.id))
 }
 
-// Construction sugar: containers take their children (varargs), and
+// Construction sugar: containers take their body as a closure and
+// parent everything declared inside it (the ambient stack), and
 // constructors carry their props and handlers — the Fyne shape
 // (widget.NewButton("Add", tapped)); nil means no handler. Everything
 // lowers eagerly to the same records; never a scene value interpreted
-// later.
+// later. Statement position is the point: a for statement over a
+// generated row trace stands between siblings.
 
-func (tx *Tx) Column(children ...Widget) Widget {
-	return tx.containerOf(KindColumn, children)
+func (tx *Tx) Column(body func()) Widget {
+	return tx.containerOf(KindColumn, body)
 }
 
-func (tx *Tx) Row(children ...Widget) Widget {
-	return tx.containerOf(KindRow, children)
+func (tx *Tx) Row(body func()) Widget {
+	return tx.containerOf(KindRow, body)
 }
 
-func (tx *Tx) containerOf(kind uint32, children []Widget) Widget {
+func (tx *Tx) containerOf(kind uint32, body func()) Widget {
 	parent := tx.Widget(kind)
-	for _, child := range children {
-		tx.AddChild(parent, child)
+	tx.app.parents = append(tx.app.parents, parent.id)
+	if body != nil {
+		body()
 	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	return parent
 }
 
@@ -395,12 +420,44 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	assertRoot(c)
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
+	// The For parents into the enclosing scope, but the record must
+	// land after template_end — an add_child inside the blueprint
+	// would cross zones.
+	parent := tx.currentParent()
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
+	tx.app.parents = append(tx.app.parents, 0)
 	fn(&Tpl{tx: tx})
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 	tx.records = append(tx.records, TxTemplateEnd())
+	if parent != 0 {
+		tx.records = append(tx.records, TxAddChild(parent, w.id))
+	}
 	return w
+}
+
+// BeginRowTrace opens a For template for a generated row trace
+// (`for row := range TodoRows(tx, todos)`): the caller runs the loop
+// body once with the returned Tpl, then close() ends the template and
+// parents the For into the enclosing scope. Range-over-func makes the
+// close structural — the iterator regains control even on break.
+func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
+	assertRoot(c)
+	tx.app.c.widget++
+	w := Widget{tx.app.c.widget}
+	parent := tx.currentParent()
+	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
+	tx.app.openFors = append(tx.app.openFors, c.id)
+	tx.app.parents = append(tx.app.parents, 0)
+	return &Tpl{tx: tx}, func() {
+		tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+		tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
+		tx.records = append(tx.records, TxTemplateEnd())
+		if parent != 0 {
+			tx.records = append(tx.records, TxAddChild(parent, w.id))
+		}
+	}
 }
 
 // When declares a When over a Bool signal: stamps on true, unstamps on
@@ -408,9 +465,15 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 	tx.app.c.widget++
 	w := Widget{tx.app.c.widget}
+	parent := tx.currentParent()
 	tx.records = append(tx.records, TxCreateWhen(w.id, s.id))
+	tx.app.parents = append(tx.app.parents, 0)
 	fn(&Tpl{tx: tx})
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.records = append(tx.records, TxTemplateEnd())
+	if parent != 0 {
+		tx.records = append(tx.records, TxAddChild(parent, w.id))
+	}
 	return w
 }
 
@@ -549,6 +612,7 @@ func (t *Tpl) Widget(kind uint32) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	t.tx.records = append(t.tx.records, TxCreateWidget(n.id, kind))
+	t.tx.autoParent(n.id)
 	return n
 }
 
@@ -563,19 +627,21 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 }
 
 // The template flavor of the containers.
-func (t *Tpl) Row(children ...Node) Node {
-	return t.containerOf(KindRow, children)
+func (t *Tpl) Row(body func()) Node {
+	return t.containerOf(KindRow, body)
 }
 
-func (t *Tpl) Column(children ...Node) Node {
-	return t.containerOf(KindColumn, children)
+func (t *Tpl) Column(body func()) Node {
+	return t.containerOf(KindColumn, body)
 }
 
-func (t *Tpl) containerOf(kind uint32, children []Node) Node {
+func (t *Tpl) containerOf(kind uint32, body func()) Node {
 	parent := t.Widget(kind)
-	for _, child := range children {
-		t.AddChild(parent, child)
+	t.tx.app.parents = append(t.tx.app.parents, parent.id)
+	if body != nil {
+		body()
 	}
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	return parent
 }
 
@@ -591,11 +657,17 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	assertRoot(c)
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
+	parent := t.tx.currentParent()
 	t.tx.records = append(t.tx.records, TxCreateFor(n.id, c.id))
 	t.tx.app.openFors = append(t.tx.app.openFors, c.id)
+	t.tx.app.parents = append(t.tx.app.parents, 0)
 	fn(&Tpl{tx: t.tx})
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	t.tx.app.openFors = t.tx.app.openFors[:len(t.tx.app.openFors)-1]
 	t.tx.records = append(t.tx.records, TxTemplateEnd())
+	if parent != 0 {
+		t.tx.records = append(t.tx.records, TxAddChild(parent, n.id))
+	}
 	return n
 }
 

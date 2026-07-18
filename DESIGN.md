@@ -283,10 +283,27 @@ rules so far:
   containers, Swift via result-builder containers (whose children
   collect through an ambient frame precisely so a for-in row trace can
   plant its For between siblings), and Haskell's do-notation is past
-  the wall by construction; C#'s duck-typed foreach and Go's
-  range-over-func (whose post-break control makes the close structural
-  rather than guarded) are recorded here as the mechanisms waiting on
-  an ambient-container decision for those bindings. Derived signals are maintained
+  the wall by construction. Go, C#, and Java joined via container
+  auto-parenting: containers take their body as a closure (func() /
+  Action / Runnable) and parent everything declared inside it through
+  an ambient stack (0 the template-root sentinel, so template bodies
+  still root themselves and a cross-zone add_child stays structurally
+  impossible; a For/When parents into the enclosing scope with its
+  add_child deferred past template_end; parents are created before
+  their bodies run). Creation order is observable (kind#N harness
+  names) and derivable, never per-language trivia: statement-shaped
+  construction is parent-first (Python, Swift, Go, C#, Java) and
+  expression trees are children-first (Rust, OCaml, Haskell —
+  arguments evaluate before the call). The shared .steps scripts may
+  therefore target containers only through the blessed column#0 (the
+  For container the root-is-a-row convention keeps unique) —
+  tools/check-steps.sh gates it. That put their iteration mechanisms in reach: Go's
+  range-over-func (post-break control makes the close structural —
+  the strongest form), C#'s duck-typed foreach (no IEnumerable, so
+  LINQ never appears on a collection at record time; the enumerator's
+  Dispose closes on break), and Java's one-shot Iterable (break
+  caught at submit). The varargs container forms are gone — one
+  construction style per language. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them. A derived signal's source
   can also be a collection — `todos.derive(|items| ...)` — recomputed

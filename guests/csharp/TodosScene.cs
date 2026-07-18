@@ -42,25 +42,35 @@ static class TodosScene
                 return n == 1 ? "1 item left" : $"{n} items left";
             });
 
-            tx.Mount(tx.Column(
-                tx.Entry((t, text) => draft = text),
+            tx.Mount(tx.Column(() =>
+            {
+                tx.Entry((t, text) => draft = text);
                 tx.Button("Add", t =>
                 {
                     nextKey++;
                     todos.Insert(t, $"t{nextKey}", new Todo(draft, false));
-                }),
-                tx.Label(bind: itemsLeft),
-                // The generated row surface: exact-index tokens, no
-                // expression trees or probes; the body runs once,
-                // authoring the blueprint.
-                TodoKaya.Each(tx, todos, (t, row) => t.Row(
-                    row.Checkbox(t, row.Done, (t2, keys, isChecked) =>
+                });
+                tx.Label(bind: itemsLeft);
+                // The tracing tier: the foreach IS the For — the body
+                // runs once over the generated row surface
+                // (exact-index tokens, no probes), and the
+                // enumerator's Dispose makes the close structural,
+                // even on break.
+                foreach (var row in todos.Rows())
+                {
+                    row.Row(() =>
                     {
-                        // One field's delta: the title never travels;
-                        // the derived signal updates itself.
-                        TodoKaya.Patch(t2, todos, keys[0]).Done(isChecked);
-                    }),
-                    row.Label(t, row.Title)))));
+                        row.Checkbox(row.Done, (t2, keys, isChecked) =>
+                        {
+                            // One field's delta: the title never
+                            // travels; the derived signal updates
+                            // itself.
+                            TodoKaya.Patch(t2, todos, keys[0]).Done(isChecked);
+                        });
+                        row.Label(row.Title);
+                    });
+                }
+            }));
         });
 
         System.Environment.Exit(app.Run());

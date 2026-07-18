@@ -45,12 +45,24 @@ type itemRow struct {
 
 func (r itemRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
 
-func (r itemRow) Row(children ...kaya.Node) kaya.Node { return r.t.Row(children...) }
+func (r itemRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
-func (r itemRow) Column(children ...kaya.Node) kaya.Node { return r.t.Column(children...) }
+func (r itemRow) Column(body func()) kaya.Node { return r.t.Column(body) }
 
 func (r itemRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
 func (r itemRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
 	return r.c.Checkbox(r.t, f, onToggle)
+}
+
+// ItemRows traces the record template as a for statement: the loop
+// body runs once, authoring the blueprint, and the close is
+// structural — range-over-func regains control even on break. The
+// For parents into the enclosing container scope.
+func ItemRows(tx *kaya.Tx, c kaya.RecordCollection[string, Item]) func(func(itemRow) bool) {
+	return func(yield func(itemRow) bool) {
+		t, done := kaya.BeginRowTrace(tx, c.Collection)
+		yield(itemRow{t: t, c: c})
+		done()
+	}
 }

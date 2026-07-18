@@ -200,6 +200,11 @@ sealed class KayaApp
     internal Tx CurrentTx;
     internal readonly Dictionary<ulong, object> SignalMirrors = new();
     internal readonly Dictionary<ulong, List<Action<Tx>>> SignalDeps = new();
+    // The ambient parent stack: containers push their id around their
+    // body, constructors parent to the top, and 0 is the template-root
+    // sentinel (template bodies root themselves; a cross-zone AddChild
+    // is structurally impossible).
+    internal readonly List<ulong> Parents = new();
     internal readonly Dictionary<ulong, List<ulong>> Children = new();
     internal readonly List<ulong> OpenFors = new();
 
@@ -547,7 +552,20 @@ sealed class Tx
     {
         var w = App.NextWidget();
         Records.Add(KayaWire.TxCreateWidget(w.Id, kind));
+        AutoParent(w.Id);
         return w;
+    }
+
+    // The current ambient parent (0 when the scope roots itself:
+    // template bodies, or no open container).
+    internal ulong CurrentParent() =>
+        App.Parents.Count > 0 ? App.Parents[App.Parents.Count - 1] : 0;
+
+    internal void AutoParent(ulong id)
+    {
+        ulong p = CurrentParent();
+        if (p != 0)
+            Records.Add(KayaWire.TxAddChild(p, id));
     }
 
     public void SetText(Widget w, string text) => Records.Add(KayaWire.TxSetText(w.Id, text));
@@ -616,17 +634,19 @@ sealed class Tx
         return w;
     }
 
-    public Widget Column(params Widget[] children) =>
-        ContainerOf(KayaWire.KindColumn, children);
+    /// A container parents everything declared inside its body (the
+    /// ambient stack). Statement position is the point: a foreach over
+    /// a generated row trace stands between siblings.
+    public Widget Column(Action body) => ContainerOf(KayaWire.KindColumn, body);
 
-    public Widget Row(params Widget[] children) =>
-        ContainerOf(KayaWire.KindRow, children);
+    public Widget Row(Action body) => ContainerOf(KayaWire.KindRow, body);
 
-    Widget ContainerOf(uint kind, Widget[] children)
+    Widget ContainerOf(uint kind, Action body)
     {
         var parent = Widget(kind);
-        foreach (var child in children)
-            AddChild(parent, child);
+        App.Parents.Add(parent.Id);
+        body?.Invoke();
+        App.Parents.RemoveAt(App.Parents.Count - 1);
         return parent;
     }
 
@@ -648,21 +668,58 @@ sealed class Tx
     {
         c.AssertRoot();
         var w = App.NextWidget();
+        // The For parents into the enclosing scope, but the record
+        // must land after template_end — an AddChild inside the
+        // blueprint would cross zones.
+        ulong parent = CurrentParent();
         Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
         App.OpenFors.Add(c.Id);
+        App.Parents.Add(0);
         body(new Tpl(this));
+        App.Parents.RemoveAt(App.Parents.Count - 1);
         App.OpenFors.RemoveAt(App.OpenFors.Count - 1);
         Records.Add(KayaWire.TxTemplateEnd());
+        if (parent != 0)
+            Records.Add(KayaWire.TxAddChild(parent, w.Id));
         return w;
+    }
+
+    /// Open a For template for a generated row trace (`foreach (var
+    /// row in todos.Rows())`): the enumerator runs the loop body once
+    /// with the returned Tpl, then the close action ends the template
+    /// and parents the For into the enclosing scope. The enumerator's
+    /// Dispose calls close, so foreach makes the close structural —
+    /// even on break.
+    public (Tpl, Action) BeginRowTrace(Collection c)
+    {
+        c.AssertRoot();
+        var w = App.NextWidget();
+        ulong parent = CurrentParent();
+        Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
+        App.OpenFors.Add(c.Id);
+        App.Parents.Add(0);
+        return (new Tpl(this), () =>
+        {
+            App.Parents.RemoveAt(App.Parents.Count - 1);
+            App.OpenFors.RemoveAt(App.OpenFors.Count - 1);
+            Records.Add(KayaWire.TxTemplateEnd());
+            if (parent != 0)
+                Records.Add(KayaWire.TxAddChild(parent, w.Id));
+        });
     }
 
     /// A When over a Bool signal: stamps on true, unstamps on false.
     public Widget When(Signal s, Action<Tpl> body)
     {
         var w = App.NextWidget();
+        ulong parent = CurrentParent();
         Records.Add(KayaWire.TxCreateWhen(w.Id, s.Id));
+        App.Parents.Add(0);
         body(new Tpl(this));
+        App.Parents.RemoveAt(App.Parents.Count - 1);
         Records.Add(KayaWire.TxTemplateEnd());
+        if (parent != 0)
+            Records.Add(KayaWire.TxAddChild(parent, w.Id));
         return w;
     }
 
@@ -835,6 +892,7 @@ sealed class Tpl
     {
         var n = tx.App.NextNode();
         tx.Records.Add(KayaWire.TxCreateWidget(n.Id, kind));
+        tx.AutoParent(n.Id);
         return n;
     }
 
@@ -888,15 +946,16 @@ sealed class Tpl
         return n;
     }
 
-    public Node Column(params Node[] children) => ContainerOf(KayaWire.KindColumn, children);
+    public Node Column(Action body) => ContainerOf(KayaWire.KindColumn, body);
 
-    public Node Row(params Node[] children) => ContainerOf(KayaWire.KindRow, children);
+    public Node Row(Action body) => ContainerOf(KayaWire.KindRow, body);
 
-    Node ContainerOf(uint kind, Node[] children)
+    Node ContainerOf(uint kind, Action body)
     {
         var parent = Widget(kind);
-        foreach (var child in children)
-            AddChild(parent, child);
+        tx.App.Parents.Add(parent.Id);
+        body?.Invoke();
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         return parent;
     }
 
@@ -909,20 +968,30 @@ sealed class Tpl
     {
         c.AssertRoot();
         var n = tx.App.NextNode();
+        ulong parent = tx.CurrentParent();
         tx.Records.Add(KayaWire.TxCreateFor(n.Id, c.Id));
         tx.App.OpenFors.Add(c.Id);
+        tx.App.Parents.Add(0);
         body(new Tpl(tx));
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         tx.App.OpenFors.RemoveAt(tx.App.OpenFors.Count - 1);
         tx.Records.Add(KayaWire.TxTemplateEnd());
+        if (parent != 0)
+            tx.Records.Add(KayaWire.TxAddChild(parent, n.Id));
         return n;
     }
 
     public Node When(Signal s, Action<Tpl> body)
     {
         var n = tx.App.NextNode();
+        ulong parent = tx.CurrentParent();
         tx.Records.Add(KayaWire.TxCreateWhen(n.Id, s.Id));
+        tx.App.Parents.Add(0);
         body(new Tpl(tx));
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         tx.Records.Add(KayaWire.TxTemplateEnd());
+        if (parent != 0)
+            tx.Records.Add(KayaWire.TxAddChild(parent, n.Id));
         return n;
     }
 }

@@ -29,24 +29,25 @@ final class Reorder {
         app.build(tx -> {
             var items = ItemKaya.collection(tx);
 
-            tx.mount(tx.row(
-                    tx.button("rotate", t -> {
-                        // First entry to the end. The model owns the
-                        // order, so the handler asks it which key is
-                        // first — it never counts widgets.
-                        List<KayaRecords.Entry<String, Item>> entries = items.items(t);
-                        items.moveToEnd(t, entries.get(0).key);
-                    }),
-                    tx.button("lift", t -> {
-                        // Last entry to the front: moveToFront is
-                        // sugar for moveBefore the current first key —
-                        // the same wire op, keys never indices.
-                        List<KayaRecords.Entry<String, Item>> entries = items.items(t);
-                        items.moveToFront(t, entries.get(entries.size() - 1).key);
-                    }),
-                    ItemKaya.each(tx, items, (t, row) -> {
-                        row.label(t, row.title);
-                    })));
+            tx.mount(tx.row(() -> {
+                tx.button("rotate", t -> {
+                    // First entry to the end. The model owns the
+                    // order, so the handler asks it which key is
+                    // first — it never counts widgets.
+                    List<KayaRecords.Entry<String, Item>> entries = items.items(t);
+                    items.moveToEnd(t, entries.get(0).key);
+                });
+                tx.button("lift", t -> {
+                    // Last entry to the front: moveToFront is
+                    // sugar for moveBefore the current first key —
+                    // the same wire op, keys never indices.
+                    List<KayaRecords.Entry<String, Item>> entries = items.items(t);
+                    items.moveToFront(t, entries.get(entries.size() - 1).key);
+                });
+                for (var row : ItemKaya.rows(items)) {
+                    row.label(row.title);
+                }
+            }));
             for (String key : new String[] { "a", "b", "c" }) {
                 items.insert(tx, key, new Item(key));
             }

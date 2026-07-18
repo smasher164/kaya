@@ -22,17 +22,23 @@ static class GalleryScene
             var status = tx.Signal("urgent: false");
             var volume = tx.Signal("volume: 50%");
 
-            tx.Mount(tx.Column(
-                tx.Row(
+            tx.Mount(tx.Column(() =>
+            {
+                tx.Row(() =>
+                {
                     tx.Checkbox("urgent", onToggle: (t, isChecked) =>
-                        t.Write(status, $"urgent: {(isChecked ? "true" : "false")}")),
-                    tx.Label(bind: status)),
-                tx.Row(
+                        t.Write(status, $"urgent: {(isChecked ? "true" : "false")}"));
+                    tx.Label(bind: status);
+                });
+                tx.Row(() =>
+                {
                     // Integer percent, so every language's formatting
                     // agrees.
                     tx.Slider(0.0, 1.0, 0.5, (t, value) =>
-                        t.Write(volume, $"volume: {(int)System.Math.Round(value * 100)}%")),
-                    tx.Label(bind: volume))));
+                        t.Write(volume, $"volume: {(int)System.Math.Round(value * 100)}%"));
+                    tx.Label(bind: volume);
+                });
+            }));
         });
 
         System.Environment.Exit(app.Run());

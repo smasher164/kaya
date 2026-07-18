@@ -20,17 +20,20 @@ final class Gallery {
             KayaApp.Signal<String> status = tx.signal("urgent: false");
             KayaApp.Signal<String> volume = tx.signal("volume: 50%");
 
-            tx.mount(tx.column(
-                    tx.row(
-                            tx.checkbox("urgent", (t, checked) ->
-                                    t.write(status, "urgent: " + checked)),
-                            tx.label(status)),
-                    tx.row(
-                            // Integer percent, so every language's
-                            // formatting agrees.
-                            tx.slider(0.0, 1.0, 0.5, (t, value) ->
-                                    t.write(volume, "volume: " + Math.round(value * 100) + "%")),
-                            tx.label(volume))));
+            tx.mount(tx.column(() -> {
+                tx.row(() -> {
+                    tx.checkbox("urgent", (t, checked) ->
+                            t.write(status, "urgent: " + checked));
+                    tx.label(status);
+                });
+                tx.row(() -> {
+                    // Integer percent, so every language's formatting
+                    // agrees.
+                    tx.slider(0.0, 1.0, 0.5, (t, value) ->
+                            t.write(volume, "volume: " + Math.round(value * 100) + "%"));
+                    tx.label(volume);
+                });
+            }));
             return null;
         });
 
