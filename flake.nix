@@ -59,7 +59,10 @@
             cargo-xwin
             cargo-ndk
             # Validation-suite languages (function floor + direct ring tier).
-            python3
+            # hatchling + build serve tools/check-wheel.sh: the kaya-gui
+            # wheel builds offline (--no-isolation) from the flake's
+            # pinned python, never from whatever pip resolves that day.
+            (python3.withPackages (ps: [ ps.hatchling ps.build ]))
             # Go 1.27rc2, pinned binary distribution: generic methods
             # (type parameters on methods) are foundational for the Go
             # binding's typed surface, and 1.27 is pre-release until
@@ -112,6 +115,10 @@
             # fingerprints flake.nix+flake.lock (the scripts recompute it
             # with `cat flake.nix flake.lock | shasum -a 256`).
             export KAYA_DEV_SHELL=${builtins.substring 0 12 (builtins.hashString "sha256" (builtins.readFile ./flake.nix + builtins.readFile ./flake.lock))}
+            # Ad-hoc `python3` in the shell resolves the kaya package the
+            # same way the suites do (the runners export their own copy
+            # of this; the shellHook covers everything run by hand).
+            export PYTHONPATH="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/bindings/python"
             export ANDROID_HOME="${androidSdk}/libexec/android-sdk"
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
             export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk-bundle"
