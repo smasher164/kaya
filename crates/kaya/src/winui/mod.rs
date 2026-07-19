@@ -37,12 +37,12 @@ use bindings::Microsoft::UI::Xaml::Controls::{
 };
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Microsoft::UI::Xaml::{
-    Application, ApplicationInitializationCallback, RoutedEventHandler, UIElement,
+    Application, ApplicationInitializationCallback, FocusState, RoutedEventHandler, UIElement,
     UnhandledExceptionEventHandler, Window,
 };
 
 use crate::protocol::{
-    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
 };
 use crate::scene::Scene;
 
@@ -595,6 +595,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Slider(slider) => core.window.SetContent(slider)?,
             }
         }
+        ApplyOp::Command { id, command } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match command {
+                CommandKind::Clear => {
+                    let NativeWidget::Entry(field) = widget else {
+                        panic!("kaya: clear on a non-entry (scene validates kinds)")
+                    };
+                    // WinUI raises TextChanged for programmatic SetText
+                    // (the Create arm's comment), so the empty edit
+                    // reaches the app through the entry's own path —
+                    // no manual emit.
+                    field.SetText(&HSTRING::new())?;
+                }
+                CommandKind::Focus => {
+                    let _ = widget.element()?.Focus(FocusState::Programmatic)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -979,6 +997,28 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             Ok(core.labels[i].Text()?.to_string())
+        })
+    }
+
+    fn read_text(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            Ok(core.entries[i].Text()?.to_string())
+        })
+    }
+
+    fn is_focused(&self, t: crate::harness::Target) -> bool {
+        Self::on_ui(move |core| {
+            // The element's own FocusState, never FocusManager's global
+            // focused element — per-window focus, so parallel tiled
+            // legs cannot steal each other's assertion.
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    Ok(core.entries[i].FocusState()? != FocusState::Unfocused)
+                }
+                other => panic!("kaya: is_focused not wired for {other:?} on winui"),
+            }
         })
     }
 

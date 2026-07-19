@@ -215,6 +215,37 @@ with app2.build():
     except RuntimeError:
         check("escaped tracer raises", True)
 
+# One-shot commands: a Widget carries clear/focus, each queueing one
+# wire record into the open transaction; a Node is a blueprint and has
+# neither (the type-level arm of the scene's template rejection). An
+# aborted build drops its command records with everything else —
+# commands carry no mirror state, so rollback is the records dying.
+app_cmd = kaya.App()
+with app_cmd.window():
+    with kaya.column():
+        cmd_field = kaya.entry()
+    before = len(kaya._tx)
+    cmd_field.clear()
+    cmd_field.focus()
+    check("commands queue one record each", len(kaya._tx) == before + 2)
+    check(
+        "commands ride the tx as widget_command records",
+        kaya._tx[-1][4:6] == kaya.wire.TX_WIDGET_COMMAND.to_bytes(2, "little"),
+    )
+check("a template node has no clear", not hasattr(kaya.Node(1), "clear"))
+_submitted = []
+_real_submit = kaya.runtime.submit
+kaya.runtime.submit = lambda records: _submitted.append(len(records))
+try:
+    with app_cmd.build():
+        cmd_field.clear()
+        raise RuntimeError("handler bug")
+except RuntimeError:
+    pass
+finally:
+    kaya.runtime.submit = _real_submit
+check("an aborted build ships no commands", not _submitted)
+
 # A break abandons the For template mid-trace; the transaction exit
 # refuses to ship the half-authored blueprint.
 app3 = kaya.App()

@@ -8,7 +8,10 @@ model (the patch-producing fold, same as milestone 2).
 
 The backend selftest (KAYA_SELFTEST=entry) sets the field's text to
 "milk", emits the change through the delegate's own path, clicks add,
-and expects the status label to read exactly "added milk, 1 total".
+and expects: the status label "added milk, 1 total", the field cleared
+and refocused (one-shot commands riding the insert's transaction), and
+a second add answering "nothing to add, 1 total" — the clear's
+text_changed("") re-entered through the fold and emptied the draft.
 
 Build the library first (cargo build), then:
     KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
@@ -34,9 +37,21 @@ def on_change(text):
 
 def on_add():
     global next_key
+    # The empty-draft guard every real form has — and the scene's
+    # proof that clear emptied the draft through the occurrence fold,
+    # not a side assignment.
+    if not draft:
+        status.set(f"nothing to add, {len(todos)} total")
+        return
     next_key += 1
     todos.insert(f"t{next_key}", draft)
     status.set(f"added {draft}, {len(todos)} total")
+    # Finish the form: drop the field's content and put the cursor
+    # back, atomically with the insert. The field answers with
+    # text_changed("") through its normal edit path, and on_change
+    # empties the draft.
+    field.clear()
+    field.focus()
 
 
 with app.window():
@@ -44,7 +59,7 @@ with app.window():
     todos = kaya.collection()
 
     with kaya.column():
-        kaya.entry(on_change=on_change)
+        field = kaya.entry(on_change=on_change)
         kaya.button("add", on_click=on_add)
         kaya.label(bind=status)
         for todo in todos:

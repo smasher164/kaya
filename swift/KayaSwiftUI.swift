@@ -24,6 +24,9 @@ private let applyAddChild: UInt16 = 3
 private let applyMount: UInt16 = 4
 private let applyDestroy: UInt16 = 5
 private let applyMoveChild: UInt16 = 6
+private let applyCommand: UInt16 = 7
+private let commandClear: UInt32 = 1
+private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
@@ -64,6 +67,9 @@ final class KayaSceneModel {
     var root: KayaNode?
     var nodes: [UInt64: KayaNode] = [:]  // main actor only
     var parents: [UInt64: UInt64] = [:]
+    // The focus command's landing spot: the entry view's FocusState
+    // mirrors it into SwiftUI, and expect_focused reads it back.
+    var focusedId: UInt64?
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     var buttons: [KayaNode] = []
@@ -210,6 +216,23 @@ private func kayaApply(_ batch: Data) {
                     parentNode.children.removeAll { $0.id == id }
                 }
                 kayaScene.nodes.removeValue(forKey: id)
+            case applyCommand:
+                let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let command = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                switch command {
+                case commandClear:
+                    // Model-driven, like set_text: the node's text is
+                    // the field's text, and the app hears the empty
+                    // edit through the same emission the binding's set
+                    // would make.
+                    let node = kayaScene.nodes[id]!
+                    node.text = ""
+                    KayaHost.emitText(node.tag, "")
+                case commandFocus:
+                    kayaScene.focusedId = id
+                default:
+                    fatalError("kaya: unknown command \(command)")
+                }
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
             }
@@ -220,8 +243,8 @@ private func kayaApply(_ batch: Data) {
 
 /// The interaction harness's Swift interpreter: the same line-oriented
 /// grammar the Rust backends embed from tools/scenes (settle / click /
-/// toggle / set_value / set_text / expect / expect_order, targets as
-/// kind#index,
+/// toggle / set_value / set_text / expect / expect_order /
+/// expect_focused, targets as kind#index,
 /// `;` accepted as a newline stand-in). The suites hand the script in
 /// through KAYA_SELFTEST_SCRIPT; steps drive the node tree exactly as
 /// a gesture would — flip the observable, emit through the host API.
@@ -300,13 +323,31 @@ private func kayaRunScript(_ script: String) {
                 }
             case "expect":
                 let want = kayaQuoted(Array(parts[2...]))
+                // An entry target reads the field's own displayed text
+                // (here, the node the TextField binds); everything else
+                // reads label text — harness.rs's routing.
                 let got = DispatchQueue.main.sync {
-                    kayaTarget(parts[1], kayaScene.labels).text
+                    parts[1].hasPrefix("entry")
+                        ? kayaTarget(parts[1], kayaScene.entries).text
+                        : kayaTarget(parts[1], kayaScene.labels).text
                 }
                 if got == want {
                     observed.append(got)
                 } else {
                     failures.append("\(parts[1]) reads \"\(got)\", wanted \"\(want)\"")
+                }
+            case "expect_focused":
+                // The model's focusedId is the observation the focus
+                // command lands as (the entry view's FocusState mirrors
+                // it into SwiftUI). Counts as an expect for the
+                // zero-expect rule, exactly as in harness.rs.
+                let focused = DispatchQueue.main.sync {
+                    kayaScene.focusedId == kayaTarget(parts[1], kayaScene.entries).id
+                }
+                if focused {
+                    observed.append("\(parts[1]) focused")
+                } else {
+                    failures.append("\(parts[1]) does not hold focus")
                 }
             case "expect_order":
                 // The container's label children in child order, joined
@@ -398,23 +439,49 @@ struct KayaRender: View {
             )
             .frame(maxWidth: 200)
         case kindEntry:
-            // Uncontrolled toward the app: the node mirrors what the
-            // user types (SwiftUI needs the binding), and every edit is
-            // emitted with the entry's identity tag for the app to fold
-            // into its own model — nothing here is read back.
-            TextField(
-                "",
-                text: Binding(
-                    get: { node.text },
-                    set: { newValue in
-                        node.text = newValue
-                        KayaHost.emitText(node.tag, newValue)
-                    })
-            )
-            .textFieldStyle(.roundedBorder)
-            .frame(maxWidth: 200)
+            KayaEntry(node: node)
         default:
             EmptyView()
+        }
+    }
+}
+
+// The entry's own view: it needs a @FocusState, which the recursive
+// KayaRender switch cannot carry per-node.
+struct KayaEntry: View {
+    let node: KayaNode
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        // Uncontrolled toward the app: the node mirrors what the
+        // user types (SwiftUI needs the binding), and every edit is
+        // emitted with the entry's identity tag for the app to fold
+        // into its own model — nothing here is read back. Focus is
+        // model-driven the same way: the focus command lands as the
+        // scene's focusedId, mirrored into SwiftUI here, and a
+        // user-driven change flows back so the model stays truthful.
+        TextField(
+            "",
+            text: Binding(
+                get: { node.text },
+                set: { newValue in
+                    node.text = newValue
+                    KayaHost.emitText(node.tag, newValue)
+                })
+        )
+        .textFieldStyle(.roundedBorder)
+        .frame(maxWidth: 200)
+        .focused($focused)
+        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onChange(of: kayaScene.focusedId) { _, newValue in
+            focused = newValue == node.id
+        }
+        .onChange(of: focused) { _, newValue in
+            if newValue {
+                kayaScene.focusedId = node.id
+            } else if kayaScene.focusedId == node.id {
+                kayaScene.focusedId = nil
+            }
         }
     }
 }

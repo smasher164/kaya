@@ -3,7 +3,10 @@
  * a text_changed occurrence; the app folds those into a plain buffer
  * (draft) — its own model, per doctrine. The add button inserts the
  * draft and, C having no binding model by decision, answers with its
- * own hand-kept count.
+ * own hand-kept count — then clears and refocuses the field with
+ * hand-called widget_command records riding the insert's transaction;
+ * the clear's own text_changed("") re-enters through the fold and
+ * empties the draft, so a second add finds nothing to add.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=entry. */
 
@@ -77,17 +80,35 @@ static void *app(void *arg) {
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_ADD && n_keys == 0) {
+                uint8_t buf[512];
+                KayaTx tx = {buf, 0};
+                char status[192];
+                /* The empty-draft guard every real form has — and the
+                 * scene's proof that clear emptied the draft through
+                 * the occurrence fold, not a side assignment. */
+                if (draft[0] == '\0') {
+                    snprintf(status, sizeof status, "nothing to add, %u total",
+                             total);
+                    kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
+                    kaya_submit(tx.buf, tx.len);
+                    continue;
+                }
                 total += 1;
                 char key[16];
                 snprintf(key, sizeof key, "t%u", total);
-                uint8_t buf[512];
-                KayaTx tx = {buf, 0};
                 kaya_tx_collection_insert(&tx, C_TODOS, 0, 0, kaya_str(key), 0,
                                           (KayaVal[]){kaya_str(draft)}, 1);
-                char status[192];
                 snprintf(status, sizeof status, "added %s, %u total", draft,
                          total);
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
+                /* Finish the form: drop the field's content and put the
+                 * cursor back, atomically with the insert — the
+                 * function floor spells the one-shot commands as the
+                 * wire records they are. The field answers with
+                 * text_changed("") through its normal edit path, and
+                 * the fold above empties the draft. */
+                kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_CLEAR);
+                kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);
             }
         }

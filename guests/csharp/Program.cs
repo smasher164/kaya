@@ -5,6 +5,14 @@ static class Program
 {
     static void Main()
     {
+        // Headless invariant checks ride the same binary (the bindings
+        // compile into this assembly): KAYA_CHECK selects one, no
+        // window, no Run().
+        if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "abort")
+        {
+            AbortCheck.Run();
+            System.Environment.Exit(0);
+        }
         switch (System.Environment.GetEnvironmentVariable("KAYA_SELFTEST"))
         {
             case "entry": EntryScene.Run(); break;

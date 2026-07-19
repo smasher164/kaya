@@ -1,0 +1,7 @@
+; The headless checks as their own executable directory: a nested dune
+; file keeps these modules out of the parent library stanza, so nothing
+; here rides into kaya_guest_binding.
+(executable
+ (name abort_check)
+ (modules abort_check)
+ (libraries kaya_guest_binding))

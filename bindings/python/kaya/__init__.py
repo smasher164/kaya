@@ -48,7 +48,9 @@ core never calls into the guest. The wire vocabulary underneath
 
 import dataclasses
 import operator
+import sys
 import threading
+import traceback
 import types
 
 from . import runtime
@@ -267,6 +269,24 @@ class Widget:
 
     def __init__(self, id):
         self.id = id
+
+    # One-shot commands: momentary verbs into widget-owned state,
+    # riding the open transaction like any write — the insert and the
+    # clear beside it commit together or not at all. Fire-and-forget:
+    # no mirror state, nothing to journal; the widget answers through
+    # its normal occurrence path (a clear arrives back as
+    # text_changed("") and the app's draft fold empties itself).
+    # Commands live on Widget only — a Node is a blueprint, and a
+    # blueprint has nothing to clear (the type-level arm of the scene's
+    # own template rejection).
+
+    def clear(self):
+        """Drop an entry's content now (the field stays authoritative)."""
+        _records().append(wire.tx_widget_command(self.id, wire.COMMAND_CLEAR))
+
+    def focus(self):
+        """Give this widget the keyboard focus."""
+        _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
 
 
 class Node:
@@ -1059,8 +1079,21 @@ class App:
             args = list(keys)
             if payload is not None:
                 args.append(payload)
-            with self.build():
-                handler(*args)
+            # One handler dispatch: an exception crosses the build
+            # boundary (which rolled the mirrors back and dropped the
+            # records), is logged, and the loop moves to the next
+            # occurrence — the uniform dispatch discipline across every
+            # binding. Non-Exception aborts (KeyboardInterrupt) still
+            # propagate: the fatal floor.
+            try:
+                with self.build():
+                    handler(*args)
+            except Exception:
+                traceback.print_exc()
+                print(
+                    "kaya: handler raised (transaction rolled back)",
+                    file=sys.stderr,
+                )
 
     def run(self):
         """Enter the core on the calling thread (must be the process

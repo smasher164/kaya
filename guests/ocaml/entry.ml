@@ -2,7 +2,10 @@
    contract end to end. The field owns its text and reports each edit
    through on_change; the app folds those into a plain ref (draft) —
    its own model, per doctrine. The add button inserts the draft and
-   answers with the count read from the collection model.
+   answers with the count read from the collection model, then clears
+   and refocuses the field — one-shot commands riding the insert's
+   transaction; the clear's own text_changed "" re-enters through the
+   fold and empties the draft, so a second add finds nothing to add.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=entry. *)
 
@@ -45,9 +48,23 @@ let () =
   let next_key = ref 0 in
   on_change app field (fun text -> io (fun () -> draft := text));
   on_click app add
-    (let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
-     let* () = insert todos (Str key) (Str !draft) in
-     let* total = count todos in
-     write status (Str (Printf.sprintf "added %s, %d total" !draft total)));
+    (let* d = io (fun () -> !draft) in
+     (* The empty-draft guard every real form has — and the scene's
+        proof that clear emptied the draft through the occurrence
+        fold, not a side assignment. *)
+     if d = "" then
+       let* total = count todos in
+       write status (Str (Printf.sprintf "nothing to add, %d total" total))
+     else
+       let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
+       let* () = insert todos (Str key) (Str d) in
+       let* total = count todos in
+       let* () = write status (Str (Printf.sprintf "added %s, %d total" d total)) in
+       (* Finish the form: drop the field's content and put the cursor
+          back, atomically with the insert. The field answers with
+          text_changed "" through its normal edit path, and the fold
+          above empties the draft. *)
+       let* () = clear field in
+       focus field);
 
   exit (run app)

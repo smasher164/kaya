@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
-    CollectionId, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
+    CollectionId, CommandKind, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -746,6 +746,29 @@ impl Tx<'_> {
 
     pub fn add_child(&mut self, parent: WidgetId, child: WidgetId) {
         self.ops.push(TxOp::AddChild { parent, child });
+    }
+
+    /// One-shot commands: momentary verbs into widget-owned state,
+    /// riding this transaction like any write — the insert and the
+    /// clear beside it commit together or not at all. Fire-and-forget:
+    /// no state at rest, nothing to journal, and the widget answers
+    /// through its normal occurrence path (a clear arrives back as
+    /// TextChanged with empty text, so the app's draft fold empties
+    /// itself — never a side assignment).
+    pub fn clear(&mut self, widget: WidgetId) {
+        self.ops.push(TxOp::WidgetCommand {
+            widget,
+            command: CommandKind::Clear,
+        });
+    }
+
+    /// Give the widget keyboard focus (the post-submit refocus every
+    /// real form wants).
+    pub fn focus(&mut self, widget: WidgetId) {
+        self.ops.push(TxOp::WidgetCommand {
+            widget,
+            command: CommandKind::Focus,
+        });
     }
 
     /// Construction sugar: a container takes its body as a closure
@@ -1693,6 +1716,36 @@ mod tests {
         assert_eq!(Todo::from_values(&values), todo);
         assert_eq!(Todo::title().index, 0);
         assert_eq!(Todo::done().index, 1);
+    }
+
+    /// A command is one pushed op — pure wire data, no model state —
+    /// and an abandoned transaction ships none of them: the ops vector
+    /// dies with the Tx, which is the whole rollback story for
+    /// commands ("insert + clear" aborting must not clear the field
+    /// either, since the two were promised as atomic).
+    #[test]
+    fn commands_push_ops_and_die_with_an_abandoned_tx() {
+        use crate::protocol::{CommandKind, TxOp, WidgetKind};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let field = tx.widget(WidgetKind::Entry);
+        tx.clear(field);
+        tx.focus(field);
+        assert!(matches!(
+            tx.ops[tx.ops.len() - 2],
+            TxOp::WidgetCommand { command: CommandKind::Clear, .. }
+        ));
+        assert!(matches!(
+            tx.ops[tx.ops.len() - 1],
+            TxOp::WidgetCommand { command: CommandKind::Focus, .. }
+        ));
+        drop(tx); // abandoned: nothing may ship
+        assert!(tx_rx.try_recv().is_err(), "an abandoned tx shipped its records");
     }
 
     /// A patch is recorded writes: each setter emits exactly one

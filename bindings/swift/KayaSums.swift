@@ -163,9 +163,9 @@ struct KayaSumCollection<T: KayaSumElement> {
         _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
     ) -> KayaSignal {
         let s = tx.signal(compute(items(tx)))
-        tx.app.derived[collection.id, default: []].append { t in
+        tx.pendingDerived.append((collection.id, { t in
             t.write(s, compute(self.items(t)))
-        }
+        }))
         return s
     }
 
@@ -210,7 +210,7 @@ struct KayaSumCase<T: KayaSumElement> {
     /// co-located (stamped keys first).
     func checkbox(
         _ t: KayaTpl, _ fieldName: String,
-        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         t.checkbox(KayaField<Bool>(index: index(of: fieldName)), onToggle: onToggle)
     }

@@ -213,6 +213,16 @@ let build app (program : 'a decl) =
       List.iter (fun (cid, saved) -> Hashtbl.replace app.model cid saved) tx.journal;
       raise e
 
+(* One handler dispatch: an exception crosses the build boundary
+   (which restored the model and dropped the records), is logged, and
+   the loop moves to the next occurrence -- the uniform dispatch
+   discipline across every binding. *)
+let dispatch app (program : unit decl) =
+  try build app program
+  with e ->
+    Printf.eprintf "kaya: handler raised (transaction rolled back): %s\n%!"
+      (Printexc.to_string e)
+
 (* The binding operators over declaration programs. *)
 let ( let* ) (m : 'a decl) (f : 'a -> 'b decl) : 'b decl = fun tx -> f (m tx) tx
 let ( let+ ) (m : 'a decl) (f : 'a -> 'b) : 'b decl = fun tx -> f (m tx)
@@ -248,6 +258,21 @@ let set_text (Widget id) text tx = emit tx (Kaya_wire.tx_set_text id text)
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)
+
+(* One-shot commands: momentary verbs into widget-owned state, riding
+   the open transaction like any record — the insert and the clear
+   beside it submit together or not at all. Fire-and-forget: no model
+   state, nothing to journal; the widget answers through its normal
+   occurrence path (a clear arrives back as text_changed "" and the
+   app's draft fold empties itself). Commands take a widget only — a
+   node is a blueprint, and a blueprint has nothing to clear (the
+   type-level arm of the scene's own template rejection). *)
+
+(* Drop an entry's content now (the field stays authoritative). *)
+let clear (Widget id) tx = emit tx (Kaya_wire.tx_widget_command id Kaya_wire.command_clear)
+
+(* Give this widget the keyboard focus. *)
+let focus (Widget id) tx = emit tx (Kaya_wire.tx_widget_command id Kaya_wire.command_focus)
 
 let add_child (Widget parent) (Widget child) tx =
   emit tx (Kaya_wire.tx_add_child parent child)
@@ -860,29 +885,29 @@ let dispatch_loop app =
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->
                (match Hashtbl.find_opt app.widget_changes id with
-               | Some handler -> build app (handler text)
+               | Some handler -> dispatch app (handler text)
                | None -> ())
            | Some (Kaya_wire.Str text), keys ->
                (match Hashtbl.find_opt app.node_changes id with
-               | Some handler -> build app (handler keys text)
+               | Some handler -> dispatch app (handler keys text)
                | None -> ())
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_toggled then
            match (payload, keys) with
            | Some (Kaya_wire.Bool checked), [] ->
                (match Hashtbl.find_opt app.widget_toggles id with
-               | Some handler -> build app (handler checked)
+               | Some handler -> dispatch app (handler checked)
                | None -> ())
            | Some (Kaya_wire.Bool checked), keys ->
                (match Hashtbl.find_opt app.node_toggles id with
-               | Some handler -> build app (handler keys checked)
+               | Some handler -> dispatch app (handler keys checked)
                | None -> ())
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_value_changed then
            match (payload, keys) with
            | Some (Kaya_wire.F64 v), [] ->
                (match Hashtbl.find_opt app.widget_values id with
-               | Some handler -> build app (handler v)
+               | Some handler -> dispatch app (handler v)
                | None -> ())
            | _ -> ()
          else
@@ -893,7 +918,7 @@ let dispatch_loop app =
                | None -> ())
            | keys ->
                (match Hashtbl.find_opt app.node_handlers id with
-               | Some handler -> build app (handler keys)
+               | Some handler -> dispatch app (handler keys)
                | None -> ()));
         loop ()
   in

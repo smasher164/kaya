@@ -1,0 +1,90 @@
+(* The uniform-abort guard: a handler abort rolls the model mirror
+   back, ships nothing, and the app continues — the same observable
+   semantics as every other binding (the negative test each language
+   carries). Runs headless: the library loads (KAYA_LIB) but the core
+   loop is never entered; records queue and the process exits. *)
+
+open Kaya_wire
+open Kaya_app
+
+exception Handler_bug
+
+let fail fmt = Printf.ksprintf (fun msg -> prerr_endline msg; exit 1) fmt
+
+let show_key = function
+  | Str s -> s
+  | Bool b -> string_of_bool b
+  | I64 n -> Int64.to_string n
+  | F64 x -> string_of_float x
+
+let entry_keys app todos =
+  build app
+    (let+ entries = items todos in
+     List.map fst entries)
+
+let expect app todos want what =
+  let got = entry_keys app todos in
+  if got <> List.map (fun k -> Str k) want then
+    fail "%s: [%s]" what (String.concat "; " (List.map show_key got))
+
+(* The honest floor a record deriver generates, spelled by hand so the
+   check needs no ppx: one string field. *)
+type check_todo = { ct_title : string }
+
+let check_todo_rt =
+  {
+    rt_schema = [ Kaya_wire.value_str ];
+    rt_to_values = (fun t -> [ Str t.ct_title ]);
+    rt_of_values =
+      (function [ Str s ] -> { ct_title = s } | _ -> invalid_arg "check_todo");
+  }
+
+let () =
+  let app = create () in
+  let todos =
+    build app
+      (let* todos = collection in
+       let* () = insert todos (Str "a") (Str "one") in
+       let+ () = insert todos (Str "b") (Str "two") in
+       todos)
+  in
+
+  (* Abort mid-transaction after mutating: the boundary must restore
+     the mirror and re-raise (rollback + propagate is the tx
+     boundary's contract; surviving is the dispatch loop's). *)
+  (match
+     build app
+       (let* () = insert todos (Str "c") (Str "three") in
+        let* () = remove todos (Str "a") in
+        fun _tx -> raise Handler_bug)
+   with
+  | () -> fail "build swallowed the exception — the tx boundary must propagate"
+  | exception Handler_bug -> ());
+  expect app todos [ "a"; "b" ] "abort did not restore the mirror";
+
+  (* The dispatch discipline: a raising handler is logged and the loop
+     continues — the next transaction works and sees the restored
+     model. *)
+  dispatch app
+    (let* () = insert todos (Str "d") (Str "four") in
+     fun _tx -> raise Handler_bug);
+  expect app todos [ "a"; "b" ] "dispatch abort leaked into the mirror";
+  build app (insert todos (Str "c") (Str "three"));
+  expect app todos [ "a"; "b"; "c" ] "post-abort commit broken";
+
+  (* An aborted transaction abandons its derived registrations with
+     its records: the pending list promotes only on submit. *)
+  let rc_cid = ref 0L in
+  dispatch app
+    (let* rc = collection_of check_todo_rt in
+     let* _count =
+       derive rc (fun entries -> I64 (Int64.of_int (List.length entries)))
+     in
+     fun _tx ->
+       rc_cid := (record_handle rc).cid;
+       raise Handler_bug);
+  (match Hashtbl.find_opt app.derived !rc_cid with
+  | None | Some [] -> ()
+  | Some fns -> fail "aborted tx leaked %d derived registrations" (List.length fns));
+
+  print_endline "ocaml abort check: OK"

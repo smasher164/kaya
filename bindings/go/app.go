@@ -18,7 +18,10 @@
 //     runs on the app goroutine after it pulls from the ring.
 package kaya
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // Typed handles over the id spaces.
 // Scalar is the signal-value constraint: the wire's scalar types.
@@ -109,6 +112,12 @@ type App struct {
 	// Signals recomputed from a collection after each of its
 	// mutations, written into the same transaction.
 	derived map[uint64][]func(*Tx)
+	// How to undo the open transaction's model edits: a deep snapshot
+	// per touched collection, taken on first touch. Non-nil exactly
+	// while a Build is running; the model methods journal through it
+	// so an abandoned transaction restores the mirror to what was
+	// actually shipped (the same discipline as every other binding).
+	journal map[uint64][]*instance
 }
 
 func NewApp() *App {
@@ -148,7 +157,28 @@ func (a *App) instanceOf(coll uint64, path []any) *instance {
 	return nil
 }
 
+// touch journals a deep snapshot of one collection's instances the
+// first time the open transaction mutates it. Deep because instances
+// are pointers and their entry slices mutate in place.
+func (a *App) touch(coll uint64) {
+	if a.journal == nil {
+		return
+	}
+	if _, done := a.journal[coll]; done {
+		return
+	}
+	saved := make([]*instance, len(a.model[coll]))
+	for i, in := range a.model[coll] {
+		saved[i] = &instance{
+			path:    append([]any(nil), in.path...),
+			entries: append([]Entry(nil), in.entries...),
+		}
+	}
+	a.journal[coll] = saved
+}
+
 func (a *App) modelSet(coll uint64, path []any, key, value any) {
+	a.touch(coll)
 	in := a.instanceOf(coll, path)
 	if in == nil {
 		in = &instance{path: append([]any(nil), path...)}
@@ -164,6 +194,7 @@ func (a *App) modelSet(coll uint64, path []any, key, value any) {
 }
 
 func (a *App) modelRemove(coll uint64, path []any, key any) {
+	a.touch(coll)
 	if in := a.instanceOf(coll, path); in != nil {
 		kept := in.entries[:0]
 		for _, e := range in.entries {
@@ -191,6 +222,7 @@ func (a *App) keysOf(coll uint64, path []any) []any {
 }
 
 func (a *App) modelMove(coll uint64, path []any, key any, before []any) {
+	a.touch(coll)
 	in := a.instanceOf(coll, path)
 	pos := -1
 	if in != nil {
@@ -237,6 +269,7 @@ func (a *App) modelMove(coll uint64, path []any, key any, before []any) {
 
 func (a *App) purgeChildren(coll uint64, prefix []any) {
 	for _, kid := range a.children[coll] {
+		a.touch(kid)
 		kept := a.model[kid][:0]
 		for _, in := range a.model[kid] {
 			if len(in.path) < len(prefix) || !pathEq(in.path[:len(prefix)], prefix) {
@@ -262,15 +295,60 @@ func (a *App) registerCollection(id uint64) {
 type Tx struct {
 	app     *App
 	records [][]byte
+	// Derived-signal registrations made this transaction, promoted into
+	// the app registry only on commit — an abandoned transaction
+	// abandons its registrations with its records.
+	pendingDerived []pendingDerived
 }
 
-// Build runs fn with a fresh transaction and submits it.
+type pendingDerived struct {
+	coll      uint64
+	recompute func(*Tx)
+}
+
+// Build runs fn with a fresh transaction and submits it. A panic out
+// of fn abandons the transaction: the records never ship, and the
+// journal restores the model mirror to exactly what was shipped —
+// then the panic continues to the caller. The tx boundary rolls back
+// and propagates; whether the app survives is the caller's decision
+// (the dispatch loop survives; see dispatch).
 func (a *App) Build(fn func(*Tx)) {
+	if a.journal != nil {
+		panic("kaya: Build inside Build — one transaction at a time")
+	}
 	tx := &Tx{app: a}
+	a.journal = make(map[uint64][]*instance)
+	committed := false
+	defer func() {
+		if !committed {
+			for id, saved := range a.journal {
+				a.model[id] = saved
+			}
+		}
+		a.journal = nil
+	}()
 	fn(tx)
+	committed = true
+	for _, p := range tx.pendingDerived {
+		a.derived[p.coll] = append(a.derived[p.coll], p.recompute)
+	}
 	if len(tx.records) > 0 {
 		Submit(tx.records...)
 	}
+}
+
+// dispatch runs one handler inside its own Build and survives a panic
+// out of it: by the time the panic crosses the Build boundary the
+// model is restored and the records are dropped, so the loop logs and
+// moves to the next occurrence. Aborts the runtime cannot recover
+// still die — uniformly with every other binding's fatal floor.
+func (a *App) dispatch(fn func(*Tx)) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "kaya: handler panicked (transaction rolled back): %v\n", r)
+		}
+	}()
+	a.Build(fn)
 }
 
 func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
@@ -325,6 +403,24 @@ func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 
 func (tx *Tx) AddChild(parent, child Widget) {
 	tx.records = append(tx.records, TxAddChild(parent.id, child.id))
+}
+
+// Clear drops the widget's owned content — a one-shot command:
+// momentary verbs into widget-owned state, riding this transaction
+// like any write, so the insert and the clear beside it commit
+// together or not at all. Fire-and-forget: no state at rest, nothing
+// to journal, and the widget answers through its normal occurrence
+// path (a clear arrives back as a text change with empty text, so the
+// app's draft fold empties itself — never a side assignment).
+func (tx *Tx) Clear(w Widget) {
+	tx.records = append(tx.records, TxWidgetCommand(w.id, CommandClear))
+}
+
+// Focus gives the widget keyboard focus (the post-submit refocus every
+// real form wants) — a one-shot command riding the transaction like
+// Clear.
+func (tx *Tx) Focus(w Widget) {
+	tx.records = append(tx.records, TxWidgetCommand(w.id, CommandFocus))
 }
 
 // Construction sugar: containers take their body as a closure and
@@ -743,31 +839,31 @@ func (a *App) Run() int {
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx) })
+					a.dispatch(func(tx *Tx) { fn(tx) })
 				}
 			case kind == occButtonClicked:
 				if fn := a.nodeHandlers[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, keys) })
+					a.dispatch(func(tx *Tx) { fn(tx, keys) })
 				}
 			case kind == occTextChanged && len(keys) == 0:
 				if fn := a.widgetChanges[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, text) })
+					a.dispatch(func(tx *Tx) { fn(tx, text) })
 				}
 			case kind == occTextChanged:
 				if fn := a.nodeChanges[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, keys, text) })
+					a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
 				}
 			case kind == occToggled && len(keys) == 0:
 				if fn := a.widgetToggles[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, checked) })
+					a.dispatch(func(tx *Tx) { fn(tx, checked) })
 				}
 			case kind == occToggled:
 				if fn := a.nodeToggles[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, keys, checked) })
+					a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
 				}
 			case kind == occValueChanged && len(keys) == 0:
 				if fn := a.widgetValues[id]; fn != nil {
-					a.Build(func(tx *Tx) { fn(tx, value) })
+					a.dispatch(func(tx *Tx) { fn(tx, value) })
 				}
 			}
 		}

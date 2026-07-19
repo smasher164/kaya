@@ -26,7 +26,7 @@ use objc2_ui_kit::{
 };
 
 use crate::protocol::{
-    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
 };
 use crate::scene::Scene;
 
@@ -340,6 +340,26 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             }
             core.content.addSubview(root_view.view());
         }
+        ApplyOp::Command { id, command } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match command {
+                CommandKind::Clear => {
+                    let NativeWidget::Entry(field) = widget else {
+                        panic!("kaya: clear on a non-entry (scene validates kinds)")
+                    };
+                    // The field stays authoritative and answers through
+                    // its normal edit path. UIKit fires no
+                    // EditingChanged for a programmatic set, so the
+                    // action is re-fired explicitly — the same
+                    // compensation the Stage's set_text makes.
+                    unsafe { field.setText(Some(&NSString::from_str(""))) };
+                    field.sendActionsForControlEvents(UIControlEvents::EditingChanged);
+                }
+                CommandKind::Focus => {
+                    widget.view().becomeFirstResponder();
+                }
+            }
+        }
     }
 }
 
@@ -562,6 +582,30 @@ impl crate::harness::Stage for UiKitStage {
                 .text()
                 .map(|t| t.to_string())
                 .unwrap_or_default()
+        })
+    }
+
+    fn read_text(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            unsafe { core.entries[i].text() }
+                .map(|t| t.to_string())
+                .unwrap_or_default()
+        })
+    }
+
+    fn is_focused(&self, t: crate::harness::Target) -> bool {
+        Self::on_main(move |core| {
+            // First-responder status is per-window on iOS (there is
+            // one key window per scene), so parallel legs cannot steal
+            // each other's focus assertions.
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    core.entries[i].isFirstResponder()
+                }
+                other => panic!("kaya: is_focused not wired for {other:?} on uikit"),
+            }
         })
     }
 

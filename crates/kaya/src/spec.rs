@@ -337,6 +337,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   for this variant. Cases must be total at template_end; an \
                   empty case renders a constructor as nothing, explicitly.",
         },
+        Record {
+            kind: 17,
+            name: "widget_command",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("command", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "A one-shot command aimed at a live widget: momentary, \
+                  fire-and-forget, never state at rest — the app's \
+                  sanctioned crossing into widget-owned state (clear, \
+                  focus). The widget answers through its normal occurrence \
+                  path; nothing is recorded and nothing replays on rebuild. \
+                  The command enum is the closed vocabulary; each verb is \
+                  admitted by a real artifact, per the escalation policy.",
+        },
     ],
     apply: &[
         Record {
@@ -397,6 +414,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Remove the widget from its parent and forget it; \
                   teardown arrives children-first.",
+        },
+        Record {
+            kind: 7,
+            name: "command",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("command", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Execute a one-shot command on a widget, then let the \
+                  widget report the result through its normal occurrence \
+                  path (a clear arrives back as text_changed with empty \
+                  text, through the same delegate a keystroke uses).",
         },
     ],
     occurrence: &[
@@ -494,6 +525,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("value_changed", 4),
             ],
         },
+        EnumSpec {
+            name: "command",
+            variants: &[("clear", 1), ("focus", 2)],
+        },
     ],
 };
 
@@ -501,7 +536,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
 mod tests {
     use super::*;
     use crate::protocol::{
-        CollectionId, Prop, PropValue, SignalId, TxOp, Value, ValueType, WidgetId, WidgetKind,
+        CollectionId, CommandKind, Prop, PropValue, SignalId, TxOp, Value, ValueType, WidgetId, WidgetKind,
         WindowId,
     };
     use crate::wire;
@@ -613,6 +648,7 @@ mod tests {
             ("collection_update_field", wire::TX_COLLECTION_UPDATE_FIELD),
             ("collection_move", wire::TX_COLLECTION_MOVE),
             ("variant_case", wire::TX_VARIANT_CASE),
+            ("widget_command", wire::TX_WIDGET_COMMAND),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -632,6 +668,7 @@ mod tests {
                 ("mount", wire::APPLY_MOUNT),
                 ("move_child", wire::APPLY_MOVE_CHILD),
                 ("destroy", wire::APPLY_DESTROY),
+                ("command", wire::APPLY_COMMAND),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -677,6 +714,8 @@ mod tests {
                     ("prop", "value") => wire::PROP_VALUE,
                     ("prop", "min") => wire::PROP_MIN,
                     ("prop", "max") => wire::PROP_MAX,
+                    ("command", "clear") => wire::COMMAND_CLEAR,
+                    ("command", "focus") => wire::COMMAND_FOCUS,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,
@@ -752,6 +791,10 @@ mod tests {
         w.record(tx_record("create_for"), &[Arg::U64(4), Arg::U64(3)]);
         w.record(tx_record("template_end"), &[]);
         w.record(tx_record("mount"), &[Arg::U64(0), Arg::U64(2)]);
+        w.record(
+            tx_record("widget_command"),
+            &[Arg::U64(2), Arg::U32(wire::COMMAND_FOCUS), Arg::U32(0)],
+        );
 
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
@@ -799,6 +842,10 @@ mod tests {
             TxOp::Mount {
                 window: WindowId(0),
                 root: WidgetId(2),
+            },
+            TxOp::WidgetCommand {
+                widget: WidgetId(2),
+                command: CommandKind::Focus,
             },
         ];
         assert_eq!(ops.len(), expected.len());

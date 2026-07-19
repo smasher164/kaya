@@ -55,6 +55,7 @@ tools/check-targets.sh || exit 1
 tools/check-shell.sh || exit 1
 tools/check-sugar-surface.sh || exit 1
 tools/check-wheel.sh || exit 1
+tools/check-abort.sh || exit 1
 tools/swift-typecheck.sh || exit 1
 tools/java-typecheck.sh || exit 1
 timing core-build+gates

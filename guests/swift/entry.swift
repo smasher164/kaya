@@ -2,7 +2,10 @@
 // The field owns its text and reports each edit through onChange; the
 // app folds those into a plain variable (draft) — its own model, per
 // doctrine. The add button inserts the draft and answers with the count
-// read from the collection model.
+// read from the collection model, then clears and refocuses the field —
+// one-shot commands riding the insert's transaction; the clear's own
+// text_changed("") re-enters through the fold and empties the draft,
+// so a second add finds nothing to add.
 
 import Foundation
 
@@ -41,10 +44,23 @@ app.onChange(field) { _, text in
     draft = text
 }
 app.onClick(add) { tx in
+    // The empty-draft guard every real form has — and the scene's
+    // proof that clear emptied the draft through the occurrence fold,
+    // not a side assignment.
+    if draft.isEmpty {
+        tx.write(status, .str("nothing to add, \(tx.count(todos)) total"))
+        return
+    }
     nextKey += 1
     tx.insert(todos, .str("t\(nextKey)"), .str(draft))
     let total = tx.count(todos)
     tx.write(status, .str("added \(draft), \(total) total"))
+    // Finish the form: drop the field's content and put the cursor
+    // back, atomically with the insert. The field answers with
+    // text_changed("") through its normal edit path, and the fold
+    // above empties the draft.
+    tx.clear(field)
+    tx.focus(field)
 }
 
 app.run()

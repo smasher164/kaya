@@ -237,9 +237,9 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 // out; the core sees an ordinary signal (a Go 1.27 generic method).
 func (c RecordCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
-	tx.app.derived[c.id] = append(tx.app.derived[c.id], func(tx *Tx) {
+	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.id, func(tx *Tx) {
 		tx.Write(s, compute(c.Items(tx)))
-	})
+	}})
 	return s
 }
 

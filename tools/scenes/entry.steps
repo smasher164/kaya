@@ -1,8 +1,17 @@
 # The entry round trip: type through the control's own change path —
 # exactly what a keystroke produces — click add, read the status label.
+# Then the command half: add must have cleared the field on screen,
+# put focus back in it, and emptied the app's draft through the
+# clear's own text_changed("") occurrence — so a second add finds
+# nothing to add (a stale draft would read "added milk, 2 total").
 settle 1500
 set_text entry#0 "milk"
 settle 400
 click button#0
 settle 700
 expect label#0 "added milk, 1 total"
+expect entry#0 ""
+expect_focused entry#0
+click button#0
+settle 400
+expect label#0 "nothing to add, 1 total"

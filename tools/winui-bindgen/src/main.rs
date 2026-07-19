@@ -37,6 +37,10 @@ fn main() {
         "Microsoft.UI.Xaml.UIElement".to_string(),
         "Microsoft.UI.Xaml.FrameworkElement".to_string(),
         "Microsoft.UI.Xaml.Controls.Control".to_string(),
+        // Unlocks UIElement.Focus/FocusState for the focus command and
+        // the harness's is_focused (the slots were `usize` pads while
+        // the enum was unfiltered).
+        "Microsoft.UI.Xaml.FocusState".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentControl".to_string(),
         "Microsoft.UI.Xaml.Controls.Panel".to_string(),
         "Microsoft.UI.Xaml.Controls.UIElementCollection".to_string(),

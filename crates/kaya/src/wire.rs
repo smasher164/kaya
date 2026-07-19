@@ -14,8 +14,8 @@
 //! runtime condition.
 
 use crate::protocol::{
-    ApplyOp, CollectionId, Occurrence, Path, Prop, PropValue, Record, SignalId, TemplateNodeId,
-    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
+    ApplyOp, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
+    TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
 
 pub const HEADER_SIZE: usize = 8;
@@ -37,6 +37,7 @@ pub const TX_TEMPLATE_END: u16 = 13;
 pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const TX_COLLECTION_MOVE: u16 = 15;
 pub const TX_VARIANT_CASE: u16 = 16;
+pub const TX_WIDGET_COMMAND: u16 = 17;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -45,6 +46,7 @@ pub const APPLY_ADD_CHILD: u16 = 3;
 pub const APPLY_MOUNT: u16 = 4;
 pub const APPLY_DESTROY: u16 = 5;
 pub const APPLY_MOVE_CHILD: u16 = 6;
+pub const APPLY_COMMAND: u16 = 7;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -72,6 +74,10 @@ pub const PROP_MAX: u32 = 5;
 pub const SOURCE_CONST: u32 = 0;
 pub const SOURCE_SIGNAL: u32 = 1;
 pub const SOURCE_ELEMENT: u32 = 2;
+
+// One-shot commands.
+pub const COMMAND_CLEAR: u32 = 1;
+pub const COMMAND_FOCUS: u32 = 2;
 
 fn pad8(n: usize) -> usize {
     (n + 7) & !7
@@ -171,6 +177,21 @@ pub fn value_type_raw(ty: ValueType) -> u32 {
         ValueType::I64 => VALUE_I64,
         ValueType::F64 => VALUE_F64,
         ValueType::Str => VALUE_STR,
+    }
+}
+
+fn command_kind(raw: u32) -> CommandKind {
+    match raw {
+        COMMAND_CLEAR => CommandKind::Clear,
+        COMMAND_FOCUS => CommandKind::Focus,
+        other => panic!("kaya: unknown command {other}"),
+    }
+}
+
+fn command_raw(command: CommandKind) -> u32 {
+    match command {
+        CommandKind::Clear => COMMAND_CLEAR,
+        CommandKind::Focus => COMMAND_FOCUS,
     }
 }
 
@@ -327,6 +348,14 @@ pub fn decode_transaction(buf: &[u8]) -> Transaction {
                     let variant = r.u32();
                     let _reserved = r.u32();
                     variant
+                },
+            },
+            TX_WIDGET_COMMAND => TxOp::WidgetCommand {
+                widget: WidgetId(r.u64()),
+                command: {
+                    let command = command_kind(r.u32());
+                    let _reserved = r.u32();
+                    command
                 },
             },
             other => panic!("kaya: unknown transaction record kind {other}"),
@@ -514,6 +543,11 @@ impl Writer {
             ApplyOp::Destroy { id } => self.record(APPLY_DESTROY, |b| {
                 b.extend_from_slice(&id.0.to_le_bytes());
             }),
+            ApplyOp::Command { id, command } => self.record(APPLY_COMMAND, |b| {
+                b.extend_from_slice(&id.0.to_le_bytes());
+                b.extend_from_slice(&command_raw(*command).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
         }
     }
 
@@ -638,6 +672,11 @@ impl Writer {
             }),
             TxOp::VariantCase { variant } => self.record(TX_VARIANT_CASE, |b| {
                 b.extend_from_slice(&variant.to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::WidgetCommand { widget, command } => self.record(TX_WIDGET_COMMAND, |b| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_| {}),
@@ -766,6 +805,14 @@ mod tests {
             TxOp::WriteSignal {
                 id: SignalId(1),
                 value: Value::I64(-7),
+            },
+            TxOp::WidgetCommand {
+                widget: WidgetId(2),
+                command: CommandKind::Clear,
+            },
+            TxOp::WidgetCommand {
+                widget: WidgetId(2),
+                command: CommandKind::Focus,
             },
         ];
         let mut w = Writer::new();

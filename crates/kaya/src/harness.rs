@@ -22,6 +22,8 @@
 //!   set_value <kind>#<index> <f64>
 //!   set_text <kind>#<index> "<text>"
 //!   expect label#<index> "<text>"
+//!   expect entry#<index> "<text>"     (reads the field's displayed text)
+//!   expect_focused <kind>#<index>
 //!
 //! Targets are (kind, creation index) — stamped copies enter the count
 //! in creation order, so `button#last` is "the most recently stamped
@@ -75,6 +77,10 @@ pub enum Step {
     /// the given `|`-joined texts — the observation reorder ops are
     /// verified by (creation-order registries cannot see a move).
     ExpectOrder(Target, String),
+    /// Expect the widget to hold keyboard focus — the observation the
+    /// focus command is verified by (there is no other way to see
+    /// focus land).
+    ExpectFocused(Target),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -86,6 +92,16 @@ pub trait Stage: Send + 'static {
     fn set_value(&self, target: Target, value: f64);
     fn set_text(&self, target: Target, text: &str);
     fn read_label(&self, target: Target) -> String;
+    /// The displayed text of an entry — what the user sees in the
+    /// field, read from the toolkit (the observation the clear command
+    /// is pinned by: the occurrence fold alone cannot prove the screen
+    /// emptied). No default, like child_texts: a backend that forgets
+    /// it fails to compile.
+    fn read_text(&self, target: Target) -> String;
+    /// Whether the widget holds keyboard focus, read from the toolkit
+    /// (per-window focus, never global key status — parallel tiled
+    /// legs must not steal each other's assertion). No default.
+    fn is_focused(&self, target: Target) -> bool;
     /// The texts of the container's label children, in child order,
     /// joined with `|` — the observation expect_order verifies. No
     /// default: a backend that forgets it must fail to compile, not
@@ -158,6 +174,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .ok_or_else(|| format!("expect wants a target and a string: {line:?}"))?;
                 Step::Expect(parse_target(target)?, parse_string(text)?)
             }
+            "expect_focused" => Step::ExpectFocused(parse_target(rest)?),
             "expect_order" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_order wants a target and a string: {line:?}")
@@ -266,7 +283,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     // mangled the text into a comment must fail, not pass.
     if !steps
         .iter()
-        .any(|s| matches!(s, Step::Expect(..) | Step::ExpectOrder(..)))
+        .any(|s| matches!(s, Step::Expect(..) | Step::ExpectOrder(..) | Step::ExpectFocused(..)))
     {
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
         return;
@@ -288,7 +305,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             Step::SetValue(t, v) => stage.set_value(*t, *v),
             Step::SetText(t, s) => stage.set_text(*t, s),
             Step::Expect(t, want) => {
-                let got = stage.read_label(*t);
+                // An entry target reads the field's own displayed
+                // text; everything else reads label text.
+                let got = if t.kind == TargetKind::Entry {
+                    stage.read_text(*t)
+                } else {
+                    stage.read_label(*t)
+                };
                 if got == *want {
                     observed.push(got);
                 } else {
@@ -301,6 +324,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     observed.push(got);
                 } else {
                     failures.push(format!("{t:?} ordered {got:?}, wanted {want:?}"));
+                }
+            }
+            Step::ExpectFocused(t) => {
+                if stage.is_focused(*t) {
+                    observed.push(format!("{t:?} focused"));
+                } else {
+                    failures.push(format!("{t:?} does not hold focus"));
                 }
             }
         }
@@ -360,6 +390,22 @@ mod tests {
         assert_eq!(steps.len(), 1);
     }
 
+    /// expect routes by target kind (entry reads the field, labels
+    /// read label text) and expect_focused both parses and counts as
+    /// an expect for the zero-expect guard.
+    #[test]
+    fn entry_expect_and_focus_route_and_count() {
+        let steps =
+            parse("expect entry#0 \"entry-text\"\nexpect_focused entry#0").unwrap();
+        assert_eq!(steps[1], Step::ExpectFocused(Target { kind: TargetKind::Entry, index: 0 }));
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("entry-text"), "{verdict}");
+        assert!(verdict.contains("focused"), "{verdict}");
+    }
+
     /// A stage that records interactions and reports the verdict back
     /// through a channel, so tests can watch a whole run.
     struct MockStage {
@@ -376,6 +422,12 @@ mod tests {
         fn set_text(&self, _: Target, _: &str) {}
         fn read_label(&self, _: Target) -> String {
             "ok-text".into()
+        }
+        fn read_text(&self, _: Target) -> String {
+            "entry-text".into()
+        }
+        fn is_focused(&self, _: Target) -> bool {
+            true
         }
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()

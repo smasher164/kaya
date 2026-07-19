@@ -133,7 +133,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x3549f42a1a09369eULL
+#define KAYA_SPEC_HASH 0x72814fd3802b05cbULL
 
 
 /* Create a signal holding `initial`. */
@@ -266,6 +266,15 @@ static inline void kaya_tx_collection_update_field(KayaTx *tx, uint64_t collecti
 static inline void kaya_tx_variant_case(KayaTx *tx, uint32_t variant) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_VARIANT_CASE);
     kaya_wire_u32(tx, variant);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, start);
+}
+
+/* A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. */
+static inline void kaya_tx_widget_command(KayaTx *tx, uint64_t widget_id, uint32_t command) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_WIDGET_COMMAND);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, command);
     kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, start);
 }

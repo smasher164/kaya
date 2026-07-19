@@ -24,7 +24,9 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
-use crate::protocol::{ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind};
+use crate::protocol::{
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+};
 use crate::scene::Scene;
 
 enum NativeWidget {
@@ -289,6 +291,34 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
         ApplyOp::Mount { window: _, root } => {
             let root_view = core.widgets.get(&root).expect("scene validated the id");
             core._window.setContentView(Some(root_view.view()));
+        }
+        ApplyOp::Command { id, command } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match command {
+                CommandKind::Clear => {
+                    let NativeWidget::Entry(field) = widget else {
+                        panic!("kaya: clear on a non-entry (scene validates kinds)")
+                    };
+                    // The field stays authoritative and answers through
+                    // its normal edit path. AppKit fires no
+                    // controlTextDidChange for a programmatic set, so
+                    // the delegate emits explicitly — the same
+                    // compensation the Stage's set_text makes.
+                    field.setStringValue(&NSString::from_str(""));
+                    let (_, delegate) = core
+                        .entries
+                        .iter()
+                        .find(|(f, _)| std::ptr::eq::<NSTextField>(&**f, &**field))
+                        .expect("entries registry covers every entry");
+                    delegate.emit("");
+                }
+                CommandKind::Focus => {
+                    // Per-window first responder: key status is not
+                    // required, so parallel tiled suite legs cannot
+                    // steal each other's focus assertions.
+                    core._window.makeFirstResponder(Some(widget.view()));
+                }
+            }
         }
     }
 }
@@ -571,6 +601,29 @@ impl crate::harness::Stage for AppKitStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             core.labels[i].stringValue().to_string()
+        })
+    }
+
+    fn read_text(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            core.entries[i].0.stringValue().to_string()
+        })
+    }
+
+    fn is_focused(&self, t: crate::harness::Target) -> bool {
+        Self::on_main(move |core| {
+            // A focused NSTextField's first responder is its field
+            // editor, not the field — currentEditor() is non-nil
+            // exactly while the field holds focus, and stays
+            // per-window (key status not required).
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    core.entries[i].0.currentEditor().is_some()
+                }
+                other => panic!("kaya: is_focused not wired for {other:?} on appkit"),
+            }
         })
     }
 

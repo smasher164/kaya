@@ -14,12 +14,17 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -55,6 +60,10 @@ object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     val nodes = HashMap<Long, KayaNode>() // UI thread only
     val parents = HashMap<Long, Long>()
+    // The focus command's landing spot: the entry's FocusRequester
+    // walks it into the platform focus system, and expect_focused
+    // reads it back.
+    var focusedId by mutableStateOf<Long?>(null)
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -74,6 +83,9 @@ object KayaCompose {
     private const val APPLY_MOUNT = 4
     private const val APPLY_DESTROY = 5
     private const val APPLY_MOVE_CHILD = 6
+    private const val APPLY_COMMAND = 7
+    private const val COMMAND_CLEAR = 1
+    private const val COMMAND_FOCUS = 2
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -183,6 +195,25 @@ object KayaCompose {
                     }
                     KayaSceneModel.nodes.remove(id)
                 }
+                APPLY_COMMAND -> {
+                    val id = b.long
+                    val command = b.int
+                    b.int // pad
+                    when (command) {
+                        COMMAND_CLEAR -> {
+                            // Model-driven, like set_text: the node's
+                            // text is the field's text, and the app
+                            // hears the empty edit through the same
+                            // emission the TextField's change would
+                            // make.
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.text = ""
+                            KayaPresent.emitTextChanged(node.tag, "")
+                        }
+                        COMMAND_FOCUS -> KayaSceneModel.focusedId = id
+                        else -> error("kaya: unknown command $command")
+                    }
+                }
             }
             b.position(start + size)
         }
@@ -214,7 +245,8 @@ object KayaCompose {
     /**
      * The interaction harness's Kotlin interpreter: the same
      * line-oriented grammar the Rust backends embed from tools/scenes
-     * (settle / click / toggle / set_value / set_text / expect,
+     * (settle / click / toggle / set_value / set_text / expect /
+     * expect_order / expect_focused,
      * targets as kind#index, `;` accepted as a newline stand-in — the
      * intent-extra transport cannot carry newlines). Steps drive the
      * node tree exactly as a gesture would: flip the snapshot state,
@@ -288,11 +320,35 @@ object KayaCompose {
                     }
                     "expect" -> {
                         val want = quoted(parts.drop(2))
-                        val got = onUi(activity) { target(parts[1], KayaSceneModel.labels).text }
+                        // An entry target reads the field's own
+                        // displayed text (here, the node the TextField
+                        // binds); everything else reads label text —
+                        // harness.rs's routing.
+                        val got = onUi(activity) {
+                            if (parts[1].startsWith("entry"))
+                                target(parts[1], KayaSceneModel.entries).text
+                            else target(parts[1], KayaSceneModel.labels).text
+                        }
                         if (got == want) {
                             observed.add(got)
                         } else {
                             failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_focused" -> {
+                        // The model's focusedId is the observation the
+                        // focus command lands as (the entry's
+                        // FocusRequester walks it into the platform).
+                        // Counts as an expect for the zero-expect
+                        // rule, exactly as in harness.rs.
+                        val focused = onUi(activity) {
+                            KayaSceneModel.focusedId ==
+                                target(parts[1], KayaSceneModel.entries).id
+                        }
+                        if (focused) {
+                            observed.add("${parts[1]} focused")
+                        } else {
+                            failures.add("${parts[1]} does not hold focus")
                         }
                     }
                     "expect_order" -> {
@@ -385,18 +441,36 @@ fun KayaRender(node: KayaNode) {
                 },
                 valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
             )
-        KayaCompose.KIND_ENTRY ->
+        KayaCompose.KIND_ENTRY -> {
             // Uncontrolled toward the app: the node mirrors what the
             // user types (Compose needs the state), and every edit is
             // emitted with the entry's identity tag for the app to fold
-            // into its own model — nothing here is read back.
+            // into its own model — nothing here is read back. Focus is
+            // model-driven the same way: the focus command lands as the
+            // scene's focusedId, walked into the platform focus system
+            // here, and a user-driven change flows back so the model
+            // stays truthful.
+            val focusRequester = remember { FocusRequester() }
             TextField(
                 value = node.text,
                 onValueChange = { newValue ->
                     node.text = newValue
                     KayaPresent.emitTextChanged(node.tag, newValue)
                 },
+                modifier = Modifier
+                    .focusRequester(focusRequester)
+                    // Gain-only back-propagation: onFocusChanged also
+                    // fires with the initial unfocused state at attach,
+                    // and a loss branch there would clear a focusedId
+                    // the LaunchedEffect below has not yet requested.
+                    .onFocusChanged { state ->
+                        if (state.isFocused) KayaSceneModel.focusedId = node.id
+                    },
             )
+            LaunchedEffect(KayaSceneModel.focusedId) {
+                if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
+            }
+        }
     }
 }
 

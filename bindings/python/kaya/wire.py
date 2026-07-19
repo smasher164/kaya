@@ -9,7 +9,7 @@ Python bool, int, float, and str, mapped to the kaya value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x3549f42a1a09369e
+SPEC_HASH = 0x72814fd3802b05cb
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -35,6 +35,8 @@ OCCURRENCE_BUTTON_CLICKED = 1
 OCCURRENCE_TEXT_CHANGED = 2
 OCCURRENCE_TOGGLED = 3
 OCCURRENCE_VALUE_CHANGED = 4
+COMMAND_CLEAR = 1
+COMMAND_FOCUS = 2
 
 TX_CREATE_SIGNAL = 1
 TX_WRITE_SIGNAL = 2
@@ -52,12 +54,14 @@ TX_TEMPLATE_END = 13
 TX_COLLECTION_MOVE = 15
 TX_COLLECTION_UPDATE_FIELD = 14
 TX_VARIANT_CASE = 16
+TX_WIDGET_COMMAND = 17
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
 APPLY_MOUNT = 4
 APPLY_MOVE_CHILD = 6
 APPLY_DESTROY = 5
+APPLY_COMMAND = 7
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -164,6 +168,10 @@ def tx_collection_update_field(collection_id, path, key, field, variant, value):
 def tx_variant_case(variant):
     """Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly."""
     return record(TX_VARIANT_CASE, struct.pack("<I", variant) + struct.pack("<I", 0))
+
+def tx_widget_command(widget_id, command):
+    """A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy."""
+    return record(TX_WIDGET_COMMAND, struct.pack("<Q", widget_id) + struct.pack("<I", command) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id, text):

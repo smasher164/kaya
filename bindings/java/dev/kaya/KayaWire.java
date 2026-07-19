@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x3549f42a1a09369eL;
+    public static final long SPEC_HASH = 0x72814fd3802b05cbL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -39,6 +39,8 @@ public final class KayaWire {
     public static final int OCCURRENCE_TEXT_CHANGED = 2;
     public static final int OCCURRENCE_TOGGLED = 3;
     public static final int OCCURRENCE_VALUE_CHANGED = 4;
+    public static final int COMMAND_CLEAR = 1;
+    public static final int COMMAND_FOCUS = 2;
     public static final short TX_KIND_CREATE_SIGNAL = 1;
     public static final short TX_KIND_WRITE_SIGNAL = 2;
     public static final short TX_KIND_CREATE_WIDGET = 3;
@@ -55,12 +57,14 @@ public final class KayaWire {
     public static final short TX_KIND_COLLECTION_MOVE = 15;
     public static final short TX_KIND_COLLECTION_UPDATE_FIELD = 14;
     public static final short TX_KIND_VARIANT_CASE = 16;
+    public static final short TX_KIND_WIDGET_COMMAND = 17;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
     public static final short APPLY_KIND_MOUNT = 4;
     public static final short APPLY_KIND_MOVE_CHILD = 6;
     public static final short APPLY_KIND_DESTROY = 5;
+    public static final short APPLY_KIND_COMMAND = 7;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -250,6 +254,15 @@ public final class KayaWire {
     public static byte[] txVariantCase(int variant) {
         ByteBuffer b = begin(TX_KIND_VARIANT_CASE);
         b.putInt(variant);
+        b.putInt(0);
+        return finish(b);
+    }
+
+    /** A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. */
+    public static byte[] txWidgetCommand(long widgetId, int command) {
+        ByteBuffer b = begin(TX_KIND_WIDGET_COMMAND);
+        b.putLong(widgetId);
+        b.putInt(command);
         b.putInt(0);
         return finish(b);
     }

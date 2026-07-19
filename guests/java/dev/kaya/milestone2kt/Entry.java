@@ -9,6 +9,13 @@ import dev.kaya.KayaWire;
  * app folds those into a plain field (draft) — its own model, per
  * doctrine. The add button inserts the draft and answers with the count
  * read from the collection model.
+ *
+ * <p>The backend selftest (KAYA_SELFTEST=entry) types "milk", clicks
+ * add, and expects the status label to read "added milk, 1 total", the
+ * field cleared and refocused (the one-shot commands riding the same
+ * transaction as the insert), and a second add to answer "nothing to
+ * add, 1 total" — proving the clear's text_changed("") re-entered
+ * through the normal fold and emptied the draft.
  */
 final class Entry {
     /** The scene's handles, returned by the build body. */
@@ -61,10 +68,23 @@ final class Entry {
 
         app.onChange(scene.field, (tx, text) -> draft = text);
         app.onClick(scene.add, tx -> {
+            // The empty-draft guard every real form has — and the
+            // scene's proof that clear emptied the draft through the
+            // occurrence fold, not a side assignment.
+            if (draft.isEmpty()) {
+                tx.write(scene.status, "nothing to add, " + tx.count(scene.todos) + " total");
+                return;
+            }
             nextKey++;
             tx.insert(scene.todos, "t" + nextKey, draft);
             int total = tx.count(scene.todos);
             tx.write(scene.status, "added " + draft + ", " + total + " total");
+            // Finish the form: drop the field's content and put the
+            // cursor back, atomically with the insert. The field
+            // answers with text_changed("") through its normal edit
+            // path, and onChange empties the draft.
+            tx.clear(scene.field);
+            tx.focus(scene.field);
         });
 
         app.dispatchLoop();

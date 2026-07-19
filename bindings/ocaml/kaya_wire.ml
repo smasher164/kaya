@@ -7,7 +7,7 @@
 type value = Bool of bool | I64 of int64 | F64 of float | Str of string
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3549f42a1a09369eL
+let spec_hash = 0x72814fd3802b05cbL
 
 let value_bool = 1
 let value_i64 = 2
@@ -33,6 +33,8 @@ let occurrence_button_clicked = 1
 let occurrence_text_changed = 2
 let occurrence_toggled = 3
 let occurrence_value_changed = 4
+let command_clear = 1
+let command_focus = 2
 let tx_kind_create_signal = 1
 let tx_kind_write_signal = 2
 let tx_kind_create_widget = 3
@@ -49,12 +51,14 @@ let tx_kind_template_end = 13
 let tx_kind_collection_move = 15
 let tx_kind_collection_update_field = 14
 let tx_kind_variant_case = 16
+let tx_kind_widget_command = 17
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
 let apply_kind_mount = 4
 let apply_kind_move_child = 6
 let apply_kind_destroy = 5
+let apply_kind_command = 7
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -219,6 +223,13 @@ let tx_collection_update_field collection_id path key field variant value =
 let tx_variant_case variant =
   finish tx_kind_variant_case (fun b ->
       Buffer.add_int32_le b (Int32.of_int variant);
+      Buffer.add_int32_le b 0l)
+
+(* A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. *)
+let tx_widget_command widget_id command =
+  finish tx_kind_widget_command (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int command);
       Buffer.add_int32_le b 0l)
 
 (* set_property with a constant text value. *)

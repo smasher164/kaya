@@ -310,6 +310,24 @@ sealed class KayaApp
     public void OnToggle(Node n, Action<Tx, List<object>, bool> handler) =>
         nodeToggles[n.Id] = handler;
 
+    /// One handler dispatch: an exception crosses the Build boundary
+    /// (which rolled the mirrors back and dropped the records), is
+    /// logged, and the loop moves to the next occurrence — the uniform
+    /// dispatch discipline across every binding. Fatal runtime errors
+    /// (stack overflow, access violation) still die.
+    void Dispatch(Action<Tx> fn)
+    {
+        try
+        {
+            Build(fn);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine(
+                $"kaya: handler threw (transaction rolled back): {e}");
+        }
+    }
+
     void DispatchLoop()
     {
         while (Kaya.NextOccurrence(
@@ -320,37 +338,37 @@ sealed class KayaApp
             if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)
             {
                 if (widgetHandlers.TryGetValue(id, out var fn))
-                    Build(fn);
+                    Dispatch(fn);
             }
             else if (kind == KayaWire.OccKindButtonClicked)
             {
                 if (nodeHandlers.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, keys));
+                    Dispatch(tx => fn(tx, keys));
             }
             else if (kind == KayaWire.OccKindTextChanged && keys.Count == 0)
             {
                 if (widgetChanges.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, text));
+                    Dispatch(tx => fn(tx, text));
             }
             else if (kind == KayaWire.OccKindTextChanged)
             {
                 if (nodeChanges.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, keys, text));
+                    Dispatch(tx => fn(tx, keys, text));
             }
             else if (kind == KayaWire.OccKindToggled && keys.Count == 0)
             {
                 if (widgetToggles.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, isChecked));
+                    Dispatch(tx => fn(tx, isChecked));
             }
             else if (kind == KayaWire.OccKindToggled)
             {
                 if (nodeToggles.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, keys, isChecked));
+                    Dispatch(tx => fn(tx, keys, isChecked));
             }
             else if (kind == KayaWire.OccKindValueChanged && keys.Count == 0)
             {
                 if (widgetValues.TryGetValue(id, out var fn))
-                    Build(tx => fn(tx, payload is double d ? d : 0.0));
+                    Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
             }
         }
     }
@@ -580,6 +598,22 @@ sealed class Tx
 
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
+
+    /// Drop the widget's owned content — a one-shot command: momentary
+    /// verbs into widget-owned state, riding this transaction like any
+    /// write, so the insert and the clear beside it commit together or
+    /// not at all. Fire-and-forget: no state at rest, nothing to
+    /// journal, and the widget answers through its normal occurrence
+    /// path (a clear arrives back as a text change with empty text, so
+    /// the app's draft fold empties itself — never a side assignment).
+    public void Clear(Widget w) =>
+        Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandClear));
+
+    /// Give the widget keyboard focus (the post-submit refocus every
+    /// real form wants) — a one-shot command riding the transaction
+    /// like Clear.
+    public void Focus(Widget w) =>
+        Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandFocus));
 
     // --- Construction sugar: the tree reads as a tree ----------------
     //

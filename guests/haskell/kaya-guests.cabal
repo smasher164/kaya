@@ -54,3 +54,9 @@ executable encodebench
   import: shared
   main-is: encodebench.hs
   build-depends: kaya-guests, time
+
+-- Not a scene: the headless abort check (uniform abort semantics).
+executable kaya-abort-check
+  import: shared
+  main-is: AbortCheck.hs
+  build-depends: kaya-guests

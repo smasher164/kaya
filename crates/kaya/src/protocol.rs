@@ -197,6 +197,23 @@ pub enum Prop {
     Max,
 }
 
+/// The one-shot command vocabulary: momentary verbs aimed at
+/// widget-owned state, the third arm of the ownership rule (app-owned
+/// state travels as props and deltas, widget-owned state comes back as
+/// occurrences, and the app's momentary crossings into state it does
+/// not own are commands). Fire-and-forget: no state at rest, nothing
+/// replays on instance rebuild, and the widget reports the result
+/// through its normal occurrence path. A closed set; each verb is
+/// admitted by a real artifact, per the escalation policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandKind {
+    /// Drop an entry's content now (the widget stays authoritative and
+    /// answers with a TextChanged carrying the empty text).
+    Clear,
+    /// Give the widget the keyboard focus.
+    Focus,
+}
+
 /// A bound property's source: a constant, a signal reference, or —
 /// inside a template — one field of the element (the entry's record)
 /// of an enclosing For, `level` Fors up (0 = nearest). Nothing else;
@@ -272,6 +289,14 @@ pub enum TxOp {
     /// a constructor as nothing; omitting a case is a scene error.
     VariantCase { variant: u32 },
     TemplateEnd,
+    /// A one-shot command aimed at a live widget. Live-zone targets
+    /// only for now: a live id can only vanish by the guest's own hand,
+    /// so a missing target is misuse and fails loudly, like
+    /// SetProperty. Instance-addressed commands (a scrollTo naming a
+    /// stamped row) arrive with their artifact and bring the silent
+    /// vanished-target no-op with them — stamped copies legitimately
+    /// disappear under rebuild.
+    WidgetCommand { widget: WidgetId, command: CommandKind },
 }
 
 /// A transaction: applied atomically, in submission order, last write
@@ -302,6 +327,13 @@ pub enum ApplyOp {
     /// one Destroy per widget of a torn-down instance, children before
     /// parents, so backends never walk anything.
     Destroy { id: WidgetId },
+    /// Execute a one-shot command on the widget, then let it report
+    /// the result through its normal occurrence path — a clear arrives
+    /// back as TextChanged with empty text, through the same delegate
+    /// a keystroke uses (programmatic mutations fire the change path
+    /// explicitly on toolkits that don't, the Stage set_text
+    /// precedent).
+    Command { id: WidgetId, command: CommandKind },
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3549f42a1a09369e
+	SpecHash uint64 = 0x72814fd3802b05cb
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -38,6 +38,8 @@ const (
 	OccurrenceTextChanged = 2
 	OccurrenceToggled = 3
 	OccurrenceValueChanged = 4
+	CommandClear = 1
+	CommandFocus = 2
 	txCreateSignal = 1
 	txWriteSignal = 2
 	txCreateWidget = 3
@@ -54,12 +56,14 @@ const (
 	txCollectionMove = 15
 	txCollectionUpdateField = 14
 	txVariantCase = 16
+	txWidgetCommand = 17
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
 	applyMount = 4
 	applyMoveChild = 6
 	applyDestroy = 5
+	applyCommand = 7
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -278,6 +282,15 @@ func TxCollectionUpdateField(collectionId uint64, path []any, key any, field uin
 func TxVariantCase(variant uint32) []byte {
 	b := beginRecord(txVariantCase)
 	b = binary.LittleEndian.AppendUint32(b, variant)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxWidgetCommand: A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
+func TxWidgetCommand(widgetId uint64, command uint32) []byte {
+	b := beginRecord(txWidgetCommand)
+	b = binary.LittleEndian.AppendUint64(b, widgetId)
+	b = binary.LittleEndian.AppendUint32(b, command)
 	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }

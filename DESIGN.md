@@ -411,6 +411,50 @@ rules so far:
   (before itself, after itself, already in place) is a no-op that
   ships nothing. Handlers ask the model which key is first or last —
   they never count widgets — and the wire delta stays keys-only.
+- One-shot commands are the third arm of the ownership rule, and the
+  rule decides the mechanism everywhere: app-owned state travels as
+  props and deltas (retained, replayable); widget-owned state comes
+  back as occurrences the app folds; and the app's momentary crossings
+  into state it does not own — clear an entry, focus a widget, later
+  scrollTo — are commands: one `widget_command` record riding the
+  ordinary transaction, so the insert and the clear beside it commit
+  atomically or not at all. A command is fire-and-forget wire data —
+  no state at rest, nothing recorded, nothing replayed on instance
+  rebuild — and the widget stays authoritative, answering through its
+  normal occurrence path (a clear arrives back as text_changed with
+  empty text, through the same delegate a keystroke uses; backends
+  whose programmatic mutation is silent re-fire the change path
+  explicitly). The vocabulary is one enum row per verb, closed under
+  the same admission policy as the binding transforms: each verb
+  admitted by a real artifact (clear and focus by the entry form;
+  scrollTo waits for a long list), never speculatively — and never a
+  general call-a-method escape hatch, which is the door to the
+  imperative API this design exists to avoid. Addressing splits the
+  failure modes: a live-zone target can only vanish by the guest's own
+  hand, so a command on a missing or wrong-kinded live widget fails
+  loudly at the call site like any misuse; instance-addressed commands
+  (when scrollTo brings key-path targets) get the silent no-op
+  instead, because a stamped copy legitimately vanishes under rebuild
+  and racing a teardown is not a bug (the Elm precedent: focus on a
+  vanished node is a defined outcome, not an error). Bindings surface
+  commands on the live widget handle or transaction (`entry.clear()`,
+  `tx.focus(field)`), live zone only — a template node has no command
+  surface, structurally, since a blueprint has nothing to clear.
+- One abort semantics in every binding, idiom deciding only the
+  spelling: a handler abort at the transaction boundary restores the
+  binding's model and signal mirrors from a journal (or by purity,
+  where the transaction is pure state), ships nothing — commands and
+  derived-signal registrations dying with the record buffer — and
+  propagates; the binding-owned dispatch loop then catches, logs, and
+  goes on to the next occurrence, so one buggy handler never takes the
+  app down. What a language cannot catch (Swift's traps, VM-fatal
+  errors, an unrecovered Go runtime abort) stays process-fatal
+  everywhere, uniformly. Rust is the one structural exception: its
+  binding owns no dispatch loop (the occurrence match is guest
+  surface), so the tx boundary's Drop-rollback is where its uniformity
+  lives and loop survival is the guest's own choice. Every binding
+  carries the same negative test — abort mid-handler: mirror restored,
+  nothing shipped, next dispatch works (tools/check-abort.sh).
 
 ## Layout
 

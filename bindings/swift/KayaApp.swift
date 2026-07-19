@@ -36,12 +36,12 @@ struct KayaSignal {
         }
         let source = self
         let d = tx.signal(compute(app.signalMirrors[source.id]!))
-        app.signalDeps[source.id, default: []].append { t in
+        tx.pendingSignalDeps.append((source.id, { t in
             let v = compute(t.app.signalMirrors[source.id]!)
             if v != t.app.signalMirrors[d.id]! {
                 t.write(d, v)
             }
-        }
+        }))
         return d
     }
 
@@ -187,13 +187,13 @@ final class KayaApp {
     private var widgets: UInt64 = 0
     private var collections: UInt64 = 0
     private var nodes: UInt64 = 0
-    private var widgetHandlers: [UInt64: (KayaAppTx) -> Void] = [:]
-    private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) -> Void] = [:]
-    private var widgetChanges: [UInt64: (KayaAppTx, String) -> Void] = [:]
-    private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) -> Void] = [:]
-    private var widgetToggles: [UInt64: (KayaAppTx, Bool) -> Void] = [:]
-    private var widgetValues: [UInt64: (KayaAppTx, Double) -> Void] = [:]
-    private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) -> Void] = [:]
+    private var widgetHandlers: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
+    private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
+    private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
+    private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
+    private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
+    private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -233,7 +233,29 @@ final class KayaApp {
         }
     }
 
+    /// Journal one collection's instances into the open transaction the
+    /// first time it mutates them (value semantics make the snapshot a
+    /// cheap copy-on-write). nil records that the collection had no
+    /// model entry before this transaction.
+    fileprivate func touchModel(_ coll: UInt64) {
+        guard let tx = currentTx else { return }
+        if tx.journal.index(forKey: coll) == nil {
+            tx.journal[coll] = model[coll]
+        }
+    }
+
+    fileprivate func restoreModel(_ journal: [UInt64: [KayaInstance]?]) {
+        for (id, saved) in journal {
+            if let saved {
+                model[id] = saved
+            } else {
+                model.removeValue(forKey: id)
+            }
+        }
+    }
+
     fileprivate func modelSet(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ value: Any) {
+        touchModel(coll)
         var instances = model[coll, default: []]
         let at = instances.firstIndex { $0.path == path } ?? {
             instances.append(KayaInstance(path: path, entries: []))
@@ -248,6 +270,7 @@ final class KayaApp {
     }
 
     fileprivate func modelRemove(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue) {
+        touchModel(coll)
         if var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }) {
             instances[at].entries.removeAll { $0.key == key }
             model[coll] = instances
@@ -264,6 +287,7 @@ final class KayaApp {
     fileprivate func modelMove(
         _ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ before: [KayaValue]
     ) {
+        touchModel(coll)
         // The same checks the scene makes, made where the guest can
         // see the stack: a missing key or anchor is a guest bug, never
         // a fallback. Both validated before anything mutates.
@@ -285,6 +309,7 @@ final class KayaApp {
 
     private func purgeChildren(_ coll: UInt64, prefix: [KayaValue]) {
         for kid in childCollections[coll, default: []] {
+            touchModel(kid)
             model[kid]?.removeAll { instance in
                 instance.path.count >= prefix.count
                     && Array(instance.path[0..<prefix.count]) == prefix
@@ -321,36 +346,46 @@ final class KayaApp {
 
     /// Run `build` with a fresh transaction and submit it atomically.
     /// The body's result comes back out — the way a scene's handles
-    /// reach the handlers.
-    func build<R>(_ build: (KayaAppTx) -> R) -> R {
+    /// reach the handlers. A throw out of the body abandons the
+    /// transaction: the records never ship and the journal restores
+    /// the model and signal mirrors to exactly what was shipped — then
+    /// the error continues to the caller. The tx boundary rolls back
+    /// and propagates; whether the app survives is the caller's
+    /// decision (the dispatch loop survives).
+    func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {
         let tx = KayaAppTx(app: self)
-        let out = build(tx)
-        tx.submitIfAny()
-        return out
+        do {
+            let out = try build(tx)
+            tx.submitIfAny()
+            return out
+        } catch {
+            tx.rollback()
+            throw error
+        }
     }
 
     /// Register a click handler for a live widget.
-    func onClick(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) -> Void) {
+    func onClick(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
         widgetHandlers[w.id] = handler
     }
 
     /// Register a click handler for a template node; it also receives
     /// the stamped copy's keys, outermost first.
-    func onClick(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) -> Void) {
+    func onClick(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
         nodeHandlers[n.id] = handler
     }
 
     /// Register a change handler for a live entry: the widget owns its
     /// text and reports each edit here; the app folds the text into its
     /// own state — there is no read-back, by doctrine.
-    func onChange(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, String) -> Void) {
+    func onChange(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, String) throws -> Void) {
         widgetChanges[w.id] = handler
     }
 
     /// Register a change handler for a template entry; it also receives
     /// the stamped copy's keys, outermost first.
     func onChange(
-        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) -> Void
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], String) throws -> Void
     ) {
         nodeChanges[n.id] = handler
     }
@@ -358,23 +393,36 @@ final class KayaApp {
     /// Register a toggle handler for a live checkbox: the box owns its
     /// checked bit and reports each flip here; the app folds it into
     /// its own state.
-    func onToggle(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Bool) -> Void) {
+    func onToggle(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Bool) throws -> Void) {
         widgetToggles[w.id] = handler
     }
 
     /// A live slider's change handler: the bar owns its position and
     /// reports each move with the new value — the entry's uncontrolled
     /// contract, with a Double.
-    func onValueChanged(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double) -> Void) {
+    func onValueChanged(_ w: KayaWidget, _ handler: @escaping (KayaAppTx, Double) throws -> Void) {
         widgetValues[w.id] = handler
     }
 
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     func onToggle(
-        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Bool) -> Void
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Bool) throws -> Void
     ) {
         nodeToggles[n.id] = handler
+    }
+
+    /// One handler dispatch: a throw crosses the build boundary (which
+    /// has already rolled the mirrors back and dropped the records), is
+    /// logged, and the loop moves to the next occurrence — the uniform
+    /// dispatch discipline across every binding. Traps still die.
+    private func dispatch(_ body: () throws -> Void) {
+        do {
+            try body()
+        } catch {
+            FileHandle.standardError.write(
+                Data("kaya: handler threw (transaction rolled back): \(error)\n".utf8))
+        }
     }
 
     private func dispatchLoop() {
@@ -397,31 +445,31 @@ final class KayaApp {
             switch (kind, keys.isEmpty) {
             case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), true):
                 if let handler = widgetHandlers[id] {
-                    build(handler)
+                    dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_BUTTON_CLICKED), false):
                 if let handler = nodeHandlers[id] {
-                    build { tx in handler(tx, keys) }
+                    dispatch { try build { tx in try handler(tx, keys) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), true):
                 if let handler = widgetChanges[id] {
-                    build { tx in handler(tx, text ?? "") }
+                    dispatch { try build { tx in try handler(tx, text ?? "") } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), false):
                 if let handler = nodeChanges[id] {
-                    build { tx in handler(tx, keys, text ?? "") }
+                    dispatch { try build { tx in try handler(tx, keys, text ?? "") } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), true):
                 if let handler = widgetToggles[id] {
-                    build { tx in handler(tx, checked) }
+                    dispatch { try build { tx in try handler(tx, checked) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), false):
                 if let handler = nodeToggles[id] {
-                    build { tx in handler(tx, keys, checked) }
+                    dispatch { try build { tx in try handler(tx, keys, checked) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), true):
                 if let handler = widgetValues[id] {
-                    build { tx in handler(tx, value) }
+                    dispatch { try build { tx in try handler(tx, value) } }
                 }
             default:
                 break
@@ -543,6 +591,15 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
 final class KayaAppTx {
     let app: KayaApp
     var tx = KayaTx()
+    // How to undo this transaction's mirror edits: a snapshot per
+    // touched collection / signal, taken on first touch (nil = it did
+    // not exist before this transaction). Derived registrations are
+    // pure data until the commit promotes them — an abandoned
+    // transaction abandons its registrations with its records.
+    fileprivate var journal: [UInt64: [KayaInstance]?] = [:]
+    var signalJournal: [UInt64: KayaValue?] = [:]
+    var pendingSignalDeps: [(UInt64, (KayaAppTx) -> Void)] = []
+    var pendingDerived: [(UInt64, (KayaAppTx) -> Void)] = []
 
     init(app: KayaApp) {
         self.app = app
@@ -554,20 +611,49 @@ final class KayaAppTx {
             app.openTraces == 0,
             "kaya: a for-in over rows was exited early (break?) — the template never closed")
         app.currentTx = nil
+        for (id, recompute) in pendingSignalDeps {
+            app.signalDeps[id, default: []].append(recompute)
+        }
+        for (id, recompute) in pendingDerived {
+            app.derived[id, default: []].append(recompute)
+        }
         if !tx.bytes.isEmpty {
             tx.submit()
+        }
+    }
+
+    /// The commit's mirror image: restore every touched mirror entry
+    /// and drop the records with the pending registrations. Reads
+    /// after an abandoned transaction show exactly what was shipped.
+    func rollback() {
+        app.currentTx = nil
+        app.restoreModel(journal)
+        for (id, old) in signalJournal {
+            if let old {
+                app.signalMirrors[id] = old
+            } else {
+                app.signalMirrors.removeValue(forKey: id)
+            }
+        }
+    }
+
+    func touchSignal(_ id: UInt64) {
+        if signalJournal.index(forKey: id) == nil {
+            signalJournal[id] = app.signalMirrors[id]
         }
     }
 
     func signal(_ initial: KayaValue) -> KayaSignal {
         let s = app.nextSignal()
         tx.createSignal(s.id, initial)
+        touchSignal(s.id)
         app.signalMirrors[s.id] = initial
         return s
     }
 
     func write(_ s: KayaSignal, _ value: KayaValue) {
         tx.writeSignal(s.id, value)
+        touchSignal(s.id)
         app.signalMirrors[s.id] = value
         // The dependents recompute now, batched into this transaction
         // (a derived write chains through here again for its own
@@ -599,6 +685,26 @@ final class KayaAppTx {
         tx.bindChecked(w.id, s.id)
     }
 
+    // One-shot commands: momentary verbs into widget-owned state,
+    // riding the open transaction like any record — the insert and the
+    // clear beside it commit together or not at all. Fire-and-forget:
+    // no mirror state, nothing to journal; the widget answers through
+    // its normal occurrence path (a clear arrives back as
+    // text_changed("") and the app's draft fold empties itself).
+    // Commands take a KayaWidget only — a KayaNodeHandle is a
+    // blueprint, and a blueprint has nothing to clear (the type-level
+    // arm of the scene's own template rejection).
+
+    /// Drop an entry's content now (the field stays authoritative).
+    func clear(_ w: KayaWidget) {
+        tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_CLEAR))
+    }
+
+    /// Give this widget the keyboard focus.
+    func focus(_ w: KayaWidget) {
+        tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_FOCUS))
+    }
+
     // --- Construction sugar: the tree reads as a tree ----------------
     //
     // Co-located constructors (props and handlers at the declaration
@@ -608,14 +714,14 @@ final class KayaAppTx {
     // the container and its addChilds. Sugar over the record calls,
     // never a scene value interpreted later.
 
-    func button(_ text: String? = nil, onClick: ((KayaAppTx) -> Void)? = nil) -> KayaWidget {
+    func button(_ text: String? = nil, onClick: ((KayaAppTx) throws -> Void)? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_BUTTON))
         if let text { setText(w, text) }
         if let onClick { app.onClick(w, onClick) }
         return w
     }
 
-    func entry(onChange: ((KayaAppTx, String) -> Void)? = nil) -> KayaWidget {
+    func entry(onChange: ((KayaAppTx, String) throws -> Void)? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_ENTRY))
         if let onChange { app.onChange(w, onChange) }
         return w
@@ -632,7 +738,7 @@ final class KayaAppTx {
     /// co-located.
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
-        onChange: ((KayaAppTx, Double) -> Void)? = nil
+        onChange: ((KayaAppTx, Double) throws -> Void)? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SLIDER))
         tx.setMin(w.id, min)
@@ -644,7 +750,7 @@ final class KayaAppTx {
 
     func checkbox(
         _ text: String? = nil, checked: Bool? = nil,
-        onToggle: ((KayaAppTx, Bool) -> Void)? = nil
+        onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_CHECKBOX))
         if let text { setText(w, text) }
@@ -926,7 +1032,7 @@ final class KayaTpl {
 
     func checkbox(
         _ f: KayaField<Bool>,
-        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_CHECKBOX))
         bindCheckedField(n, f)

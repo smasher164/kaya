@@ -32,8 +32,10 @@ module KayaApp
     Collection,
     Declare (..),
     kayaMain,
+    newApp,
     buildTx,
     submitTx,
+    dispatch,
     onClick,
     onClickNode,
     onChange,
@@ -54,6 +56,8 @@ module KayaApp
     items,
     count,
     mount,
+    clearWidget,
+    focusWidget,
     bindText,
     bindChecked,
     bindTextElement,
@@ -113,6 +117,9 @@ import Data.Proxy (Proxy (..))
 import Data.Word (Word32, Word64)
 import GHC.Generics
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
+
+import Control.Exception (SomeException, catch, evaluate)
+import System.IO (hPutStrLn, stderr)
 
 import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence)
 import qualified KayaWire as W
@@ -511,6 +518,23 @@ count c = length <$> items c
 -- window vocabulary.
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
+
+-- One-shot commands: momentary verbs into widget-owned state, riding
+-- the open transaction like any record — the insert and the clear
+-- beside it submit together or not at all. Fire-and-forget: no model
+-- state, nothing to journal; the widget answers through its normal
+-- occurrence path (a clear arrives back as text_changed "" and the
+-- app's draft fold empties itself). Build-zone Widgets only — a Node
+-- is a blueprint, and a blueprint has nothing to clear (the
+-- type-level arm of the scene's own template rejection).
+
+-- | Drop an entry's content now (the field stays authoritative).
+clearWidget :: Widget -> Build ()
+clearWidget (Widget n) = emitB (W.txWidgetCommand n W.commandClear)
+
+-- | Give this widget the keyboard focus.
+focusWidget :: Widget -> Build ()
+focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
 
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
@@ -1019,6 +1043,12 @@ buildTx app (Build f) = do
   (model, children) <- readIORef (appModel app)
   derived <- readIORef (appDerived app)
   let (a, s) = f (BuildState counters mempty model children [] [] derived)
+  -- Force the Build's final state before the first store-back: a
+  -- Build that throws must throw HERE, where the boundary abandons
+  -- everything — never later, from a poisoned thunk inside an IORef
+  -- (the catch-and-continue dispatch would trip on it transactions
+  -- after the guilty one).
+  _ <- evaluate s
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
   writeIORef (appDerived app) (bDerived s)
@@ -1082,30 +1112,46 @@ onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
 onToggleNode app (Node n) handler =
   modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
+-- | A fresh app: zeroed id counters, an empty model, empty dispatch
+-- tables. kayaMain starts from one; headless checks use it directly,
+-- without ever entering the core.
+newApp :: IO App
+newApp =
+  App
+    <$> newIORef (Counters 0 0 0 0)
+    <*> newIORef (Map.empty, Map.empty)
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
 -- which must be the process main thread (GHC's main runs bound to it;
 -- -threaded is required).
 kayaMain :: (App -> IO ()) -> IO ()
 kayaMain setup = do
-  app <-
-    App
-      <$> newIORef (Counters 0 0 0 0)
-      <*> newIORef (Map.empty, Map.empty)
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
-      <*> newIORef Map.empty
+  app <- newApp
   setup app
   done <- newEmptyMVar
   _ <- forkIO (dispatchLoop app >> putMVar done ())
   code <- kayaRun
   takeMVar done
   if code == 0 then exitSuccess else exitWith (ExitFailure (fromIntegral code))
+
+-- | One handler dispatch: an exception crosses the build boundary
+-- (the pure Build's store-back and submit never ran, so the model
+-- shows exactly what was shipped), is logged, and the loop moves to
+-- the next occurrence — the uniform dispatch discipline across every
+-- binding.
+dispatch :: IO () -> IO ()
+dispatch body =
+  body `catch` \e ->
+    hPutStrLn stderr ("kaya: handler threw (transaction rolled back): " ++ show (e :: SomeException))
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
@@ -1118,34 +1164,34 @@ dispatchLoop app = do
           case keys of
             [] -> do
               handlers <- readIORef (appWidgetChanges app)
-              mapM_ ($ content) (Map.lookup ident handlers)
+              dispatch (mapM_ ($ content) (Map.lookup ident handlers))
             _ -> do
               handlers <- readIORef (appNodeChanges app)
-              mapM_ (\h -> h keys content) (Map.lookup ident handlers)
+              dispatch (mapM_ (\h -> h keys content) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindToggled -> do
           let checked = case payload of Just (W.VBool b) -> b; _ -> False
           case keys of
             [] -> do
               handlers <- readIORef (appWidgetToggles app)
-              mapM_ ($ checked) (Map.lookup ident handlers)
+              dispatch (mapM_ ($ checked) (Map.lookup ident handlers))
             _ -> do
               handlers <- readIORef (appNodeToggles app)
-              mapM_ (\h -> h keys checked) (Map.lookup ident handlers)
+              dispatch (mapM_ (\h -> h keys checked) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindValueChanged -> do
           let v = case payload of Just (W.VF64 x) -> x; _ -> 0
           case keys of
             [] -> do
               handlers <- readIORef (appWidgetValues app)
-              mapM_ ($ v) (Map.lookup ident handlers)
+              dispatch (mapM_ ($ v) (Map.lookup ident handlers))
             _ -> return ()
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)
-      mapM_ id (Map.lookup ident handlers)
+      dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
     Just (_, ident, keys, _) -> do
       handlers <- readIORef (appNodeHandlers app)
-      mapM_ ($ keys) (Map.lookup ident handlers)
+      dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
       dispatchLoop app

@@ -2,7 +2,10 @@
    The field owns its text and reports each edit through onChange; the
    app folds those into an IORef (draft) — its own model, per doctrine.
    The add button inserts the draft and answers with the count read
-   from the collection model.
+   from the collection model, then clears and refocuses the field —
+   one-shot commands riding the insert's transaction; the clear's own
+   text_changed "" re-enters through the fold and empties the draft,
+   so a second add finds nothing to add.
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=entry. -}
 
@@ -42,8 +45,22 @@ main = kayaMain $ \app -> do
   onChange app field $ \text -> writeIORef draftRef text
   onClick app add $ do
     draft <- readIORef draftRef
-    key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
-    submitTx app $ do
-      insert todos (VStr ("t" ++ show key)) (VStr draft)
-      total <- count todos
-      writeSignal status (VStr ("added " ++ draft ++ ", " ++ show total ++ " total"))
+    -- The empty-draft guard every real form has — and the scene's
+    -- proof that clear emptied the draft through the occurrence fold,
+    -- not a side assignment.
+    if null draft
+      then submitTx app $ do
+        total <- count todos
+        writeSignal status (VStr ("nothing to add, " ++ show total ++ " total"))
+      else do
+        key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
+        submitTx app $ do
+          insert todos (VStr ("t" ++ show key)) (VStr draft)
+          total <- count todos
+          writeSignal status (VStr ("added " ++ draft ++ ", " ++ show total ++ " total"))
+          -- Finish the form: drop the field's content and put the
+          -- cursor back, atomically with the insert. The field answers
+          -- with text_changed "" through its normal edit path, and the
+          -- fold above empties the draft.
+          clearWidget field
+          focusWidget field

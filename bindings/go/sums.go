@@ -142,9 +142,9 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 // Derive is the collection-derived signal, over the sum's entries.
 func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
-	tx.app.derived[c.id] = append(tx.app.derived[c.id], func(tx *Tx) {
+	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.id, func(tx *Tx) {
 		tx.Write(s, compute(c.Items(tx)))
-	})
+	}})
 	return s
 }
 

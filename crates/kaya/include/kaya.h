@@ -52,6 +52,8 @@
 
 #define TX_VARIANT_CASE 16
 
+#define TX_WIDGET_COMMAND 17
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -63,6 +65,8 @@
 #define APPLY_DESTROY 5
 
 #define APPLY_MOVE_CHILD 6
+
+#define APPLY_COMMAND 7
 
 #define VALUE_BOOL 1
 
@@ -101,6 +105,10 @@
 #define SOURCE_SIGNAL 1
 
 #define SOURCE_ELEMENT 2
+
+#define COMMAND_CLEAR 1
+
+#define COMMAND_FOCUS 2
 
 /**
  * Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
@@ -181,6 +189,8 @@
 
 #define KAYA_TX_VARIANT_CASE 16
 
+#define KAYA_TX_WIDGET_COMMAND 17
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
@@ -197,6 +207,13 @@
  *   MOVE_CHILD: u64 parent, u64 child, u64 before — reposition child
  *              among parent's children so it sits before `before`;
  *              0 means the end (widget ids start at 1).
+ *   COMMAND:   u64 widget_id, u32 command, u32 pad — execute a
+ *              one-shot command (KAYA_COMMAND_*) on the widget, then
+ *              let it report through its normal occurrence path (a
+ *              clear arrives back as text_changed with empty text,
+ *              through the same path a keystroke uses — emit it
+ *              explicitly on toolkits whose programmatic set is
+ *              silent).
  */
 #define KAYA_APPLY_CREATE 1
 
@@ -209,6 +226,17 @@
 #define KAYA_APPLY_DESTROY 5
 
 #define KAYA_APPLY_MOVE_CHILD 6
+
+#define KAYA_APPLY_COMMAND 7
+
+/**
+ * One-shot commands (the widget_command tx record / COMMAND apply
+ * record): momentary verbs into widget-owned state. The closed
+ * vocabulary; each verb is admitted by a real artifact.
+ */
+#define KAYA_COMMAND_CLEAR 1
+
+#define KAYA_COMMAND_FOCUS 2
 
 /**
  * Value types.

@@ -167,7 +167,7 @@ struct KayaRecordCollection<T: KayaRecord> {
     /// toggle handler co-located.
     func checkbox(
         _ t: KayaTpl, _ keyPath: WritableKeyPath<T, Bool>,
-        onToggle: ((KayaAppTx, [KayaValue], Bool) -> Void)? = nil
+        onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
     ) -> KayaNodeHandle {
         t.checkbox(T.field(keyPath), onToggle: onToggle)
     }
@@ -186,9 +186,9 @@ struct KayaRecordCollection<T: KayaRecord> {
         _ tx: KayaAppTx, _ compute: @escaping ([(key: KayaValue, value: T)]) -> KayaValue
     ) -> KayaSignal {
         let s = tx.signal(compute(items(tx)))
-        tx.app.derived[collection.id, default: []].append { t in
+        tx.pendingDerived.append((collection.id, { t in
             t.write(s, compute(self.items(t)))
-        }
+        }))
         return s
     }
 

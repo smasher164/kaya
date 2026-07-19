@@ -533,6 +533,27 @@ public final class KayaApp {
             records.add(KayaWire.txAddChild(parent.id, child.id));
         }
 
+        /**
+         * Drop the widget's owned content — a one-shot command:
+         * momentary verbs into widget-owned state, riding this
+         * transaction like any write, so the insert and the clear
+         * beside it commit together or not at all. Fire-and-forget: no
+         * state at rest, nothing to journal, and the widget answers
+         * through its normal occurrence path (a clear arrives back as
+         * a text change with empty text, so the app's draft fold
+         * empties itself — never a side assignment).
+         */
+        public void clear(Widget w) {
+            records.add(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_CLEAR));
+        }
+
+        /** Give the widget keyboard focus (the post-submit refocus
+         * every real form wants) — a one-shot command riding the
+         * transaction like clear. */
+        public void focus(Widget w) {
+            records.add(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
+        }
+
         public Collection collection() {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
@@ -949,6 +970,11 @@ public final class KayaApp {
         } catch (RuntimeException | Error e) {
             tx.rollback();
             throw e;
+        } finally {
+            // Every exit clears the ambient slot — a stale currentTx
+            // would let the operator sugar reach a closed transaction
+            // (the divergence the other bindings never had).
+            currentTx = null;
         }
         tx.submitIfAny();
         return out;
@@ -1061,6 +1087,21 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * One handler dispatch: an exception crosses the build boundary
+     * (which rolled the model back and dropped the records), is
+     * logged, and the loop moves to the next occurrence — the uniform
+     * dispatch discipline across every binding. VM-fatal errors still
+     * die.
+     */
+    private void dispatch(Consumer<Tx> handler) {
+        try {
+            build(handler);
+        } catch (RuntimeException e) {
+            System.err.println("kaya: handler threw (transaction rolled back): " + e);
+        }
+    }
+
     private void loop() throws Throwable {
         long data = KayaRing.dataAddress();
         long headAddr = KayaRing.headAddress();
@@ -1094,47 +1135,47 @@ public final class KayaApp {
             if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {
                 Consumer<Tx> handler = widgetHandlers.get(occ.id);
                 if (handler != null) {
-                    build(handler);
+                    dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED) {
                 BiConsumer<Tx, List<Object>> handler = nodeHandlers.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, occ.keys);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, String> handler = widgetChanges.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, (String) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TEXT_CHANGED) {
                 ChangeHandler handler = nodeChanges.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, occ.keys, (String) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, Boolean> handler = widgetToggles.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, (Boolean) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED) {
                 ToggleHandler handler = nodeToggles.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, occ.keys, (Boolean) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_VALUE_CHANGED && occ.keys.isEmpty()) {
                 BiConsumer<Tx, Double> handler = widgetValues.get(occ.id);
                 if (handler != null) {
-                    build(tx -> {
+                    dispatch(tx -> {
                         handler.accept(tx, (Double) occ.payload);
                     });
                 }

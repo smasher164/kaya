@@ -22,7 +22,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x3549f42a1a09369e
+specHash = 0x72814fd3802b05cb
 
 valueBool :: Word32
 valueBool = 1
@@ -72,6 +72,10 @@ occurrenceToggled :: Word32
 occurrenceToggled = 3
 occurrenceValueChanged :: Word32
 occurrenceValueChanged = 4
+commandClear :: Word32
+commandClear = 1
+commandFocus :: Word32
+commandFocus = 2
 txKindCreateSignal :: Word16
 txKindCreateSignal = 1
 txKindWriteSignal :: Word16
@@ -104,6 +108,8 @@ txKindCollectionUpdateField :: Word16
 txKindCollectionUpdateField = 14
 txKindVariantCase :: Word16
 txKindVariantCase = 16
+txKindWidgetCommand :: Word16
+txKindWidgetCommand = 17
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -116,6 +122,8 @@ applyKindMoveChild :: Word16
 applyKindMoveChild = 6
 applyKindDestroy :: Word16
 applyKindDestroy = 5
+applyKindCommand :: Word16
+applyKindCommand = 7
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -222,6 +230,10 @@ txCollectionUpdateField collectionId path key field variant value = wireRecord t
 -- Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
 txVariantCase :: Word32 -> Builder
 txVariantCase variant = wireRecord txKindVariantCase (word32LE variant <> word32LE 0)
+
+-- A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
+txWidgetCommand :: Word64 -> Word32 -> Builder
+txWidgetCommand widgetId command = wireRecord txKindWidgetCommand (word64LE widgetId <> word32LE command <> word32LE 0)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

@@ -933,6 +933,24 @@ pub mod Microsoft {
             unsafe impl Send for DependencyObject {}
             unsafe impl Sync for DependencyObject {}
             #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct FocusState(pub i32);
+            impl FocusState {
+                pub const Unfocused: Self = Self(0i32);
+                pub const Pointer: Self = Self(1i32);
+                pub const Keyboard: Self = Self(2i32);
+                pub const Programmatic: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for FocusState {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for FocusState {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.FocusState;i4)",
+                    );
+            }
+            #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct FrameworkElement(windows_core::IUnknown);
             windows_core::imp::interface_hierarchy!(
@@ -2166,6 +2184,17 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn FocusState(&self) -> windows_core::Result<FocusState> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FocusState)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -2841,6 +2870,18 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn Focus(&self, value: FocusState) -> windows_core::Result<bool> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Focus)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -3908,7 +3949,10 @@ pub mod Microsoft {
                     -> windows_core::HRESULT,
                 pub SetRasterizationScale:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
-                FocusState: usize,
+                pub FocusState: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut FocusState,
+                ) -> windows_core::HRESULT,
                 pub UseSystemFocusVisuals: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -4131,7 +4175,11 @@ pub mod Microsoft {
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 StartBringIntoViewWithOptions: usize,
                 TryInvokeKeyboardAccelerator: usize,
-                Focus: usize,
+                pub Focus: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    FocusState,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
                 StartAnimation: usize,
                 StopAnimation: usize,
             }
@@ -5776,6 +5824,17 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn FocusState(&self) -> windows_core::Result<FocusState> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FocusState)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
@@ -6451,6 +6510,18 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn Focus(&self, value: FocusState) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Focus)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -8723,6 +8794,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -9421,6 +9503,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -11302,6 +11396,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -12000,6 +12105,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -13654,6 +13771,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -14352,6 +14480,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -16025,6 +16165,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -16723,6 +16874,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -20109,6 +20272,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -20807,6 +20981,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -22745,6 +22931,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -23443,6 +23640,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -24992,6 +25201,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -25690,6 +25910,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -27356,6 +27588,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -28054,6 +28297,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -30308,6 +30563,17 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FocusState(&self) -> windows_core::Result<super::FocusState> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FocusState)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -31006,6 +31272,18 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn Focus(&self, value: super::FocusState) -> windows_core::Result<bool> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Focus)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -33622,6 +33900,18 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FocusState(&self) -> windows_core::Result<super::super::FocusState> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FocusState)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -34408,6 +34698,22 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn Focus(
+                            &self,
+                            value: super::super::FocusState,
+                        ) -> windows_core::Result<bool> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Focus)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -37751,6 +38057,18 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FocusState(&self) -> windows_core::Result<super::super::FocusState> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FocusState)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -38537,6 +38855,22 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn Focus(
+                            &self,
+                            value: super::super::FocusState,
+                        ) -> windows_core::Result<bool> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Focus)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {
@@ -40787,6 +41121,18 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FocusState(&self) -> windows_core::Result<super::super::FocusState> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FocusState)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn UseSystemFocusVisuals(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -41573,6 +41919,22 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn Focus(
+                            &self,
+                            value: super::super::FocusState,
+                        ) -> windows_core::Result<bool> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Focus)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn OnDisconnectVisualChildren(&self) -> windows_core::Result<()> {

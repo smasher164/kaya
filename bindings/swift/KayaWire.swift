@@ -15,7 +15,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x3549f42a1a09369e
+let kayaSpecHash: UInt64 = 0x72814fd3802b05cb
 
 struct KayaTx {
     var bytes = Data()
@@ -226,6 +226,15 @@ struct KayaTx {
     mutating func variantCase(_ variant: UInt32) {
         let start = self.begin(UInt16(KAYA_TX_VARIANT_CASE))
         self.u32(variant)
+        self.u32(0)
+        self.end(start)
+    }
+
+    /// A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
+    mutating func widgetCommand(_ widgetId: UInt64, _ command: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_WIDGET_COMMAND))
+        self.u64(widgetId)
+        self.u32(command)
         self.u32(0)
         self.end(start)
     }

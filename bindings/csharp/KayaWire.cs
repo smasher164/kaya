@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x3549f42a1a09369e;
+    public const ulong SpecHash = 0x72814fd3802b05cb;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -38,6 +38,8 @@ static class KayaWire
     public const uint OccurrenceTextChanged = 2;
     public const uint OccurrenceToggled = 3;
     public const uint OccurrenceValueChanged = 4;
+    public const uint CommandClear = 1;
+    public const uint CommandFocus = 2;
     public const ushort TxKindCreateSignal = 1;
     public const ushort TxKindWriteSignal = 2;
     public const ushort TxKindCreateWidget = 3;
@@ -54,12 +56,14 @@ static class KayaWire
     public const ushort TxKindCollectionMove = 15;
     public const ushort TxKindCollectionUpdateField = 14;
     public const ushort TxKindVariantCase = 16;
+    public const ushort TxKindWidgetCommand = 17;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
     public const ushort ApplyKindMount = 4;
     public const ushort ApplyKindMoveChild = 6;
     public const ushort ApplyKindDestroy = 5;
+    public const ushort ApplyKindCommand = 7;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -287,6 +291,16 @@ static class KayaWire
         w.Write(variant);
         w.Write(0u);
         return Finish(stream, w, TxKindVariantCase);
+    }
+
+    /// A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
+    public static byte[] TxWidgetCommand(ulong widgetId, uint command)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId);
+        w.Write(command);
+        w.Write(0u);
+        return Finish(stream, w, TxKindWidgetCommand);
     }
 
     /// set_property with a constant text value.

@@ -99,6 +99,7 @@ pub const KAYA_TX_TEMPLATE_END: u16 = 13;
 pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const KAYA_TX_COLLECTION_MOVE: u16 = 15;
 pub const KAYA_TX_VARIANT_CASE: u16 = 16;
+pub const KAYA_TX_WIDGET_COMMAND: u16 = 17;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -126,6 +127,7 @@ const _: () = assert!(
         && KAYA_TX_COLLECTION_UPDATE_FIELD == wire::TX_COLLECTION_UPDATE_FIELD
         && KAYA_TX_COLLECTION_MOVE == wire::TX_COLLECTION_MOVE
         && KAYA_TX_VARIANT_CASE == wire::TX_VARIANT_CASE
+        && KAYA_TX_WIDGET_COMMAND == wire::TX_WIDGET_COMMAND
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -143,12 +145,20 @@ const _: () = assert!(
 ///   MOVE_CHILD: u64 parent, u64 child, u64 before — reposition child
 ///              among parent's children so it sits before `before`;
 ///              0 means the end (widget ids start at 1).
+///   COMMAND:   u64 widget_id, u32 command, u32 pad — execute a
+///              one-shot command (KAYA_COMMAND_*) on the widget, then
+///              let it report through its normal occurrence path (a
+///              clear arrives back as text_changed with empty text,
+///              through the same path a keystroke uses — emit it
+///              explicitly on toolkits whose programmatic set is
+///              silent).
 pub const KAYA_APPLY_CREATE: u16 = 1;
 pub const KAYA_APPLY_SET_PROP: u16 = 2;
 pub const KAYA_APPLY_ADD_CHILD: u16 = 3;
 pub const KAYA_APPLY_MOUNT: u16 = 4;
 pub const KAYA_APPLY_DESTROY: u16 = 5;
 pub const KAYA_APPLY_MOVE_CHILD: u16 = 6;
+pub const KAYA_APPLY_COMMAND: u16 = 7;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -156,6 +166,16 @@ const _: () = assert!(
         && KAYA_APPLY_MOUNT == wire::APPLY_MOUNT
         && KAYA_APPLY_DESTROY == wire::APPLY_DESTROY
         && KAYA_APPLY_MOVE_CHILD == wire::APPLY_MOVE_CHILD
+        && KAYA_APPLY_COMMAND == wire::APPLY_COMMAND
+);
+
+/// One-shot commands (the widget_command tx record / COMMAND apply
+/// record): momentary verbs into widget-owned state. The closed
+/// vocabulary; each verb is admitted by a real artifact.
+pub const KAYA_COMMAND_CLEAR: u32 = 1;
+pub const KAYA_COMMAND_FOCUS: u32 = 2;
+const _: () = assert!(
+    KAYA_COMMAND_CLEAR == wire::COMMAND_CLEAR && KAYA_COMMAND_FOCUS == wire::COMMAND_FOCUS
 );
 
 /// Value types.
@@ -515,6 +535,7 @@ mod tests {
             ("collection_update_field", KAYA_TX_COLLECTION_UPDATE_FIELD),
             ("collection_move", KAYA_TX_COLLECTION_MOVE),
             ("variant_case", KAYA_TX_VARIANT_CASE),
+            ("widget_command", KAYA_TX_WIDGET_COMMAND),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -523,6 +544,7 @@ mod tests {
             ("mount", KAYA_APPLY_MOUNT),
             ("destroy", KAYA_APPLY_DESTROY),
             ("move_child", KAYA_APPLY_MOVE_CHILD),
+            ("command", KAYA_APPLY_COMMAND),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -17,7 +17,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::protocol::{
-    ApplyOp, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
 };
 use crate::scene::Scene;
 
@@ -274,6 +274,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .widget();
             core.window.set_child(Some(&root_widget));
         }
+        ApplyOp::Command { id, command } => {
+            let widget = core.widgets.get(&id).expect("scene validated the id");
+            match command {
+                CommandKind::Clear => {
+                    let NativeWidget::Entry(entry) = widget else {
+                        panic!("kaya: clear on a non-entry (scene validates kinds)")
+                    };
+                    // GTK fires `changed` for programmatic set_text (the
+                    // Create arm's comment), so the empty edit reaches
+                    // the app through the entry's own path — no manual
+                    // emit, unlike AppKit's compensation.
+                    entry.set_text("");
+                }
+                CommandKind::Focus => {
+                    // grab_focus is per-window (the toplevel's focus
+                    // widget), so parallel tiled suite legs cannot
+                    // steal each other's focus assertions.
+                    widget.widget().grab_focus();
+                }
+            }
+        }
     }
 }
 
@@ -402,6 +423,32 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.labels.len());
             core.labels[i].text().to_string()
+        })
+    }
+
+    fn read_text(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.entries.len());
+            core.entries[i].text().to_string()
+        })
+    }
+
+    fn is_focused(&self, t: crate::harness::Target) -> bool {
+        Self::on_main(move |core| {
+            // A focused GtkEntry delegates to its internal GtkText, so
+            // the entry itself is never the toplevel's focus widget
+            // (is_focus() stays false) — FOCUS_WITHIN is the flag GTK
+            // sets on the ancestors of the focus widget, and it stays
+            // per-window (key status not required).
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    core.entries[i]
+                        .state_flags()
+                        .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
+                }
+                other => panic!("kaya: is_focused not wired for {other:?} on gtk"),
+            }
         })
     }
 

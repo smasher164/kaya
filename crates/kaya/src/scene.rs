@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, Key, Prop, PropValue, Record, SignalId, Transaction, TxOp, Value,
-    ValueType, WidgetId, WidgetKind,
+    ApplyOp, CollectionId, CommandKind, Key, Prop, PropValue, Record, SignalId, Transaction, TxOp,
+    Value, ValueType, WidgetId, WidgetKind,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -208,6 +208,23 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Value | Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
+}
+
+/// A command is momentary and kind-scoped: clear drops an entry's
+/// content, focus lands on anything interactive. The same check class
+/// as check_prop — misuse fails loudly at the call site, never on a
+/// backend. (The silent no-op is reserved for instance-addressed
+/// commands, where a stamped target can legitimately vanish under
+/// rebuild; a live id only vanishes by the guest's own hand.)
+fn check_command(kind: WidgetKind, command: CommandKind) {
+    let ok = match command {
+        CommandKind::Clear => matches!(kind, WidgetKind::Entry),
+        CommandKind::Focus => matches!(
+            kind,
+            WidgetKind::Entry | WidgetKind::Button | WidgetKind::Checkbox | WidgetKind::Slider
+        ),
+    };
+    assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
 }
 
 /// Every property has one value type (spec::PROPS). The match is
@@ -500,6 +517,17 @@ impl Scene {
                         explicit_cases: false,
                         scope: self.next_scope,
                     });
+                }
+                TxOp::WidgetCommand { widget, command } => {
+                    let kind = *self
+                        .widgets
+                        .get(&widget)
+                        .unwrap_or_else(|| panic!("kaya: command on unknown widget {widget:?}"));
+                    check_command(kind, command);
+                    // Momentary by construction: nothing is recorded, so
+                    // nothing replays on rebuild — the op forwards and is
+                    // forgotten.
+                    out.push(ApplyOp::Command { id: widget, command });
                 }
                 TxOp::VariantCase { .. } => {
                     panic!("kaya: variant_case outside a template scope")

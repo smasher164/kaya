@@ -25,7 +25,7 @@ use jni::{JavaVM, NativeMethod};
 
 use crate::app::AppCtx;
 use crate::protocol::{
-    ApplyOp, OccSink, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Prop, Transaction, Value, WidgetId, WidgetKind,
 };
 use crate::scene::Scene;
 
@@ -606,6 +606,30 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 &[JValue::Object(root_view.as_obj())],
             )?;
         }
+        ApplyOp::Command { id, command } => {
+            let view = with_widget(id, |w| w.view.clone());
+            match command {
+                CommandKind::Clear => {
+                    // setText fires the KayaTextWatcher (programmatic
+                    // set included — the Create arm's comment), so the
+                    // empty edit reaches the app through the entry's
+                    // own path — no manual emit.
+                    let text = env.new_string("")?;
+                    env.call_method(
+                        view.as_obj(),
+                        "setText",
+                        "(Ljava/lang/CharSequence;)V",
+                        &[JValue::Object(&text)],
+                    )?;
+                }
+                CommandKind::Focus => {
+                    // EditText is focusable in touch mode by default,
+                    // so requestFocus lands without a focusability
+                    // dance; per-window focus, never global key status.
+                    env.call_method(view.as_obj(), "requestFocus", "()Z", &[])?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -832,6 +856,45 @@ impl crate::harness::Stage for AndroidStage {
             env.get_string(&JString::from(string))
                 .expect("kaya: label decode failed")
                 .into()
+        })
+    }
+
+    fn read_text(&self, t: crate::harness::Target) -> String {
+        let entry = Self::view(|core| {
+            core.entries[crate::harness::resolve(t.index, core.entries.len())].clone()
+        });
+        Self::on_ui(move |env| {
+            // getText through the TextView bridge signature: EditText's
+            // covariant Editable override keeps a CharSequence bridge,
+            // the same shape read_label uses.
+            let chars = env
+                .call_method(entry.as_obj(), "getText", "()Ljava/lang/CharSequence;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: entry read failed");
+            let string = env
+                .call_method(&chars, "toString", "()Ljava/lang/String;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: entry toString failed");
+            env.get_string(&JString::from(string))
+                .expect("kaya: entry decode failed")
+                .into()
+        })
+    }
+
+    fn is_focused(&self, t: crate::harness::Target) -> bool {
+        // Per-window focus (the view hierarchy's focused view), never
+        // global key status — parallel legs must not steal each
+        // other's assertion.
+        let entry = match t.kind {
+            crate::harness::TargetKind::Entry => Self::view(|core| {
+                core.entries[crate::harness::resolve(t.index, core.entries.len())].clone()
+            }),
+            other => panic!("kaya: is_focused not wired for {other:?} on android"),
+        };
+        Self::on_ui(move |env| {
+            env.call_method(entry.as_obj(), "isFocused", "()Z", &[])
+                .and_then(|v| v.z())
+                .expect("kaya: focus read failed")
         })
     }
 
