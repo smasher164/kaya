@@ -1,0 +1,96 @@
+# Deferred work ledger
+
+The running inventory of punted items. Check things off here as they
+land; add new deferrals with enough context that a future contributor
+(human or agent) can pick them up cold. DESIGN.md's open-questions
+section is the architectural counterpart; this is the working list.
+Landed history lives in git; this file only carries what is still open.
+
+## Next milestones (in rough priority order)
+
+- **Layout props**: spacing/grow/alignment; the layout-normalization
+  worklist scenes. Recording mode (KAYA_RECORD=1) was built partly as
+  the cross-backend comparison vehicle for this.
+- **Window vocabulary** (DESIGN open question #4): create_window,
+  per-window mount targets, lifecycle (CloseRequested + veto default,
+  Present, Close), sizing/titles, dialogs/modality, mobile capability
+  story. Mount target 0 is reserved so the wire doesn't break. `close()`
+  joins the command enum here. Unlocks the appendix's
+  `app.window(title=...)` as real protocol.
+- **The versioned binding style guide** (DESIGN open question #1):
+  ratify per-language tiers; ambient-transaction spellings; the
+  eq/ne/fmt derived-signal vocabulary beyond Python; blob-signal
+  ergonomics parity (Go has typed Signal[[]byte]; others wrap handles
+  manually); decision gate for deleting the probe/reflection selector
+  floor that the KayaGen generators superseded; optional static
+  analyzers (Roslyn for C# is the plausible one; go/analysis; ErrorProne
+  — never load-bearing, the runtime guards are the floor).
+
+## Protocol / core
+
+- scrollTo + ref markers (per-instance handles): brings the first
+  instance-addressed command (TemplateNodeId + key path target) and the
+  silent vanished-target no-op (live-zone commands fail loudly; stamped
+  copies legitimately vanish under rebuild). Wants a long-list scene —
+  which pairs with row-window virtualization for For.
+- Command completion observability (awaitable commands — the Compose
+  scrollToItem precedent); command payloads (a set_text command awaits
+  an autofill-shaped artifact). Admission policy: each verb needs a
+  real artifact.
+- Value::Record — waits for nested fields or field-level sum payloads.
+- Nesting depth >2 validation; typed keys in collection schemas.
+- Occurrence growth: subscription/filtering (every click emits today),
+  suspension lifecycle (Android), CloseRequested.
+- Vello scene-encoding subset (open question #3) — arrives with Canvas,
+  post-v1, on the surface-handle transport (pixel surfaces as
+  IOSurface/DXGI/dmabuf handles; the blob channel is the byte-copy arm,
+  Canvas is the zero-copy arm).
+- Blob follow-ups: dedup on repeated registration (needs an artifact);
+  kaya_blob_from_file/mmap escalation (needs an artifact showing the
+  register copy matters — decode dominates by an order of magnitude).
+
+## Bindings / ergonomics
+
+- Component functions as the reusable named unit (Solid's model, slot
+  proxies = the function signature) — mostly ratification for the
+  typed languages; Python validates at record time.
+- Switch sugar (app-level one-of-N over a signal; sum-typed elements
+  already cover collection rows) — wants the comparison vocabulary
+  first.
+- Template-declared collection escape to handlers (`group.items` via
+  the element proxy) — flagged, undesigned; wait for a motivating
+  scene.
+- Portal (platform overlays; protocol + backend work).
+- OCaml effect-handler ambience (true Python-style ambient
+  transactions; runtime-only scoping errors — OCaml has no effect
+  typing).
+- Binding-maintained mirrors (todos-iterable style shadow state).
+- Go sum note: SumCollection.UpdateField now routes through the
+  encoder (uniform with records and other languages).
+
+## Testing / infrastructure
+
+- bench-encode blob leg: register+reference throughput with an MB/s
+  floor, so payload-path structural regressions trip at gate time.
+  (Adding it means a second phase in each language's encode_bench
+  program + floors in tools/bench-encode.sh — keep it separate from
+  the existing rec/s floors, which would otherwise deflate.)
+- Windows entry follow-ups: IME contract notes for mobile; the WinUI
+  text-flyout-open path is untested; XamlControlsResources merging can
+  crash even with the metadata provider (test when adopting fluent
+  styling).
+- Packaging: at-release items — Hackage/opam publication, Go vanity
+  import path (akhil.cc/kaya + go-import meta; dev.kaya is
+  unpublishable), Maven publication under cc.akhil, npm kaya-gui after
+  account recovery; a LICENSE decision before any real release;
+  trusted publishing (OIDC) on nuget/PyPI/npm when releases start.
+  Android Python/Go guests need binding bootstrap (briefcase/gomobile).
+  Swift SPM packaging needs a modulemap target.
+- Node.js guest (the roster's first async surface): Node first;
+  function-floor tier via N-API (V8 pointer compression forbids
+  external ArrayBuffers over native memory — no direct ring);
+  main thread blocks in kaya_run, app logic in a worker; layer 3 wants
+  for-await occurrence iteration.
+- Arena offset+length form (row batches, audio) — returns when the row
+  window and audio land; the blob table is its v1 realization.
+- Attach/embedding tooling rework (parked at milestone 0).
