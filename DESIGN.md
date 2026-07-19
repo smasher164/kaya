@@ -440,6 +440,36 @@ rules so far:
   commands on the live widget handle or transaction (`entry.clear()`,
   `tx.focus(field)`), live zone only — a template node has no command
   surface, structurally, since a blueprint has nothing to clear.
+- The record-time mirror-read guard: inside a template scope (a For
+  body, a When body, a row trace) every binding-mediated model read —
+  items, count, get, iteration — fails loudly, in every binding. The
+  template records once and replays; a read would bake today's value
+  into the blueprint as silently dead data, the Flutter-intuition trap
+  (Solid, this model's source, ships a lint for the identical seam).
+  Writes in a template were always loud (the scene rejects them at
+  declaration); reads never reach the scene, so the binding is the
+  only place — and the earliest — to catch them. The static-wall
+  languages get the guard from their types: Rust's `for_each` holds
+  the transaction exclusively for the body's extent (a template read
+  is a borrow error, pinned by compile_fail doc-tests), and Haskell's
+  reads are Build-typed where template bodies are Tpl-typed with no
+  lift between them (pinned by a must-not-compile fixture). The
+  closure languages — where the body can lexically capture the outer
+  transaction and no type can stop it — carry a runtime template-depth
+  counter, armed by For, When, and the trace alike (the For-only
+  openFors stack is not the guard's state: When pushes nothing there),
+  and reset on transaction abort so a surviving app never inherits a
+  poisoned zone. `derive` remains the sanctioned read — it reads in
+  order to register recomputation, and is the fix the guard's error
+  names, along with binding a signal or taking the element's field.
+  The honest residue: only binding-mediated reads are catchable — a
+  plain host variable in a template is an indistinguishable constant
+  in every language and framework, and stays governed by the
+  convention (values in handlers, signals in templates). Python's
+  `window()` block additionally arms the guard for its whole extent:
+  that construct is declaration-only sugar whose contract is
+  recording; bindings without the construct have nothing to diverge
+  from.
 - One abort semantics in every binding, idiom deciding only the
   spelling: a handler abort at the transaction boundary restores the
   binding's model and signal mirrors from a journal (or by purity,

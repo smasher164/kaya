@@ -112,6 +112,12 @@ type App struct {
 	// Signals recomputed from a collection after each of its
 	// mutations, written into the same transaction.
 	derived map[uint64][]func(*Tx)
+	// Non-zero exactly while a template body (For, When, or a row
+	// trace) is being declared: the record-time mirror-read guard's
+	// arm. openFors is For-only by design (it carries collection ids
+	// for nesting), so the guard has its own depth, bumped by every
+	// scope opener in both zones.
+	tplDepth int
 	// How to undo the open transaction's model edits: a deep snapshot
 	// per touched collection, taken on first touch. Non-nil exactly
 	// while a Build is running; the model methods journal through it
@@ -324,6 +330,13 @@ func (a *App) Build(fn func(*Tx)) {
 			for id, saved := range a.journal {
 				a.model[id] = saved
 			}
+			// A panic mid-declaration leaves the ambient stacks and
+			// the template depth dirty; the app survives the abort,
+			// so reset them or every later transaction inherits a
+			// poisoned zone state.
+			a.parents = a.parents[:0]
+			a.openFors = a.openFors[:0]
+			a.tplDepth = 0
 		}
 		a.journal = nil
 	}()
@@ -523,7 +536,9 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
+	tx.app.tplDepth++
 	fn(&Tpl{tx: tx})
+	tx.app.tplDepth--
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 	tx.records = append(tx.records, TxTemplateEnd())
@@ -546,7 +561,9 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
+	tx.app.tplDepth++
 	return &Tpl{tx: tx}, func() {
+		tx.app.tplDepth--
 		tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 		tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 		tx.records = append(tx.records, TxTemplateEnd())
@@ -564,7 +581,9 @@ func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 	parent := tx.currentParent()
 	tx.records = append(tx.records, TxCreateWhen(w.id, s.id))
 	tx.app.parents = append(tx.app.parents, 0)
+	tx.app.tplDepth++
 	fn(&Tpl{tx: tx})
+	tx.app.tplDepth--
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.records = append(tx.records, TxTemplateEnd())
 	if parent != 0 {
@@ -676,9 +695,23 @@ func (tx *Tx) recomputeDerived(coll uint64, path []any) {
 	}
 }
 
+// guardMirrorRead panics on a model read inside a template body: the
+// template records once and replays — the read would bake today's
+// value into the blueprint as silently dead data. Bind a signal, use
+// the element's field, or Derive for computed values. (Handler and
+// build reads stay legal; read-your-writes is the model's contract.)
+func (a *App) guardMirrorRead() {
+	if a.tplDepth > 0 {
+		panic("kaya: model read inside a template body — the template records " +
+			"once and replays; bind a signal, use the element's field, or " +
+			"Derive for computed values")
+	}
+}
+
 // Items is the model: what this guest wrote, exactly — the fold of
 // every patch so far (this transaction's included), in insertion order.
 func (tx *Tx) Items(c Collection) []Entry {
+	tx.app.guardMirrorRead()
 	if in := tx.app.instanceOf(c.id, c.path); in != nil {
 		return append([]Entry(nil), in.entries...)
 	}
@@ -686,6 +719,7 @@ func (tx *Tx) Items(c Collection) []Entry {
 }
 
 func (tx *Tx) Len(c Collection) int {
+	tx.app.guardMirrorRead()
 	if in := tx.app.instanceOf(c.id, c.path); in != nil {
 		return len(in.entries)
 	}
@@ -757,7 +791,9 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	t.tx.records = append(t.tx.records, TxCreateFor(n.id, c.id))
 	t.tx.app.openFors = append(t.tx.app.openFors, c.id)
 	t.tx.app.parents = append(t.tx.app.parents, 0)
+	t.tx.app.tplDepth++
 	fn(&Tpl{tx: t.tx})
+	t.tx.app.tplDepth--
 	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	t.tx.app.openFors = t.tx.app.openFors[:len(t.tx.app.openFors)-1]
 	t.tx.records = append(t.tx.records, TxTemplateEnd())
@@ -771,7 +807,9 @@ func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	t.tx.records = append(t.tx.records, TxCreateWhen(n.id, s.id))
+	t.tx.app.tplDepth++
 	fn(&Tpl{tx: t.tx})
+	t.tx.app.tplDepth--
 	t.tx.records = append(t.tx.records, TxTemplateEnd())
 	return n
 }

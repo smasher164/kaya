@@ -96,3 +96,51 @@ func TestAbortRestoresModelShipsNothingAndContinues(t *testing.T) {
 type checkTodo struct {
 	Title string
 }
+
+// The record-time mirror-read guard: a model read inside a template
+// body panics — the template records once and replays, so the read
+// would bake today's value into the blueprint as silently dead data.
+// For bodies, When bodies, and the row trace all arm it. Each case
+// aborts its Build (the panic crosses the boundary), which also pins
+// the abort path's zone-state reset: the final Build proves reads
+// outside template scopes stay legal afterward.
+func TestMirrorReadsPoisonInsideTemplateBodies(t *testing.T) {
+	app := NewApp()
+	cases := []struct {
+		name string
+		body func(tx *Tx, c Collection)
+	}{
+		{"for body", func(tx *Tx, c Collection) {
+			tx.ForEach(c, func(*Tpl) { tx.Items(c) })
+		}},
+		{"when body", func(tx *Tx, c Collection) {
+			s := tx.Signal(true)
+			tx.When(s, func(*Tpl) { tx.Len(c) })
+		}},
+		{"row trace", func(tx *Tx, c Collection) {
+			_, _ = BeginRowTrace(tx, c)
+			tx.Items(c)
+		}},
+	}
+	for _, tc := range cases {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s: template-body read did not panic", tc.name)
+				}
+			}()
+			app.Build(func(tx *Tx) {
+				c := tx.Collection()
+				tx.Insert(c, "a", "one")
+				tc.body(tx, c)
+			})
+		}()
+	}
+	app.Build(func(tx *Tx) {
+		c := tx.Collection()
+		tx.Insert(c, "b", "two")
+		if n := tx.Len(c); n != 1 {
+			t.Fatalf("post-abort live read broken: %d", n)
+		}
+	})
+}

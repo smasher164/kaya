@@ -94,6 +94,44 @@ static class AbortCheck
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "post-abort commit broken"));
 
+        // The record-time mirror-read guard: while a template body is
+        // being declared (a For body, a When body), the model mirror is
+        // off-limits — the template records once and replays, so a read
+        // baked into it is silently dead data. Live-zone and build
+        // reads stay legal, pinned below.
+        app.Build(tx =>
+        {
+            tx.ForEach(todos, t =>
+            {
+                bool threw = false;
+                try { tx.Items(todos); }
+                catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
+                Check(threw, "Items inside a For body did not throw");
+                threw = false;
+                try { tx.Count(todos); }
+                catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
+                Check(threw, "Count inside a For body did not throw");
+            });
+            // The When arm: OpenFors tracks Fors only — When pushes
+            // nothing there — so this pins the counter's When arm.
+            var visible = tx.Signal(true);
+            tx.When(visible, t =>
+            {
+                bool threw = false;
+                try { tx.Items(todos); }
+                catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
+                Check(threw, "Items inside a When body did not throw");
+            });
+            // After the scope closes, the same transaction reads again.
+            Check(KeysEqual(EntryKeys(tx, todos), "a", "b", "c"),
+                "read after the template scope closed broken");
+        });
+        // A later build-tx read stays legal — explicit, even though the
+        // reads above already exercised it: the guard is template-scope
+        // only, never build-wide.
+        app.Build(tx => Check(
+            KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "build-tx read after the guard broken"));
+
         Console.WriteLine("csharp abort check: OK");
     }
 }

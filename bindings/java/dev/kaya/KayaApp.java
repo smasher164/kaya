@@ -52,6 +52,14 @@ public final class KayaApp {
     Tx currentTx;
     final java.util.List<Long> parents = new java.util.ArrayList<>();
     int openTraces;
+    // >0 while a template body is being declared (a For body, a When
+    // body, or an open row trace). openFors tracks Fors only — when()
+    // pushes nothing there — so template-scope detection needs its own
+    // counter. The template records once and replays: a model read
+    // inside its body would bake one snapshot into every stamp as
+    // silently dead data, so mirror reads throw while this is armed;
+    // live-zone, handler, and build reads stay legal.
+    int tplDepth;
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
     private final Map<Long, List<Consumer<Tx>>> derived = new HashMap<>();
@@ -273,6 +281,9 @@ public final class KayaApp {
         void submitIfAny() {
             if (openTraces != 0) {
                 openTraces = 0;
+                // The open trace also left the template-scope counter
+                // armed; a stuck counter would poison later reads.
+                tplDepth = 0;
                 throw new IllegalStateException(
                         "kaya: a for-each over rows was exited early (break?)"
                                 + " — the template never closed");
@@ -288,6 +299,10 @@ public final class KayaApp {
 
         void rollback() {
             openTraces = 0;
+            // App state, not tx state: an aborted build is abandoned
+            // but the app continues, and a stuck counter would poison
+            // every later mirror read.
+            tplDepth = 0;
             parents.clear();
             model.putAll(journal);
         }
@@ -587,7 +602,15 @@ public final class KayaApp {
             records.add(KayaWire.txCreateFor(w.id, c.id));
             openFors.add(c.id);
             parents.add(0L);
-            R out = body.apply(new Tpl(this));
+            // try/finally: a throwing body abandons the tx but the app
+            // survives, and a stuck counter would poison later reads.
+            tplDepth++;
+            R out;
+            try {
+                out = body.apply(new Tpl(this));
+            } finally {
+                tplDepth--;
+            }
             parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
             records.add(KayaWire.txTemplateEnd());
@@ -609,7 +632,11 @@ public final class KayaApp {
             openFors.add(c.id);
             parents.add(0L);
             openTraces++;
+            // The counter drops in close(); a break leaves it armed
+            // alongside openTraces, and submitIfAny resets both.
+            tplDepth++;
             return new RowTrace(new Tpl(this), () -> {
+                tplDepth--;
                 parents.remove(parents.size() - 1);
                 openFors.remove(openFors.size() - 1);
                 records.add(KayaWire.txTemplateEnd());
@@ -633,7 +660,13 @@ public final class KayaApp {
             long parent = currentParent();
             records.add(KayaWire.txCreateWhen(w.id, s.id));
             parents.add(0L);
-            R out = body.apply(new Tpl(this));
+            tplDepth++;
+            R out;
+            try {
+                out = body.apply(new Tpl(this));
+            } finally {
+                tplDepth--;
+            }
             parents.remove(parents.size() - 1);
             records.add(KayaWire.txTemplateEnd());
             if (parent != 0) {
@@ -766,12 +799,27 @@ public final class KayaApp {
             recomputeDerived(c);
         }
 
+        // The record-time mirror-read guard: the template records once
+        // and replays, so a read inside a template body is one snapshot
+        // baked into every stamp — silently dead data. The typed
+        // surfaces (KayaRecords, KayaSums) route through items, so this
+        // is the single choke point.
+        private void guardMirrorRead() {
+            if (tplDepth > 0) {
+                throw new IllegalStateException(
+                        "kaya: model read inside a template body — the template records once"
+                                + " and replays; bind a signal, use the element's field, or"
+                                + " derive() for computed values");
+            }
+        }
+
         /**
          * The model: what this guest wrote, exactly — the fold of every
          * patch so far (this transaction's included), in insertion
          * order.
          */
         public List<Entry> items(Collection c) {
+            guardMirrorRead();
             Instance instance = instanceOf(c.id, c.path);
             return instance == null
                     ? java.util.Collections.emptyList()
@@ -779,6 +827,7 @@ public final class KayaApp {
         }
 
         public int count(Collection c) {
+            guardMirrorRead();
             Instance instance = instanceOf(c.id, c.path);
             return instance == null ? 0 : instance.entries.size();
         }
@@ -911,7 +960,13 @@ public final class KayaApp {
             tx.records.add(KayaWire.txCreateFor(n.id, c.id));
             openFors.add(c.id);
             parents.add(0L);
-            R out = body.apply(new Tpl(tx));
+            tplDepth++;
+            R out;
+            try {
+                out = body.apply(new Tpl(tx));
+            } finally {
+                tplDepth--;
+            }
             parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
@@ -933,7 +988,13 @@ public final class KayaApp {
             long parent = tx.currentParent();
             tx.records.add(KayaWire.txCreateWhen(n.id, s.id));
             parents.add(0L);
-            R out = body.apply(new Tpl(tx));
+            tplDepth++;
+            R out;
+            try {
+                out = body.apply(new Tpl(tx));
+            } finally {
+                tplDepth--;
+            }
             parents.remove(parents.size() - 1);
             tx.records.add(KayaWire.txTemplateEnd());
             if (parent != 0) {

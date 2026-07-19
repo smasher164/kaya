@@ -664,6 +664,39 @@ impl Tx<'_> {
     /// The model: what this guest wrote, exactly — the fold of every
     /// committed patch plus this transaction's own, in insertion order,
     /// parsed to the element type on the way out.
+    ///
+    /// Reads are transaction-scoped, and the borrow checker is the
+    /// record-time mirror-read guard: a template body cannot read the
+    /// model, because `for_each` holds the transaction exclusively for
+    /// the body's extent — the template records once and replays, so a
+    /// read would bake today's value into the blueprint as silently
+    /// dead data. Bind a signal, use the element's field, or `derive`
+    /// for computed values. This is a compile error, pinned here:
+    ///
+    /// ```compile_fail
+    /// let (_occ_tx, occ_rx) = std::sync::mpsc::channel();
+    /// let (tx_tx, _tx_rx) = std::sync::mpsc::channel();
+    /// let ctx = kaya::AppCtx::new(occ_rx, tx_tx);
+    /// let mut tx = ctx.begin();
+    /// let todos = tx.collection::<String>();
+    /// tx.for_each(&todos, |_t| {
+    ///     tx.len(&todos); // cannot borrow `tx`: the body records a blueprint
+    /// });
+    /// ```
+    ///
+    /// The for-statement tracer holds the same wall — a `Row` borrows
+    /// the transaction for as long as it lives:
+    ///
+    /// ```compile_fail
+    /// let (_occ_tx, occ_rx) = std::sync::mpsc::channel();
+    /// let (tx_tx, _tx_rx) = std::sync::mpsc::channel();
+    /// let ctx = kaya::AppCtx::new(occ_rx, tx_tx);
+    /// let mut tx = ctx.begin();
+    /// let todos = tx.collection::<String>();
+    /// for _row in todos.rows(&mut tx) {
+    ///     tx.items(&todos); // cannot borrow `tx`: the trace is recording
+    /// }
+    /// ```
     pub fn items<T: KayaSum>(&self, instance: &Collection<T>) -> Vec<(Value, T)> {
         self.ctx
             .model

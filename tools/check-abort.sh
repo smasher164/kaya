@@ -85,4 +85,16 @@ dune exec bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
 "$(cd guests/haskell && cabal list-bin kaya-abort-check -v0)" >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell; }
 
+# Haskell's mirror-read guard is the Build/Tpl monad wall itself; pin
+# it with a must-not-compile fixture. -fno-code type-checks without
+# linking libkaya; the grep insists on the type error (a syntax error
+# must not pass as "didn't compile").
+if ghc -fno-code -XGHC2021 -ibindings/haskell -hidir "$TMP/hs-guard" -odir "$TMP/hs-guard" \
+    tools/checks/haskell-guard-fail/TplRead.hs >"$TMP/hs-guard.log" 2>&1; then
+    echo "check-abort: haskell guard fixture COMPILED — the Build/Tpl wall fell" >&2
+    exit 1
+fi
+grep -q "Couldn't match" "$TMP/hs-guard.log" \
+    || { cat "$TMP/hs-guard.log"; fail haskell-guard-fixture; }
+
 echo "check-abort: OK"

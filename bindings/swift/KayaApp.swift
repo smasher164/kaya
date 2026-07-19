@@ -243,6 +243,11 @@ final class KayaApp {
         }
     }
     var openTraces = 0
+    // The record-time mirror-read guard's arming counter: >0 while any
+    // template body (a For body, a When body, or a row-trace body) is
+    // being DECLARED. Distinct from openFors (For-only, and keyed by
+    // collection): every template scope bumps this, When included.
+    var tplDepth = 0
 
     init() {
         KayaApp.ambient = self
@@ -591,6 +596,7 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
             tx.tx.createFor(w.id, collection.id)
             app.openFors.append(collection.id)
             app.openTraces += 1
+            app.tplDepth += 1
             return makeRow(KayaTpl(tx: tx))
         }
         if state == 1 {
@@ -598,6 +604,10 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
             app.openFors.removeLast()
             tx.tx.templateEnd()
             app.openTraces -= 1
+            // Paired with openTraces: a break-ed trace never reaches
+            // here, and submitIfAny's openTraces precondition kills the
+            // transaction before a stuck depth could misfire.
+            app.tplDepth -= 1
             precondition(
                 !app.childFrames.isEmpty,
                 "kaya: a for-in over rows needs an enclosing container builder")
@@ -828,6 +838,8 @@ final class KayaAppTx {
         tx.createFor(w.id, c.id)
         app.parentAtCreation(live: w.id)
         app.openFors.append(c.id)
+        app.tplDepth += 1
+        defer { app.tplDepth -= 1 }
         let out = body(KayaTpl(tx: self))
         app.openFors.removeLast()
         tx.templateEnd()
@@ -839,6 +851,8 @@ final class KayaAppTx {
         let w = app.nextWidget()
         tx.createWhen(w.id, s.id)
         app.parentAtCreation(live: w.id)
+        app.tplDepth += 1
+        defer { app.tplDepth -= 1 }
         let out = body(KayaTpl(tx: self))
         tx.templateEnd()
         return (w, out)
@@ -928,10 +942,24 @@ final class KayaAppTx {
         recomputeDerived(c)
     }
 
+    /// The record-time mirror-read guard: a template body records once
+    /// and the core replays it — a model read inside one bakes this
+    /// moment's data into every future stamp, silently dead. Live-zone,
+    /// handler-tx, and build-tx reads stay legal.
+    private func guardMirrorRead() {
+        precondition(
+            app.tplDepth == 0,
+            "kaya: model read inside a template body — the template records once and replays; "
+                + "bind a signal, use the element's field, or derive() for computed values")
+    }
+
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
     func items(_ c: KayaCollection) -> [(key: KayaValue, value: KayaValue)] {
-        app.instanceEntries(c.id, c.path).map { (key: $0.key, value: $0.value as! KayaValue) }
+        guardMirrorRead()
+        return app.instanceEntries(c.id, c.path).map {
+            (key: $0.key, value: $0.value as! KayaValue)
+        }
     }
 
     // The raw record paths KayaRecords builds on: the model keeps the
@@ -978,12 +1006,16 @@ final class KayaAppTx {
         recomputeDerived(c)
     }
 
+    // The raw read every typed surface (KayaRecords items/get,
+    // KayaSums items/get) funnels through — guarded here once.
     func recordEntries(_ c: KayaCollection) -> [(key: KayaValue, value: Any)] {
-        app.instanceEntries(c.id, c.path)
+        guardMirrorRead()
+        return app.instanceEntries(c.id, c.path)
     }
 
     func count(_ c: KayaCollection) -> Int {
-        app.instanceEntries(c.id, c.path).count
+        guardMirrorRead()
+        return app.instanceEntries(c.id, c.path).count
     }
 
     /// Mount into the default window; per-window targets arrive with
@@ -1094,6 +1126,8 @@ final class KayaTpl {
         tx.tx.createFor(n.id, c.id)
         tx.app.parentAtCreation(node: n.id)
         tx.app.openFors.append(c.id)
+        tx.app.tplDepth += 1
+        defer { tx.app.tplDepth -= 1 }
         let out = body(KayaTpl(tx: tx))
         tx.app.openFors.removeLast()
         tx.tx.templateEnd()
@@ -1104,6 +1138,8 @@ final class KayaTpl {
         let n = tx.app.nextNode()
         tx.tx.createWhen(n.id, s.id)
         tx.app.parentAtCreation(node: n.id)
+        tx.app.tplDepth += 1
+        defer { tx.app.tplDepth -= 1 }
         let out = body(KayaTpl(tx: tx))
         tx.tx.templateEnd()
         return (n, out)

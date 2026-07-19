@@ -81,6 +81,72 @@ public final class AbortCheck {
             }
         });
 
+        // The record-time mirror-read guard: while a template body is
+        // being declared (a For body, a When body), the model is
+        // off-limits — the template records once and replays, so a
+        // read baked into it is silently dead data. Live-zone and
+        // build reads stay legal, pinned below. The template records
+        // (createFor/createWhen) must never reach submit in this
+        // pure-JVM check, so the whole transaction aborts at the end.
+        Consumer<KayaApp.Tx> guarded = tx -> {
+            tx.forEach(todos[0], t -> {
+                boolean threw = false;
+                try {
+                    tx.items(todos[0]);
+                } catch (IllegalStateException e) {
+                    threw = e.getMessage().contains("template body");
+                }
+                if (!threw) {
+                    throw new AssertionError("items() inside a For body did not throw");
+                }
+                threw = false;
+                try {
+                    tx.count(todos[0]);
+                } catch (IllegalStateException e) {
+                    threw = e.getMessage().contains("template body");
+                }
+                if (!threw) {
+                    throw new AssertionError("count() inside a For body did not throw");
+                }
+            });
+            // The When arm: openFors tracks Fors only — when() pushes
+            // nothing there — so this pins the counter's When arm.
+            KayaApp.Signal<Boolean> visible = tx.signal(true);
+            tx.when(visible, t -> {
+                boolean threw = false;
+                try {
+                    tx.items(todos[0]);
+                } catch (IllegalStateException e) {
+                    threw = e.getMessage().contains("template body");
+                }
+                if (!threw) {
+                    throw new AssertionError("items() inside a When body did not throw");
+                }
+            });
+            // After the scope closes, the same transaction reads again.
+            if (tx.count(todos[0]) != 0) {
+                throw new AssertionError("read after the template scope closed broken");
+            }
+            throw new RuntimeException("handler bug");
+        };
+        propagated = false;
+        try {
+            app.build(guarded);
+        } catch (RuntimeException e) {
+            propagated = "handler bug".equals(e.getMessage());
+        }
+        if (!propagated) {
+            throw new AssertionError(
+                    "the guard transaction did not abort cleanly");
+        }
+        // A later build-tx read stays legal (read-only, nothing
+        // submits): the guard is template-scope only, never build-wide.
+        app.build(tx -> {
+            if (tx.count(todos[0]) != 0) {
+                throw new AssertionError("build-tx read after the guard broken");
+            }
+        });
+
         System.out.println("java abort check: OK");
     }
 }

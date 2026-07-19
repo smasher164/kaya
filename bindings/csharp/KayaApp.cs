@@ -207,6 +207,14 @@ sealed class KayaApp
     internal readonly List<ulong> Parents = new();
     internal readonly Dictionary<ulong, List<ulong>> Children = new();
     internal readonly List<ulong> OpenFors = new();
+    // >0 while a template body is being declared (a For body, a When
+    // body, or an open row trace). OpenFors tracks Fors only — When
+    // pushes nothing there — so template-scope detection needs its own
+    // counter. The template records once and replays: a model read
+    // inside its body would bake one snapshot into every stamp as
+    // silently dead data, so mirror reads throw while this is armed;
+    // live-zone, handler, and build reads stay legal.
+    internal int TplDepth;
 
     public KayaApp()
     {
@@ -432,6 +440,10 @@ sealed class Tx
 
     internal void Rollback()
     {
+        // The template-scope counter is app state, not tx state: an
+        // aborted build is abandoned but the app continues, and a
+        // stuck counter would poison every later mirror read.
+        App.TplDepth = 0;
         foreach (var (id, snapshot) in journal)
             App.Model[id] = snapshot;
         foreach (var (id, (existed, old)) in signalJournal)
@@ -709,7 +721,17 @@ sealed class Tx
         Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
         App.OpenFors.Add(c.Id);
         App.Parents.Add(0);
-        body(new Tpl(this));
+        // try/finally: a throwing body abandons the tx but the app
+        // survives, and a stuck counter would poison later reads.
+        App.TplDepth++;
+        try
+        {
+            body(new Tpl(this));
+        }
+        finally
+        {
+            App.TplDepth--;
+        }
         App.Parents.RemoveAt(App.Parents.Count - 1);
         App.OpenFors.RemoveAt(App.OpenFors.Count - 1);
         Records.Add(KayaWire.TxTemplateEnd());
@@ -732,8 +754,12 @@ sealed class Tx
         Records.Add(KayaWire.TxCreateFor(w.Id, c.Id));
         App.OpenFors.Add(c.Id);
         App.Parents.Add(0);
+        // The counter drops in the close action: foreach's Dispose
+        // calls it structurally, even on break or a throwing body.
+        App.TplDepth++;
         return (new Tpl(this), () =>
         {
+            App.TplDepth--;
             App.Parents.RemoveAt(App.Parents.Count - 1);
             App.OpenFors.RemoveAt(App.OpenFors.Count - 1);
             Records.Add(KayaWire.TxTemplateEnd());
@@ -749,7 +775,15 @@ sealed class Tx
         ulong parent = CurrentParent();
         Records.Add(KayaWire.TxCreateWhen(w.Id, s.Id));
         App.Parents.Add(0);
-        body(new Tpl(this));
+        App.TplDepth++;
+        try
+        {
+            body(new Tpl(this));
+        }
+        finally
+        {
+            App.TplDepth--;
+        }
         App.Parents.RemoveAt(App.Parents.Count - 1);
         Records.Add(KayaWire.TxTemplateEnd());
         if (parent != 0)
@@ -897,17 +931,36 @@ sealed class Tx
         RecomputeDerived(c);
     }
 
+    // The record-time mirror-read guard: the template records once
+    // and replays, so a read inside a template body is one snapshot
+    // baked into every stamp — silently dead data. The typed surfaces
+    // (RecordCollection, SumCollection) route through Items, so this
+    // is the single choke point.
+    void GuardMirrorRead()
+    {
+        if (App.TplDepth > 0)
+            throw new InvalidOperationException(
+                "kaya: model read inside a template body — the template records once and "
+                + "replays; bind a signal, use the element's field, or Derive() for "
+                + "computed values");
+    }
+
     /// The model: what this guest wrote, exactly — the fold of every
     /// patch so far (this transaction's included), in insertion order.
     public List<KeyValuePair<object, object>> Items(Collection c)
     {
+        GuardMirrorRead();
         var instance = App.InstanceOf(c.Id, c.Path);
         return instance == null
             ? new List<KeyValuePair<object, object>>()
             : new List<KeyValuePair<object, object>>(instance.Entries);
     }
 
-    public int Count(Collection c) => App.InstanceOf(c.Id, c.Path)?.Entries.Count ?? 0;
+    public int Count(Collection c)
+    {
+        GuardMirrorRead();
+        return App.InstanceOf(c.Id, c.Path)?.Entries.Count ?? 0;
+    }
 
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
@@ -1006,7 +1059,15 @@ sealed class Tpl
         tx.Records.Add(KayaWire.TxCreateFor(n.Id, c.Id));
         tx.App.OpenFors.Add(c.Id);
         tx.App.Parents.Add(0);
-        body(new Tpl(tx));
+        tx.App.TplDepth++;
+        try
+        {
+            body(new Tpl(tx));
+        }
+        finally
+        {
+            tx.App.TplDepth--;
+        }
         tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         tx.App.OpenFors.RemoveAt(tx.App.OpenFors.Count - 1);
         tx.Records.Add(KayaWire.TxTemplateEnd());
@@ -1021,7 +1082,15 @@ sealed class Tpl
         ulong parent = tx.CurrentParent();
         tx.Records.Add(KayaWire.TxCreateWhen(n.Id, s.Id));
         tx.App.Parents.Add(0);
-        body(new Tpl(tx));
+        tx.App.TplDepth++;
+        try
+        {
+            body(new Tpl(tx));
+        }
+        finally
+        {
+            tx.App.TplDepth--;
+        }
         tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
         tx.Records.Add(KayaWire.TxTemplateEnd());
         if (parent != 0)

@@ -43,6 +43,16 @@ with app.window():
             except RuntimeError:
                 check("guard trips in template", True)
             kaya.label(bind=el)
+        # When bodies arm the same guard (_tpl_depth covers both For
+        # and When — the For-only openFors gap the other bindings had).
+        cond = kaya.signal(True)
+        with kaya.when(cond):
+            try:
+                c.items()
+                check("guard trips in a When body", False)
+            except RuntimeError:
+                check("guard trips in a When body", True)
+            kaya.label("empty")
 
 with app.build():
     s.set(2)

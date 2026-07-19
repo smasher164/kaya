@@ -68,6 +68,11 @@ type app = {
   model : (int64, instance list) Hashtbl.t;
   children : (int64, int64 list) Hashtbl.t;
   mutable open_fors : int64 list;
+  (* The record-time mirror-read guard's arming counter: >0 while any
+     template body (a For body, a When body, a sum eliminator's arms)
+     is being DECLARED. Distinct from open_fors (For-only, and keyed by
+     collection): every template scope bumps this, When included. *)
+  mutable tpl_depth : int;
   (* Signals recomputed from a collection after each of its mutations,
      written into the same transaction. *)
   derived : (int64, (tx -> unit) list) Hashtbl.t;
@@ -108,11 +113,30 @@ let create () =
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
     open_fors = [];
+    tpl_depth = 0;
     derived = Hashtbl.create 8;
   }
 
 let emit tx record = tx.records <- record :: tx.records
 let instances_of app cid = Option.value ~default:[] (Hashtbl.find_opt app.model cid)
+
+(* The record-time mirror-read guard: a template body records once and
+   the core replays it — a model read inside one bakes this moment's
+   data into every future stamp, silently dead. Live-zone, handler-tx,
+   and build-tx reads stay legal. *)
+let guard_mirror_read tx =
+  if tx.app.tpl_depth > 0 then
+    failwith
+      "kaya: model read inside a template body — the template records once \
+       and replays; bind a signal, use the element's field, or derive for \
+       computed values"
+
+(* Bracket a template body: the depth arms the guard; a raise out of
+   the body (the guard's own included) must not leave it stuck — the
+   tx boundary rolls back and the app survives the raise. *)
+let in_tpl_scope app f =
+  app.tpl_depth <- app.tpl_depth + 1;
+  Fun.protect ~finally:(fun () -> app.tpl_depth <- app.tpl_depth - 1) f
 
 let touch tx cid =
   if not (List.mem_assoc cid tx.journal) then
@@ -459,10 +483,12 @@ let move_after c key anchor tx =
 (* The model: what this guest wrote, exactly — the fold of every patch
    so far (this transaction's included), in insertion order. *)
 let items c tx =
+  guard_mirror_read tx;
   match List.find_opt (fun i -> i.path = c.cpath) (instances_of tx.app c.cid) with
   | Some i -> List.map (fun (k, (_, vs)) -> (k, List.hd vs)) i.entries
   | None -> []
 
+(* count reads through items, so the mirror-read guard fires there. *)
 let count c tx = List.length (items c tx)
 
 (* Records: a first-class descriptor is the schema — the honest floor
@@ -553,6 +579,7 @@ let update_field rc key fd value tx =
 
 (* The typed model: what this guest wrote, in insertion order. *)
 let record_items rc tx =
+  guard_mirror_read tx;
   match
     List.find_opt (fun i -> i.path = rc.rc_handle.cpath) (instances_of tx.app rc.rc_handle.cid)
   with
@@ -591,7 +618,7 @@ let for_each c body tx =
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_for id c.cid);
   tx.app.open_fors <- c.cid :: tx.app.open_fors;
-  let result = body { tpl_tx = tx } in
+  let result = in_tpl_scope tx.app (fun () -> body { tpl_tx = tx }) in
   tx.app.open_fors <- List.tl tx.app.open_fors;
   emit tx (Kaya_wire.tx_template_end ());
   (Widget id, result)
@@ -652,6 +679,7 @@ let sum_update sc key value tx =
 (* The typed model, in insertion order; [match] eliminates the
    values. *)
 let sum_items sc tx =
+  guard_mirror_read tx;
   match
     List.find_opt
       (fun i -> i.path = sc.sc_handle.cpath)
@@ -664,6 +692,7 @@ let sum_items sc tx =
 (* The entry's current value — the scrutinee for the match that
    precedes a patch. *)
 let sum_get sc key tx =
+  guard_mirror_read tx;
   match
     List.find_opt
       (fun i -> i.path = sc.sc_handle.cpath)
@@ -720,11 +749,12 @@ let each_sum sc arms tx =
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_for id sc.sc_handle.cid);
   tx.app.open_fors <- sc.sc_handle.cid :: tx.app.open_fors;
-  List.iter
-    (fun (variant, arm) ->
-      emit tx (Kaya_wire.tx_variant_case variant);
-      arm { tpl_tx = tx })
-    arms;
+  in_tpl_scope tx.app (fun () ->
+      List.iter
+        (fun (variant, arm) ->
+          emit tx (Kaya_wire.tx_variant_case variant);
+          arm { tpl_tx = tx })
+        arms);
   tx.app.open_fors <- List.tl tx.app.open_fors;
   emit tx (Kaya_wire.tx_template_end ());
   Widget id
@@ -734,7 +764,7 @@ let when_ (Signal sid) body tx =
   tx.app.c_widget <- Int64.add tx.app.c_widget 1L;
   let id = tx.app.c_widget in
   emit tx (Kaya_wire.tx_create_when id sid);
-  let result = body { tpl_tx = tx } in
+  let result = in_tpl_scope tx.app (fun () -> body { tpl_tx = tx }) in
   emit tx (Kaya_wire.tx_template_end ());
   (Widget id, result)
 
@@ -788,7 +818,7 @@ module Tpl = struct
     let id = alloc_node t.tpl_tx in
     emit t.tpl_tx (Kaya_wire.tx_create_for id c.cid);
     t.tpl_tx.app.open_fors <- c.cid :: t.tpl_tx.app.open_fors;
-    let result = body { tpl_tx = t.tpl_tx } in
+    let result = in_tpl_scope t.tpl_tx.app (fun () -> body { tpl_tx = t.tpl_tx }) in
     t.tpl_tx.app.open_fors <- List.tl t.tpl_tx.app.open_fors;
     emit t.tpl_tx (Kaya_wire.tx_template_end ());
     (Node id, result)
@@ -796,7 +826,7 @@ module Tpl = struct
   let when_ (Signal sid) body t =
     let id = alloc_node t.tpl_tx in
     emit t.tpl_tx (Kaya_wire.tx_create_when id sid);
-    let result = body { tpl_tx = t.tpl_tx } in
+    let result = in_tpl_scope t.tpl_tx.app (fun () -> body { tpl_tx = t.tpl_tx }) in
     emit t.tpl_tx (Kaya_wire.tx_template_end ());
     (Node id, result)
 

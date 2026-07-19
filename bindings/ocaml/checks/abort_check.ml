@@ -87,4 +87,36 @@ let () =
   | None | Some [] -> ()
   | Some fns -> fail "aborted tx leaked %d derived registrations" (List.length fns));
 
+  (* The record-time mirror-read guard: a template body records once
+     and the core replays it, so a model read inside a For or When
+     body being declared is baked-in dead data — it must raise. The
+     same read in a build tx, or after the scope closes, stays legal
+     (the entry_keys reads above pin the build-tx side). *)
+  (match
+     build app
+       (let+ _ = for_each todos (fun t -> items todos t.tpl_tx) in
+        ())
+   with
+  | () -> fail "For-body mirror read did not raise"
+  | exception Failure _ -> ());
+  expect app todos [ "a"; "b"; "c" ] "For-body read abort leaked into the mirror";
+
+  let visible = build app (signal (Bool false)) in
+  (match
+     build app
+       (let+ _ = when_ visible (fun t -> count todos t.tpl_tx) in
+        ())
+   with
+  | () -> fail "When-body mirror read did not raise"
+  | exception Failure _ -> ());
+
+  (* Legal: the read after the template scope closes, in the very
+     transaction that declared it. *)
+  let n =
+    build app
+      (let* _ = for_each todos (fun _ -> ()) in
+       count todos)
+  in
+  if n <> 3 then fail "post-scope read broken: %d" n;
+
   print_endline "ocaml abort check: OK"

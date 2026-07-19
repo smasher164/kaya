@@ -189,6 +189,7 @@ func (c RecordCollection[K, T]) MoveAfter(tx *Tx, key, anchor K) {
 
 // Items is the typed model: what this guest wrote, in insertion order.
 func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
+	tx.app.guardMirrorRead()
 	in := tx.app.instanceOf(c.id, c.path)
 	if in == nil {
 		return nil

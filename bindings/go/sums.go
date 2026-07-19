@@ -80,6 +80,7 @@ func (c SumCollection[K, T]) Update(tx *Tx, key K, value T) {
 // Items is the typed model, in insertion order; the values are the
 // constructor structs behind T — a type switch eliminates them.
 func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
+	tx.app.guardMirrorRead()
 	in := tx.app.instanceOf(c.id, c.path)
 	if in == nil {
 		return nil
@@ -94,6 +95,7 @@ func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 // Get is the entry's current value — the scrutinee for the type
 // switch that precedes a patch. ok is false for a missing key.
 func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
+	tx.app.guardMirrorRead()
 	var zero T
 	in := tx.app.instanceOf(c.id, c.path)
 	if in == nil {
