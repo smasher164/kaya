@@ -40,11 +40,24 @@ main = kayaMain $ \app -> do
         let n = length (filter (not . done . snd) entries)
          in VStr (if n == 1 then "1 item left" else show n ++ " items left")
 
+    entryField <- entryOn (writeIORef draftRef)
+
     let onAdd = do
           draft <- readIORef draftRef
-          key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
-          submitTx app $
-            insertRecord todos (VStr ("t" ++ show key)) (Todo draft False)
+          -- The empty-draft guard every real form has: nothing to
+          -- insert, nothing to command.
+          if null draft
+            then return ()
+            else do
+              key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
+              submitTx app $ do
+                insertRecord todos (VStr ("t" ++ show key)) (Todo draft False)
+                -- Finish the form: the field empties on screen and
+                -- reports text_changed("") through its normal edit path
+                -- (the fold empties the draft), and the cursor lands
+                -- back in it.
+                clearWidget entryField
+                focusWidget entryField
         onToggle keys checked =
           submitTx app $
             -- One field's delta: the title never travels; the derived
@@ -53,7 +66,7 @@ main = kayaMain $ \app -> do
 
     root <-
       column
-        [ entryOn (writeIORef draftRef),
+        [ pure entryField,
           buttonOn "Add" onAdd,
           labelBound itemsLeft,
           each (recordHandle todos) $

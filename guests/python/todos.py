@@ -45,8 +45,15 @@ def on_change(text):
 
 def on_add():
     global next_key
+    if not draft:
+        return
     next_key += 1
     todos.insert(f"t{next_key}", Todo(title=draft, done=False))
+    # Finish the form: the field empties on screen and reports
+    # text_changed("") through its normal edit path (the fold above
+    # empties the draft), and the cursor lands back in it.
+    field.clear()
+    field.focus()
 
 
 def on_toggle(key, checked):
@@ -60,7 +67,7 @@ with app.window():
     items_left = todos.derive(items_left_text)
 
     with kaya.column():
-        kaya.entry(on_change=on_change)
+        field = kaya.entry(on_change=on_change)
         kaya.button("Add", on_click=on_add)
         kaya.label(bind=items_left)
         # The tracing tier: the for statement IS the For — the body

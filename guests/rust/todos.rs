@@ -33,14 +33,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // explicit floor on purpose; see guests/c). Handlers stay in the occurrence
     // loop, the Rust idiom.
     let msgs = kaya::Messages::new();
-    let todos = ctx.apply(|tx| {
+    let (todos, field) = ctx.apply(|tx| {
         let todos = tx.collection::<Todo>();
         let items_left = todos.derive(tx, |items| {
             let n = items.iter().filter(|(_, t)| !t.done).count();
             if n == 1 { "1 item left".to_string() } else { format!("{n} items left") }
         });
 
-        let (root, ()) = tx.column(|tx| {
+        let (root, field) = tx.column(|tx| {
             let field = tx.entry();
             msgs.on_change(field, Msg::Draft);
             let add = tx.button("Add");
@@ -58,9 +58,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     t.label(Todo::title());
                 });
             }
+            field
         });
         tx.mount(root);
-        todos
+        (todos, field)
     });
 
     // The fold: widget-owned state arrives as occurrences; the app's
@@ -71,6 +72,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         match msg {
             Msg::Draft(text) => draft = text,
             Msg::Add => {
+                if draft.is_empty() {
+                    continue;
+                }
                 next_key += 1;
                 ctx.apply(|tx| {
                     tx.insert(
@@ -78,6 +82,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         format!("t{next_key}"),
                         Todo { title: draft.clone(), done: false },
                     );
+                    // Finish the form: the field empties on screen and
+                    // reports text_changed("") through its normal edit
+                    // path (the fold empties the draft), and the
+                    // cursor lands back in it.
+                    tx.clear(field);
+                    tx.focus(field);
                 });
             }
             Msg::Toggle(path, checked) => {

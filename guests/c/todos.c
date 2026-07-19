@@ -122,6 +122,10 @@ static void *app(void *arg) {
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_ADD && n_keys == 0 && n_todos < MAX_TODOS) {
+                /* The empty-draft guard every real form has: nothing to
+                 * insert, nothing to command. */
+                if (draft[0] == '\0')
+                    continue;
                 snprintf(todos[n_todos].key, sizeof todos[n_todos].key, "t%u",
                          n_todos + 1);
                 todos[n_todos].done = 0;
@@ -132,6 +136,12 @@ static void *app(void *arg) {
                     &tx, C_TODOS, 0, 0, kaya_str(todos[n_todos - 1].key), 0,
                     (KayaVal[]){kaya_str(draft), kaya_bool(0)}, 2);
                 write_items_left(&tx);
+                /* Finish the form: the field empties on screen and
+                 * reports text_changed("") through its normal edit path
+                 * (the fold empties the draft), and the cursor lands
+                 * back in it. */
+                kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_CLEAR);
+                kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);
             }
         }

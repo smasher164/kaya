@@ -5,6 +5,8 @@ set_text entry#0 "buy milk"
 settle 400
 click button#0
 settle 400
+expect entry#0 ""
+expect_focused entry#0
 toggle checkbox#0 on
 settle 700
 expect label#0 "0 items left"

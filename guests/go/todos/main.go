@@ -62,12 +62,21 @@ func main() {
 		})
 
 		tx.Mount(tx.Column(func() {
-			tx.Entry(func(tx *kaya.Tx, text string) {
+			field := tx.Entry(func(tx *kaya.Tx, text string) {
 				draft = text
 			})
 			tx.Button("Add", func(tx *kaya.Tx) {
+				if draft == "" {
+					return
+				}
 				nextKey++
 				todos.Insert(tx, fmt.Sprintf("t%d", nextKey), Todo{Title: draft})
+				// Finish the form: the field empties on screen and
+				// reports text_changed("") through its normal edit
+				// path (the fold empties the draft), and the cursor
+				// lands back in it.
+				tx.Clear(field)
+				tx.Focus(field)
 			})
 			tx.Label(itemsLeft)
 			// The tracing tier: the for statement IS the For — the

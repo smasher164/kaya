@@ -31,10 +31,16 @@ app.build { tx in
     }
 
     let root = tx.column {
-        tx.entry { _, text in draft = text }
+        let field = tx.entry { _, text in draft = text }
         tx.button("Add") { tx in
+            if draft.isEmpty { return }
             nextKey += 1
             todos.insert(tx, .str("t\(nextKey)"), Todo(title: draft, done: false))
+            // Finish the form: the field empties on screen and reports
+            // text_changed("") through its normal edit path (the fold
+            // empties the draft), and the cursor lands back in it.
+            tx.clear(field)
+            tx.focus(field)
         }
         tx.label(bind: itemsLeft)
         // The tracing tier: the for statement IS the For — the body

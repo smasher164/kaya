@@ -44,11 +44,19 @@ static class TodosScene
 
             tx.Mount(tx.Column(() =>
             {
-                tx.Entry((t, text) => draft = text);
+                var field = tx.Entry((t, text) => draft = text);
                 tx.Button("Add", t =>
                 {
+                    if (draft.Length == 0)
+                        return;
                     nextKey++;
                     todos.Insert(t, $"t{nextKey}", new Todo(draft, false));
+                    // Finish the form: the field empties on screen and
+                    // reports text_changed("") through its normal edit
+                    // path (the fold empties the draft), and the
+                    // cursor lands back in it.
+                    t.Clear(field);
+                    t.Focus(field);
                 });
                 tx.Label(bind: itemsLeft);
                 // The tracing tier: the foreach IS the For — the body

@@ -45,10 +45,19 @@ final class Todos {
             KayaApp.Signal<String> itemsLeft = todos.derive(tx, Todos::itemsLeftText);
 
             tx.mount(tx.column(() -> {
-                tx.entry((t, text) -> draft = text);
+                var field = tx.entry((t, text) -> draft = text);
                 tx.button("Add", t -> {
+                    if (draft.isEmpty()) {
+                        return;
+                    }
                     nextKey++;
                     todos.insert(t, "t" + nextKey, new Todo(draft, false));
+                    // Finish the form: the field empties on screen and
+                    // reports text_changed("") through its normal edit
+                    // path (the fold empties the draft), and the
+                    // cursor lands back in it.
+                    t.clear(field);
+                    t.focus(field);
                 });
                 tx.label(itemsLeft);
                 // The tracing tier: the for-each IS the For — the body

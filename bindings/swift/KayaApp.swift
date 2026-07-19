@@ -210,8 +210,38 @@ final class KayaApp {
     var signalDeps: [UInt64: [(KayaAppTx) -> Void]] = [:]
     // Container builders collect children ambiently, in evaluation
     // order (a frame per open container); a for-in row trace appends
-    // its For widget to the top frame at close.
-    var childFrames: [[UInt64]] = []
+    // its For widget to the top frame at close. Frames are
+    // zone-tagged: constructors parent AT CREATION (the ambient-stack
+    // semantics every other binding has — parenting at expression
+    // position silently dropped any let-bound child, the unparented-
+    // entry focus bug), and the tag makes a cross-zone child loud
+    // instead of silently absent.
+    struct KayaFrame {
+        let template: Bool
+        var ids: [UInt64] = []
+    }
+
+    var childFrames: [KayaFrame] = []
+
+    /// A live widget parents into the open live frame at creation;
+    /// creating one inside a template body is misuse, caught here.
+    fileprivate func parentAtCreation(live id: UInt64) {
+        guard let top = childFrames.indices.last else { return }
+        precondition(
+            !childFrames[top].template,
+            "kaya: a live widget cannot be created inside a template body")
+        childFrames[top].ids.append(id)
+    }
+
+    /// A template node parents into the open template frame at
+    /// creation; with no template frame open it is template-rooted
+    /// (a blueprint root, or a trace body's row) and the scope itself
+    /// carries it.
+    fileprivate func parentAtCreation(node id: UInt64) {
+        if let top = childFrames.indices.last, childFrames[top].template {
+            childFrames[top].ids.append(id)
+        }
+    }
     var openTraces = 0
 
     init() {
@@ -503,22 +533,13 @@ final class KayaApp {
 /// loop contributes nothing through the builder).
 @resultBuilder
 enum KayaChildren {
+    // Parenting happens at creation (the constructors append to the
+    // open frame); expression position only carries the value away.
     static func buildExpression(_ w: KayaWidget) {
-        guard let app = KayaApp.ambient, !app.childFrames.isEmpty else {
-            preconditionFailure("kaya: a container builder has no open frame")
-        }
-        app.childFrames[app.childFrames.count - 1].append(w.id)
+        _ = w
     }
 
-    // A template node at statement position inside a live container:
-    // legal only as a for-in row trace's body (the node is already
-    // template-rooted; the builder discards the handle).
     static func buildExpression(_ n: KayaNodeHandle) {
-        guard let app = KayaApp.ambient, app.openTraces > 0 else {
-            preconditionFailure(
-                "kaya: a template node cannot parent into a live container "
-                    + "— it belongs to a for-in row trace's body")
-        }
         _ = n
     }
 
@@ -529,11 +550,9 @@ enum KayaChildren {
 
 @resultBuilder
 enum KayaNodeChildren {
+    // Parenting happens at creation; see KayaChildren.
     static func buildExpression(_ n: KayaNodeHandle) {
-        guard let app = KayaApp.ambient, !app.childFrames.isEmpty else {
-            preconditionFailure("kaya: a container builder has no open frame")
-        }
-        app.childFrames[app.childFrames.count - 1].append(n.id)
+        _ = n
     }
 
     static func buildBlock(_: Void...) {}
@@ -582,7 +601,7 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
             precondition(
                 !app.childFrames.isEmpty,
                 "kaya: a for-in over rows needs an enclosing container builder")
-            app.childFrames[app.childFrames.count - 1].append(forId)
+            app.childFrames[app.childFrames.count - 1].ids.append(forId)
         }
         return nil
     }
@@ -666,6 +685,7 @@ final class KayaAppTx {
     func widget(_ kind: UInt32) -> KayaWidget {
         let w = app.nextWidget()
         tx.createWidget(w.id, kind)
+        app.parentAtCreation(live: w.id)
         return w
     }
 
@@ -774,9 +794,9 @@ final class KayaAppTx {
         // creation order is observable (column#N) and derivable from
         // the construction style, never per-language trivia.
         let parent = widget(kind)
-        app.childFrames.append([])
+        app.childFrames.append(KayaApp.KayaFrame(template: false))
         children()
-        let ids = app.childFrames.removeLast()
+        let ids = app.childFrames.removeLast().ids
         for id in ids { tx.addChild(parent.id, id) }
         return parent
     }
@@ -806,6 +826,7 @@ final class KayaAppTx {
         c.assertRoot()
         let w = app.nextWidget()
         tx.createFor(w.id, c.id)
+        app.parentAtCreation(live: w.id)
         app.openFors.append(c.id)
         let out = body(KayaTpl(tx: self))
         app.openFors.removeLast()
@@ -817,6 +838,7 @@ final class KayaAppTx {
     func when<R>(_ s: KayaSignal, _ body: (KayaTpl) -> R) -> (KayaWidget, R) {
         let w = app.nextWidget()
         tx.createWhen(w.id, s.id)
+        app.parentAtCreation(live: w.id)
         let out = body(KayaTpl(tx: self))
         tx.templateEnd()
         return (w, out)
@@ -982,6 +1004,7 @@ final class KayaTpl {
 
     func widget(_ kind: UInt32) -> KayaNodeHandle {
         let n = tx.app.nextNode()
+        defer { tx.app.parentAtCreation(node: n.id) }
         tx.tx.createWidget(n.id, kind)
         return n
     }
@@ -1050,9 +1073,9 @@ final class KayaTpl {
 
     private func nodeContainerOf(_ kind: UInt32, _ children: () -> Void) -> KayaNodeHandle {
         let parent = widget(kind)
-        tx.app.childFrames.append([])
+        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
         children()
-        let ids = tx.app.childFrames.removeLast()
+        let ids = tx.app.childFrames.removeLast().ids
         for id in ids { tx.tx.addChild(parent.id, id) }
         return parent
     }
@@ -1069,6 +1092,7 @@ final class KayaTpl {
         c.assertRoot()
         let n = tx.app.nextNode()
         tx.tx.createFor(n.id, c.id)
+        tx.app.parentAtCreation(node: n.id)
         tx.app.openFors.append(c.id)
         let out = body(KayaTpl(tx: tx))
         tx.app.openFors.removeLast()
@@ -1079,6 +1103,7 @@ final class KayaTpl {
     func when<R>(_ s: KayaSignal, _ body: (KayaTpl) -> R) -> (KayaNodeHandle, R) {
         let n = tx.app.nextNode()
         tx.tx.createWhen(n.id, s.id)
+        tx.app.parentAtCreation(node: n.id)
         let out = body(KayaTpl(tx: tx))
         tx.tx.templateEnd()
         return (n, out)

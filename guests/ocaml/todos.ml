@@ -30,9 +30,20 @@ let () =
            let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
            Str (if n = 1 then "1 item left" else Printf.sprintf "%d items left" n))
      in
+     let* field = entry ~on_change:(fun text -> io (fun () -> draft := text)) () in
      let on_add =
-       let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
-       insert_record todos (Str key) { title = !draft; done_ = false }
+       let* d = io (fun () -> !draft) in
+       (* The empty-draft guard every real form has: nothing to insert,
+          nothing to command. *)
+       if d = "" then return ()
+       else
+         let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
+         let* () = insert_record todos (Str key) { title = d; done_ = false } in
+         (* Finish the form: the field empties on screen and reports
+            text_changed "" through its normal edit path (the fold
+            empties the draft), and the cursor lands back in it. *)
+         let* () = clear field in
+         focus field
      in
      let on_toggle keys checked =
        (* One field's delta: the title never travels; the derived
@@ -44,7 +55,7 @@ let () =
      let* root =
        column
          [
-           entry ~on_change:(fun text -> io (fun () -> draft := text)) ();
+           return field;
            button ~text:"Add" ~on_click:on_add ();
            label ~bind:items_left ();
            each (record_handle todos)
