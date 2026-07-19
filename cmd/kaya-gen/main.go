@@ -38,9 +38,28 @@ import (
 )
 
 // The wire vocabulary a field type maps into; any other field type is
-// guest-only and gets no setter.
+// guest-only and gets no setter. []byte is the blob channel (encoded
+// image bytes; VALUE_BLOB in the schema — bindings/go/records.go
+// wireTag), so a skipped []byte field here would shift every later
+// exact-index token off the runtime schema.
 var wireTypes = map[string]bool{
 	"string": true, "bool": true, "int64": true, "float64": true,
+	"[]byte": true,
+}
+
+// wireTypeName names a field's declared type in the wire vocabulary: a
+// scalar ident or the []byte blob channel; anything else is
+// guest-only.
+func wireTypeName(e ast.Expr) (string, bool) {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return t.Name, wireTypes[t.Name]
+	case *ast.ArrayType:
+		if id, ok := t.Elt.(*ast.Ident); ok && t.Len == nil && id.Name == "byte" {
+			return "[]byte", wireTypes["[]byte"]
+		}
+	}
+	return "", false
 }
 
 func main() {
@@ -270,13 +289,13 @@ func wireFieldsOf(pkg *ast.Package, name string) []struct{ name, typ string } {
 					continue
 				}
 				for _, f := range strct.Fields.List {
-					id, ok := f.Type.(*ast.Ident)
-					if !ok || !wireTypes[id.Name] {
+					typ, ok := wireTypeName(f.Type)
+					if !ok {
 						continue
 					}
 					for _, n := range f.Names {
 						if n.IsExported() {
-							fields = append(fields, struct{ name, typ string }{n.Name, id.Name})
+							fields = append(fields, struct{ name, typ string }{n.Name, typ})
 						}
 					}
 				}
@@ -292,13 +311,13 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	type field struct{ name, typ string }
 	var fields []field
 	for _, f := range strct.Fields.List {
-		id, ok := f.Type.(*ast.Ident)
-		if !ok || !wireTypes[id.Name] {
+		typ, ok := wireTypeName(f.Type)
+		if !ok {
 			continue
 		}
 		for _, n := range f.Names {
 			if n.IsExported() {
-				fields = append(fields, field{n.Name, id.Name})
+				fields = append(fields, field{n.Name, typ})
 			}
 		}
 	}
@@ -353,6 +372,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) Column(body func()) kaya.Node { return r.t.Column(body) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) Image(f kaya.Field[[]byte]) kaya.Node { return r.c.Image(r.t, f) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, %s, bool)) kaya.Node {", lowerFirst(name), key)
 	w("\treturn r.c.Checkbox(r.t, f, onToggle)")

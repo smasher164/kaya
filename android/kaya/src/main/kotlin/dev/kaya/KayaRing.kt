@@ -29,4 +29,10 @@ object KayaRing {
     @JvmStatic external fun tailAddress(): Long
     @JvmStatic external fun waitOccurrences(): Boolean
     @JvmStatic external fun specHash(): Long
+
+    /** kaya_blob_register's JNI spelling: one copy of the bytes into
+     * core-owned memory; the returned handle is consumed by the next
+     * submit from this guest, referenced or not, and the caller's
+     * array is free the moment this returns. */
+    @JvmStatic external fun blobRegister(data: ByteArray): Long
 }

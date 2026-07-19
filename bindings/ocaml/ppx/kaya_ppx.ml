@@ -21,8 +21,11 @@
    indexes, and the patch all derive from the one declaration, so none
    can drift (the same single-source move as #[derive(Kaya)] in Rust
    and the dataclass reader in Python). Every field must be wire-typed
-   (string, bool, int64, float); OCaml keeps handlers out of records by
-   idiom, so there is no guest-only skipping.
+   (string, bool, int64, float, or bytes — the blob kind: the model
+   keeps the guest's own bytes, and every insert/update/update_field
+   re-registers them with the core at encode time, because blob handles
+   are single-submit); OCaml keeps handlers out of records by idiom, so
+   there is no guest-only skipping.
 
    On a variant whose constructors carry inline records —
 
@@ -44,7 +47,7 @@
 
 open Ppxlib
 
-type wire = Str | Bool | I64 | F64
+type wire = Str | Bool | I64 | F64 | Blob
 
 let wire_of_core_type (ct : core_type) =
   match ct with
@@ -53,6 +56,8 @@ let wire_of_core_type (ct : core_type) =
   | [%type: int64] -> Some I64
   | [%type: Int64.t] -> Some I64
   | [%type: float] -> Some F64
+  | [%type: bytes] -> Some Blob
+  | [%type: Bytes.t] -> Some Blob
   | _ -> None
 
 let tag_expr ~loc = function
@@ -60,18 +65,33 @@ let tag_expr ~loc = function
   | Bool -> [%expr Kaya_wire.value_bool]
   | I64 -> [%expr Kaya_wire.value_i64]
   | F64 -> [%expr Kaya_wire.value_f64]
+  | Blob -> [%expr Kaya_wire.value_blob]
 
+(* A blob field's MODEL value carries the guest's own bytes as a
+   binary Str (the wire side re-registers them at encode time, in
+   Kaya_app.encode_field — handles are single-submit), so its value
+   constructor is Str, wrapped by the conversions below. *)
 let value_ctor = function
   | Str -> "Str"
   | Bool -> "Bool"
   | I64 -> "I64"
   | F64 -> "F64"
+  | Blob -> "Str"
+
+(* Wrap a record field's read for its model value (bytes -> Str). *)
+let to_model_expr ~loc w e =
+  match w with Blob -> [%expr Bytes.to_string [%e e]] | _ -> e
+
+(* Wrap a model value's bound variable back to the record field. *)
+let of_model_expr ~loc w e =
+  match w with Blob -> [%expr Bytes.of_string [%e e]] | _ -> e
 
 let field_ctor = function
   | Str -> "str_field"
   | Bool -> "bool_field"
   | I64 -> "i64_field"
   | F64 -> "f64_field"
+  | Blob -> "blob_field"
 
 let generate ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -86,7 +106,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | None ->
                 Location.raise_errorf ~loc:ld.pld_loc
                   "kaya: field %s is not wire-typed (string, bool, int64, \
-                   or float)"
+                   float, or bytes)"
                   ld.pld_name.txt)
           labels
       in
@@ -109,8 +129,9 @@ let generate ~ctxt (_rec_flag, type_decls) =
                       ~name:{ loc; txt = value_ctor w }
                       ~args:(Pcstr_tuple []) ~res:None)
                    (Some
-                      (Ast_builder.Default.pexp_field ~loc [%expr r]
-                         (lident name))))
+                      (to_model_expr ~loc w
+                         (Ast_builder.Default.pexp_field ~loc [%expr r]
+                            (lident name)))))
                fields)
         in
         [%expr fun r -> [%e body]]
@@ -129,7 +150,9 @@ let generate ~ctxt (_rec_flag, type_decls) =
         in
         let record =
           Ast_builder.Default.pexp_record ~loc
-            (List.map (fun (name, _) -> (lident name, evar name)) fields)
+            (List.map
+               (fun (name, w) -> (lident name, of_model_expr ~loc w (evar name)))
+               fields)
             None
         in
         [%expr
@@ -208,7 +231,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                       | None ->
                           Location.raise_errorf ~loc:ld.pld_loc
                             "kaya: field %s is not wire-typed (string, bool, \
-                             int64, or float)"
+                             int64, float, or bytes)"
                             ld.pld_name.txt)
                     labels
                 in
@@ -266,8 +289,9 @@ let generate ~ctxt (_rec_flag, type_decls) =
                                 ~name:{ loc; txt = value_ctor w }
                                 ~args:(Pcstr_tuple []) ~res:None)
                              (Some
-                                (Ast_builder.Default.pexp_field ~loc
-                                   [%expr __kaya_r] (lident name))))
+                                (to_model_expr ~loc w
+                                   (Ast_builder.Default.pexp_field ~loc
+                                      [%expr __kaya_r] (lident name)))))
                          fields)))
              variants
         in
@@ -292,7 +316,10 @@ let generate ~ctxt (_rec_flag, type_decls) =
               in
               let record =
                 Ast_builder.Default.pexp_record ~loc
-                  (List.map (fun (name, _) -> (lident name, evar name)) fields)
+                  (List.map
+                     (fun (name, w) ->
+                       (lident name, of_model_expr ~loc w (evar name)))
+                     fields)
                   None
               in
               Ast_builder.Default.case

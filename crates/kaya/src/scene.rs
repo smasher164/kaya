@@ -206,6 +206,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         Prop::Value | Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
+        Prop::Source => matches!(kind, WidgetKind::Image),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -234,6 +235,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Text => ValueType::Str,
         Prop::Checked => ValueType::Bool,
         Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
+        Prop::Source => ValueType::Blob,
     }
 }
 

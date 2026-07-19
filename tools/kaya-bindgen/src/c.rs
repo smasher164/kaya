@@ -77,6 +77,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return v;");
     c.line("}");
     c.line("");
+    c.line("/* A blob by its kaya_blob_register handle (riding in i), consumed by");
+    c.line(" * the next submit; the bytes never enter the record stream. */");
+    c.line("static inline KayaVal kaya_blob(uint64_t handle) {");
+    c.line("    KayaVal v = {KAYA_VALUE_BLOB, (int64_t)handle, 0, 0, 0};");
+    c.line("    return v;");
+    c.line("}");
+    c.line("");
     c.line("static inline void kaya_wire_u32(KayaTx *tx, uint32_t v) {");
     c.line("    memcpy(tx->buf + tx->len, &v, 4);");
     c.line("    tx->len += 4;");
@@ -101,6 +108,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        tx->buf[tx->len++] = (uint8_t)v.i;");
     c.line("        break;");
     c.line("    case KAYA_VALUE_I64:");
+    c.line("    case KAYA_VALUE_BLOB: /* the u64 handle rides in i */");
     c.line("        kaya_wire_u32(tx, 8);");
     c.line("        memcpy(tx->buf + tx->len, &v.i, 8);");
     c.line("        tx->len += 8;");
@@ -208,19 +216,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // takes a KayaVal; strings stay the common case via kaya_str.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        let (ty, ctor) = match kind {
-            crate::PropKind::Str => ("const char *", "kaya_str"),
-            crate::PropKind::Bool => ("int ", "kaya_bool"),
-            crate::PropKind::F64 => ("double ", "kaya_f64"),
+        // Blob setters take the u64 kaya_blob_register handle (see
+        // kaya_blob), so the parameter says so.
+        let (ty, ctor, param) = match kind {
+            crate::PropKind::Str => ("const char *", "kaya_str", *prop),
+            crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
+            crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
+            crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
         };
         c.line("");
         c.line(&format!("/* set_property with a constant {prop} value. */"));
-        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {ty}{prop}) {{"));
+        c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {ty}{param}) {{"));
         c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
-        c.line(&format!("    kaya_wire_value(tx, {ctor}({prop}));"));
+        c.line(&format!("    kaya_wire_value(tx, {ctor}({param}));"));
         c.line("    kaya_wire_end(tx, start);");
         c.line("}");
         c.line("");
@@ -261,6 +272,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        out->i = buf[at + 8];");
     c.line("        break;");
     c.line("    case KAYA_VALUE_I64:");
+    c.line("    case KAYA_VALUE_BLOB:");
     c.line("        memcpy(&out->i, buf + at + 8, 8);");
     c.line("        break;");
     c.line("    case KAYA_VALUE_F64:");

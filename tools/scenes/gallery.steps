@@ -1,5 +1,8 @@
 # The gallery round trip: flip the checkbox and set the slider through
-# each control's own event path; both labels prove the answers.
+# each control's own event path; both labels prove the answers. The
+# image row pins the content-buffer path both ways: a valid 2x2 PNG
+# decodes to its size, and deliberately invalid bytes read 0x0 —
+# decode failure is the placeholder class, never a crash.
 settle 1500
 toggle checkbox#0 on
 settle 400
@@ -7,3 +10,5 @@ set_value slider#0 0.75
 settle 700
 expect label#0 "urgent: true"
 expect label#1 "volume: 75%"
+expect image#0 "2x2"
+expect image#1 "0x0"

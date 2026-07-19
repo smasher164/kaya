@@ -65,8 +65,39 @@ func wireTag(t reflect.Type) (uint32, bool) {
 		return ValueF64, true
 	case reflect.String:
 		return ValueStr, true
+	case reflect.Slice:
+		// A []byte field is the blob channel: encoded image bytes,
+		// registered with the core at encode time.
+		if t.Elem().Kind() == reflect.Uint8 {
+			return ValueBlob, true
+		}
 	}
 	return 0, false
+}
+
+// blobWire registers a blob's bytes at encode time and returns the
+// wire handle. Handles are single-submit, so every operation that
+// carries blob bytes re-registers: one copy into core memory per
+// write; the model keeps the guest's own bytes. The clear-error
+// guard: anything but a byte slice in a blob position fails here, by
+// name, instead of deep in the wire encoder.
+func blobWire(v any) BlobHandle {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || rv.Type().Elem().Kind() != reflect.Uint8 {
+		panic(fmt.Sprintf(
+			"kaya: a blob (image source) takes []byte, not %T — text belongs on a label", v))
+	}
+	return BlobHandle(RegisterBlob(rv.Bytes()))
+}
+
+// scalarWire is the signal-value encode step: byte slices become
+// registered blob handles (see blobWire); every other scalar rides
+// the record as is.
+func scalarWire(v any) any {
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+		return blobWire(v)
+	}
+	return v
 }
 
 // One reflection walk per record type, ever — UpdateField and the
@@ -140,9 +171,20 @@ func (info *recordInfo) values(value any) []any {
 	v := reflect.ValueOf(value)
 	out := make([]any, len(info.indexes))
 	for i, idx := range info.indexes {
-		out[i] = v.Field(idx).Interface()
+		out[i] = info.encode(uint32(i), v.Field(idx).Interface())
 	}
 	return out
+}
+
+// encode is one field's wire value. Blob fields register their bytes
+// now, at encode time — handles are single-submit, so insert, update,
+// and update_field all re-register (one copy into core memory per
+// write; the model keeps the guest's own bytes).
+func (info *recordInfo) encode(field uint32, v any) any {
+	if info.schema[field] == ValueBlob {
+		return blobWire(v)
+	}
+	return v
 }
 
 // Insert a record; the model keeps the T itself, the wire carries its
@@ -227,7 +269,7 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 			break
 		}
 	}
-	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, 0, value))
+	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, 0, c.info.encode(f.index, value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -327,4 +369,32 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 // element; Field[bool] only.
 func (t *Tpl) BindCheckedField(n Node, level uint32, f Field[bool]) {
 	t.tx.records = append(t.tx.records, TxBindCheckedElement(n.id, level, f.index))
+}
+
+// Image creates an image bound to any addressable source: encoded
+// bytes (registered once, at declaration — the blueprint's stamped
+// copies share the value), a blob signal, a field projection, or a
+// pre-resolved token — the same union-constrained shape as Label.
+func (c RecordCollection[K, T]) Image[S interface {
+	~[]byte | Signal[[]byte] | func(*T) *[]byte | Field[[]byte]
+}](t *Tpl, src S) Node {
+	n := t.Widget(KindImage)
+	switch v := any(src).(type) {
+	case Signal[[]byte]:
+		t.tx.records = append(t.tx.records, TxBindSource(n.id, v.id))
+	case func(*T) *[]byte:
+		t.BindSourceField(n, 0, FieldBy(v))
+	case Field[[]byte]:
+		t.BindSourceField(n, 0, v)
+	default:
+		// ~[]byte, named byte-slice types included: register now.
+		t.tx.records = append(t.tx.records, TxSetSource(n.id, uint64(blobWire(v))))
+	}
+	return n
+}
+
+// BindSourceField binds an image's source to one field of the element
+// of the enclosing For; Field[[]byte] only.
+func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
+	t.tx.records = append(t.tx.records, TxBindSourceElement(n.id, level, f.index))
 }

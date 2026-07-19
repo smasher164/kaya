@@ -1,8 +1,8 @@
 // Records: the struct is the schema. KayaRecord reflects a prototype
 // instance with Mirror once at declaration — stored properties of wire
-// types (String, Bool, Int64, Double) in declaration order become the
-// schema; anything else is guest-only, living in the model and never
-// reaching the wire. Mirror cannot construct values, so the one
+// types (String, Bool, Int64, Double, and Data for blob fields) in
+// declaration order become the schema; anything else is guest-only,
+// living in the model and never reaching the wire. Mirror cannot construct values, so the one
 // hand-written member is init(values:) — a line per field; the schema,
 // the outbound conversion, and the field tokens all derive.
 
@@ -41,11 +41,23 @@ func wireValue(_ any: Any) -> KayaValue? {
     }
 }
 
+/// The outbound encoder wireValue is not: a blob field (Data) registers
+/// its bytes now, at encode time — handles are single-submit, so every
+/// write that carries a blob field re-registers (insert, update, and
+/// update_field alike: one copy into core memory per write; the model
+/// keeps the guest's own bytes).
+func kayaEncode(_ any: Any) -> KayaValue? {
+    if let data = any as? Data { return .blob(kayaRegisterBlob(data)) }
+    return wireValue(any)
+}
+
 extension KayaRecord {
     /// The wire schema: one type tag per wire-typed stored property,
-    /// declaration order.
+    /// declaration order. A Data property is a blob field: the bytes
+    /// travel out of band, the record slot carries the handle.
     static var kayaSchema: [UInt32] {
         Mirror(reflecting: prototype).children.compactMap { child in
+            if child.value is Data { return UInt32(KAYA_VALUE_BLOB) }
             switch wireValue(child.value) {
             case .some(.str): return UInt32(KAYA_VALUE_STR)
             case .some(.bool): return UInt32(KAYA_VALUE_BOOL)
@@ -56,9 +68,23 @@ extension KayaRecord {
         }
     }
 
-    /// The record's wire fields, in schema order.
+    /// The record's wire fields, in schema order. Encoding registers
+    /// blob fields' bytes (see kayaEncode) — call this to ship a
+    /// record, never to inspect one.
     var kayaValues: [KayaValue] {
-        Mirror(reflecting: self).children.compactMap { wireValue($0.value) }
+        Mirror(reflecting: self).children.compactMap { kayaEncode($0.value) }
+    }
+
+    /// The pure projection field() diffs: like kayaValues but a blob
+    /// field maps to its byte count — probe resolution must not mint
+    /// handles (two registrations of the same bytes get distinct
+    /// handles, which would break the diff), and appending a probe
+    /// byte changes the count, so the diff still finds the field.
+    private var kayaProbeValues: [KayaValue] {
+        Mirror(reflecting: self).children.compactMap { child in
+            if let data = child.value as? Data { return .blob(UInt64(data.count)) }
+            return wireValue(child.value)
+        }
     }
 
     /// The field token for the field a key path selects:
@@ -79,9 +105,10 @@ extension KayaRecord {
         case let b as Bool: probe[keyPath: keyPath] = (!b) as! V
         case let n as Int64: probe[keyPath: keyPath] = (n &+ 0x5eed) as! V
         case let x as Double: probe[keyPath: keyPath] = (x.isNaN ? 0 : x + 1) as! V
+        case let d as Data: probe[keyPath: keyPath] = (d + Data([0x6b])) as! V
         default: preconditionFailure("kaya: \(V.self) is not a wire type")
         }
-        for (i, (a, b)) in zip(prototype.kayaValues, probe.kayaValues).enumerated()
+        for (i, (a, b)) in zip(prototype.kayaProbeValues, probe.kayaProbeValues).enumerated()
         where a != b {
             kayaFieldIndexes[keyPath] = UInt32(i)
             return KayaField<V>(index: UInt32(i))
@@ -110,15 +137,32 @@ struct KayaRecordCollection<T: KayaRecord> {
 
     /// One field's delta by key path: the rest of the record never
     /// travels. The key path is the field reference — no token to
-    /// declare.
+    /// declare — and it writes the model entry in place, so a blob
+    /// field's bytes stay native (the wire carries only the handle
+    /// kayaEncode registers at encode time; handles are single-submit,
+    /// so every update_field that carries a blob re-registers).
     func updateField<V>(
         _ tx: KayaAppTx, _ key: KayaValue, _ keyPath: WritableKeyPath<T, V>, _ value: V
     ) {
-        updateField(tx, key, T.field(keyPath), value)
+        guard var current = tx.recordEntries(collection).first(where: { $0.key == key })?.value as? T
+        else {
+            preconditionFailure("kaya: update of missing key \(key)")
+        }
+        current[keyPath: keyPath] = value
+        guard let wire = kayaEncode(value) else {
+            preconditionFailure("kaya: \(V.self) is not a wire type")
+        }
+        tx.updateFieldRaw(collection, key, current, 0, T.field(keyPath).index, wire)
     }
 
-    /// updateField over a pre-resolved token.
+    /// updateField over a pre-resolved token. This form rebuilds the
+    /// model entry from wire values, which cannot resurrect a blob
+    /// field's bytes — a record with a blob field patches through the
+    /// key-path form, and the guard holds that structurally.
     func updateField<V>(_ tx: KayaAppTx, _ key: KayaValue, _ f: KayaField<V>, _ value: V) {
+        precondition(
+            !T.kayaSchema.contains(UInt32(KAYA_VALUE_BLOB)),
+            "kaya: token updateField cannot rebuild \(T.self)'s blob bytes — patch through the key-path form")
         guard let current = tx.recordEntries(collection).first(where: { $0.key == key })?.value as? T
         else {
             preconditionFailure("kaya: update of missing key \(key)")

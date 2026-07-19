@@ -61,6 +61,20 @@ func Submit(records ...[]byte) {
 	C.kaya_submit((*C.uint8_t)(unsafe.Pointer(&tx[0])), C.size_t(len(tx)))
 }
 
+// RegisterBlob registers bulk payload bytes (an encoded image) with
+// the core: one copy into core-owned memory, returning the u64 handle
+// the next submit from this guest consumes (referenced or not). The
+// caller's bytes are free to drop the moment this returns.
+func RegisterBlob(data []byte) uint64 {
+	if len(data) == 0 {
+		// &data[0] does not exist for an empty slice; a one-byte
+		// stand-in with length 0 keeps the C side off a null pointer.
+		var zero C.uint8_t
+		return uint64(C.kaya_blob_register(&zero, 0))
+	}
+	return uint64(C.kaya_blob_register((*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data))))
+}
+
 // NextOccurrence blocks for the next occurrence; ok is false when the
 // core has shut down. keys is nil when id is a widget id, else id is a
 // template node id and keys is the stamped copy's key path, outermost

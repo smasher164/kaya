@@ -868,6 +868,17 @@ impl Tx<'_> {
         w
     }
 
+    /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
+    /// decodes natively. The bytes ride the blob channel — one Arc'd
+    /// copy in core memory, an 8-byte handle everywhere else — so a
+    /// large image costs one registration copy and a decode, never a
+    /// per-widget or per-update re-copy. Display-only, like a label.
+    pub fn image(&mut self, bytes: impl Into<crate::protocol::Blob>) -> WidgetId {
+        let w = self.widget(WidgetKind::Image);
+        self.set(w, Prop::Source, Value::Blob(bytes.into()));
+        w
+    }
+
     /// Declare a collection of `T` records: a core-side keyed table a
     /// For renders. The element type is the schema — `T::VARIANTS`
     /// goes on the wire here (one field-type list per constructor; a

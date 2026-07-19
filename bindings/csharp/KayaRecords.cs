@@ -37,6 +37,7 @@ sealed class RecordInfo
         : t == typeof(bool) ? KayaWire.ValueBool
         : t == typeof(long) ? KayaWire.ValueI64
         : t == typeof(double) ? KayaWire.ValueF64
+        : t == typeof(byte[]) ? KayaWire.ValueBlob
         : (uint?)null;
 
     // One reflection walk per record type, ever — FieldOf runs per
@@ -85,8 +86,34 @@ sealed class RecordInfo
     {
         var fields = new object[WireToCtor.Length];
         for (int i = 0; i < WireToCtor.Length; i++)
-            fields[i] = Getters[WireToCtor[i]](record);
+            fields[i] = EncodeField((uint)i, Getters[WireToCtor[i]](record));
         return fields;
+    }
+
+    /// One field's wire value. A blob field registers its bytes now,
+    /// at encode time — handles are single-submit, so every mutation
+    /// that carries a blob field re-registers (Insert, Update, and
+    /// UpdateField alike: one copy into core memory per write; the
+    /// model keeps the guest's own byte[]). The type checks turn what
+    /// would be an obscure wire-encoder failure — a hand-minted
+    /// FieldAt token pointing at the wrong index, say — into an error
+    /// naming the field.
+    internal object EncodeField(uint wireIndex, object value)
+    {
+        string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name;
+        if (Schema[wireIndex] == KayaWire.ValueBlob)
+        {
+            if (value is not byte[] bytes)
+                throw new ArgumentException(
+                    $"kaya: {name} is a blob field and takes byte[], not "
+                    + $"{value?.GetType().Name ?? "null"}");
+            return new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes));
+        }
+        if (value is byte[])
+            throw new ArgumentException(
+                $"kaya: {name} is not a blob field — image bytes belong in a "
+                + "byte[]-typed record field (or Tx.Image)");
+        return value;
     }
 
     internal object WithField(object record, uint wireIndex, object value)
@@ -133,7 +160,11 @@ sealed class RecordCollection<T>
                 current = entry.Value;
         if (current == null)
             throw new InvalidOperationException($"kaya: update of missing key {key}");
-        tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), 0, f.Index, value);
+        // The model keeps the guest's own value; the wire value is
+        // encoded (a blob field re-registers its bytes — handles are
+        // single-submit).
+        tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), 0,
+            f.Index, Info.EncodeField(f.Index, value));
     }
 
     /// MoveBefore repositions an entry before another's: order is
@@ -186,6 +217,10 @@ sealed class RecordCollection<T>
     public Node Checkbox(Tpl t, Expression<Func<T, bool>> selector,
         Action<Tx, List<object>, bool> onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
+
+    /// An image bound to the byte[] field the selector names.
+    public Node Image(Tpl t, Expression<Func<T, byte[]>> selector) =>
+        t.Image(KayaRecords.FieldOf(selector));
 
     /// The typed model: what this guest wrote, in insertion order.
     public List<KeyValuePair<object, T>> Items(Tx tx)

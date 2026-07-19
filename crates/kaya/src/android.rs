@@ -100,6 +100,7 @@ struct CoreState {
     labels: Vec<GlobalRef>,
     entries: Vec<GlobalRef>,
     sliders: Vec<(GlobalRef, u64)>,
+    images: Vec<GlobalRef>,
     columns: Vec<GlobalRef>,
 }
 
@@ -292,6 +293,7 @@ fn setup(
         labels: Vec::new(),
         entries: Vec::new(),
         sliders: Vec::new(),
+        images: Vec::new(),
         columns: Vec::new(),
     });
 
@@ -336,6 +338,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 WidgetKind::Label => "android/widget/TextView",
                 WidgetKind::Checkbox => "android/widget/CheckBox",
                 WidgetKind::Slider => "android/widget/SeekBar",
+                WidgetKind::Image => "android/widget/ImageView",
             };
             let view = env.new_object(
                 class,
@@ -374,6 +377,9 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     )?;
                 }
                 WidgetKind::Label => {}
+                // Display-only, like Label: no tag, no listener. The
+                // source arrives as a SetProp blob and decodes there.
+                WidgetKind::Image => {}
                 WidgetKind::Entry => {
                     // Uncontrolled: the widget owns its text; the
                     // watcher reports each edit (programmatic setText
@@ -459,6 +465,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 WidgetKind::Slider => core
                     .sliders
                     .push((view.clone(), tag_key.expect("sliders carry a tag"))),
+                WidgetKind::Image => core.images.push(view.clone()),
                 WidgetKind::Column => core.columns.push(view.clone()),
                 _ => {}
             }
@@ -576,6 +583,33 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     let key = with_widget(id, |w| w.tag_key).expect("sliders carry a tag");
                     if let Some(ranges) = RANGES.lock().unwrap().as_mut() {
                         ranges.entry(key).or_insert((0.0, 1.0)).1 = v;
+                    }
+                }
+                (Prop::Source, Value::Blob(blob)) => {
+                    // Encoded bytes in, native decode:
+                    // BitmapFactory.decodeByteArray. A null bitmap is
+                    // the placeholder class (setImageBitmap never
+                    // called, image_size reads 0x0), never a crash.
+                    let bytes = env.byte_array_from_slice(&blob.0)?;
+                    let bitmap = env
+                        .call_static_method(
+                            "android/graphics/BitmapFactory",
+                            "decodeByteArray",
+                            "([BII)Landroid/graphics/Bitmap;",
+                            &[
+                                JValue::Object(&bytes),
+                                JValue::Int(0),
+                                JValue::Int(blob.0.len() as i32),
+                            ],
+                        )?
+                        .l()?;
+                    if !bitmap.is_null() {
+                        env.call_method(
+                            view.as_obj(),
+                            "setImageBitmap",
+                            "(Landroid/graphics/Bitmap;)V",
+                            &[JValue::Object(&bitmap)],
+                        )?;
                     }
                 }
                 (prop, value) => {
@@ -881,6 +915,47 @@ impl crate::harness::Stage for AndroidStage {
         })
     }
 
+    fn image_size(&self, t: crate::harness::Target) -> String {
+        let image = Self::view(|core| {
+            core.images[crate::harness::resolve(t.index, core.images.len())].clone()
+        });
+        Self::on_ui(move |env| {
+            // Read the bitmap's own pixel dimensions, not the
+            // drawable's intrinsic size: BitmapDrawable scales
+            // intrinsic sizes by display density, and the harness pins
+            // decoded pixels. A null drawable is the placeholder class
+            // (decode failed or no source yet): "0x0".
+            let drawable = env
+                .call_method(
+                    image.as_obj(),
+                    "getDrawable",
+                    "()Landroid/graphics/drawable/Drawable;",
+                    &[],
+                )
+                .and_then(|v| v.l())
+                .expect("kaya: drawable read failed");
+            if drawable.is_null() {
+                return "0x0".into();
+            }
+            let bitmap = env
+                .call_method(&drawable, "getBitmap", "()Landroid/graphics/Bitmap;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: bitmap read failed");
+            if bitmap.is_null() {
+                return "0x0".into();
+            }
+            let width = env
+                .call_method(&bitmap, "getWidth", "()I", &[])
+                .and_then(|v| v.i())
+                .expect("kaya: bitmap width read failed");
+            let height = env
+                .call_method(&bitmap, "getHeight", "()I", &[])
+                .and_then(|v| v.i())
+                .expect("kaya: bitmap height read failed");
+            format!("{width}x{height}")
+        })
+    }
+
     fn is_focused(&self, t: crate::harness::Target) -> bool {
         // Per-window focus (the view hierarchy's focused view), never
         // global key status — parallel legs must not steal each
@@ -1003,6 +1078,11 @@ fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: ring_wait as *mut _,
             },
             NativeMethod {
+                name: "blobRegister".into(),
+                sig: "([B)J".into(),
+                fn_ptr: ring_blob_register as *mut _,
+            },
+            NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: ring_spec_hash as *mut _,
@@ -1049,6 +1129,20 @@ extern "system" fn ring_submit(mut env: JNIEnv, _class: JClass, records: JByteAr
     unsafe { crate::capi::kaya_submit(bytes.as_ptr(), bytes.len()) };
 }
 
+/// KayaRing.blobRegister: kaya_blob_register's JNI spelling — the JVM
+/// guest's bulk-payload entry (one copy into core memory; the handle
+/// is consumed by the next submit).
+extern "system" fn ring_blob_register(
+    mut env: JNIEnv,
+    _class: JClass,
+    data: JByteArray,
+) -> jni::sys::jlong {
+    let bytes = env
+        .convert_byte_array(&data)
+        .expect("kaya: reading the blob bytes failed");
+    (unsafe { crate::capi::kaya_blob_register(bytes.as_ptr(), bytes.len()) }) as jni::sys::jlong
+}
+
 // The presentation-side C API over JNI, for guest-language backends
 // (Compose): emissions in, resolved apply-op records out, mirroring
 // KayaHostApi on the Apple side.
@@ -1081,6 +1175,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
+            },
+            NativeMethod {
+                name: "blobData".into(),
+                sig: "(J)[B".into(),
+                fn_ptr: present_blob_data as *mut _,
             },
         ],
     )
@@ -1138,6 +1237,30 @@ extern "system" fn present_emit_toggled(
         .convert_byte_array(&tag)
         .expect("kaya: reading the checkbox tag failed");
     unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
+}
+
+/// KayaPresent.blobData: fetch a blob's bytes by the handle an apply
+/// record carried — kaya_blob_data's JNI spelling, copied into a fresh
+/// byte[] (the JVM cannot borrow core memory safely). Null for a dead
+/// handle (a batch already superseded); fetch within the batch.
+extern "system" fn present_blob_data(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) -> jni::sys::jbyteArray {
+    let mut len: usize = 0;
+    let data = unsafe { crate::capi::kaya_blob_data(handle as u64, &mut len) };
+    if data.is_null() {
+        return std::ptr::null_mut();
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    match env.byte_array_from_slice(bytes) {
+        Ok(array) => array.into_raw(),
+        Err(e) => {
+            log::error!("kaya: copying blob bytes to the JVM failed: {e}");
+            std::ptr::null_mut()
+        }
+    }
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,

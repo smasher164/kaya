@@ -608,6 +608,16 @@ sealed class Tx
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
+    /// Point the widget at encoded image bytes: one registration copy
+    /// into core-owned memory — the handle is consumed by the next
+    /// submit from this guest, referenced or not, so the caller's
+    /// array is free to drop the moment this returns.
+    public void SetSource(Widget w, byte[] source) =>
+        Records.Add(KayaWire.TxSetSource(w.Id, Kaya.RegisterBlob(source)));
+
+    public void BindSource(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindSource(w.Id, s.Id));
+
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
 
@@ -677,6 +687,20 @@ sealed class Tx
         if (text != null) SetText(w, text);
         if (isChecked is bool c) SetChecked(w, c);
         if (onToggle != null) App.OnToggle(w, onToggle);
+        return w;
+    }
+
+    /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
+    /// decodes natively, and decode failure renders the placeholder,
+    /// never a crash. `source` is the encoded bytes — one registration
+    /// copy into core memory, consumed by the next submit, so the
+    /// caller's array is free to drop the moment this returns; `bind`
+    /// a Signal carrying the image bytes.
+    public Widget Image(byte[] source = null, Signal? bind = null)
+    {
+        var w = Widget(KayaWire.KindImage);
+        if (source != null) SetSource(w, source);
+        if (bind is Signal s) BindSource(w, s);
         return w;
     }
 
@@ -1000,6 +1024,11 @@ sealed class Tpl
     public void BindCheckedField(Node n, uint level, Field<bool> f) =>
         tx.Records.Add(KayaWire.TxBindCheckedElement(n.Id, level, f.Index));
 
+    /// Bind an image's source to one field of the element;
+    /// Field<byte[]> only — the token pins the type at compile time.
+    public void BindSourceField(Node n, uint level, Field<byte[]> f) =>
+        tx.Records.Add(KayaWire.TxBindSourceElement(n.Id, level, f.Index));
+
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal,
     // or element field); handlers receive the stamped copy's keys
@@ -1022,6 +1051,30 @@ sealed class Tpl
     {
         var n = Widget(KayaWire.KindLabel);
         BindTextField(n, 0, f);
+        return n;
+    }
+
+    /// An image over constant encoded bytes: one registration copy
+    /// into core memory at record time — the handle is consumed by
+    /// the next submit, and every stamped copy shows the same asset.
+    public Node Image(byte[] source)
+    {
+        var n = Widget(KayaWire.KindImage);
+        tx.Records.Add(KayaWire.TxSetSource(n.Id, Kaya.RegisterBlob(source)));
+        return n;
+    }
+
+    public Node Image(Signal s)
+    {
+        var n = Widget(KayaWire.KindImage);
+        tx.Records.Add(KayaWire.TxBindSource(n.Id, s.Id));
+        return n;
+    }
+
+    public Node Image(Field<byte[]> f)
+    {
+        var n = Widget(KayaWire.KindImage);
+        BindSourceField(n, 0, f);
         return n;
     }
 

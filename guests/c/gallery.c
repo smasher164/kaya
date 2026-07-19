@@ -22,6 +22,20 @@
 #define W_VOLUME_ROW 5
 #define W_BAR 6
 #define W_VOLUME 7
+#define W_IMAGE_ROW 8
+#define W_IMAGE_OK 9
+#define W_IMAGE_BAD 10
+
+/* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
+ * binary asset, embedded as source per the include_str! doctrine —
+ * scenes carry their inputs, no runtime file I/O. */
+static const uint8_t TEST_PNG[75] = {
+    137, 80,  78,  71,  13,  10,  26,  10,  0,   0,   0,   13,  73,
+    72,  68,  82,  0,   0,   0,   2,   0,   0,   0,   2,   8,   2,
+    0,   0,   0,   253, 212, 154, 115, 0,   0,   0,   18,  73,  68,
+    65,  84,  120, 156, 99,  248, 207, 192, 192, 0,   194, 12,  255,
+    129, 0,   0,   31,  238, 5,   251, 11,  217, 104, 139, 0,   0,
+    0,   0,   73,  69,  78,  68,  174, 66,  96,  130};
 
 static void build_scene(void) {
     uint8_t buf[1024];
@@ -43,12 +57,32 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_VOLUME, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_VOLUME, SIG_VOLUME);
 
+    /* The content-buffer row: a valid 2x2 PNG decodes and reports its
+     * size, and deliberately invalid bytes read 0x0 — decode failure
+     * is the placeholder class, never a crash, on every backend. On
+     * the function floor the blob channel is explicit: register the
+     * bytes (one copy into core memory; the handle is consumed by the
+     * next kaya_submit, and the guest's bytes are free to drop the
+     * moment the call returns), then aim set_source at the widget. */
+    static const uint8_t not_an_image[] = "not an image";
+    uint64_t png_handle = kaya_blob_register(TEST_PNG, sizeof TEST_PNG);
+    uint64_t bad_handle =
+        kaya_blob_register(not_an_image, sizeof not_an_image - 1);
+    kaya_tx_create_widget(&tx, W_IMAGE_ROW, KAYA_KIND_ROW);
+    kaya_tx_create_widget(&tx, W_IMAGE_OK, KAYA_KIND_IMAGE);
+    kaya_tx_set_source(&tx, W_IMAGE_OK, png_handle);
+    kaya_tx_create_widget(&tx, W_IMAGE_BAD, KAYA_KIND_IMAGE);
+    kaya_tx_set_source(&tx, W_IMAGE_BAD, bad_handle);
+
     kaya_tx_add_child(&tx, W_ROW, W_URGENT);
     kaya_tx_add_child(&tx, W_ROW, W_STATUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_ROW);
     kaya_tx_add_child(&tx, W_VOLUME_ROW, W_BAR);
     kaya_tx_add_child(&tx, W_VOLUME_ROW, W_VOLUME);
     kaya_tx_add_child(&tx, W_COLUMN, W_VOLUME_ROW);
+    kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_OK);
+    kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_BAD);
+    kaya_tx_add_child(&tx, W_COLUMN, W_IMAGE_ROW);
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

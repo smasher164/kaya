@@ -16,6 +16,7 @@ let show_key = function
   | Bool b -> string_of_bool b
   | I64 n -> Int64.to_string n
   | F64 x -> string_of_float x
+  | Blob h -> Printf.sprintf "blob:%Ld" h
 
 let entry_keys app todos =
   build app
@@ -28,16 +29,24 @@ let expect app todos want what =
     fail "%s: [%s]" what (String.concat "; " (List.map show_key got))
 
 (* The honest floor a record deriver generates, spelled by hand so the
-   check needs no ppx: one string field. *)
-type check_todo = { ct_title : string }
+   check needs no ppx: one string field and one blob (bytes) field.
+   The blob's MODEL value is the guest's own bytes as a binary Str;
+   the wire side re-registers them at encode time (handles are
+   single-submit) — see Kaya_app.encode_field. *)
+type check_todo = { ct_title : string; ct_pic : bytes }
 
 let check_todo_rt =
   {
-    rt_schema = [ Kaya_wire.value_str ];
-    rt_to_values = (fun t -> [ Str t.ct_title ]);
+    rt_schema = [ Kaya_wire.value_str; Kaya_wire.value_blob ];
+    rt_to_values =
+      (fun t -> [ Str t.ct_title; Str (Bytes.to_string t.ct_pic) ]);
     rt_of_values =
-      (function [ Str s ] -> { ct_title = s } | _ -> invalid_arg "check_todo");
+      (function
+        | [ Str s; Str p ] -> { ct_title = s; ct_pic = Bytes.of_string p }
+        | _ -> invalid_arg "check_todo");
   }
+
+let check_todo_ct_pic : (check_todo, bytes) Kaya_app.field = blob_field 1
 
 let () =
   let app = create () in
@@ -86,6 +95,23 @@ let () =
   (match Hashtbl.find_opt app.derived !rc_cid with
   | None | Some [] -> ()
   | Some fns -> fail "aborted tx leaked %d derived registrations" (List.length fns));
+
+  (* The blob field round trip: the model keeps the guest's own bytes
+     — record_items reads back exactly what was written — while
+     insert and update_field each register a fresh copy with the core
+     at encode time (headless-safe: registration only copies into the
+     pending table, drained by the next submit). *)
+  let pics = build app (collection_of check_todo_rt) in
+  let png = Bytes.of_string "not really a png" in
+  build app (insert_record pics (Str "p") { ct_title = "pic"; ct_pic = png });
+  (match build app (record_items pics) with
+  | [ (Str "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
+  | _ -> fail "blob field did not round-trip through the model");
+  let png2 = Bytes.of_string "different bytes" in
+  build app (update_field pics (Str "p") check_todo_ct_pic png2);
+  (match build app (record_items pics) with
+  | [ (_, { ct_pic; _ }) ] when ct_pic = png2 -> ()
+  | _ -> fail "blob update_field did not update the model's copy");
 
   (* The record-time mirror-read guard: a template body records once
      and the core replays it, so a model read inside a For or When

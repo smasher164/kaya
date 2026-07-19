@@ -46,6 +46,8 @@ _lib.kaya_next_occurrence.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
 _lib.kaya_next_occurrence.restype = ctypes.c_size_t
 _lib.kaya_submit.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_submit.restype = None
+_lib.kaya_blob_register.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_blob_register.restype = ctypes.c_uint64
 _lib.kaya_run.restype = ctypes.c_int32
 
 _occ_buf = ctypes.create_string_buffer(256)
@@ -56,6 +58,19 @@ def submit(*records):
     (tx_* results from kaya_wire), applied atomically."""
     tx = b"".join(records)
     _lib.kaya_submit(tx, len(tx))
+
+
+def register_blob(data):
+    """Register bulk payload bytes (an encoded image) with the core:
+    one copy into core-owned memory, returning the u64 handle the next
+    submit consumes (referenced or not). The caller's bytes are free to
+    drop the moment this returns."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            f"kaya: blob data must be bytes, not {type(data).__name__}"
+        )
+    data = bytes(data)
+    return _lib.kaya_blob_register(data, len(data))
 
 
 def next_occurrence():

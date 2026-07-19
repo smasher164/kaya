@@ -29,6 +29,7 @@ enum NativeWidget {
     Row(gtk4::Box),
     Checkbox(gtk4::CheckButton),
     Slider(gtk4::Scale),
+    Image(gtk4::Picture),
 }
 
 impl NativeWidget {
@@ -41,6 +42,7 @@ impl NativeWidget {
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.clone().upcast(),
+            NativeWidget::Image(w) => w.clone().upcast(),
         }
     }
 }
@@ -59,6 +61,7 @@ struct CoreState {
     labels: Vec<gtk4::Label>,
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
+    images: Vec<gtk4::Picture>,
     columns: Vec<gtk4::Box>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
@@ -177,6 +180,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
+                WidgetKind::Image => {
+                    // Display-only, like Label: no tag, no signal. The
+                    // source arrives as a SetProp blob and decodes
+                    // there.
+                    let picture = gtk4::Picture::new();
+                    core.images.push(picture.clone());
+                    NativeWidget::Image(picture)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -248,6 +259,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Slider(scale), Prop::Max, Value::F64(v)) => {
                     scale.adjustment().set_upper(v);
+                }
+                (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => {
+                    // Encoded bytes in, native decode:
+                    // gdk::Texture::from_bytes reads encoded PNG/JPEG.
+                    // A failed decode yields the placeholder class (no
+                    // paintable, image_size reads 0x0), never a panic.
+                    let bytes = gtk4::glib::Bytes::from(&blob.0[..]);
+                    match gtk4::gdk::Texture::from_bytes(&bytes) {
+                        Ok(texture) => picture.set_paintable(Some(&texture)),
+                        Err(_) => picture.set_paintable(gtk4::gdk::Paintable::NONE),
+                    }
                 }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
@@ -345,6 +367,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 labels: Vec::new(),
                 entries: Vec::new(),
                 sliders: Vec::new(),
+                images: Vec::new(),
                 columns: Vec::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
@@ -430,6 +453,22 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.entries.len());
             core.entries[i].text().to_string()
+        })
+    }
+
+    fn image_size(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.images.len());
+            // The paintable's intrinsic size, in pixels for a texture;
+            // no paintable is the placeholder class, "0x0".
+            match core.images[i].paintable() {
+                Some(paintable) => format!(
+                    "{}x{}",
+                    paintable.intrinsic_width(),
+                    paintable.intrinsic_height()
+                ),
+                None => "0x0".into(),
+            }
         })
     }
 

@@ -134,6 +134,16 @@ func kayaOrder(_ a: KayaValue, _ b: KayaValue) -> Int {
     }
 }
 
+/// Register bulk payload bytes (an encoded image) with the core: one
+/// copy into core-owned memory, returning the u64 handle the next
+/// submit from this guest consumes, referenced or not. The caller's
+/// bytes are free to drop the moment this returns.
+func kayaRegisterBlob(_ data: Data) -> UInt64 {
+    data.withUnsafeBytes { raw in
+        kaya_blob_register(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
+    }
+}
+
 /// A live widget: exactly one thing on screen.
 struct KayaWidget {
     let id: UInt64
@@ -715,6 +725,18 @@ final class KayaAppTx {
         tx.bindChecked(w.id, s.id)
     }
 
+    /// Aim an image's source at encoded bytes: one registration copy
+    /// into core memory — the handle is consumed by the next submit,
+    /// and the guest's bytes are free to drop the moment this returns.
+    func setSource(_ w: KayaWidget, _ data: Data) {
+        tx.setSource(w.id, kayaRegisterBlob(data))
+    }
+
+    /// Aim an image's source at a signal carrying a blob handle.
+    func bindSource(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindSource(w.id, s.id)
+    }
+
     // One-shot commands: momentary verbs into widget-owned state,
     // riding the open transaction like any record — the insert and the
     // clear beside it commit together or not at all. Fire-and-forget:
@@ -786,6 +808,19 @@ final class KayaAppTx {
         if let text { setText(w, text) }
         if let checked { setChecked(w, checked) }
         if let onToggle { app.onToggle(w, onToggle) }
+        return w
+    }
+
+    /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
+    /// decodes natively, and decode failure renders the placeholder,
+    /// never a crash. `source` is the encoded bytes — one registration
+    /// copy into core memory; the handle is consumed by the next
+    /// submit, and the guest's bytes are free to drop the moment the
+    /// call returns. `bind` is a Signal carrying a blob handle.
+    func image(_ source: Data? = nil, bind: KayaSignal? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_IMAGE))
+        if let source { setSource(w, source) }
+        if let bind { bindSource(w, bind) }
         return w
     }
 
@@ -1063,6 +1098,12 @@ final class KayaTpl {
         tx.tx.bindCheckedElement(n.id, level: level, field: f.index)
     }
 
+    /// Bind an image's source to one field of the element;
+    /// KayaField<Data> only — the token pins the type at compile time.
+    func bindSourceField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Data>) {
+        tx.tx.bindSourceElement(n.id, level: level, field: f.index)
+    }
+
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal,
     // or element field); handlers receive the stamped copy's keys
@@ -1092,6 +1133,27 @@ final class KayaTpl {
         let n = widget(UInt32(KAYA_KIND_CHECKBOX))
         bindCheckedField(n, f)
         if let onToggle { tx.app.onToggle(n, onToggle) }
+        return n
+    }
+
+    /// An image with constant encoded bytes: every stamped copy shows
+    /// the same picture — one registration copy into core memory, the
+    /// handle consumed by the next submit.
+    func image(_ source: Data) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_IMAGE))
+        tx.tx.setSource(n.id, kayaRegisterBlob(source))
+        return n
+    }
+
+    func image(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_IMAGE))
+        tx.tx.bindSource(n.id, s.id)
+        return n
+    }
+
+    func image(_ f: KayaField<Data>) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_IMAGE))
+        bindSourceField(n, f)
         return n
     }
 

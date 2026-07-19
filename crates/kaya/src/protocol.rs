@@ -7,6 +7,8 @@
 //! guests submit the same records as bytes. Occurrences travel the
 //! byte-record ring (ring.rs) or mpsc, per consumer.
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WidgetId(pub u64);
 
@@ -67,17 +69,71 @@ pub enum Occurrence {
     Shutdown,
 }
 
-/// A signal, property, element-field, or key value. The scalar set;
-/// there is deliberately no record *value* — a collection entry is a
-/// Record (one Value per schema field), and Value::Record waits for
-/// the feature that needs a record as a value (nested fields, sum-typed
-/// payloads).
+/// Bulk payload bytes behind a cheap handle: the content-buffer arm of
+/// the value set. The bytes live once, in core-owned memory; every
+/// clone is an Arc clone (8 bytes of pointer, one refcount bump), so a
+/// blob bound to N widgets or stamped into M rows never re-copies —
+/// the scene's fan-out clones stay O(1) per reference. The last drop
+/// frees: reclamation is refcount, resolving DESIGN's open question #2.
+/// On the wire a blob travels as its u64 registration handle; the
+/// bytes never enter a record stream.
+#[derive(Clone)]
+pub struct Blob(pub Arc<[u8]>);
+
+impl std::fmt::Debug for Blob {
+    /// Length plus a short FNV prefix, never the bytes: round-trip
+    /// tests compare Debug strings, and a payload dump would make a
+    /// megabyte diff out of a one-line mismatch (while a bare length
+    /// would false-match different bytes of equal size).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in self.0.iter() {
+            h ^= u64::from(*b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        write!(f, "Blob({} bytes, fnv={:08x})", self.0.len(), h as u32)
+    }
+}
+
+impl PartialEq for Blob {
+    /// Content equality: a decoded blob is a different allocation with
+    /// the same bytes, and tests compare across that boundary.
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl From<Vec<u8>> for Blob {
+    fn from(bytes: Vec<u8>) -> Self {
+        Blob(bytes.into())
+    }
+}
+impl From<&[u8]> for Blob {
+    fn from(bytes: &[u8]) -> Self {
+        Blob(bytes.into())
+    }
+}
+impl From<Arc<[u8]>> for Blob {
+    fn from(bytes: Arc<[u8]>) -> Self {
+        Blob(bytes)
+    }
+}
+
+/// A signal, property, element-field, or key value. The scalar set
+/// plus the blob handle; there is deliberately no record *value* — a
+/// collection entry is a Record (one Value per schema field), and
+/// Value::Record waits for the feature that needs a record as a value
+/// (nested fields, sum-typed payloads).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
     I64(i64),
     F64(f64),
     Str(String),
+    /// Bulk payload bytes (an encoded image, a row batch): Arc'd core
+    /// memory referenced by handle on the wire. Not a key type — a
+    /// blob names content, never identity.
+    Blob(Blob),
 }
 
 /// A value's type: the schema element. Every collection declares an
@@ -89,6 +145,7 @@ pub enum ValueType {
     I64,
     F64,
     Str,
+    Blob,
 }
 
 impl Value {
@@ -98,6 +155,7 @@ impl Value {
             Value::I64(_) => ValueType::I64,
             Value::F64(_) => ValueType::F64,
             Value::Str(_) => ValueType::Str,
+            Value::Blob(_) => ValueType::Blob,
         }
     }
 }
@@ -131,6 +189,11 @@ impl From<f64> for Value {
         Value::F64(v)
     }
 }
+impl From<Blob> for Value {
+    fn from(b: Blob) -> Self {
+        Value::Blob(b)
+    }
+}
 
 /// A collection key, core-side: domain identity, unique per collection
 /// instance. I64 and Str only — a float is not an identity, and a bool
@@ -148,6 +211,10 @@ impl Key {
         match v {
             Value::I64(n) => Key::I64(*n),
             Value::Str(s) => Key::Str(s.clone()),
+            Value::Blob(_) => panic!(
+                "kaya: a blob names content, never identity — blobs cannot be \
+                 collection keys (key by an id and keep the bytes as a field)"
+            ),
             other => panic!("kaya: collection keys must be I64 or Str, got {other:?}"),
         }
     }
@@ -181,6 +248,12 @@ pub enum WidgetKind {
     /// drags report as ValueChanged occurrences, one per change.
     /// Uncontrolled, like the entry: the widget owns its position.
     Slider,
+    /// A displayed picture. Prop::Source carries the encoded bytes
+    /// (PNG/JPEG/...) as a blob; the toolkit decodes natively.
+    /// Display-only, like Label: no occurrence, no tag. The v1 vehicle
+    /// for the content-buffer path (DESIGN: "Image covers content
+    /// buffers").
+    Image,
 }
 
 /// Property keys; grows with widgets.
@@ -195,6 +268,8 @@ pub enum Prop {
     Min,
     /// A slider's range, upper bound (F64-valued).
     Max,
+    /// An image's encoded source bytes (Blob-valued).
+    Source,
 }
 
 /// The one-shot command vocabulary: momentary verbs aimed at
@@ -453,5 +528,19 @@ impl OccSink {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Content is not identity: the blob arm of the key gate has its
+    /// own sentence, because "must be I64 or Str" would leave an
+    /// avatar-keyed collection author guessing at the doctrine.
+    #[test]
+    #[should_panic(expected = "a blob names content, never identity")]
+    fn a_blob_cannot_be_a_key() {
+        Key::from_value(&Value::Blob(Blob::from(&b"\x89PNG"[..])));
     }
 }

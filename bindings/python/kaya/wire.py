@@ -3,18 +3,20 @@
 Records are {u32 size, u16 kind, u16 flags}, body, padded to 8, little-endian.
 Values are {u32 type, u32 len, payload padded to 8}; paths are
 {u32 count, u32 reserved, count values}. Keys and values here accept
-Python bool, int, float, and str, mapped to the kaya value types.
+Python bool, int, float, str, and BlobHandle, mapped to the kaya
+value types.
 """
 
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x72814fd3802b05cb
+SPEC_HASH = 0x8a6b17e10c7a5c34
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
 VALUE_F64 = 3
 VALUE_STR = 4
+VALUE_BLOB = 5
 KIND_COLUMN = 1
 KIND_BUTTON = 2
 KIND_LABEL = 3
@@ -22,11 +24,13 @@ KIND_ENTRY = 4
 KIND_ROW = 5
 KIND_CHECKBOX = 6
 KIND_SLIDER = 7
+KIND_IMAGE = 8
 PROP_TEXT = 1
 PROP_CHECKED = 2
 PROP_VALUE = 3
 PROP_MIN = 4
 PROP_MAX = 5
+PROP_SOURCE = 6
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -72,6 +76,18 @@ def _pad(b):
     return b + b"\0" * (-len(b) % 8)
 
 
+class BlobHandle:
+    """A blob value at the wire tier: the u64 handle from
+    kaya_blob_register, consumed by the next submit. The bytes never
+    ride the record stream; the wrapper distinguishes a blob from a
+    plain int in the type-dispatched encoders."""
+
+    __slots__ = ("handle",)
+
+    def __init__(self, handle):
+        self.handle = handle
+
+
 class _enc:
     """Encoders, namespaced so no generated parameter can shadow them."""
 
@@ -84,6 +100,8 @@ class _enc:
             return struct.pack("<IIq", VALUE_I64, 8, v)
         if isinstance(v, float):
             return struct.pack("<IId", VALUE_F64, 8, v)
+        if isinstance(v, BlobHandle):
+            return struct.pack("<IIQ", VALUE_BLOB, 8, v.handle)
         utf8 = v.encode()
         return _pad(struct.pack("<II", VALUE_STR, len(utf8)) + utf8)
 
@@ -249,6 +267,21 @@ def tx_bind_max_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MAX, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_source(widget_id, handle):
+    """set_property with a constant source value (a kaya_blob_register handle, consumed by the next submit)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SOURCE, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
+
+
+def tx_bind_source(widget_id, signal_id):
+    """set_property with a signal-bound source value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SOURCE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_source_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SOURCE, SOURCE_ELEMENT, level, field))
+
+
 def parse_value(buf, at):
     """Decode one value; returns (python value, next offset)."""
     vtype, vlen = struct.unpack_from("<II", buf, at)
@@ -262,6 +295,8 @@ def parse_value(buf, at):
         return struct.unpack("<d", payload)[0], end
     if vtype == VALUE_STR:
         return payload.decode(), end
+    if vtype == VALUE_BLOB:
+        return BlobHandle(struct.unpack("<Q", payload)[0]), end
     raise ValueError(f"unknown value type {vtype}")
 
 

@@ -52,6 +52,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    case i64(Int64)");
     c.line("    case f64(Double)");
     c.line("    case str(String)");
+    c.line("    /// The u64 handle from kaya_blob_register, consumed by the next");
+    c.line("    /// submit; the bytes never ride the record stream.");
+    c.line("    case blob(UInt64)");
     c.line("}");
     c.line("");
     c.line("/// A transaction under construction: packed records accumulate in");
@@ -98,6 +101,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            u32(UInt32(KAYA_VALUE_STR))");
     c.line("            u32(UInt32(utf8.count))");
     c.line("            bytes.append(contentsOf: utf8)");
+    c.line("        case .blob(let x):");
+    c.line("            u32(UInt32(KAYA_VALUE_BLOB))");
+    c.line("            u32(8)");
+    c.line("            u64(x)");
     c.line("        }");
     c.line("        pad()");
     c.line("    }");
@@ -148,13 +155,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
     for (prop, _, kind) in prop_variants(spec) {
-        let p = camel(prop);
         let pc = pascal(prop);
         let up = prop.to_uppercase();
-        let (ty, ctor) = match kind {
-            crate::PropKind::Str => ("String", "str"),
-            crate::PropKind::Bool => ("Bool", "bool"),
-            crate::PropKind::F64 => ("Double", "f64"),
+        // Blob setters take the u64 kaya_blob_register handle (see
+        // KayaValue.blob), so the parameter says so.
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
+            crate::PropKind::F64 => (camel(prop), "Double", "f64"),
+            crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
         };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));

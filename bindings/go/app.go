@@ -24,9 +24,12 @@ import (
 )
 
 // Typed handles over the id spaces.
-// Scalar is the signal-value constraint: the wire's scalar types.
+// Scalar is the signal-value constraint: the wire's value types.
+// []byte is the blob channel — encoded image bytes; each create or
+// write registers the bytes with the core at encode time (handles are
+// single-submit), and the guest keeps its own copy.
 type Scalar interface {
-	~string | ~bool | ~int64 | ~float64
+	~string | ~bool | ~int64 | ~float64 | ~[]byte
 }
 
 // Signal carries its value type: writes are checked at compile time,
@@ -367,12 +370,15 @@ func (a *App) dispatch(fn func(*Tx)) {
 func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
 	tx.app.c.signal++
 	s := Signal[V]{tx.app.c.signal}
-	tx.records = append(tx.records, TxCreateSignal(s.id, initial))
+	tx.records = append(tx.records, TxCreateSignal(s.id, scalarWire(initial)))
 	return s
 }
 
+// Write writes a signal's value. A []byte value registers its bytes at
+// encode time — handles are single-submit, so every write re-registers
+// (one copy into core memory per write).
 func (tx *Tx) Write[V Scalar](s Signal[V], value V) {
-	tx.records = append(tx.records, TxWriteSignal(s.id, value))
+	tx.records = append(tx.records, TxWriteSignal(s.id, scalarWire(value)))
 }
 
 func (tx *Tx) Widget(kind uint32) Widget {
@@ -412,6 +418,21 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
+}
+
+// SetSource sets an image's encoded bytes: one registration copy into
+// core-owned memory; the returned handle is consumed by the next
+// submit from this guest, referenced or not, so the caller's bytes are
+// free to drop the moment this returns. A later SetSource registers
+// again — handles are single-submit.
+func (tx *Tx) SetSource(w Widget, data []byte) {
+	tx.records = append(tx.records, TxSetSource(w.id, RegisterBlob(data)))
+}
+
+// BindSource binds an image's source to a blob signal; each write of
+// the signal re-registers its bytes (see Tx.Write).
+func (tx *Tx) BindSource(w Widget, s Signal[[]byte]) {
+	tx.records = append(tx.records, TxBindSource(w.id, s.id))
 }
 
 func (tx *Tx) AddChild(parent, child Widget) {
@@ -512,6 +533,27 @@ func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
 	if onToggle != nil {
 		tx.app.OnToggle(w, onToggle)
 	}
+	return w
+}
+
+// Image creates an image displaying encoded bytes (PNG, JPEG, ...):
+// the toolkit decodes natively, and decode failure renders the
+// placeholder, never a crash. source is the encoded bytes — one
+// registration copy into core memory; the handle is consumed by the
+// next submit, and the guest's bytes are free to drop the moment this
+// returns. ImageSignal is the signal-bound flavor — separate methods,
+// like SetText/BindText, per the Tx surface's convention.
+func (tx *Tx) Image(source []byte) Widget {
+	w := tx.Widget(KindImage)
+	tx.SetSource(w, source)
+	return w
+}
+
+// ImageSignal creates an image whose source is bound to a blob signal;
+// each write of the signal re-registers its bytes (see Tx.Write).
+func (tx *Tx) ImageSignal(s Signal[[]byte]) Widget {
+	w := tx.Widget(KindImage)
+	tx.BindSource(w, s)
 	return w
 }
 

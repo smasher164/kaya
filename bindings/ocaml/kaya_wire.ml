@@ -4,15 +4,24 @@
    little-endian; each tx_* returns one packed record, and a
    transaction is their concatenation. *)
 
-type value = Bool of bool | I64 of int64 | F64 of float | Str of string
+(* Blob carries the u64 handle from kaya_blob_register (as int64),
+   consumed by the next submit; the bytes never ride the record
+   stream. *)
+type value =
+  | Bool of bool
+  | I64 of int64
+  | F64 of float
+  | Str of string
+  | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x72814fd3802b05cbL
+let spec_hash = 0x8a6b17e10c7a5c34L
 
 let value_bool = 1
 let value_i64 = 2
 let value_f64 = 3
 let value_str = 4
+let value_blob = 5
 let kind_column = 1
 let kind_button = 2
 let kind_label = 3
@@ -20,11 +29,13 @@ let kind_entry = 4
 let kind_row = 5
 let kind_checkbox = 6
 let kind_slider = 7
+let kind_image = 8
 let prop_text = 1
 let prop_checked = 2
 let prop_value = 3
 let prop_min = 4
 let prop_max = 5
+let prop_source = 6
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -87,7 +98,11 @@ let encode_value b v =
   | Str x ->
       Buffer.add_int32_le b (Int32.of_int value_str);
       Buffer.add_int32_le b (Int32.of_int (String.length x));
-      Buffer.add_string b x);
+      Buffer.add_string b x
+  | Blob x ->
+      Buffer.add_int32_le b (Int32.of_int value_blob);
+      Buffer.add_int32_le b 8l;
+      Buffer.add_int64_le b x);
   pad8 b
 
 (* A key path: {u32 count, u32 reserved, count values}. *)
@@ -362,6 +377,32 @@ let tx_bind_max_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant source value. *)
+let tx_set_source widget_id handle =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_source);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Blob handle))
+
+(* set_property with a signal-bound source value. *)
+let tx_bind_source widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_source);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_source_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_source);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)
 let u16_at byte i = byte i lor (byte (i + 1) lsl 8)
@@ -374,13 +415,16 @@ let parse_value byte at =
   let next = at + 8 + ((vlen + 7) land lnot 7) in
   let v =
     if vtype = value_bool then Bool (byte (at + 8) <> 0)
-    else if vtype = value_i64 || vtype = value_f64 then begin
+    else if vtype = value_i64 || vtype = value_f64 || vtype = value_blob
+    then begin
       let n = ref 0L in
       for i = 7 downto 0 do
         n := Int64.logor (Int64.shift_left !n 8)
                (Int64.of_int (byte (at + 8 + i)))
       done;
-      if vtype = value_i64 then I64 !n else F64 (Int64.float_of_bits !n)
+      if vtype = value_i64 then I64 !n
+      else if vtype = value_blob then Blob !n
+      else F64 (Int64.float_of_bits !n)
     end
     else Str (String.init vlen (fun i -> Char.chr (byte (at + 8 + i))))
   in

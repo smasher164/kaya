@@ -643,7 +643,23 @@ platform flavor". The gallery doubles as the permanent regression suite.
     demand, and the app-readable widget-state mirror are all slots: one
     mechanism in three roles.
   - A shared-memory arena for bulk payloads (row batches, pixel surfaces,
-    audio, templates), referenced by offset and length.
+    audio, templates), referenced by offset and length. Its v1
+    realization is the blob table: kaya_blob_register copies bytes once
+    into core-owned refcounted memory and returns a handle the next
+    submitted transaction references (handles are consumed by one
+    submit — register per transaction); every record stream carries the
+    8-byte handle, never payload bytes, so no fixed buffer anywhere
+    bounds a payload's size. Reclamation is the refcount: scene state
+    (a signal's current value, a collection record's field) holds
+    references, restamps re-read without re-upload, and the last drop
+    frees — there is no guest-visible free, and an unreferenced
+    registration dies at its submit boundary, so the leak class is
+    closed by construction. The guest's own buffer is never part of the
+    count: the register copy is the ownership boundary (the
+    kaya_submit stance), and the guest frees its bytes whenever it
+    likes. Presentation-side, the pump publishes a batch-local table
+    (fetch by handle, decode within the batch). The offset+length
+    arena form returns when the row window and audio need it.
 
 The invariant: every question the platform asks synchronously must be
 answerable from state already on the fast (core) side. Events can express
@@ -1339,8 +1355,11 @@ remains is implementation-scale:
    versioned deliverable it commits to. (The former slot-syntax question
    dissolved, since the slot schema is the component function's
    signature.)
-2. Shared-arena reclamation: a generation or refcount scheme for bulk
-   payloads.
+2. Shared-arena reclamation: resolved — refcount, shipped with the
+   blob channel and the Image widget (see the transport section's blob
+   table). The generation alternative lost: the Arc already tracks the
+   only fact a generation scheme would approximate, and a stuck
+   consumer pins one blob, never an epoch.
 3. The Vello scene-encoding subset for v2 display lists (arrives with
    Canvas, after v1).
 4. The window vocabulary, in full: create_window and per-window mount

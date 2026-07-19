@@ -33,4 +33,12 @@ object KayaPresent {
      * 0 when the core has shut down. Use a 64 KiB buffer.
      */
     @JvmStatic external fun nextCommands(buffer: ByteArray): Int
+
+    /**
+     * Fetch a blob's bytes by the [handle] an apply record carried,
+     * copied into a fresh array. Handles are batch-local: the current
+     * batch's table is replaced by the next [nextCommands] call, so
+     * fetch within the batch. Null for a dead handle.
+     */
+    @JvmStatic external fun blobData(handle: Long): ByteArray?
 }

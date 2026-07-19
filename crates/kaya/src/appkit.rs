@@ -15,14 +15,18 @@ use std::sync::mpsc::Receiver;
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel};
+use objc2::{
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel,
+};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSButton, NSControlTextEditingDelegate, NSLayoutAttribute, NSSlider, NSStackView,
-    NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow,
+    NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSLayoutAttribute, NSSlider,
+    NSStackView, NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow,
     NSWindowStyleMask,
 };
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{
+    NSData, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+};
 
 use crate::protocol::{
     ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
@@ -37,6 +41,7 @@ enum NativeWidget {
     Entry(Retained<NSTextField>),
     Checkbox(Retained<NSButton>),
     Slider(Retained<NSSlider>),
+    Image(Retained<NSImageView>),
 }
 
 impl NativeWidget {
@@ -49,6 +54,7 @@ impl NativeWidget {
             NativeWidget::Entry(v) => v,
             NativeWidget::Checkbox(v) => v,
             NativeWidget::Slider(v) => v,
+            NativeWidget::Image(v) => v,
         }
     }
 }
@@ -67,6 +73,7 @@ struct CoreState {
     labels: Vec<Retained<NSTextField>>,
     entries: Vec<(Retained<NSTextField>, Retained<EntryDelegate>)>,
     sliders: Vec<(Retained<NSSlider>, Retained<ButtonTarget>)>,
+    images: Vec<Retained<NSImageView>>,
     columns: Vec<Retained<NSStackView>>,
     // Held so targets and the delegates outlive the objects that
     // reference them weakly.
@@ -205,6 +212,14 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     core._entry_delegates.push(delegate);
                     NativeWidget::Entry(field)
                 }
+                WidgetKind::Image => {
+                    // Display-only, like Label: no tag, no target. The
+                    // source arrives as a SetProp blob and decodes
+                    // there.
+                    let view = NSImageView::new(mtm);
+                    core.images.push(view.clone());
+                    NativeWidget::Image(view)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -266,6 +281,14 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
                     slider.setMaxValue(v);
+                }
+                (NativeWidget::Image(view), Prop::Source, Value::Blob(blob)) => {
+                    // Encoded bytes in, native decode: NSImage(data:).
+                    // A failed decode yields nil — the placeholder
+                    // class, never a crash — and image_size reads 0x0.
+                    let data = NSData::with_bytes(&blob.0);
+                    let image = NSImage::initWithData(NSImage::alloc(), &data);
+                    view.setImage(image.as_deref());
                 }
                 (_, prop, value) => {
                     panic!("kaya: appkit cannot apply {prop:?} = {value:?} here")
@@ -520,6 +543,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            images: Vec::new(),
             columns: Vec::new(),
             _targets: Vec::new(),
             _entry_delegates: Vec::new(),
@@ -608,6 +632,21 @@ impl crate::harness::Stage for AppKitStage {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.entries.len());
             core.entries[i].0.stringValue().to_string()
+        })
+    }
+
+    fn image_size(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.images.len());
+            match core.images[i].image() {
+                // NSImage.size is in points; the tiny test PNGs carry
+                // no DPI chunk, so points equal pixels here.
+                Some(image) => {
+                    let size = image.size();
+                    format!("{}x{}", size.width as i64, size.height as i64)
+                }
+                None => "0x0".into(),
+            }
         })
     }
 

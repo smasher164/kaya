@@ -58,7 +58,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("import GHC.Float (castDoubleToWord64, castWord64ToDouble)");
     c.line("import Data.Char (chr)");
     c.line("");
-    c.line("data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String");
+    c.line("-- VBlob carries the u64 handle from kaya_blob_register, consumed by");
+    c.line("-- the next submit; the bytes never ride the record stream.");
+    c.line("data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64");
     c.line("  deriving (Eq, Show)");
     c.line("");
     c.line(&format!("-- | specHash: {}.", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
@@ -93,6 +95,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        padded = (n + 7) .&. complement 7");
     c.line("     in word32LE valueStr <> word32LE (fromIntegral n) <> byteString utf8");
     c.line("          <> byteString (BS.replicate (padded - n) 0)");
+    c.line("  VBlob x -> word32LE valueBlob <> word32LE 8 <> word64LE x");
     c.line("");
     c.line("-- A key path: {u32 count, u32 reserved, count values}.");
     c.line("-- | A counted value sequence: a key path or a record.");
@@ -128,12 +131,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
     for (prop, _, kind) in prop_variants(spec) {
-        let p = camel(prop);
         let pc = pascal(prop);
-        let (ty, ctor) = match kind {
-            crate::PropKind::Str => ("String", "VStr"),
-            crate::PropKind::Bool => ("Bool", "VBool"),
-            crate::PropKind::F64 => ("Double", "VF64"),
+        // Blob setters take the u64 kaya_blob_register handle (see
+        // VBlob), so the parameter says so.
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
+            crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
         };
         c.line("");
         c.line(&format!("-- set_property with a constant {prop} value."));
@@ -172,10 +177,13 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          else");
     c.line("            if vtype == valueF64");
     c.line("              then VF64 . castWord64ToDouble <$> peekByteOff rec (at + 8)");
-    c.line("              else do");
-    c.line("                bytes <- peekArray (fromIntegral vlen)");
-    c.line("                  (rec `plusPtr` (at + 8)) :: IO [Word8]");
-    c.line("                return (VStr (map (chr . fromIntegral) bytes))");
+    c.line("              else");
+    c.line("                if vtype == valueBlob");
+    c.line("                  then VBlob <$> peekByteOff rec (at + 8)");
+    c.line("                  else do");
+    c.line("                    bytes <- peekArray (fromIntegral vlen)");
+    c.line("                      (rec `plusPtr` (at + 8)) :: IO [Word8]");
+    c.line("                    return (VStr (map (chr . fromIntegral) bytes))");
     c.line("  return (v, next)");
     c.line("");
     c.line("-- Decode one occurrence record at `rec` (header included). Just");

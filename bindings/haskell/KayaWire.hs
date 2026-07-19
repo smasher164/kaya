@@ -17,12 +17,14 @@ import Foreign.Storable (peekByteOff)
 import GHC.Float (castDoubleToWord64, castWord64ToDouble)
 import Data.Char (chr)
 
-data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String
+-- VBlob carries the u64 handle from kaya_blob_register, consumed by
+-- the next submit; the bytes never ride the record stream.
+data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
   deriving (Eq, Show)
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x72814fd3802b05cb
+specHash = 0x8a6b17e10c7a5c34
 
 valueBool :: Word32
 valueBool = 1
@@ -32,6 +34,8 @@ valueF64 :: Word32
 valueF64 = 3
 valueStr :: Word32
 valueStr = 4
+valueBlob :: Word32
+valueBlob = 5
 kindColumn :: Word32
 kindColumn = 1
 kindButton :: Word32
@@ -46,6 +50,8 @@ kindCheckbox :: Word32
 kindCheckbox = 6
 kindSlider :: Word32
 kindSlider = 7
+kindImage :: Word32
+kindImage = 8
 propText :: Word32
 propText = 1
 propChecked :: Word32
@@ -56,6 +62,8 @@ propMin :: Word32
 propMin = 4
 propMax :: Word32
 propMax = 5
+propSource :: Word32
+propSource = 6
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -146,6 +154,7 @@ encodeValue v = case v of
         padded = (n + 7) .&. complement 7
      in word32LE valueStr <> word32LE (fromIntegral n) <> byteString utf8
           <> byteString (BS.replicate (padded - n) 0)
+  VBlob x -> word32LE valueBlob <> word32LE 8 <> word64LE x
 
 -- A key path: {u32 count, u32 reserved, count values}.
 -- | A counted value sequence: a key path or a record.
@@ -330,6 +339,25 @@ txBindMaxElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propMax <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant source value.
+txSetSource :: Word64 -> Word64 -> Builder
+txSetSource widgetId handle = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSource <> word32LE sourceConst
+    <> encodeValue (VBlob handle))
+
+-- set_property with a signal-bound source value.
+txBindSource :: Word64 -> Word64 -> Builder
+txBindSource widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSource <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSourceElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSourceElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSource <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -346,10 +374,13 @@ parseValue rec at = do
           else
             if vtype == valueF64
               then VF64 . castWord64ToDouble <$> peekByteOff rec (at + 8)
-              else do
-                bytes <- peekArray (fromIntegral vlen)
-                  (rec `plusPtr` (at + 8)) :: IO [Word8]
-                return (VStr (map (chr . fromIntegral) bytes))
+              else
+                if vtype == valueBlob
+                  then VBlob <$> peekByteOff rec (at + 8)
+                  else do
+                    bytes <- peekArray (fromIntegral vlen)
+                      (rec `plusPtr` (at + 8)) :: IO [Word8]
+                    return (VStr (map (chr . fromIntegral) bytes))
   return (v, next)
 
 -- Decode one occurrence record at `rec` (header included). Just

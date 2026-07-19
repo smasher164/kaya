@@ -32,10 +32,12 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, Orientation, Slider, StackPanel, TextBlock, TextBox,
+    Button, CheckBox, Image, Orientation, Slider, StackPanel, TextBlock, TextBox,
     TextChangedEventHandler,
 };
+use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
+use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, FocusState, RoutedEventHandler, UIElement,
     UnhandledExceptionEventHandler, Window,
@@ -55,6 +57,7 @@ enum NativeWidget {
     Button { button: Button, caption: TextBlock },
     Label(TextBlock),
     Entry(TextBox),
+    Image(Image),
 }
 
 impl NativeWidget {
@@ -68,6 +71,7 @@ impl NativeWidget {
             NativeWidget::Button { button, .. } => button.cast(),
             NativeWidget::Label(label) => label.cast(),
             NativeWidget::Entry(field) => field.cast(),
+            NativeWidget::Image(image) => image.cast(),
         }
     }
 }
@@ -89,6 +93,7 @@ struct CoreState {
     labels: Vec<TextBlock>,
     entries: Vec<TextBox>,
     sliders: Vec<Slider>,
+    images: Vec<Image>,
     columns: Vec<StackPanel>,
     window: Window,
 }
@@ -471,6 +476,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
+                WidgetKind::Image => {
+                    // Display-only, like Label: no tag, no handler. The
+                    // source arrives as a SetProp blob and decodes
+                    // there. Code-only construction, no XAML.
+                    let image = Image::new()?;
+                    core.images.push(image.clone());
+                    NativeWidget::Image(image)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -503,6 +516,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Slider(slider) => {
                         windows_core::Interface::cast(slider).expect("slider is a UIElement")
+                    }
+                    NativeWidget::Image(image) => {
+                        windows_core::Interface::cast(image).expect("image is a UIElement")
                     }
                 }
             };
@@ -562,6 +578,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
                     slider.SetMaximum(v)?;
                 }
+                (NativeWidget::Image(image), Prop::Source, Value::Blob(blob)) => {
+                    // Encoded bytes in, native decode: the bytes go
+                    // through an InMemoryRandomAccessStream (via
+                    // DataWriter) into a BitmapImage. SetSource is the
+                    // synchronously-callable path on the UI thread;
+                    // the one async hop is DataWriter.StoreAsync,
+                    // blocked on .join() — an in-memory store completes
+                    // promptly, but this friction is why runtime
+                    // verification happens on the VM. Any failure
+                    // (decode included) leaves the placeholder — no
+                    // Source, image_size reads 0x0 — never a panic.
+                    let result: windows_core::Result<()> = (|| {
+                        let stream = InMemoryRandomAccessStream::new()?;
+                        let writer = DataWriter::CreateDataWriter(&stream)?;
+                        writer.WriteBytes(&blob.0)?;
+                        writer.StoreAsync()?.join()?;
+                        writer.DetachStream()?;
+                        stream.Seek(0)?;
+                        let source = BitmapImage::new()?;
+                        source.SetSource(&stream)?;
+                        image.SetSource(&source)?;
+                        Ok(())
+                    })();
+                    if let Err(e) = result {
+                        eprintln!(
+                            "kaya: winui image source rejected (placeholder): {}",
+                            e.message()
+                        );
+                    }
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -580,6 +626,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Entry(field) => children.Append(field)?,
                 NativeWidget::Checkbox { check, .. } => children.Append(check)?,
                 NativeWidget::Slider(slider) => children.Append(slider)?,
+                NativeWidget::Image(image) => children.Append(image)?,
             }
             core.parents.insert(child, panel);
         }
@@ -593,6 +640,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Entry(field) => core.window.SetContent(field)?,
                 NativeWidget::Checkbox { check, .. } => core.window.SetContent(check)?,
                 NativeWidget::Slider(slider) => core.window.SetContent(slider)?,
+                NativeWidget::Image(image) => core.window.SetContent(image)?,
             }
         }
         ApplyOp::Command { id, command } => {
@@ -919,6 +967,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            images: Vec::new(),
             columns: Vec::new(),
             window,
         });
@@ -1004,6 +1053,26 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.entries.len());
             Ok(core.entries[i].Text()?.to_string())
+        })
+    }
+
+    fn image_size(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.images.len());
+            // The stored BitmapImage's decoded pixel size; no source
+            // (or a source that never decoded) is the placeholder
+            // class, "0x0".
+            let size = core.images[i]
+                .Source()
+                .ok()
+                .and_then(|source| source.cast::<BitmapImage>().ok())
+                .and_then(|bitmap| {
+                    Some((bitmap.PixelWidth().ok()?, bitmap.PixelHeight().ok()?))
+                });
+            Ok(match size {
+                Some((w, h)) => format!("{w}x{h}"),
+                None => "0x0".into(),
+            })
         })
     }
 

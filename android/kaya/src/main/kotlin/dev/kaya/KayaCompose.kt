@@ -1,8 +1,10 @@
 package dev.kaya
 
+import android.graphics.BitmapFactory
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -53,6 +57,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
     var maxValue by mutableStateOf(1.0)
+    // The image slot: the decoded bitmap (null is the placeholder
+    // class) and its size as the harness's "WxH" observation string
+    // ("0x0" before a source lands or after a failed decode).
+    var imageBitmap by mutableStateOf<ImageBitmap?>(null)
+    var imageSize by mutableStateOf("0x0")
     val children = mutableStateListOf<KayaNode>()
 }
 
@@ -71,6 +80,7 @@ object KayaSceneModel {
     val labels = ArrayList<KayaNode>()
     val entries = ArrayList<KayaNode>()
     val sliders = ArrayList<KayaNode>()
+    val images = ArrayList<KayaNode>()
     val columns = ArrayList<KayaNode>()
 }
 
@@ -93,14 +103,17 @@ object KayaCompose {
     const val KIND_ROW = 5
     const val KIND_CHECKBOX = 6
     const val KIND_SLIDER = 7
+    const val KIND_IMAGE = 8
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
     private const val PROP_MIN = 4
     private const val PROP_MAX = 5
+    private const val PROP_SOURCE = 6
     private const val VALUE_BOOL = 1
     private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
+    private const val VALUE_BLOB = 5
 
     /**
      * Start the pump and mount the interpreter. Call from onCreate when
@@ -120,12 +133,48 @@ object KayaCompose {
                 val length = KayaPresent.nextCommands(buffer)
                 if (length == 0) break
                 val batch = buffer.copyOf(length)
-                activity.runOnUiThread { apply(batch) }
+                // Blob handles are batch-local: the next nextCommands
+                // call replaces the core's table, and the UI-thread
+                // apply may run after that. Fetch every referenced blob
+                // here, on the pump thread, within the batch; the bytes
+                // travel with it.
+                val blobs = collectBlobs(batch)
+                activity.runOnUiThread { apply(batch, blobs) }
             }
         }
     }
 
-    private fun apply(batch: ByteArray) {
+    /**
+     * Pre-fetch the batch's blob payloads (SET_PROP values of type
+     * blob) through [KayaPresent.blobData], keyed by wire handle. Runs
+     * on the pump thread, before the next nextCommands call
+     * invalidates the handles.
+     */
+    private fun collectBlobs(batch: ByteArray): Map<Long, ByteArray> {
+        val blobs = HashMap<Long, ByteArray>()
+        val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
+        while (b.remaining() >= 8) {
+            val start = b.position()
+            val size = b.int
+            val kind = b.short.toInt()
+            b.short // flags
+            if (kind == APPLY_SET_PROP) {
+                b.long // widget id
+                b.int // prop
+                b.int // pad
+                val type = b.int
+                b.int // len
+                if (type == VALUE_BLOB) {
+                    val handle = b.long
+                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+                }
+            }
+            b.position(start + size)
+        }
+        return blobs
+    }
+
+    private fun apply(batch: ByteArray, blobs: Map<Long, ByteArray>) {
         val b = ByteBuffer.wrap(batch).order(ByteOrder.LITTLE_ENDIAN)
         while (b.remaining() >= 8) {
             val start = b.position()
@@ -147,6 +196,7 @@ object KayaCompose {
                         KIND_SLIDER -> KayaSceneModel.sliders.add(node)
                         KIND_ENTRY -> KayaSceneModel.entries.add(node)
                         KIND_CHECKBOX -> KayaSceneModel.checkboxes.add(node)
+                        KIND_IMAGE -> KayaSceneModel.images.add(node)
                         KIND_COLUMN -> KayaSceneModel.columns.add(node)
                     }
                 }
@@ -160,6 +210,27 @@ object KayaCompose {
                         PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
+                        PROP_SOURCE -> {
+                            // The value's payload is a u64 batch-local
+                            // handle; the pump prefetched the bytes into
+                            // `blobs`. Native decode:
+                            // BitmapFactory.decodeByteArray; a null
+                            // bitmap is the placeholder class, never a
+                            // crash — imageSize stays "0x0".
+                            val handle = readBlobHandle(b)
+                            val node = KayaSceneModel.nodes[id]!!
+                            val bytes = blobs[handle]
+                            val bitmap = bytes?.let {
+                                BitmapFactory.decodeByteArray(it, 0, it.size)
+                            }
+                            if (bitmap != null) {
+                                node.imageBitmap = bitmap.asImageBitmap()
+                                node.imageSize = "${bitmap.width}x${bitmap.height}"
+                            } else {
+                                node.imageBitmap = null
+                                node.imageSize = "0x0"
+                            }
+                        }
                         else -> error("kaya: unknown prop $prop")
                     }
                 }
@@ -242,6 +313,13 @@ object KayaCompose {
         return b.get() != 0.toByte()
     }
 
+    private fun readBlobHandle(b: ByteBuffer): Long {
+        val type = b.int
+        b.int // len
+        check(type == VALUE_BLOB) { "kaya: expected a blob value, got type $type" }
+        return b.long
+    }
+
     /**
      * The interaction harness's Kotlin interpreter: the same
      * line-oriented grammar the Rust backends embed from tools/scenes
@@ -320,13 +398,16 @@ object KayaCompose {
                     }
                     "expect" -> {
                         val want = quoted(parts.drop(2))
-                        // An entry target reads the field's own
-                        // displayed text (here, the node the TextField
-                        // binds); everything else reads label text —
+                        // The target kind picks the observation: an
+                        // entry reads the field's own displayed text,
+                        // an image its decoded size ("WxH"/"0x0"),
+                        // everything else reads label text —
                         // harness.rs's routing.
                         val got = onUi(activity) {
                             if (parts[1].startsWith("entry"))
                                 target(parts[1], KayaSceneModel.entries).text
+                            else if (parts[1].startsWith("image"))
+                                target(parts[1], KayaSceneModel.images).imageSize
                             else target(parts[1], KayaSceneModel.labels).text
                         }
                         if (got == want) {
@@ -441,6 +522,14 @@ fun KayaRender(node: KayaNode) {
                 },
                 valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
             )
+        KayaCompose.KIND_IMAGE ->
+            // Fixed to the decoded bitmap's intrinsic size (Image
+            // defaults to it), matching the harness's size
+            // observation; null is the placeholder class — nothing
+            // renders.
+            node.imageBitmap?.let { bitmap ->
+                Image(bitmap = bitmap, contentDescription = null)
+            }
         KayaCompose.KIND_ENTRY -> {
             // Uncontrolled toward the app: the node mirrors what the
             // user types (Compose needs the state), and every edit is

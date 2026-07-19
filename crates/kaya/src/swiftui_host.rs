@@ -13,15 +13,18 @@
 use std::ffi::{CString, c_char, c_int, c_void};
 
 use crate::capi::{
-    kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled, kaya_emit_value_changed,
-    kaya_next_commands,
+    kaya_blob_data, kaya_emit_clicked, kaya_emit_text_changed, kaya_emit_toggled,
+    kaya_emit_value_changed, kaya_next_commands,
 };
 
 /// The presentation-side functions handed to a guest-language backend.
 /// emit_clicked takes the click-tag bytes delivered with a widget's
 /// CREATE record, verbatim. next_commands blocks until a transaction is
 /// resolved and fills the buffer with apply-op records (KAYA_APPLY_*);
-/// returns the byte length, 0 on shutdown.
+/// returns the byte length, 0 on shutdown. blob_data resolves a blob
+/// value's u64 handle to (pointer, length) — handles are batch-local
+/// and the pointer is valid until the next next_commands call, so fetch
+/// and decode within the batch; NULL for a dead handle.
 #[repr(C)]
 pub struct KayaHostApi {
     pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
@@ -29,6 +32,7 @@ pub struct KayaHostApi {
     pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
+    pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
 }
 
 unsafe extern "C" {
@@ -61,6 +65,7 @@ pub(crate) fn run() -> i32 {
         emit_text_changed: kaya_emit_text_changed,
         emit_toggled: kaya_emit_toggled,
         emit_value_changed: kaya_emit_value_changed,
+        blob_data: kaya_blob_data,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

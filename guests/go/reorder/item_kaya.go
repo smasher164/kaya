@@ -51,6 +51,8 @@ func (r itemRow) Column(body func()) kaya.Node { return r.t.Column(body) }
 
 func (r itemRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
+func (r itemRow) Image(f kaya.Field[[]byte]) kaya.Node { return r.c.Image(r.t, f) }
+
 func (r itemRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
 	return r.c.Checkbox(r.t, f, onToggle)
 }

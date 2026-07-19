@@ -50,6 +50,7 @@ public final class KayaRecords {
             if (t == boolean.class || t == Boolean.class) return KayaWire.VALUE_BOOL;
             if (t == long.class || t == Long.class) return KayaWire.VALUE_I64;
             if (t == double.class || t == Double.class) return KayaWire.VALUE_F64;
+            if (t == byte[].class) return KayaWire.VALUE_BLOB;
             return null;
         }
 
@@ -141,12 +142,40 @@ public final class KayaRecords {
             Object[] fields = new Object[wireToComponent.length];
             try {
                 for (int i = 0; i < wireToComponent.length; i++) {
-                    fields[i] = accessors[wireToComponent[i]].invoke(record);
+                    fields[i] = encodeField(i, accessors[wireToComponent[i]].invoke(record));
                 }
             } catch (ReflectiveOperationException e) {
                 throw new IllegalStateException("kaya: record accessor failed", e);
             }
             return fields;
+        }
+
+        /**
+         * One field's wire value. Blob fields (byte[] components)
+         * register their bytes with the core here, at encode time —
+         * handles are single-submit, so insert, update, and
+         * update_field all re-register (one copy into core memory per
+         * write; the model keeps the guest's own byte[]). The guards
+         * turn the otherwise-obscure failure — a mistyped value
+         * encoding under the wrong tag and dying in the core — into an
+         * error at the call site.
+         */
+        Object encodeField(int wireIndex, Object value) {
+            if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
+                if (!(value instanceof byte[])) {
+                    throw new IllegalArgumentException("kaya: "
+                            + ctor.getDeclaringClass().getName() + " wire field " + wireIndex
+                            + " is a blob — pass byte[] (encoded image bytes), not "
+                            + (value == null ? "null" : value.getClass().getName()));
+                }
+                return new KayaWire.BlobHandle(KayaRing.blobRegister((byte[]) value));
+            }
+            if (value instanceof byte[]) {
+                throw new IllegalArgumentException("kaya: "
+                        + ctor.getDeclaringClass().getName() + " wire field " + wireIndex
+                        + " is not a blob — byte[] belongs on a byte[] record component");
+            }
+            return value;
         }
 
         Object withField(Object record, int wireIndex, Object value) {
@@ -218,7 +247,8 @@ public final class KayaRecords {
             if (current == null) {
                 throw new IllegalStateException("kaya: update of missing key " + key);
             }
-            tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), 0, f.index, value);
+            tx.updateFieldRaw(handle, key, info.withField(current, f.index, value), 0,
+                    f.index, info.encodeField(f.index, value));
         }
 
         /**
@@ -293,6 +323,12 @@ public final class KayaRecords {
             return t.label(this.<String>resolve(selector));
         }
 
+        /** An image bound to the field the selector reads. */
+        public KayaApp.Node image(KayaApp.Tpl t,
+                java.util.function.Function<T, byte[]> selector) {
+            return t.image(this.<byte[]>resolve(selector));
+        }
+
         /** The token routes, for the generated row surface: exact-index
          * tokens, no probe resolution. */
         @SuppressWarnings("unchecked")
@@ -308,6 +344,10 @@ public final class KayaRecords {
 
         public KayaApp.Node label(KayaApp.Tpl t, Field<String> f) {
             return t.label(f);
+        }
+
+        public KayaApp.Node image(KayaApp.Tpl t, Field<byte[]> f) {
+            return t.image(f);
         }
 
         @SuppressWarnings("unchecked")
@@ -490,11 +530,18 @@ public final class KayaRecords {
         }
     }
 
+    // Identity-stable singletons: probe resolution compares selector
+    // results with Objects.equals, which is identity for arrays — a
+    // fresh array per probe would read as a change in every field.
+    private static final byte[] DEFAULT_BLOB = new byte[0];
+    private static final byte[] SENTINEL_BLOB = {0x5e};
+
     private static Object defaultValue(Class<?> t) {
         if (t == String.class) return "";
         if (t == boolean.class || t == Boolean.class) return false;
         if (t == long.class || t == Long.class) return 0L;
         if (t == double.class || t == Double.class) return 0.0;
+        if (t == byte[].class) return DEFAULT_BLOB;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -504,6 +551,7 @@ public final class KayaRecords {
         if (t == boolean.class || t == Boolean.class) return true;
         if (t == long.class || t == Long.class) return 0x5eedL;
         if (t == double.class || t == Double.class) return 1.0;
+        if (t == byte[].class) return SENTINEL_BLOB;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 

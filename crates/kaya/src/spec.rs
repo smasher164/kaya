@@ -91,6 +91,10 @@ pub enum PropKind {
     Str,
     Bool,
     F64,
+    /// Bulk payload bytes by handle (an image's encoded source). The
+    /// typed setter takes the language's bytes form; the wire carries
+    /// the registration handle.
+    Blob,
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -101,6 +105,7 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("value", 3, PropKind::F64),
     ("min", 4, PropKind::F64),
     ("max", 5, PropKind::F64),
+    ("source", 6, PropKind::Blob),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -487,7 +492,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
     enums: &[
         EnumSpec {
             name: "value",
-            variants: &[("bool", 1), ("i64", 2), ("f64", 3), ("str", 4)],
+            variants: &[("bool", 1), ("i64", 2), ("f64", 3), ("str", 4), ("blob", 5)],
         },
         EnumSpec {
             name: "kind",
@@ -499,6 +504,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("row", 5),
                 ("checkbox", 6),
                 ("slider", 7),
+                ("image", 8),
             ],
         },
         EnumSpec {
@@ -509,6 +515,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("value", 3),
                 ("min", 4),
                 ("max", 5),
+                ("source", 6),
             ],
         },
         EnumSpec {
@@ -546,6 +553,9 @@ mod tests {
     /// expected op, the generated bindings agree with the core.
     struct GenericWriter {
         buf: Vec<u8>,
+        // The batch's blob table, exactly as a generated binding and
+        // the pump keep one: values reference bytes by 1-based index.
+        blobs: Vec<std::sync::Arc<[u8]>>,
     }
 
     enum Arg {
@@ -605,6 +615,13 @@ mod tests {
                 Value::I64(n) => (2, n.to_le_bytes().to_vec()),
                 Value::F64(x) => (3, x.to_le_bytes().to_vec()),
                 Value::Str(s) => (4, s.as_bytes().to_vec()),
+                // What a generated binding writes for a blob: the u64
+                // registration handle, never the bytes. The test's
+                // decode resolver maps handles back to bytes.
+                Value::Blob(b) => {
+                    self.blobs.push(b.0.clone());
+                    (5, (self.blobs.len() as u64).to_le_bytes().to_vec())
+                }
             };
             self.buf.extend_from_slice(&ty.to_le_bytes());
             self.buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
@@ -702,6 +719,7 @@ mod tests {
                     ("value", "i64") => wire::VALUE_I64,
                     ("value", "f64") => wire::VALUE_F64,
                     ("value", "str") => wire::VALUE_STR,
+                    ("value", "blob") => wire::VALUE_BLOB,
                     ("kind", "column") => wire::KIND_COLUMN,
                     ("kind", "button") => wire::KIND_BUTTON,
                     ("kind", "label") => wire::KIND_LABEL,
@@ -709,11 +727,13 @@ mod tests {
                     ("kind", "row") => wire::KIND_ROW,
                     ("kind", "checkbox") => wire::KIND_CHECKBOX,
                     ("kind", "slider") => wire::KIND_SLIDER,
+                    ("kind", "image") => wire::KIND_IMAGE,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
                     ("prop", "min") => wire::PROP_MIN,
                     ("prop", "max") => wire::PROP_MAX,
+                    ("prop", "source") => wire::PROP_SOURCE,
                     ("command", "clear") => wire::COMMAND_CLEAR,
                     ("command", "focus") => wire::COMMAND_FOCUS,
                     ("source", "const") => wire::SOURCE_CONST,
@@ -736,7 +756,7 @@ mod tests {
     /// reads.
     #[test]
     fn spec_encoding_round_trips_through_wire() {
-        let mut w = GenericWriter { buf: Vec::new() };
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
         w.record(
             tx_record("create_signal"),
             &[Arg::U64(1), Arg::Value(Value::from("step 0"))],
@@ -853,7 +873,7 @@ mod tests {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
         }
         // And the variable-tail record, one arm per source.
-        let mut w = GenericWriter { buf: Vec::new() };
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
         w.record(
             tx_record("set_property"),
             &[Arg::U64(2), Arg::U32(wire::PROP_TEXT), Arg::U32(wire::SOURCE_CONST)],
@@ -861,7 +881,7 @@ mod tests {
         // Splice the const tail in by hand, as a generated helper would.
         let mut buf = w.buf;
         buf.truncate(buf.len()); // record already padded; rebuild with tail
-        let mut w = GenericWriter { buf: Vec::new() };
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
         let start = 0;
         w.buf.extend_from_slice(&[0u8; 8]);
         w.buf.extend_from_slice(&2u64.to_le_bytes());

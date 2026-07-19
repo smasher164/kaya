@@ -95,8 +95,11 @@ public final class KayaSums {
                         + current.getClass().getSimpleName());
             }
             KayaRecords.Field<F> f = KayaRecords.fieldOf(constructor, selector);
+            // encodeField: blob fields re-register their bytes at
+            // encode time — handles are single-submit.
             tx.updateFieldRaw(handle, key,
-                    infos[variant].withField(current, f.index, value), variant, f.index, value);
+                    infos[variant].withField(current, f.index, value), variant, f.index,
+                    infos[variant].encodeField(f.index, value));
         }
 
         /** The collection-derived signal, over the sum's entries. */

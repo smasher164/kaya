@@ -34,5 +34,14 @@ public final class KayaRing {
         return false;
     }
 
+    // Stands in for kaya_blob_register: one copy of the encoded bytes
+    // into core-owned memory, returning the u64 handle the next submit
+    // from this guest consumes (referenced or not). The real Kotlin
+    // KayaRing must grow the matching JNI method — deferred to the
+    // Android side.
+    public static long blobRegister(byte[] data) {
+        return 0;
+    }
+
     private KayaRing() {}
 }

@@ -10,12 +10,15 @@ enum KayaValue: Equatable {
     case i64(Int64)
     case f64(Double)
     case str(String)
+    /// The u64 handle from kaya_blob_register, consumed by the next
+    /// submit; the bytes never ride the record stream.
+    case blob(UInt64)
 }
 
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x72814fd3802b05cb
+let kayaSpecHash: UInt64 = 0x8a6b17e10c7a5c34
 
 struct KayaTx {
     var bytes = Data()
@@ -56,6 +59,10 @@ struct KayaTx {
             u32(UInt32(KAYA_VALUE_STR))
             u32(UInt32(utf8.count))
             bytes.append(contentsOf: utf8)
+        case .blob(let x):
+            u32(UInt32(KAYA_VALUE_BLOB))
+            u32(8)
+            u64(x)
         }
         pad()
     }
@@ -393,6 +400,38 @@ struct KayaTx {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MAX))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(start)
+    }
+
+    /// set_property with a constant source value.
+    mutating func setSource(_ widgetId: UInt64, _ handle: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_SOURCE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.blob(handle))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound source value.
+    mutating func bindSource(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_SOURCE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindSourceElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_SOURCE))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)

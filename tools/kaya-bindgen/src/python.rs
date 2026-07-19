@@ -8,7 +8,7 @@ use crate::{Ctx, PropKind, prop_variants, record_params};
 /// Names spec identifiers must avoid: this emitter's helpers, plus
 /// Python's keywords and builtins a parameter would shadow.
 pub const RESERVED: &[&str] = &[
-    "_enc", "record", "parse_value", "parse_occurrence", "struct",
+    "_enc", "record", "parse_value", "parse_occurrence", "struct", "BlobHandle",
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
     "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
@@ -22,7 +22,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("Records are {u32 size, u16 kind, u16 flags}, body, padded to 8, little-endian.");
     c.line("Values are {u32 type, u32 len, payload padded to 8}; paths are");
     c.line("{u32 count, u32 reserved, count values}. Keys and values here accept");
-    c.line("Python bool, int, float, and str, mapped to the kaya value types.");
+    c.line("Python bool, int, float, str, and BlobHandle, mapped to the kaya");
+    c.line("value types.");
     c.line("\"\"\"");
     c.line("");
     c.line("import struct");
@@ -54,6 +55,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return b + b\"\\0\" * (-len(b) % 8)");
     c.line("");
     c.line("");
+    c.line("class BlobHandle:");
+    c.line("    \"\"\"A blob value at the wire tier: the u64 handle from");
+    c.line("    kaya_blob_register, consumed by the next submit. The bytes never");
+    c.line("    ride the record stream; the wrapper distinguishes a blob from a");
+    c.line("    plain int in the type-dispatched encoders.\"\"\"");
+    c.line("");
+    c.line("    __slots__ = (\"handle\",)");
+    c.line("");
+    c.line("    def __init__(self, handle):");
+    c.line("        self.handle = handle");
+    c.line("");
+    c.line("");
     c.line("class _enc:");
     c.line("    \"\"\"Encoders, namespaced so no generated parameter can shadow them.\"\"\"");
     c.line("");
@@ -66,6 +79,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            return struct.pack(\"<IIq\", VALUE_I64, 8, v)");
     c.line("        if isinstance(v, float):");
     c.line("            return struct.pack(\"<IId\", VALUE_F64, 8, v)");
+    c.line("        if isinstance(v, BlobHandle):");
+    c.line("            return struct.pack(\"<IIQ\", VALUE_BLOB, 8, v.handle)");
     c.line("        utf8 = v.encode()");
     c.line("        return _pad(struct.pack(\"<II\", VALUE_STR, len(utf8)) + utf8)");
     c.line("");
@@ -126,16 +141,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // encoder is type-generic, so PropKind only shapes the docstring.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        let ty = match kind {
-            PropKind::Str => "str",
-            PropKind::Bool => "bool",
-            PropKind::F64 => "float",
+        // Blob setters speak the wire tier: the parameter is the u64
+        // handle from kaya_blob_register (see BlobHandle), not bytes.
+        let (param, ty, expr) = match kind {
+            PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
+            PropKind::Bool => (*prop, "bool", format!("_enc.value({prop})")),
+            PropKind::F64 => (*prop, "float", format!("_enc.value({prop})")),
+            PropKind::Blob => (
+                "handle",
+                "a kaya_blob_register handle, consumed by the next submit",
+                "_enc.value(BlobHandle(handle))".to_string(),
+            ),
         };
         c.line("");
         c.line("");
-        c.line(&format!("def tx_set_{prop}(widget_id, {prop}):"));
+        c.line(&format!("def tx_set_{prop}(widget_id, {param}):"));
         c.line(&format!("    \"\"\"set_property with a constant {prop} value ({ty}).\"\"\""));
-        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QII\", widget_id, PROP_{up}, SOURCE_CONST) + _enc.value({prop}))"));
+        c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QII\", widget_id, PROP_{up}, SOURCE_CONST) + {expr})"));
         c.line("");
         c.line("");
         c.line(&format!("def tx_bind_{prop}(widget_id, signal_id):"));
@@ -162,6 +184,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        return struct.unpack(\"<d\", payload)[0], end");
     c.line("    if vtype == VALUE_STR:");
     c.line("        return payload.decode(), end");
+    c.line("    if vtype == VALUE_BLOB:");
+    c.line("        return BlobHandle(struct.unpack(\"<Q\", payload)[0]), end");
     c.line("    raise ValueError(f\"unknown value type {vtype}\")");
     c.line("");
     c.line("");

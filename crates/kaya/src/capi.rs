@@ -183,11 +183,13 @@ pub const KAYA_VALUE_BOOL: u32 = 1;
 pub const KAYA_VALUE_I64: u32 = 2;
 pub const KAYA_VALUE_F64: u32 = 3;
 pub const KAYA_VALUE_STR: u32 = 4;
+pub const KAYA_VALUE_BLOB: u32 = 5;
 const _: () = assert!(
     KAYA_VALUE_BOOL == wire::VALUE_BOOL
         && KAYA_VALUE_I64 == wire::VALUE_I64
         && KAYA_VALUE_F64 == wire::VALUE_F64
         && KAYA_VALUE_STR == wire::VALUE_STR
+        && KAYA_VALUE_BLOB == wire::VALUE_BLOB
 );
 
 /// Widget kinds.
@@ -198,6 +200,7 @@ pub const KAYA_KIND_ENTRY: u32 = 4;
 pub const KAYA_KIND_ROW: u32 = 5;
 pub const KAYA_KIND_CHECKBOX: u32 = 6;
 pub const KAYA_KIND_SLIDER: u32 = 7;
+pub const KAYA_KIND_IMAGE: u32 = 8;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -206,6 +209,7 @@ const _: () = assert!(
         && KAYA_KIND_ROW == wire::KIND_ROW
         && KAYA_KIND_CHECKBOX == wire::KIND_CHECKBOX
         && KAYA_KIND_SLIDER == wire::KIND_SLIDER
+        && KAYA_KIND_IMAGE == wire::KIND_IMAGE
 );
 
 /// Property keys.
@@ -214,12 +218,14 @@ pub const KAYA_PROP_CHECKED: u32 = 2;
 pub const KAYA_PROP_VALUE: u32 = 3;
 pub const KAYA_PROP_MIN: u32 = 4;
 pub const KAYA_PROP_MAX: u32 = 5;
+pub const KAYA_PROP_SOURCE: u32 = 6;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
         && KAYA_PROP_VALUE == wire::PROP_VALUE
         && KAYA_PROP_MIN == wire::PROP_MIN
         && KAYA_PROP_MAX == wire::PROP_MAX
+        && KAYA_PROP_SOURCE == wire::PROP_SOURCE
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -292,9 +298,88 @@ pub(crate) fn ring_raw() -> (*mut u8, u32, *mut u32, *mut u32) {
     state().ring.raw()
 }
 
+/// The blob tables: bulk payload bytes live once, in core-owned
+/// memory, and every record stream carries 8-byte handles.
+///
+/// Two directions, two small id spaces:
+/// - `pending` (guest -> core): kaya_blob_register copies bytes in and
+///   returns a handle valid for exactly one submit — the next
+///   kaya_submit resolves references (Arc clones into values) and
+///   drains the whole table, referenced or not, so registration's
+///   ownership transfers at the submit boundary and an unreferenced
+///   blob cannot leak.
+/// - `out` (core -> presentation pump): batch-local, 1-based indices
+///   minted by the wire writer; kaya_blob_data serves the CURRENT
+///   batch and the next kaya_next_commands call replaces it. Fetch and
+///   decode within the batch, per the pump contract.
+///
+/// Reclamation is refcount: scene state (signal values, collection
+/// records) holds Arc clones, so restamps re-read without re-upload,
+/// and the last drop frees (DESIGN open question #2).
+struct Blobs {
+    next: u64,
+    pending: std::collections::HashMap<u64, std::sync::Arc<[u8]>>,
+    out: Vec<std::sync::Arc<[u8]>>,
+}
+
+fn blobs() -> &'static std::sync::Mutex<Blobs> {
+    static BLOBS: std::sync::OnceLock<std::sync::Mutex<Blobs>> = std::sync::OnceLock::new();
+    BLOBS.get_or_init(|| {
+        std::sync::Mutex::new(Blobs { next: 1, pending: std::collections::HashMap::new(), out: Vec::new() })
+    })
+}
+
+/// Register bulk payload bytes (an encoded image, a row batch) and get
+/// the handle the next submitted transaction references them by. One
+/// copy, into core-owned memory; `len` is a usize — blob size is
+/// bounded by memory, never by any wire or pump buffer, because the
+/// bytes never enter a record stream. The handle is consumed by the
+/// next kaya_submit from this guest, referenced or not.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_blob_register(bytes: *const u8, len: usize) -> u64 {
+    let src = if bytes.is_null() || len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(bytes, len) }
+    };
+    let mut table = blobs().lock().unwrap();
+    let handle = table.next;
+    table.next += 1;
+    table.pending.insert(handle, std::sync::Arc::from(src));
+    handle
+}
+
+/// Fetch a blob's bytes by the handle an apply record carried. Returns
+/// the byte pointer and writes the length; NULL for a dead handle (a
+/// batch already superseded). The pointer borrows core memory and is
+/// valid until the next kaya_next_commands call — fetch and decode
+/// within the batch.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_blob_data(handle: u64, len: *mut usize) -> *const u8 {
+    let table = blobs().lock().unwrap();
+    // Pump handles are 1-based indices into the current batch's table.
+    match usize::try_from(handle).ok().and_then(|h| h.checked_sub(1)).and_then(|i| table.out.get(i))
+    {
+        Some(arc) => {
+            if !len.is_null() {
+                unsafe { *len = arc.len() };
+            }
+            arc.as_ptr()
+        }
+        None => {
+            if !len.is_null() {
+                unsafe { *len = 0 };
+            }
+            std::ptr::null()
+        }
+    }
+}
+
 /// Submit one transaction: `len` bytes of records at `records`, applied
 /// atomically on the UI thread. The buffer is copied before this call
 /// returns. Malformed records are a broken binding and fail loudly.
+/// Blob references resolve against the pending registration table,
+/// which drains at this boundary whether referenced or not.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
     let buf = if records.is_null() || len == 0 {
@@ -302,7 +387,12 @@ pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
     } else {
         unsafe { std::slice::from_raw_parts(records, len) }
     };
-    let tx = wire::decode_transaction(buf);
+    let tx = {
+        let mut table = blobs().lock().unwrap();
+        let pending = std::mem::take(&mut table.pending);
+        drop(table);
+        wire::decode_transaction_with_blobs(buf, &|h| pending.get(&h).cloned())
+    };
     if state().tx_tx.send(tx).is_ok() {
         crate::backend::ring_doorbell();
     }
@@ -496,6 +586,12 @@ pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
     for op in &ops {
         writer.apply_op(op);
     }
+    // Publish the batch's blob table (replacing the previous batch's):
+    // the records in `buf` reference these bytes by 1-based index
+    // through kaya_blob_data, valid until the next call here. Blob
+    // payloads never enter `buf`, so the 64 KiB pump budget is spent
+    // on records alone.
+    blobs().lock().unwrap().out = std::mem::take(&mut writer.blobs);
     let bytes = writer.into_bytes();
     assert!(
         bytes.len() <= cap,
@@ -516,6 +612,41 @@ mod tests {
     /// count catches a row added without one — the failure that once
     /// surfaced as a Swift guest typecheck error, five tools
     /// downstream) and every constant matches its row's kind.
+    /// The blob tables' lifecycle, in one serial test (the tables are
+    /// process-global): registration fills pending; the submit
+    /// boundary drains it, referenced or not (ownership transfers, an
+    /// unreferenced blob cannot leak); the out table serves the
+    /// current batch by 1-based index and a dead handle reads NULL.
+    #[test]
+    fn blob_tables_register_drain_and_serve() {
+        let bytes = [1u8, 2, 3, 4];
+        let handle = unsafe { kaya_blob_register(bytes.as_ptr(), bytes.len()) };
+        assert!(handle > 0);
+        assert_eq!(
+            blobs().lock().unwrap().pending.get(&handle).map(|a| a.len()),
+            Some(4)
+        );
+        // An empty submit still drains pending: registration's
+        // ownership transferred at the boundary.
+        unsafe { kaya_submit(std::ptr::null(), 0) };
+        assert!(blobs().lock().unwrap().pending.is_empty());
+
+        // The out table serves the current batch; index 0 and past-end
+        // are dead handles (NULL, len 0).
+        blobs().lock().unwrap().out = vec![std::sync::Arc::from(&bytes[..])];
+        let mut len = 0usize;
+        let p = unsafe { kaya_blob_data(1, &mut len) };
+        assert!(!p.is_null());
+        assert_eq!(len, 4);
+        assert_eq!(unsafe { std::slice::from_raw_parts(p, len) }, &bytes);
+        let dead = unsafe { kaya_blob_data(2, &mut len) };
+        assert!(dead.is_null());
+        assert_eq!(len, 0);
+        let zero = unsafe { kaya_blob_data(0, &mut len) };
+        assert!(zero.is_null());
+        blobs().lock().unwrap().out.clear();
+    }
+
     #[test]
     fn c_abi_constants_cover_the_spec() {
         let tx = [

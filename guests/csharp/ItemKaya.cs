@@ -42,6 +42,8 @@ sealed class ItemRow
 
     public Node Label(Field<string> f) => t.Label(f);
 
+    public Node Image(Field<byte[]> f) => t.Image(f);
+
     public Node Checkbox(Field<bool> f,
         System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
         t.Checkbox(f, onToggle);

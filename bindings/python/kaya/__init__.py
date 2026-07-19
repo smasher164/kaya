@@ -60,7 +60,8 @@ from . import wire
 # type (a handler, say) is guest-only: it lives in the model and never
 # reaches the wire. bool before int — bool is an int in Python.
 _WIRE_TYPES = [(bool, wire.VALUE_BOOL), (int, wire.VALUE_I64),
-               (float, wire.VALUE_F64), (str, wire.VALUE_STR)]
+               (float, wire.VALUE_F64), (str, wire.VALUE_STR),
+               (bytes, wire.VALUE_BLOB)]
 
 
 def _wire_tag(py_type):
@@ -68,6 +69,25 @@ def _wire_tag(py_type):
         if py_type is ty:
             return tag
     return None
+
+
+def _encode_blob_field(value):
+    """A blob field's wire value: register the bytes now, at encode
+    time — handles are single-submit, so every mutation that carries a
+    blob field re-registers (one copy into core memory per write; the
+    model keeps the guest's own bytes)."""
+    return wire.BlobHandle(runtime.register_blob(value))
+
+
+def _text_value(what, text):
+    """The UTF-8 wall: text properties are str, never bytes — image
+    bytes have their own channel."""
+    if not isinstance(text, str):
+        raise TypeError(
+            f"kaya: {what} takes str, not {type(text).__name__} — encoded "
+            "image bytes belong on kaya.image(source=...)"
+        )
+    return text
 
 _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
@@ -427,7 +447,7 @@ class _BoundCollection:
         variant, spec = self._owner._variant_for(value)
         if spec.getters is None:
             return variant, [value]
-        return variant, [g(value) for g in spec.getters]
+        return variant, [e(g(value)) for g, e in zip(spec.getters, spec.encoders)]
 
     def derive(self, compute):
         """A signal the binding recomputes from this collection's
@@ -489,10 +509,11 @@ class _BoundCollection:
                 raise KeyError(
                     f"kaya: {type(entry).__name__} has no wire field {name!r}"
                 )
+            index = spec.fields[name]
             _records().append(
                 wire.tx_collection_update_field(
-                    self._owner._id, self._path, key, spec.fields[name],
-                    variant, value
+                    self._owner._id, self._path, key, index,
+                    variant, spec.encoders[index](value)
                 )
             )
             setattr(entry, name, value)
@@ -650,10 +671,14 @@ class _Variant:
             self.fields = None
             self.schema = [wire.VALUE_STR]
             self.getters = None
+            self.encoders = None
             return
         self.fields = {}
         self.schema = []
         self.getters = []
+        # Per-field wire encoders, parallel to the schema: identity for
+        # scalars; blob fields register their bytes at encode time.
+        self.encoders = []
         for f in dataclasses.fields(cls):
             tag = _wire_tag(f.type)
             if tag is None:
@@ -661,6 +686,9 @@ class _Variant:
             self.fields[f.name] = len(self.schema)
             self.schema.append(tag)
             self.getters.append(operator.attrgetter(f.name))
+            self.encoders.append(
+                _encode_blob_field if tag == wire.VALUE_BLOB else (lambda v: v)
+            )
         if not self.schema:
             raise TypeError(f"kaya: {cls.__name__} has no wire-typed fields")
 
@@ -882,7 +910,7 @@ def column():
 def button(text=None, on_click=None):
     handle = _widget(wire.KIND_BUTTON)
     if text is not None:
-        _records().append(wire.tx_set_text(handle.id, text))
+        _records().append(wire.tx_set_text(handle.id, _text_value("button text", text)))
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
     return handle
@@ -901,7 +929,7 @@ def checkbox(text=None, checked=None, on_toggle=None):
     into its own model. `checked` sets the state; `text` the caption."""
     handle = _widget(wire.KIND_CHECKBOX)
     if text is not None:
-        _records().append(wire.tx_set_text(handle.id, text))
+        _records().append(wire.tx_set_text(handle.id, _text_value("checkbox text", text)))
     if checked is not None:
         if isinstance(checked, Signal):
             _records().append(wire.tx_bind_checked(handle.id, checked.id))
@@ -950,7 +978,7 @@ def entry(text=None, on_change=None):
     folds those into its own state. There is no read-back."""
     handle = _widget(wire.KIND_ENTRY)
     if text is not None:
-        _records().append(wire.tx_set_text(handle.id, text))
+        _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
     return handle
@@ -961,7 +989,7 @@ def label(text=None, bind=None):
     Element (the enclosing For's, levels computed)."""
     handle = _widget(wire.KIND_LABEL)
     if text is not None:
-        _records().append(wire.tx_set_text(handle.id, text))
+        _records().append(wire.tx_set_text(handle.id, _text_value("label text", text)))
     if isinstance(bind, Signal):
         _records().append(wire.tx_bind_text(handle.id, bind.id))
     elif isinstance(bind, Element):
@@ -970,6 +998,35 @@ def label(text=None, bind=None):
         _records().append(
             wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
         )
+    return handle
+
+
+def image(source=None):
+    """An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
+    decodes natively, and decode failure renders the placeholder, never
+    a crash. `source` is the encoded bytes — one registration copy into
+    core memory; the handle is consumed by the next submit, and the
+    guest's bytes are free to drop the moment the call returns — or a
+    Signal, or an element field (`row.pic`) inside a template."""
+    handle = _widget(wire.KIND_IMAGE)
+    if source is not None:
+        if isinstance(source, Signal):
+            _records().append(wire.tx_bind_source(handle.id, source.id))
+        elif isinstance(source, FieldRef):
+            _records().append(
+                wire.tx_bind_source_element(handle.id, source._level(),
+                                            source._index)
+            )
+        elif isinstance(source, (bytes, bytearray, memoryview)):
+            _records().append(
+                wire.tx_set_source(handle.id, runtime.register_blob(source))
+            )
+        else:
+            raise TypeError(
+                f"kaya: image source takes encoded bytes (or a Signal or "
+                f"element field), not {type(source).__name__} — text "
+                "belongs on kaya.label"
+            )
     return handle
 
 

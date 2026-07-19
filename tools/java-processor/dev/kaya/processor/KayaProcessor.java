@@ -229,6 +229,11 @@ public final class KayaProcessor extends AbstractProcessor {
             case "boolean", "java.lang.Boolean" -> "Boolean";
             case "long", "java.lang.Long" -> "Long";
             case "double", "java.lang.Double" -> "Double";
+            // The blob value type: KayaRecords.Info maps byte[]
+            // components into the schema, so the generator must too —
+            // a skipped component here would shift every later
+            // exact-index token off the runtime schema.
+            case "byte[]" -> "byte[]";
             default -> null;
         };
     }
@@ -341,6 +346,10 @@ public final class KayaProcessor extends AbstractProcessor {
         w(b, "");
         w(b, "        KayaApp.Node label(KayaRecords.Field<String> f) {");
         w(b, "            return c.label(t, f);");
+        w(b, "        }");
+        w(b, "");
+        w(b, "        KayaApp.Node image(KayaRecords.Field<byte[]> f) {");
+        w(b, "            return c.image(t, f);");
         w(b, "        }");
         w(b, "");
         w(b, "        KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,");

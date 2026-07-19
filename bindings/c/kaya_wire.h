@@ -56,6 +56,13 @@ static inline KayaVal kaya_bool(int b) {
     return v;
 }
 
+/* A blob by its kaya_blob_register handle (riding in i), consumed by
+ * the next submit; the bytes never enter the record stream. */
+static inline KayaVal kaya_blob(uint64_t handle) {
+    KayaVal v = {KAYA_VALUE_BLOB, (int64_t)handle, 0, 0, 0};
+    return v;
+}
+
 static inline void kaya_wire_u32(KayaTx *tx, uint32_t v) {
     memcpy(tx->buf + tx->len, &v, 4);
     tx->len += 4;
@@ -80,6 +87,7 @@ static inline void kaya_wire_value(KayaTx *tx, KayaVal v) {
         tx->buf[tx->len++] = (uint8_t)v.i;
         break;
     case KAYA_VALUE_I64:
+    case KAYA_VALUE_BLOB: /* the u64 handle rides in i */
         kaya_wire_u32(tx, 8);
         memcpy(tx->buf + tx->len, &v.i, 8);
         tx->len += 8;
@@ -133,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x72814fd3802b05cbULL
+#define KAYA_SPEC_HASH 0x8a6b17e10c7a5c34ULL
 
 
 /* Create a signal holding `initial`. */
@@ -439,6 +447,38 @@ static inline void kaya_tx_bind_max_element(KayaTx *tx, uint64_t widget_id, uint
     kaya_wire_end(tx, start);
 }
 
+/* set_property with a constant source value. */
+static inline void kaya_tx_set_source(KayaTx *tx, uint64_t widget_id, uint64_t handle) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_SOURCE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_blob(handle));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound source value. */
+static inline void kaya_tx_bind_source(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_SOURCE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_source_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_SOURCE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
 /* Decode one value at `at`; returns the next offset. */
 static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {
     memcpy(&out->type, buf + at, 4);
@@ -453,6 +493,7 @@ static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *ou
         out->i = buf[at + 8];
         break;
     case KAYA_VALUE_I64:
+    case KAYA_VALUE_BLOB:
         memcpy(&out->i, buf + at + 8, 8);
         break;
     case KAYA_VALUE_F64:

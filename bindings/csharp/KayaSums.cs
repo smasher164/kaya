@@ -85,8 +85,11 @@ sealed class SumCollection<T>
             throw new InvalidOperationException(
                 $"kaya: update_field witnessed {typeof(V).Name} but {key} holds {current.GetType().Name}");
         var f = KayaRecords.FieldOf(selector);
+        // The model keeps the guest's own value; the wire value is
+        // encoded (a blob field re-registers its bytes — handles are
+        // single-submit).
         tx.UpdateFieldRaw(Collection, key, info.WithField(current, f.Index, value), variant,
-            f.Index, value);
+            f.Index, info.EncodeField(f.Index, value));
     }
 
     /// The collection-derived signal, over the sum's entries.

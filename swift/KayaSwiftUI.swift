@@ -34,14 +34,23 @@ private let kindEntry: UInt32 = 4
 private let kindRow: UInt32 = 5
 private let kindCheckbox: UInt32 = 6
 private let kindSlider: UInt32 = 7
+private let kindImage: UInt32 = 8
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
+private let propSource: UInt32 = 6
 private let valueBool: UInt32 = 1
 private let valueF64: UInt32 = 3
 private let valueStr: UInt32 = 4
+private let valueBlob: UInt32 = 5
+
+#if os(macOS)
+    typealias KayaPlatformImage = NSImage
+#else
+    typealias KayaPlatformImage = UIImage
+#endif
 
 @Observable
 final class KayaNode: Identifiable {
@@ -53,6 +62,11 @@ final class KayaNode: Identifiable {
     var value = 0.0
     var minValue = 0.0
     var maxValue = 1.0
+    // The image slot: the decoded native image (nil is the placeholder
+    // class) and its size as the harness's "WxH" observation string
+    // ("0x0" before a source lands or after a failed decode).
+    var image: KayaPlatformImage?
+    var imageSize = "0x0"
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -77,6 +91,7 @@ final class KayaSceneModel {
     var labels: [KayaNode] = []
     var entries: [KayaNode] = []
     var sliders: [KayaNode] = []
+    var images: [KayaNode] = []
     var columns: [KayaNode] = []
 }
 
@@ -119,6 +134,16 @@ enum KayaHost {
     static func nextCommands(_ buffer: UnsafeMutablePointer<UInt8>, _ cap: Int) -> Int {
         Int(api.next_commands(buffer, UInt(cap)))
     }
+
+    /// Fetch a blob's bytes by the handle an apply record carried,
+    /// copied out of core memory. Handles are batch-local (the next
+    /// next_commands call replaces the table), so callers fetch on the
+    /// pump thread, within the batch. Nil for a dead handle.
+    static func blobData(_ handle: UInt64) -> Data? {
+        var length: UInt = 0
+        guard let bytes = api.blob_data(handle, &length) else { return nil }
+        return Data(bytes: bytes, count: Int(length))
+    }
 }
 
 func kayaStartCommandPump() {
@@ -130,15 +155,43 @@ func kayaStartCommandPump() {
             let length = KayaHost.nextCommands(buffer, cap)
             if length == 0 { break }
             let batch = Data(bytes: buffer, count: length)
+            // Blob handles are batch-local: the next nextCommands call
+            // replaces the core's table, and the main-queue apply may
+            // run after that. Fetch every referenced blob here, on the
+            // pump thread, within the batch; the bytes travel with it.
+            let blobs = kayaCollectBlobs(batch)
             DispatchQueue.main.async {
-                kayaApply(batch)
+                kayaApply(batch, blobs)
             }
         }
     }
     thread.start()
 }
 
-private func kayaApply(_ batch: Data) {
+/// Pre-fetch the batch's blob payloads (SET_PROP values of type blob)
+/// through the host's blob_data, keyed by wire handle. Runs on the pump
+/// thread, before the next nextCommands call invalidates the handles.
+private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
+    var blobs: [UInt64: Data] = [:]
+    batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        var at = 0
+        while at + 8 <= raw.count {
+            let size = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+            let kind = raw.loadUnaligned(fromByteOffset: at + 4, as: UInt16.self)
+            if kind == applySetProp {
+                let valueType = raw.loadUnaligned(fromByteOffset: at + 24, as: UInt32.self)
+                if valueType == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: at + 32, as: UInt64.self)
+                    blobs[handle] = KayaHost.blobData(handle)
+                }
+            }
+            at += size
+        }
+    }
+    return blobs
+}
+
+private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
         var at = 0
         while at + 8 <= raw.count {
@@ -159,6 +212,7 @@ private func kayaApply(_ batch: Data) {
                 case kindSlider: kayaScene.sliders.append(node)
                 case kindEntry: kayaScene.entries.append(node)
                 case kindCheckbox: kayaScene.checkboxes.append(node)
+                case kindImage: kayaScene.images.append(node)
                 case kindColumn: kayaScene.columns.append(node)
                 default: break
                 }
@@ -183,6 +237,22 @@ private func kayaApply(_ batch: Data) {
                 case (propMax, valueF64):
                     kayaScene.nodes[id]!.maxValue =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propSource, valueBlob):
+                    // The value's payload is a u64 batch-local handle;
+                    // the pump prefetched the bytes into `blobs`.
+                    // Native decode: NSImage(data:)/UIImage(data:); a
+                    // failed decode is nil — the placeholder class,
+                    // never a crash — and imageSize stays "0x0".
+                    let handle = raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self)
+                    let node = kayaScene.nodes[id]!
+                    if let data = blobs[handle], let image = KayaPlatformImage(data: data) {
+                        node.image = image
+                        node.imageSize =
+                            "\(Int(image.size.width))x\(Int(image.size.height))"
+                    } else {
+                        node.image = nil
+                        node.imageSize = "0x0"
+                    }
                 default:
                     fatalError("kaya: cannot apply prop \(prop) with value type \(valueType)")
                 }
@@ -323,13 +393,16 @@ private func kayaRunScript(_ script: String) {
                 }
             case "expect":
                 let want = kayaQuoted(Array(parts[2...]))
-                // An entry target reads the field's own displayed text
-                // (here, the node the TextField binds); everything else
-                // reads label text — harness.rs's routing.
+                // The target kind picks the observation: an entry reads
+                // the field's own displayed text, an image its decoded
+                // size ("WxH"/"0x0"), everything else reads label text
+                // — harness.rs's routing.
                 let got = DispatchQueue.main.sync {
                     parts[1].hasPrefix("entry")
                         ? kayaTarget(parts[1], kayaScene.entries).text
-                        : kayaTarget(parts[1], kayaScene.labels).text
+                        : parts[1].hasPrefix("image")
+                            ? kayaTarget(parts[1], kayaScene.images).imageSize
+                            : kayaTarget(parts[1], kayaScene.labels).text
                 }
                 if got == want {
                     observed.append(got)
@@ -440,6 +513,19 @@ struct KayaRender: View {
             .frame(maxWidth: 200)
         case kindEntry:
             KayaEntry(node: node)
+        case kindImage:
+            // Fixed to the decoded image's intrinsic size (no
+            // .resizable()), matching the harness's size observation;
+            // nil is the placeholder class — nothing renders.
+            if let image = node.image {
+                #if os(macOS)
+                    Image(nsImage: image)
+                #else
+                    Image(uiImage: image)
+                #endif
+            } else {
+                EmptyView()
+            }
         default:
             EmptyView()
         }

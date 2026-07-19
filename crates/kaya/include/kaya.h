@@ -76,6 +76,8 @@
 
 #define VALUE_STR 4
 
+#define VALUE_BLOB 5
+
 #define KIND_COLUMN 1
 
 #define KIND_BUTTON 2
@@ -90,6 +92,8 @@
 
 #define KIND_SLIDER 7
 
+#define KIND_IMAGE 8
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -99,6 +103,8 @@
 #define PROP_MIN 4
 
 #define PROP_MAX 5
+
+#define PROP_SOURCE 6
 
 #define SOURCE_CONST 0
 
@@ -249,6 +255,8 @@
 
 #define KAYA_VALUE_STR 4
 
+#define KAYA_VALUE_BLOB 5
+
 /**
  * Widget kinds.
  */
@@ -266,6 +274,8 @@
 
 #define KAYA_KIND_SLIDER 7
 
+#define KAYA_KIND_IMAGE 8
+
 /**
  * Property keys.
  */
@@ -278,6 +288,8 @@
 #define KAYA_PROP_MIN 4
 
 #define KAYA_PROP_MAX 5
+
+#define KAYA_PROP_SOURCE 6
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -341,7 +353,10 @@ typedef struct KayaRecordButtonClicked {
  * emit_clicked takes the click-tag bytes delivered with a widget's
  * CREATE record, verbatim. next_commands blocks until a transaction is
  * resolved and fills the buffer with apply-op records (KAYA_APPLY_*);
- * returns the byte length, 0 on shutdown.
+ * returns the byte length, 0 on shutdown. blob_data resolves a blob
+ * value's u64 handle to (pointer, length) — handles are batch-local
+ * and the pointer is valid until the next next_commands call, so fetch
+ * and decode within the batch; NULL for a dead handle.
  */
 typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
@@ -349,6 +364,7 @@ typedef struct KayaHostApi {
   void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
+  const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
 } KayaHostApi;
 
 
@@ -378,9 +394,30 @@ uint64_t kaya_spec_hash(void);
 int32_t kaya_run(void);
 
 /**
+ * Register bulk payload bytes (an encoded image, a row batch) and get
+ * the handle the next submitted transaction references them by. One
+ * copy, into core-owned memory; `len` is a usize — blob size is
+ * bounded by memory, never by any wire or pump buffer, because the
+ * bytes never enter a record stream. The handle is consumed by the
+ * next kaya_submit from this guest, referenced or not.
+ */
+uint64_t kaya_blob_register(const uint8_t *bytes, uintptr_t len);
+
+/**
+ * Fetch a blob's bytes by the handle an apply record carried. Returns
+ * the byte pointer and writes the length; NULL for a dead handle (a
+ * batch already superseded). The pointer borrows core memory and is
+ * valid until the next kaya_next_commands call — fetch and decode
+ * within the batch.
+ */
+const uint8_t *kaya_blob_data(uint64_t handle, uintptr_t *len);
+
+/**
  * Submit one transaction: `len` bytes of records at `records`, applied
  * atomically on the UI thread. The buffer is copied before this call
  * returns. Malformed records are a broken binding and fail loudly.
+ * Blob references resolve against the pending registration table,
+ * which drains at this boundary whether referenced or not.
  */
 void kaya_submit(const uint8_t *records, uintptr_t len);
 

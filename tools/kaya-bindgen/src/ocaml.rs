@@ -26,7 +26,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("   little-endian; each tx_* returns one packed record, and a");
     c.line("   transaction is their concatenation. *)");
     c.line("");
-    c.line("type value = Bool of bool | I64 of int64 | F64 of float | Str of string");
+    c.line("(* Blob carries the u64 handle from kaya_blob_register (as int64),");
+    c.line("   consumed by the next submit; the bytes never ride the record");
+    c.line("   stream. *)");
+    c.line("type value =");
+    c.line("  | Bool of bool");
+    c.line("  | I64 of int64");
+    c.line("  | F64 of float");
+    c.line("  | Str of string");
+    c.line("  | Blob of int64");
     c.line("");
     c.line(&format!("(* spec_hash: {}. *)", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
     c.line(&format!("let spec_hash = 0x{:016x}L", crate::spec_hash()));
@@ -65,7 +73,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  | Str x ->");
     c.line("      Buffer.add_int32_le b (Int32.of_int value_str);");
     c.line("      Buffer.add_int32_le b (Int32.of_int (String.length x));");
-    c.line("      Buffer.add_string b x);");
+    c.line("      Buffer.add_string b x");
+    c.line("  | Blob x ->");
+    c.line("      Buffer.add_int32_le b (Int32.of_int value_blob);");
+    c.line("      Buffer.add_int32_le b 8l;");
+    c.line("      Buffer.add_int64_le b x);");
     c.line("  pad8 b");
     c.line("");
     c.line("(* A key path: {u32 count, u32 reserved, count values}. *)");
@@ -108,19 +120,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // The set_property arms, one trio per property: spec-driven so new
     // props reach every binding without emitter edits.
     for (prop, _, kind) in prop_variants(spec) {
-        let ctor = match kind {
-            crate::PropKind::Str => "Str",
-            crate::PropKind::Bool => "Bool",
-            crate::PropKind::F64 => "F64",
+        // Blob setters take the u64 kaya_blob_register handle (see
+        // Blob), so the parameter says so.
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::Bool => ("Bool", *prop),
+            crate::PropKind::F64 => ("F64", *prop),
+            crate::PropKind::Blob => ("Blob", "handle"),
         };
         c.line("");
         c.line(&format!("(* set_property with a constant {prop} value. *)"));
-        c.line(&format!("let tx_set_{prop} widget_id {prop} ="));
+        c.line(&format!("let tx_set_{prop} widget_id {param} ="));
         c.line("  finish tx_kind_set_property (fun b ->");
         c.line("      Buffer.add_int64_le b widget_id;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int prop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
-        c.line(&format!("      encode_value b ({ctor} {prop}))"));
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
         c.line("");
         c.line(&format!("(* set_property with a signal-bound {prop} value. *)"));
         c.line(&format!("let tx_bind_{prop} widget_id signal_id ="));
@@ -153,13 +168,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  let next = at + 8 + ((vlen + 7) land lnot 7) in");
     c.line("  let v =");
     c.line("    if vtype = value_bool then Bool (byte (at + 8) <> 0)");
-    c.line("    else if vtype = value_i64 || vtype = value_f64 then begin");
+    c.line("    else if vtype = value_i64 || vtype = value_f64 || vtype = value_blob");
+    c.line("    then begin");
     c.line("      let n = ref 0L in");
     c.line("      for i = 7 downto 0 do");
     c.line("        n := Int64.logor (Int64.shift_left !n 8)");
     c.line("               (Int64.of_int (byte (at + 8 + i)))");
     c.line("      done;");
-    c.line("      if vtype = value_i64 then I64 !n else F64 (Int64.float_of_bits !n)");
+    c.line("      if vtype = value_i64 then I64 !n");
+    c.line("      else if vtype = value_blob then Blob !n");
+    c.line("      else F64 (Int64.float_of_bits !n)");
     c.line("    end");
     c.line("    else Str (String.init vlen (fun i -> Char.chr (byte (at + 8 + i))))");
     c.line("  in");

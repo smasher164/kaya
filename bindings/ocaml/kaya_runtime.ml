@@ -53,6 +53,10 @@ let kaya_wait_occurrences =
 let kaya_submit =
   foreign ~from:lib "kaya_submit" (string @-> size_t @-> returning void)
 
+let kaya_blob_register =
+  foreign ~from:lib "kaya_blob_register"
+    (string @-> size_t @-> returning uint64_t)
+
 (* The ordered cursor accesses; see kaya_ml_stubs.c. *)
 external load_acquire_u32 : nativeint -> int = "kaya_ml_load_acquire_u32"
   [@@noalloc]
@@ -87,6 +91,16 @@ let run () =
 let submit records =
   let tx = String.concat "" records in
   kaya_submit tx (Unsigned.Size_t.of_int (String.length tx))
+
+(* Register bulk payload bytes (an encoded image) with the core: one
+   copy into core-owned memory, returning the handle (a u64, carried
+   as the int64 the Blob wire value takes). The handle is consumed by
+   the next submit from this guest, referenced or not; the caller's
+   bytes are free to drop the moment this returns. *)
+let register_blob data =
+  let s = Bytes.to_string data in
+  Unsigned.UInt64.to_int64
+    (kaya_blob_register s (Unsigned.Size_t.of_int (String.length s)))
 
 (* Block for the next occurrence; None when the core has shut down.
    Some (kind, id, keys, payload): keys are [] when the id is a widget

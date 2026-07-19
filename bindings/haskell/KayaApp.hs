@@ -60,6 +60,7 @@ module KayaApp
     focusWidget,
     bindText,
     bindChecked,
+    bindSource,
     bindTextElement,
     KayaFieldType (..),
     KayaRecord (..),
@@ -78,16 +79,21 @@ module KayaApp
     recordItems,
     bindTextField,
     bindCheckedField,
+    bindSourceField,
     buttonOn,
     entryOn,
     labelText,
     labelBound,
     checkboxOn,
     sliderOn,
+    imageBytes,
+    imageBound,
     TplTextSource (..),
     TplBoolSource (..),
+    TplImageSource (..),
     label,
     checkbox,
+    image,
     each,
     KayaSum (..),
     SumCollection,
@@ -105,6 +111,8 @@ module KayaApp
 where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder)
 import Data.Int (Int64)
 import Data.IORef
@@ -121,7 +129,7 @@ import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import Control.Exception (SomeException, catch, evaluate)
 import System.IO (hPutStrLn, stderr)
 
-import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence)
+import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence, registerBlob)
 import qualified KayaWire as W
 
 newtype Signal = Signal Word64
@@ -177,7 +185,16 @@ type Model = Map.Map Word64 [Instance]
 
 data BuildState = BuildState
   { bCounters :: !Counters,
-    bRecords :: Builder,
+    -- The transaction under construction: IO Builder, not Builder.
+    -- Record construction stays pure (the Build fold below), but
+    -- serialization runs at buildTx's IO boundary — which is where
+    -- blob-carrying records (image sources, ByteString record fields)
+    -- register their bytes with the core. Handles are core-issued and
+    -- single-submit, so they cannot exist earlier; the Semigroup on IO
+    -- runs left-to-right, so registrations interleave in exact record
+    -- order, immediately before the submit that consumes them. Pure
+    -- records enter as `pure builder`.
+    bRecords :: IO Builder,
     bModel :: !Model,
     bChildren :: !(Map.Map Word64 [Word64]),
     bOpenFors :: ![Word64],
@@ -295,11 +312,20 @@ instance Applicative Tpl where
 instance Monad Tpl where
   Tpl g >>= f = Tpl $ \s -> let (a, s') = g s in unTpl (f a) s'
 
+-- Pure records enter the transaction as `pure builder`; blob-carrying
+-- records enter through the IO variants as the action that registers
+-- their bytes and then builds — run in record order at buildTx.
 emitB :: Builder -> Build ()
-emitB r = Build $ \s -> ((), s {bRecords = bRecords s <> r})
+emitB = emitBIO . pure
+
+emitBIO :: IO Builder -> Build ()
+emitBIO r = Build $ \s -> ((), s {bRecords = bRecords s <> r})
 
 emitT :: Builder -> Tpl ()
-emitT r = Tpl $ \s -> ((), s {bRecords = bRecords s <> r})
+emitT = emitTIO . pure
+
+emitTIO :: IO Builder -> Tpl ()
+emitTIO r = Tpl $ \s -> ((), s {bRecords = bRecords s <> r})
 
 allocW :: Build Word64
 allocW = Build $ \s ->
@@ -322,12 +348,12 @@ bracketTpl :: (BuildState -> (Word64, BuildState)) -> (Word64 -> Builder) -> May
 bracketTpl alloc opener forCid (Tpl body) s0 =
   let (self, s1) = alloc s0
       s2 = s1
-        { bRecords = bRecords s1 <> opener self,
+        { bRecords = bRecords s1 <> pure (opener self),
           bOpenFors = maybe (bOpenFors s1) (: bOpenFors s1) forCid
         }
       (a, s3) = body s2
       s4 = s3
-        { bRecords = bRecords s3 <> W.txTemplateEnd,
+        { bRecords = bRecords s3 <> pure W.txTemplateEnd,
           bOpenFors = maybe (bOpenFors s3) (const (drop 1 (bOpenFors s3))) forCid
         }
    in ((self, a), s4)
@@ -368,7 +394,7 @@ instance Declare Build where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [[W.valueStr]]})
+     in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [[W.valueStr]])})
   forEach coll body =
     Build $ \s ->
       let cid = assertRoot coll
@@ -394,7 +420,7 @@ instance Declare Tpl where
     let c = bCounters s
         n = cCollection c + 1
         s' = registerCollection n s {bCounters = c {cCollection = n}}
-     in (Collection n [], s' {bRecords = bRecords s' <> W.txCreateCollection n [[W.valueStr]]})
+     in (Collection n [], s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [[W.valueStr]])})
   forEach coll body =
     Tpl $ \s ->
       let cid = assertRoot coll
@@ -414,7 +440,7 @@ signal initial = Build $ \s ->
   let c = bCounters s
       n = cSignal c + 1
       s' = s {bCounters = c {cSignal = n}}
-   in (Signal n, s' {bRecords = bRecords s' <> W.txCreateSignal n initial})
+   in (Signal n, s' {bRecords = bRecords s' <> pure (W.txCreateSignal n initial)})
 
 writeSignal :: Signal -> W.Value -> Build ()
 writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
@@ -432,24 +458,24 @@ recomputeDerived cid path s
             foldMap
               (\(sid, f) -> W.txWriteSignal sid (f entries))
               (Map.findWithDefault [] cid (bDerived s))
-       in s {bRecords = bRecords s <> writes}
+       in s {bRecords = bRecords s <> pure writes}
 
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionInsert n path key 0 [value],
+    s {bRecords = bRecords s <> pure (W.txCollectionInsert n path key 0 [value]),
        bModel = modelSet n path key 0 [value] (bModel s)})
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionUpdate n path key 0 [value],
+    s {bRecords = bRecords s <> pure (W.txCollectionUpdate n path key 0 [value]),
        bModel = modelSet n path key 0 [value] (bModel s)})
 
 remove :: Collection -> W.Value -> Build ()
 remove (Collection n path) key = Build $ \s ->
   ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionRemove n path key,
+    s {bRecords = bRecords s <> pure (W.txCollectionRemove n path key),
        bModel = modelRemove (bChildren s) n path key (bModel s)})
 
 -- | Reposition an entry before another's: order is collection data,
@@ -502,7 +528,7 @@ moveEntry (Collection n path) key before = Build $ \s ->
             | anchor == key -> ((), s) -- moving before itself: no-op
           _ ->
             ((), recomputeDerived n path
-              s {bRecords = bRecords s <> W.txCollectionMove n path key before,
+              s {bRecords = bRecords s <> pure (W.txCollectionMove n path key before),
                  bModel = modelMove n path key before (bModel s)})
 
 -- | The model: what this guest wrote, exactly — the fold of every
@@ -541,6 +567,10 @@ bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
+
+-- | Bind an image's source to a Blob signal.
+bindSource :: Widget -> Signal -> Build ()
+bindSource (Widget w) (Signal s) = emitB (W.txBindSource w s)
 
 containerOf :: (Declare m) => Word32 -> [m (El m)] -> m (El m)
 containerOf kind children = do
@@ -598,6 +628,26 @@ labelBound sig = do
   bindText w sig
   return w
 
+-- | An image displaying constant encoded bytes (PNG, JPEG, ...): the
+-- toolkit decodes natively, and decode failure renders the
+-- placeholder, never a crash. One registration copy into core memory,
+-- made at the boundary of the transaction this Build submits through;
+-- the handle is consumed by that submit, and the caller's bytes are
+-- free to drop the moment buildTx returns. Text belongs on labels —
+-- image bytes have their own channel.
+imageBytes :: BS.ByteString -> Build Widget
+imageBytes bytes = do
+  w@(Widget n) <- widget W.kindImage
+  emitBIO (W.txSetSource n <$> registerBlob bytes)
+  return w
+
+-- | An image whose source follows a Blob signal.
+imageBound :: Signal -> Build Widget
+imageBound sig = do
+  w <- widget W.kindImage
+  bindSource w sig
+  return w
+
 -- Construction sugar, template flavor: one name per widget, and the
 -- argument's type picks the addressable source — a constant, a signal,
 -- or an element field. The protocol's closed union, as a class per
@@ -631,6 +681,21 @@ instance TplBoolSource Signal where
 instance TplBoolSource (KField Bool) where
   bindCheckedSource n fd = bindCheckedField n 0 fd
 
+-- | What a template image's source can bind to: constant bytes (the
+-- registration runs at the transaction boundary, inside the template
+-- scope's records), a Blob signal, or an element's Blob field.
+class TplImageSource s where
+  bindImageSource :: Node -> s -> Tpl ()
+
+instance TplImageSource BS.ByteString where
+  bindImageSource (Node n) bytes = emitTIO (W.txSetSource n <$> registerBlob bytes)
+
+instance TplImageSource Signal where
+  bindImageSource (Node n) (Signal s) = emitT (W.txBindSource n s)
+
+instance TplImageSource (KField BS.ByteString) where
+  bindImageSource n fd = bindSourceField n 0 fd
+
 label :: TplTextSource s => s -> Tpl Node
 label src = do
   n <- widget W.kindLabel
@@ -642,6 +707,14 @@ checkbox src handler = do
   n@(Node i) <- widget W.kindCheckbox
   bindCheckedSource n src
   pendT (PToggleNode i handler)
+  return n
+
+-- | A template image; decode failure renders the placeholder, never a
+-- crash, on every backend.
+image :: TplImageSource s => s -> Tpl Node
+image src = do
+  n <- widget W.kindImage
+  bindImageSource n src
   return n
 
 -- | A For as a child: forEach whose body keeps no handles — the common
@@ -719,23 +792,29 @@ sumCollectionOf p = Build $ \s ->
       n = cCollection c + 1
       s' = registerCollection n s {bCounters = c {cCollection = n}}
    in ( SumCollection (Collection n []),
-        s' {bRecords = bRecords s' <> W.txCreateCollection n (kayaVariantSchemas p)}
+        s' {bRecords = bRecords s' <> pure (W.txCreateCollection n (kayaVariantSchemas p))}
       )
 
 -- | Insert witnesses the value's own constructor onto the wire.
-sumInsert :: KayaSum a => SumCollection a -> W.Value -> a -> Build ()
+sumInsert :: forall a. KayaSum a => SumCollection a -> W.Value -> a -> Build ()
 sumInsert (SumCollection (Collection n path)) key value = Build $ \s ->
-  ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionInsert n path key (kayaSumVariant value) (kayaSumToValues value),
-       bModel = modelSet n path key (kayaSumVariant value) (kayaSumToValues value) (bModel s)})
+  let variant = kayaSumVariant value
+      vals = kayaSumToValues value
+      tags = kayaVariantSchemas (Proxy :: Proxy a) !! fromIntegral variant
+   in ((), recomputeDerived n path
+        s {bRecords = bRecords s <> (W.txCollectionInsert n path key variant <$> encodeFields tags vals),
+           bModel = modelSet n path key variant vals (bModel s)})
 
 -- | Update replaces a record wholesale; a different constructor than
 -- the entry's current one restamps its copy in place.
-sumUpdate :: KayaSum a => SumCollection a -> W.Value -> a -> Build ()
+sumUpdate :: forall a. KayaSum a => SumCollection a -> W.Value -> a -> Build ()
 sumUpdate (SumCollection (Collection n path)) key value = Build $ \s ->
-  ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionUpdate n path key (kayaSumVariant value) (kayaSumToValues value),
-       bModel = modelSet n path key (kayaSumVariant value) (kayaSumToValues value) (bModel s)})
+  let variant = kayaSumVariant value
+      vals = kayaSumToValues value
+      tags = kayaVariantSchemas (Proxy :: Proxy a) !! fromIntegral variant
+   in ((), recomputeDerived n path
+        s {bRecords = bRecords s <> (W.txCollectionUpdate n path key variant <$> encodeFields tags vals),
+           bModel = modelSet n path key variant vals (bModel s)})
 
 -- | The typed model, in insertion order; `case` eliminates the values.
 sumItems :: KayaSum a => SumCollection a -> Build [(W.Value, a)]
@@ -754,19 +833,19 @@ sumGet (SumCollection (Collection n path)) key = Build $ \s ->
 -- witness — its constructor names the variant — and the model refuses
 -- a drifted entry, so the guard is checked, not trusted.
 sumPatch :: KayaSum a => SumCollection a -> W.Value -> a -> [FieldSet v] -> Build ()
-sumPatch c key witness = mapM_ (\(FieldSet i v) -> sumUpdateFieldWire c key (kayaSumVariant witness) i v)
+sumPatch c key witness = mapM_ (\(FieldSet i tag v) -> sumUpdateFieldWire c key (kayaSumVariant witness) i tag v)
 
-sumUpdateFieldWire :: SumCollection a -> W.Value -> Word32 -> Word32 -> W.Value -> Build ()
-sumUpdateFieldWire (SumCollection (Collection n path)) key variant i wire = Build $ \s ->
+sumUpdateFieldWire :: SumCollection a -> W.Value -> Word32 -> Word32 -> Word32 -> W.Value -> Build ()
+sumUpdateFieldWire (SumCollection (Collection n path)) key variant i tag value = Build $ \s ->
   let (stored, current) = case lookup key (lookupEntries n path (bModel s)) of
         Just (v, vs) -> (v, vs)
         Nothing -> error "kaya: update of missing key"
-      updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
+      updated = take (fromIntegral i) current ++ [value] ++ drop (fromIntegral i + 1) current
    in if stored /= variant
         then error "kaya: update_field witnessed a constructor the entry no longer holds"
         else
           ((), recomputeDerived n path
-            s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i variant wire,
+            s {bRecords = bRecords s <> (W.txCollectionUpdateField n path key i variant <$> encodeFieldWire tag value),
                bModel = modelSet n path key variant updated (bModel s)})
 
 -- | The collection-derived signal, over the sum's entries.
@@ -779,7 +858,7 @@ sumDerive (SumCollection (Collection n _)) compute = Build $ \s ->
       c = bCounters s
       sid = cSignal c + 1
       s' = s {bCounters = c {cSignal = sid},
-              bRecords = bRecords s <> W.txCreateSignal sid initial,
+              bRecords = bRecords s <> pure (W.txCreateSignal sid initial),
               bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
    in (Signal sid, s')
 
@@ -805,7 +884,7 @@ eachSum (SumCollection coll) arms = Build $ \s ->
             error "kaya: two arms for one constructor"
         | otherwise = ()
       body = mapM_ (\(SumArm v (Tpl arm)) -> Tpl (\st ->
-        ((), snd (arm st {bRecords = bRecords st <> W.txVariantCase v})))) arms
+        ((), snd (arm st {bRecords = bRecords st <> pure (W.txVariantCase v)})))) arms
       ((self, _), s') =
         _checked `seq`
         bracketTpl (unBuild allocW) (`W.txCreateFor` cid) (Just cid) body s
@@ -847,6 +926,31 @@ instance KayaFieldType Double where
   fieldTag _ = W.valueF64
   toFieldValue = W.VF64
   fromFieldValue v = case v of W.VF64 x -> x; _ -> error "kaya: field is not an F64"
+
+-- | Encoded image bytes are a wire type: the schema slot is Blob, and
+-- every encode registers the bytes with the core right then — handles
+-- are single-submit, so insert, update, and update_field all
+-- re-register (one copy into core memory per write). The model keeps
+-- the guest's own bytes, never a consumed handle: W.Value is generated
+-- and closed, so the model's copy rides a byte-per-Char VStr carrier
+-- (Char8 pack/unpack, lossless over 0..255) that encodeFieldWire
+-- converts to a fresh VBlob handle on every trip to the wire.
+instance KayaFieldType BS.ByteString where
+  fieldTag _ = W.valueBlob
+  toFieldValue = W.VStr . BC.unpack
+  fromFieldValue v = case v of W.VStr s -> BC.pack s; _ -> error "kaya: field is not a Blob"
+
+-- Model form to wire form for one field, at the transaction's IO
+-- boundary: scalar slots pass through; a Blob slot's bytes register
+-- with the core now, yielding the handle the submit consumes.
+encodeFieldWire :: Word32 -> W.Value -> IO W.Value
+encodeFieldWire tag v
+  | tag == W.valueBlob, W.VStr s <- v = W.VBlob <$> registerBlob (BC.pack s)
+  | otherwise = pure v
+
+-- One record's fields, schema tags in parallel.
+encodeFields :: [Word32] -> [W.Value] -> IO [W.Value]
+encodeFields tags = sequence . zipWith encodeFieldWire tags
 
 -- The Generic walker: one pass shape for schema, names, and both
 -- conversions, over the product of selectors.
@@ -937,51 +1041,55 @@ collectionOf p = Build $ \s ->
       n = cCollection c + 1
       s' = registerCollection n s {bCounters = c {cCollection = n}}
    in ( RecordCollection (Collection n []),
-        s' {bRecords = bRecords s' <> W.txCreateCollection n [kayaSchema p]}
+        s' {bRecords = bRecords s' <> pure (W.txCreateCollection n [kayaSchema p])}
       )
 
-insertRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
+insertRecord :: forall a. KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
-  ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionInsert n path key 0 (toValues value),
-       bModel = modelSet n path key 0 (toValues value) (bModel s)})
+  let vals = toValues value
+   in ((), recomputeDerived n path
+        s {bRecords = bRecords s <> (W.txCollectionInsert n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals),
+           bModel = modelSet n path key 0 vals (bModel s)})
 
-updateRecord :: KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
+updateRecord :: forall a. KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
-  ((), recomputeDerived n path
-    s {bRecords = bRecords s <> W.txCollectionUpdate n path key 0 (toValues value),
-       bModel = modelSet n path key 0 (toValues value) (bModel s)})
+  let vals = toValues value
+   in ((), recomputeDerived n path
+        s {bRecords = bRecords s <> (W.txCollectionUpdate n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals),
+           bModel = modelSet n path key 0 vals (bModel s)})
 
 -- | One field's delta: the rest of the record never travels; the
 -- model's copy updates the same slot.
 updateField ::
-  KayaFieldType v =>
+  forall v a. KayaFieldType v =>
   RecordCollection a -> W.Value -> KField v -> v -> Build ()
-updateField c key (KField i) value = updateFieldWire c key i (toFieldValue value)
+updateField c key (KField i) value =
+  updateFieldWire c key i (fieldTag (Proxy :: Proxy v)) (toFieldValue value)
 
-updateFieldWire :: RecordCollection a -> W.Value -> Word32 -> W.Value -> Build ()
-updateFieldWire (RecordCollection (Collection n path)) key i wire = Build $ \s ->
+updateFieldWire :: RecordCollection a -> W.Value -> Word32 -> Word32 -> W.Value -> Build ()
+updateFieldWire (RecordCollection (Collection n path)) key i tag value = Build $ \s ->
   let current = case lookup key (lookupEntries n path (bModel s)) of
         Just (_, vs) -> vs
         Nothing -> error "kaya: update of missing key"
-      updated = take (fromIntegral i) current ++ [wire] ++ drop (fromIntegral i + 1) current
+      updated = take (fromIntegral i) current ++ [value] ++ drop (fromIntegral i + 1) current
    in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> W.txCollectionUpdateField n path key i 0 wire,
+        s {bRecords = bRecords s <> (W.txCollectionUpdateField n path key i 0 <$> encodeFieldWire tag value),
            bModel = modelSet n path key 0 updated (bModel s)})
 
 -- | One recorded field write of an a-record: the value's type checks
--- against the field's at the use site, then the pair travels as
--- (index, wire value).
-data FieldSet a = FieldSet !Word32 !W.Value
+-- against the field's at the use site, then the triple travels as
+-- (index, schema tag, model value) — the tag tells the boundary
+-- whether the value is a Blob slot that must register its bytes.
+data FieldSet a = FieldSet !Word32 !Word32 !W.Value
 
-set :: KayaFieldType v => KField v -> v -> FieldSet a
-set (KField i) v = FieldSet i (toFieldValue v)
+set :: forall v a. KayaFieldType v => KField v -> v -> FieldSet a
+set (KField i) v = FieldSet i (fieldTag (Proxy :: Proxy v)) (toFieldValue v)
 
 -- | Typed field writes with the key spelled once:
 -- @patch todos key [set (field \@"done" \@Todo) True]@. Each entry
 -- records one update_field — a patch is recorded writes, never a diff.
 patch :: RecordCollection a -> W.Value -> [FieldSet a] -> Build ()
-patch c key = mapM_ (\(FieldSet i v) -> updateFieldWire c key i v)
+patch c key = mapM_ (\(FieldSet i tag v) -> updateFieldWire c key i tag v)
 
 -- | The typed model: what this guest wrote, in insertion order.
 recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
@@ -1002,7 +1110,7 @@ derive (RecordCollection (Collection n _)) compute = Build $ \s ->
       c = bCounters s
       sid = cSignal c + 1
       s' = s {bCounters = c {cSignal = sid},
-              bRecords = bRecords s <> W.txCreateSignal sid initial,
+              bRecords = bRecords s <> pure (W.txCreateSignal sid initial),
               bDerived = Map.insertWith (flip (++)) n [(sid, wireCompute)] (bDerived s)}
    in (Signal sid, s')
 
@@ -1015,6 +1123,11 @@ bindTextField (Node n) level (KField i) = emitT (W.txBindTextElement n level i)
 -- only.
 bindCheckedField :: Node -> Word32 -> KField Bool -> Tpl ()
 bindCheckedField (Node n) level (KField i) = emitT (W.txBindCheckedElement n level i)
+
+-- | Bind an image's source to one Blob field of the element; KField
+-- ByteString only.
+bindSourceField :: Node -> Word32 -> KField BS.ByteString -> Tpl ()
+bindSourceField (Node n) level (KField i) = emitT (W.txBindSourceElement n level i)
 
 -- The app: id counters that outlive any one transaction, and the
 -- dispatch tables.
@@ -1049,6 +1162,14 @@ buildTx app (Build f) = do
   -- (the catch-and-continue dispatch would trip on it transactions
   -- after the guilty one).
   _ <- evaluate s
+  -- Serialize now, before any store-back: this runs the records' IO,
+  -- which is where image sources and Blob record fields register
+  -- their bytes with the core — in record order, immediately before
+  -- the submit whose handle table they fill. A Build whose records
+  -- throw still abandons everything (no store-back has run), and
+  -- registrations already made are harmless: the next submit drains
+  -- the pending table, referenced or not.
+  records <- bRecords s
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
   writeIORef (appDerived app) (bDerived s)
@@ -1056,7 +1177,7 @@ buildTx app (Build f) = do
   -- submit; a Build that threw never reaches here, abandoning them
   -- with its records.
   mapM_ (register app) (reverse (bPending s))
-  kayaSubmit [bRecords s]
+  kayaSubmit [records]
   return a
 
 register :: App -> Pending -> IO ()

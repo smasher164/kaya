@@ -70,6 +70,22 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Slider".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs".to_string(),
+        // The image widget: Image displays a BitmapImage source fed
+        // from an in-memory stream (encoded bytes arrive as blobs;
+        // there is no file to point a Uri at).
+        "Microsoft.UI.Xaml.Controls.Image".to_string(),
+        // The class filter is explicit: without it windows-bindgen
+        // emits only the IImageSource interface, leaving BitmapImage's
+        // required_hierarchy! (and Image.Source/SetSource) referencing
+        // a type that does not exist.
+        "Microsoft.UI.Xaml.Media.ImageSource".to_string(),
+        "Microsoft.UI.Xaml.Media.Imaging.BitmapSource".to_string(),
+        "Microsoft.UI.Xaml.Media.Imaging.BitmapImage".to_string(),
+        "Windows.Storage.Streams.InMemoryRandomAccessStream".to_string(),
+        "Windows.Storage.Streams.DataWriter".to_string(),
+        // StoreAsync's return type; without it the method is skipped.
+        "Windows.Storage.Streams.DataWriterStoreOperation".to_string(),
+        "Windows.Storage.Streams.IRandomAccessStream".to_string(),
         "Windows.Foundation.IReference".to_string(),
         "Windows.Foundation.PropertyValue".to_string(),
         "Windows.Foundation.EventHandler".to_string(),

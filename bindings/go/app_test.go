@@ -97,6 +97,45 @@ type checkTodo struct {
 	Title string
 }
 
+// The blob channel's record layer: a []byte field maps to ValueBlob in
+// the schema, and every encode registers the bytes right then —
+// handles are single-submit, so insert, update, and update_field each
+// produce a fresh handle. Headless like the rest of the file:
+// registration crosses into the library, the core loop never runs.
+type blobRec struct {
+	Name string
+	Pic  []byte
+}
+
+func TestBlobFieldsMapAndRegisterAtEncodeTime(t *testing.T) {
+	app := NewApp()
+	app.Build(func(tx *Tx) {
+		c := CollectionOf[string, blobRec](tx)
+		if s := c.info.schema; len(s) != 2 || s[0] != ValueStr || s[1] != ValueBlob {
+			t.Fatalf("[]byte did not map to ValueBlob: schema %v", s)
+		}
+		vals := c.info.values(blobRec{"a", []byte{1, 2, 3}})
+		if _, ok := vals[1].(BlobHandle); !ok {
+			t.Fatalf("blob field encoded as %T, not BlobHandle", vals[1])
+		}
+		// The whole mutation surface goes through the same encoder.
+		c.Insert(tx, "a", blobRec{"a", []byte{1, 2, 3}})
+		c.Update(tx, "a", blobRec{"a", []byte{4, 5}})
+		c.UpdateField(tx, "a", func(r *blobRec) *[]byte { return &r.Pic }, []byte{6})
+	})
+}
+
+// The clear-error type guard: anything but a byte slice in a blob
+// position fails by name, here, instead of deep in the wire encoder.
+func TestBlobGuardRejectsNonBytes(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("blobWire accepted a string")
+		}
+	}()
+	blobWire("not bytes")
+}
+
 // The record-time mirror-read guard: a model read inside a template
 // body panics — the template records once and replays, so the read
 // would bake today's value into the blueprint as silently dead data.

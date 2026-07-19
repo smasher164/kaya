@@ -23,6 +23,7 @@
 //!   set_text <kind>#<index> "<text>"
 //!   expect label#<index> "<text>"
 //!   expect entry#<index> "<text>"     (reads the field's displayed text)
+//!   expect image#<index> "<WxH>"      (reads the decoded image's size)
 //!   expect_focused <kind>#<index>
 //!
 //! Targets are (kind, creation index) — stamped copies enter the count
@@ -63,6 +64,7 @@ pub enum TargetKind {
     Entry,
     Label,
     Column,
+    Image,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +104,11 @@ pub trait Stage: Send + 'static {
     /// (per-window focus, never global key status — parallel tiled
     /// legs must not steal each other's assertion). No default.
     fn is_focused(&self, target: Target) -> bool;
+    /// The decoded size of an image, as "WxH" — the observation that
+    /// pins "the bytes actually decoded and display" (a failed decode
+    /// reads "0x0", the placeholder class). No default, like
+    /// child_texts: a backend that forgets it fails to compile.
+    fn image_size(&self, target: Target) -> String;
     /// The texts of the container's label children, in child order,
     /// joined with `|` — the observation expect_order verifies. No
     /// default: a backend that forgets it must fail to compile, not
@@ -200,6 +207,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "entry" => TargetKind::Entry,
         "label" => TargetKind::Label,
         "column" => TargetKind::Column,
+        "image" => TargetKind::Image,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -305,12 +313,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             Step::SetValue(t, v) => stage.set_value(*t, *v),
             Step::SetText(t, s) => stage.set_text(*t, s),
             Step::Expect(t, want) => {
-                // An entry target reads the field's own displayed
-                // text; everything else reads label text.
-                let got = if t.kind == TargetKind::Entry {
-                    stage.read_text(*t)
-                } else {
-                    stage.read_label(*t)
+                // The target kind picks the observation: an entry
+                // reads its own displayed text, an image its decoded
+                // size, everything else reads label text.
+                let got = match t.kind {
+                    TargetKind::Entry => stage.read_text(*t),
+                    TargetKind::Image => stage.image_size(*t),
+                    _ => stage.read_label(*t),
                 };
                 if got == *want {
                     observed.push(got);
@@ -428,6 +437,9 @@ mod tests {
         }
         fn is_focused(&self, _: Target) -> bool {
             true
+        }
+        fn image_size(&self, _: Target) -> String {
+            "2x2".into()
         }
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()

@@ -133,8 +133,12 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 		rv := reflect.ValueOf(&record).Elem()
 		rv.Field(info.indexes[f.index]).Set(reflect.ValueOf(value))
 		tx.app.modelSet(c.id, c.path, key, any(record).(T))
+		// Through the encoder, like the record path and every other
+		// language's sum path: a blob field registers its bytes at
+		// encode time (handles are single-submit); scalars pass
+		// through unchanged.
 		tx.records = append(tx.records,
-			TxCollectionUpdateField(c.id, c.path, key, f.index, variant, value))
+			TxCollectionUpdateField(c.id, c.path, key, f.index, variant, info.encode(f.index, value)))
 		tx.recomputeDerived(c.id, c.path)
 		return
 	}

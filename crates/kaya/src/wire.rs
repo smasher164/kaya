@@ -13,8 +13,10 @@
 //! Malformed input fails loudly: a bad buffer is a broken binding, not a
 //! runtime condition.
 
+use std::sync::Arc;
+
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
+    ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
 
@@ -53,6 +55,7 @@ pub const VALUE_BOOL: u32 = 1;
 pub const VALUE_I64: u32 = 2;
 pub const VALUE_F64: u32 = 3;
 pub const VALUE_STR: u32 = 4;
+pub const VALUE_BLOB: u32 = 5;
 
 // Widget kinds.
 pub const KIND_COLUMN: u32 = 1;
@@ -62,6 +65,7 @@ pub const KIND_ENTRY: u32 = 4;
 pub const KIND_ROW: u32 = 5;
 pub const KIND_CHECKBOX: u32 = 6;
 pub const KIND_SLIDER: u32 = 7;
+pub const KIND_IMAGE: u32 = 8;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -69,6 +73,7 @@ pub const PROP_CHECKED: u32 = 2;
 pub const PROP_VALUE: u32 = 3;
 pub const PROP_MIN: u32 = 4;
 pub const PROP_MAX: u32 = 5;
+pub const PROP_SOURCE: u32 = 6;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -88,6 +93,11 @@ fn pad8(n: usize) -> usize {
 struct Reader<'a> {
     buf: &'a [u8],
     at: usize,
+    /// Resolves a wire blob handle to its bytes. Guest submissions
+    /// resolve against the pending registration table; decoders with
+    /// no blob context (unit tests over scalar records) pass a
+    /// resolver that refuses, and any blob handle fails loudly.
+    blobs: &'a dyn Fn(u64) -> Option<Arc<[u8]>>,
 }
 
 impl<'a> Reader<'a> {
@@ -121,6 +131,16 @@ impl<'a> Reader<'a> {
                     .expect("kaya: string value is not UTF-8")
                     .to_owned(),
             ),
+            VALUE_BLOB => {
+                let handle = u64::from_le_bytes(payload.try_into().unwrap());
+                Value::Blob(Blob((self.blobs)(handle).unwrap_or_else(|| {
+                    panic!(
+                        "kaya: blob handle {handle} is not registered — handles \
+                         are consumed by one submit; register the bytes again \
+                         for each transaction that references them"
+                    )
+                })))
+            }
             other => panic!("kaya: unknown value type {other}"),
         };
         self.at = pad8(self.at);
@@ -164,6 +184,7 @@ fn value_type(raw: u32) -> ValueType {
         VALUE_I64 => ValueType::I64,
         VALUE_F64 => ValueType::F64,
         VALUE_STR => ValueType::Str,
+        VALUE_BLOB => ValueType::Blob,
         other => panic!("kaya: unknown value type {other} in schema"),
     }
 }
@@ -177,6 +198,7 @@ pub fn value_type_raw(ty: ValueType) -> u32 {
         ValueType::I64 => VALUE_I64,
         ValueType::F64 => VALUE_F64,
         ValueType::Str => VALUE_STR,
+        ValueType::Blob => VALUE_BLOB,
     }
 }
 
@@ -204,6 +226,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_ROW => WidgetKind::Row,
         KIND_CHECKBOX => WidgetKind::Checkbox,
         KIND_SLIDER => WidgetKind::Slider,
+        KIND_IMAGE => WidgetKind::Image,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -215,18 +238,32 @@ fn prop(raw: u32) -> Prop {
         PROP_VALUE => Prop::Value,
         PROP_MIN => Prop::Min,
         PROP_MAX => Prop::Max,
+        PROP_SOURCE => Prop::Source,
         other => panic!("kaya: unknown property {other}"),
     }
 }
 
-/// Decode a submitted transaction buffer. Panics on malformed input; a
-/// bad buffer is a broken binding and the failure should be loud.
+/// Decode a submitted transaction buffer with no blob context: any
+/// blob handle fails loudly. The scalar path for tests and callers
+/// that cannot see the registration table.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn decode_transaction(buf: &[u8]) -> Transaction {
+    decode_transaction_with_blobs(buf, &|_| None)
+}
+
+/// Decode a submitted transaction buffer, resolving blob handles
+/// through `blobs` (the pending registration table at the submit
+/// boundary). Panics on malformed input; a bad buffer is a broken
+/// binding and the failure should be loud.
+pub fn decode_transaction_with_blobs(
+    buf: &[u8],
+    blobs: &dyn Fn(u64) -> Option<Arc<[u8]>>,
+) -> Transaction {
     assert!(buf.len() % 8 == 0, "kaya: transaction length not 8-aligned");
     let mut ops = Vec::new();
     let mut at = 0;
     while at < buf.len() {
-        let mut r = Reader { buf, at };
+        let mut r = Reader { buf, at, blobs };
         let size = r.u32() as usize;
         let kind = r.u16();
         let _flags = r.u16();
@@ -379,13 +416,13 @@ pub fn click_tag(id: u64, path: &[Value]) -> Vec<u8> {
     b.extend_from_slice(&(path.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for key in path {
-        write_value(&mut b, key);
+        write_value(&mut b, key, &mut Vec::new());
     }
     b
 }
 
 pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
-    let mut r = Reader { buf: tag, at: 0 };
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
     let path = r.path();
     if path.is_empty() {
@@ -405,7 +442,7 @@ pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
 pub fn text_changed_body(tag: &[u8], text: &str) -> Vec<u8> {
     let mut b = Vec::with_capacity(tag.len() + 8 + text.len());
     b.extend_from_slice(tag);
-    write_value(&mut b, &Value::Str(text.to_owned()));
+    write_value(&mut b, &Value::Str(text.to_owned()), &mut Vec::new());
     b
 }
 
@@ -414,7 +451,7 @@ pub fn text_changed_body(tag: &[u8], text: &str) -> Vec<u8> {
 pub fn toggled_body(tag: &[u8], checked: bool) -> Vec<u8> {
     let mut b = Vec::with_capacity(tag.len() + 16);
     b.extend_from_slice(tag);
-    write_value(&mut b, &Value::Bool(checked));
+    write_value(&mut b, &Value::Bool(checked), &mut Vec::new());
     b
 }
 
@@ -423,12 +460,12 @@ pub fn toggled_body(tag: &[u8], checked: bool) -> Vec<u8> {
 pub fn value_changed_body(tag: &[u8], value: f64) -> Vec<u8> {
     let mut b = Vec::with_capacity(tag.len() + 16);
     b.extend_from_slice(tag);
-    write_value(&mut b, &Value::F64(value));
+    write_value(&mut b, &Value::F64(value), &mut Vec::new());
     b
 }
 
 pub fn decode_value_changed_tag(tag: &[u8], value: f64) -> Occurrence {
-    let mut r = Reader { buf: tag, at: 0 };
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
     let path = r.path();
     if path.is_empty() {
@@ -446,7 +483,7 @@ pub fn decode_value_changed_tag(tag: &[u8], value: f64) -> Occurrence {
 }
 
 pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
-    let mut r = Reader { buf: tag, at: 0 };
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
     let path = r.path();
     if path.is_empty() {
@@ -464,7 +501,7 @@ pub fn decode_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
 }
 
 pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
-    let mut r = Reader { buf: tag, at: 0 };
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
     let id = r.u64();
     let path = r.path();
     if path.is_empty() {
@@ -485,21 +522,29 @@ pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
 
 pub struct Writer {
     buf: Vec<u8>,
+    /// The batch's blob table: bytes referenced by the records just
+    /// written, in first-reference order. A blob VALUE on the wire is
+    /// a 1-based index into this table (0 is reserved as invalid) —
+    /// handles are batch-local, and the consumer's fetch window is
+    /// exactly one batch (kaya_blob_data serves the current table
+    /// until the next kaya_next_commands call replaces it). Payload
+    /// bytes never enter the record stream.
+    pub blobs: Vec<Arc<[u8]>>,
 }
 
 impl Writer {
     pub fn new() -> Self {
-        Writer { buf: Vec::new() }
+        Writer { buf: Vec::new(), blobs: Vec::new() }
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
         self.buf
     }
 
-    fn record(&mut self, kind: u16, body: impl FnOnce(&mut Vec<u8>)) {
+    fn record(&mut self, kind: u16, body: impl FnOnce(&mut Vec<u8>, &mut Vec<Arc<[u8]>>)) {
         let start = self.buf.len();
         self.buf.extend_from_slice(&[0; HEADER_SIZE]);
-        body(&mut self.buf);
+        body(&mut self.buf, &mut self.blobs);
         while self.buf.len() % 8 != 0 {
             self.buf.push(0);
         }
@@ -512,38 +557,38 @@ impl Writer {
         match op {
             // Create: { u64 id; u32 kind; u32 tag_len; tag bytes padded }.
             // tag_len 0 means no tag (non-interactive widget).
-            ApplyOp::Create { id, kind, tag } => self.record(APPLY_CREATE, |b| {
+            ApplyOp::Create { id, kind, tag } => self.record(APPLY_CREATE, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&kind_raw(*kind).to_le_bytes());
                 let tag = tag.as_deref().unwrap_or(&[]);
                 b.extend_from_slice(&(tag.len() as u32).to_le_bytes());
                 b.extend_from_slice(tag);
             }),
-            ApplyOp::SetProp { id, prop, value } => self.record(APPLY_SET_PROP, |b| {
+            ApplyOp::SetProp { id, prop, value } => self.record(APPLY_SET_PROP, |b, blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&prop_raw(*prop).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
-                write_value(b, value);
+                write_value(b, value, blobs);
             }),
-            ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b| {
+            ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
             }),
-            ApplyOp::Mount { window, root } => self.record(APPLY_MOUNT, |b| {
+            ApplyOp::Mount { window, root } => self.record(APPLY_MOUNT, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
             ApplyOp::MoveChild { parent, child, before } => {
-                self.record(APPLY_MOVE_CHILD, |b| {
+                self.record(APPLY_MOVE_CHILD, |b, _| {
                     b.extend_from_slice(&parent.0.to_le_bytes());
                     b.extend_from_slice(&child.0.to_le_bytes());
                     b.extend_from_slice(&before.map_or(0, |w| w.0).to_le_bytes());
                 })
             }
-            ApplyOp::Destroy { id } => self.record(APPLY_DESTROY, |b| {
+            ApplyOp::Destroy { id } => self.record(APPLY_DESTROY, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
             }),
-            ApplyOp::Command { id, command } => self.record(APPLY_COMMAND, |b| {
+            ApplyOp::Command { id, command } => self.record(APPLY_COMMAND, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -556,15 +601,15 @@ impl Writer {
     #[cfg(test)]
     pub fn tx_op(&mut self, op: &TxOp) {
         match op {
-            TxOp::CreateSignal { id, initial } => self.record(TX_CREATE_SIGNAL, |b| {
+            TxOp::CreateSignal { id, initial } => self.record(TX_CREATE_SIGNAL, |b, blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
-                write_value(b, initial);
+                write_value(b, initial, blobs);
             }),
-            TxOp::WriteSignal { id, value } => self.record(TX_WRITE_SIGNAL, |b| {
+            TxOp::WriteSignal { id, value } => self.record(TX_WRITE_SIGNAL, |b, blobs| {
                 b.extend_from_slice(&id.0.to_le_bytes());
-                write_value(b, value);
+                write_value(b, value, blobs);
             }),
-            TxOp::CreateWidget { id, kind } => self.record(TX_CREATE_WIDGET, |b| {
+            TxOp::CreateWidget { id, kind } => self.record(TX_CREATE_WIDGET, |b, _| {
                 b.extend_from_slice(&id.0.to_le_bytes());
                 b.extend_from_slice(&kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -573,13 +618,13 @@ impl Writer {
                 widget,
                 prop,
                 value,
-            } => self.record(TX_SET_PROPERTY, |b| {
+            } => self.record(TX_SET_PROPERTY, |b, blobs| {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&prop_raw(*prop).to_le_bytes());
                 match value {
                     PropValue::Const(v) => {
                         b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
-                        write_value(b, v);
+                        write_value(b, v, blobs);
                     }
                     PropValue::Signal(id) => {
                         b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
@@ -592,16 +637,16 @@ impl Writer {
                     }
                 }
             }),
-            TxOp::AddChild { parent, child } => self.record(TX_ADD_CHILD, |b| {
+            TxOp::AddChild { parent, child } => self.record(TX_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
             }),
-            TxOp::Mount { window, root } => self.record(TX_MOUNT, |b| {
+            TxOp::Mount { window, root } => self.record(TX_MOUNT, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&root.0.to_le_bytes());
             }),
             TxOp::CreateCollection { id, variants } => {
-                self.record(TX_CREATE_COLLECTION, |b| {
+                self.record(TX_CREATE_COLLECTION, |b, _| {
                     b.extend_from_slice(&id.0.to_le_bytes());
                     b.extend_from_slice(&(variants.len() as u32).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
@@ -617,89 +662,89 @@ impl Writer {
                 })
             }
             TxOp::CollectionInsert { id, path, key, variant, record } => {
-                self.record(TX_COLLECTION_INSERT, |b| {
+                self.record(TX_COLLECTION_INSERT, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    write_path(b, path);
-                    write_value(b, key);
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
                     b.extend_from_slice(&variant.to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
-                    write_values(b, record);
+                    write_values(b, record, blobs);
                 })
             }
             TxOp::CollectionUpdate { id, path, key, variant, record } => {
-                self.record(TX_COLLECTION_UPDATE, |b| {
+                self.record(TX_COLLECTION_UPDATE, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    write_path(b, path);
-                    write_value(b, key);
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
                     b.extend_from_slice(&variant.to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
-                    write_values(b, record);
+                    write_values(b, record, blobs);
                 })
             }
             TxOp::CollectionUpdateField { id, path, key, variant, field, value } => {
-                self.record(TX_COLLECTION_UPDATE_FIELD, |b| {
+                self.record(TX_COLLECTION_UPDATE_FIELD, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    write_path(b, path);
-                    write_value(b, key);
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
                     b.extend_from_slice(&field.to_le_bytes());
                     b.extend_from_slice(&variant.to_le_bytes());
-                    write_value(b, value);
+                    write_value(b, value, blobs);
                 })
             }
             TxOp::CollectionMove { id, path, key, before } => {
-                self.record(TX_COLLECTION_MOVE, |b| {
+                self.record(TX_COLLECTION_MOVE, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    write_path(b, path);
-                    write_value(b, key);
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
                     let anchors: Path = before.iter().cloned().collect();
-                    write_path(b, &anchors);
+                    write_path(b, &anchors, blobs);
                 })
             }
             TxOp::CollectionRemove { id, path, key } => {
-                self.record(TX_COLLECTION_REMOVE, |b| {
+                self.record(TX_COLLECTION_REMOVE, |b, blobs| {
                     b.extend_from_slice(&id.0.to_le_bytes());
-                    write_path(b, path);
-                    write_value(b, key);
+                    write_path(b, path, blobs);
+                    write_value(b, key, blobs);
                 })
             }
-            TxOp::CreateFor { id, collection } => self.record(TX_CREATE_FOR, |b| {
+            TxOp::CreateFor { id, collection } => self.record(TX_CREATE_FOR, |b, _| {
                 b.extend_from_slice(&id.to_le_bytes());
                 b.extend_from_slice(&collection.0.to_le_bytes());
             }),
-            TxOp::CreateWhen { id, signal } => self.record(TX_CREATE_WHEN, |b| {
+            TxOp::CreateWhen { id, signal } => self.record(TX_CREATE_WHEN, |b, _| {
                 b.extend_from_slice(&id.to_le_bytes());
                 b.extend_from_slice(&signal.0.to_le_bytes());
             }),
-            TxOp::VariantCase { variant } => self.record(TX_VARIANT_CASE, |b| {
+            TxOp::VariantCase { variant } => self.record(TX_VARIANT_CASE, |b, _| {
                 b.extend_from_slice(&variant.to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
-            TxOp::WidgetCommand { widget, command } => self.record(TX_WIDGET_COMMAND, |b| {
+            TxOp::WidgetCommand { widget, command } => self.record(TX_WIDGET_COMMAND, |b, _| {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
-            TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_| {}),
+            TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }
     }
 }
 
 #[cfg(test)]
-fn write_path(b: &mut Vec<u8>, path: &Path) {
+fn write_path(b: &mut Vec<u8>, path: &Path, blobs: &mut Vec<Arc<[u8]>>) {
     b.extend_from_slice(&(path.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for key in path {
-        write_value(b, key);
+        write_value(b, key, blobs);
     }
 }
 
 /// A record's fields, count-prefixed — the same shape as a path.
 #[cfg(test)]
-fn write_values(b: &mut Vec<u8>, values: &[Value]) {
+fn write_values(b: &mut Vec<u8>, values: &[Value], blobs: &mut Vec<Arc<[u8]>>) {
     b.extend_from_slice(&(values.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for v in values {
-        write_value(b, v);
+        write_value(b, v, blobs);
     }
 }
 
@@ -712,6 +757,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Row => KIND_ROW,
         WidgetKind::Checkbox => KIND_CHECKBOX,
         WidgetKind::Slider => KIND_SLIDER,
+        WidgetKind::Image => KIND_IMAGE,
     }
 }
 
@@ -722,10 +768,11 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Value => PROP_VALUE,
         Prop::Min => PROP_MIN,
         Prop::Max => PROP_MAX,
+        Prop::Source => PROP_SOURCE,
     }
 }
 
-fn write_value(b: &mut Vec<u8>, value: &Value) {
+fn write_value(b: &mut Vec<u8>, value: &Value, blobs: &mut Vec<Arc<[u8]>>) {
     let start = b.len();
     match value {
         Value::Bool(v) => {
@@ -747,6 +794,15 @@ fn write_value(b: &mut Vec<u8>, value: &Value) {
             b.extend_from_slice(&VALUE_STR.to_le_bytes());
             b.extend_from_slice(&(s.len() as u32).to_le_bytes());
             b.extend_from_slice(s.as_bytes());
+        }
+        Value::Blob(blob) => {
+            // The bytes never enter the record stream: the value is a
+            // 1-based index into the batch's blob table, and the
+            // consumer fetches by handle for exactly one batch.
+            blobs.push(blob.0.clone());
+            b.extend_from_slice(&VALUE_BLOB.to_le_bytes());
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&(blobs.len() as u64).to_le_bytes());
         }
     }
     let _ = start;
@@ -824,6 +880,62 @@ mod tests {
         for (a, b) in ops.iter().zip(decoded.iter()) {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
         }
+    }
+
+    /// Blobs ride every value position — a signal's initial, a write,
+    /// a record field — as batch-local handles; the bytes live in the
+    /// writer's table and the decoder resolves them back. Content
+    /// equality crosses the allocation boundary (Blob's PartialEq).
+    #[test]
+    fn blob_values_round_trip_by_handle() {
+        use crate::protocol::Blob;
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0, 159, 146, 150];
+        let ops = vec![
+            TxOp::CreateSignal {
+                id: SignalId(1),
+                initial: Value::Blob(Blob::from(png)),
+            },
+            TxOp::CollectionInsert {
+                id: CollectionId(2),
+                path: vec![],
+                key: Value::from("a"),
+                variant: 0,
+                record: vec![Value::from("avatar"), Value::Blob(Blob::from(png))],
+            },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        // The record stream stays small: two blob references cost 16
+        // payload bytes, not two copies of the image.
+        assert_eq!(w.blobs.len(), 2);
+        let table = w.blobs.clone();
+        let bytes = w.into_bytes();
+        let decoded = wire_decode_with(&bytes, &table);
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    fn wire_decode_with(bytes: &[u8], table: &[Arc<[u8]>]) -> Transaction {
+        decode_transaction_with_blobs(bytes, &|h| {
+            usize::try_from(h).ok().and_then(|h| h.checked_sub(1)).and_then(|i| table.get(i)).cloned()
+        })
+    }
+
+    /// A handle with no registration is a broken binding, loudly.
+    #[test]
+    #[should_panic(expected = "blob handle 1 is not registered")]
+    fn unregistered_blob_handle_fails_loudly() {
+        use crate::protocol::Blob;
+        let mut w = Writer::new();
+        w.tx_op(&TxOp::CreateSignal {
+            id: SignalId(1),
+            initial: Value::Blob(Blob::from(&b"x"[..])),
+        });
+        decode_transaction(&w.into_bytes());
     }
 
     #[test]
@@ -954,7 +1066,7 @@ mod tests {
         // The wire body is tag bytes then one value: the parser side of
         // this (generated per language) reads keys, then the text.
         let body = text_changed_body(&click_tag(5, &[]), "milk");
-        let mut r = Reader { buf: &body, at: 0 };
+        let mut r = Reader { buf: &body, at: 0, blobs: &|_| None };
         assert_eq!(r.u64(), 5);
         assert!(r.path().is_empty());
         assert_eq!(r.value(), Value::from("milk"));
@@ -982,7 +1094,7 @@ mod tests {
             }
         );
         let body = toggled_body(&click_tag(5, &[]), true);
-        let mut r = Reader { buf: &body, at: 0 };
+        let mut r = Reader { buf: &body, at: 0, blobs: &|_| None };
         assert_eq!(r.u64(), 5);
         assert!(r.path().is_empty());
         assert_eq!(r.value(), Value::Bool(true));

@@ -460,6 +460,21 @@ public final class KayaApp {
             records.add(KayaWire.txBindText(w.id, s.id));
         }
 
+        /**
+         * Point an image at encoded bytes (PNG, JPEG, ...): registers
+         * them with the core now — one copy into core memory; the u64
+         * handle is consumed by this transaction's submit, so the
+         * caller's array is free to change the moment this returns.
+         * Handles are single-submit: setting again re-registers.
+         */
+        public void setSource(Widget w, byte[] source) {
+            records.add(KayaWire.txSetSource(w.id, KayaRing.blobRegister(source)));
+        }
+
+        public void bindSource(Widget w, Signal<byte[]> s) {
+            records.add(KayaWire.txBindSource(w.id, s.id));
+        }
+
         // Construction sugar: containers take their body as a
         // Runnable and parent everything declared inside it (the
         // ambient stack); the common constructors carry their
@@ -541,6 +556,26 @@ public final class KayaApp {
         public Widget entry(BiConsumer<Tx, String> onChange) {
             Widget w = entry();
             KayaApp.this.onChange(w, onChange);
+            return w;
+        }
+
+        /**
+         * An image displaying encoded bytes (PNG, JPEG, ...): the
+         * toolkit decodes natively, and decode failure renders the
+         * placeholder, never a crash. Registration semantics per
+         * setSource: one copy into core memory, the handle consumed by
+         * this transaction's submit.
+         */
+        public Widget image(byte[] source) {
+            Widget w = widget(KayaWire.KIND_IMAGE);
+            setSource(w, source);
+            return w;
+        }
+
+        /** An image bound to a blob signal. */
+        public Widget image(Signal<byte[]> s) {
+            Widget w = widget(KayaWire.KIND_IMAGE);
+            bindSource(w, s);
             return w;
         }
 
@@ -883,6 +918,12 @@ public final class KayaApp {
             tx.records.add(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
 
+        /** Bind an image's source to one field of the element; a
+         * byte[] field token only — the type pins it at compile time. */
+        public void bindSourceField(Node n, int level, KayaRecords.Field<byte[]> f) {
+            tx.records.add(KayaWire.txBindSourceElement(n.id, level, f.index));
+        }
+
         // The template flavor of the sugar: bindings take field
         // tokens, containers take their body.
         public Node row(Runnable body) {
@@ -920,6 +961,27 @@ public final class KayaApp {
         public Node label(KayaRecords.Field<String> f) {
             Node n = widget(KayaWire.KIND_LABEL);
             bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A constant image in the blueprint: the bytes register once,
+         * at record time, and every stamp shows them. */
+        public Node image(byte[] source) {
+            Node n = widget(KayaWire.KIND_IMAGE);
+            tx.records.add(KayaWire.txSetSource(n.id, KayaRing.blobRegister(source)));
+            return n;
+        }
+
+        public Node image(Signal<byte[]> s) {
+            Node n = widget(KayaWire.KIND_IMAGE);
+            tx.records.add(KayaWire.txBindSource(n.id, s.id));
+            return n;
+        }
+
+        /** An image bound to one field of the element. */
+        public Node image(KayaRecords.Field<byte[]> f) {
+            Node n = widget(KayaWire.KIND_IMAGE);
+            bindSourceField(n, 0, f);
             return n;
         }
 

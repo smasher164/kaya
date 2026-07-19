@@ -16,13 +16,16 @@ use std::sync::mpsc::Receiver;
 
 use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2::{
+    AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
+};
 use objc2_core_foundation::CGRect;
-use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
-    UIControlEvents, UIControlState, UILabel, UILayoutConstraintAxis, UIScreen, UIStackView,
-    UISlider, UISwitch, UITextField, UIView, UIViewAutoresizing, UIViewController, UIWindow,
+    UIControlEvents, UIControlState, UIImage, UIImageView, UILabel, UILayoutConstraintAxis,
+    UIScreen, UIStackView, UISlider, UISwitch, UITextField, UIView, UIViewAutoresizing,
+    UIViewController, UIWindow,
 };
 
 use crate::protocol::{
@@ -45,6 +48,7 @@ enum NativeWidget {
         toggle: Retained<UISwitch>,
         caption: Retained<UILabel>,
     },
+    Image(Retained<UIImageView>),
 }
 
 impl NativeWidget {
@@ -57,6 +61,7 @@ impl NativeWidget {
             NativeWidget::Entry(v) => v,
             NativeWidget::Checkbox { stack, .. } => stack,
             NativeWidget::Slider(v) => v,
+            NativeWidget::Image(v) => v,
         }
     }
 }
@@ -74,6 +79,7 @@ struct CoreState {
     labels: Vec<Retained<UILabel>>,
     entries: Vec<Retained<UITextField>>,
     sliders: Vec<Retained<UISlider>>,
+    images: Vec<Retained<UIImageView>>,
     columns: Vec<Retained<UIStackView>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
@@ -237,6 +243,14 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
+                WidgetKind::Image => {
+                    // Display-only, like Label: no tag, no target. The
+                    // source arrives as a SetProp blob and decodes
+                    // there.
+                    let view = UIImageView::new(mtm);
+                    core.images.push(view.clone());
+                    NativeWidget::Image(view)
+                }
             };
             core.widgets.insert(id, native);
         }
@@ -307,6 +321,14 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 (NativeWidget::Slider(slider), Prop::Max, Value::F64(v)) => {
                     unsafe { slider.setMaximumValue(v as f32) };
+                }
+                (NativeWidget::Image(view), Prop::Source, Value::Blob(blob)) => {
+                    // Encoded bytes in, native decode: UIImage(data:).
+                    // A failed decode yields nil — the placeholder
+                    // class, never a crash — and image_size reads 0x0.
+                    let data = NSData::with_bytes(&blob.0);
+                    let image = UIImage::initWithData(UIImage::alloc(), &data);
+                    unsafe { view.setImage(image.as_deref()) };
                 }
                 (_, prop, value) => {
                     panic!("kaya: uikit cannot apply {prop:?} = {value:?} here")
@@ -479,6 +501,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             labels: Vec::new(),
             entries: Vec::new(),
             sliders: Vec::new(),
+            images: Vec::new(),
             columns: Vec::new(),
             content: view,
             _targets: Vec::new(),
@@ -591,6 +614,21 @@ impl crate::harness::Stage for UiKitStage {
             unsafe { core.entries[i].text() }
                 .map(|t| t.to_string())
                 .unwrap_or_default()
+        })
+    }
+
+    fn image_size(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.images.len());
+            match core.images[i].image() {
+                // UIImage.size is in points; the tiny test PNGs carry
+                // no DPI, so points equal pixels here.
+                Some(image) => {
+                    let size = unsafe { image.size() };
+                    format!("{}x{}", size.width as i64, size.height as i64)
+                }
+                None => "0x0".into(),
+            }
         })
     }
 

@@ -77,6 +77,10 @@ final class TodoKaya {
             return c.label(t, f);
         }
 
+        KayaApp.Node image(KayaRecords.Field<byte[]> f) {
+            return c.image(t, f);
+        }
+
         KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,
                 KayaRecords.Collection.ToggleHandler<String> onToggle) {
             return c.checkbox(t, f, onToggle);

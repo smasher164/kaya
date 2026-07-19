@@ -36,6 +36,9 @@ static class Kaya
     [DllImport("kaya")]
     static extern void kaya_submit(byte[] records, nuint len);
 
+    [DllImport("kaya")]
+    static extern ulong kaya_blob_register(byte[] bytes, nuint len);
+
     static RingInfo ring;
 
     /// On Windows, "kaya" resolves to kaya.dll via PATH. Elsewhere, point
@@ -85,6 +88,13 @@ static class Kaya
         }
         kaya_submit(tx, (nuint)tx.Length);
     }
+
+    /// Register bulk payload bytes (an encoded image) with the core:
+    /// one copy into core-owned memory, returning the u64 handle the
+    /// next submit from this guest consumes, referenced or not. The
+    /// caller's bytes are free to drop the moment this returns.
+    public static ulong RegisterBlob(byte[] data) =>
+        kaya_blob_register(data, (nuint)data.Length);
 
     /// Block for the next occurrence; false when the core has shut
     /// down. keys is empty when id is a widget id, else id is a

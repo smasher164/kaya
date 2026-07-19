@@ -102,8 +102,15 @@ static class Program
         return 0;
     }
 
+    // The wire vocabulary a parameter type maps into; byte[] is the
+    // blob channel (encoded image bytes; VALUE_BLOB in the schema —
+    // KayaRecords.Info maps byte[] parameters in, so a skipped one
+    // here would shift every later exact-index token off the runtime
+    // schema). Sum-side setters stay blob-safe too: the witnessed
+    // update routes through Info.EncodeField, which re-registers the
+    // bytes.
     static readonly System.Collections.Generic.HashSet<string> Wire =
-        new() { "string", "bool", "long", "double" };
+        new() { "string", "bool", "long", "double", "byte[]" };
 
     static bool IsKayaGen(RecordDeclarationSyntax r) =>
         r.AttributeLists.SelectMany(l => l.Attributes)
@@ -243,6 +250,8 @@ static class Program
         b.AppendLine($"    internal {rec}Row(Tpl t) => this.t = t;");
         b.AppendLine();
         b.AppendLine($"    public Node Label(Field<string> f) => t.Label(f);");
+        b.AppendLine();
+        b.AppendLine($"    public Node Image(Field<byte[]> f) => t.Image(f);");
         b.AppendLine();
         b.AppendLine($"    public Node Checkbox(Field<bool> f,");
         b.AppendLine("        System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>");

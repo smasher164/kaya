@@ -256,6 +256,96 @@ finally:
     kaya.runtime.submit = _real_submit
 check("an aborted build ships no commands", not _submitted)
 
+# The blob channel at the binding boundary: image() registers its
+# bytes and queues create_widget + set_property(source, blob); a bytes
+# dataclass field maps to VALUE_BLOB in the collection schema and
+# re-registers at every encode (handles are single-submit); template
+# binds of a blob field lower to SOURCE_ELEMENT. And the type walls
+# hold — str is not image data, bytes are not label text.
+@dataclass
+class Avatar:
+    name: str
+    pic: bytes
+
+
+def _rec_kind(rec):
+    return int.from_bytes(rec[4:6], "little")
+
+
+app_img = kaya.App()
+with app_img.window():
+    with kaya.column():
+        before = len(kaya._tx)
+        kaya.image(b"\x89PNG, not really")
+        queued = kaya._tx[before:]
+        check(
+            "image queues a create_widget",
+            any(_rec_kind(r) == kaya.wire.TX_CREATE_WIDGET for r in queued),
+        )
+        last = queued[-1]
+        check(
+            "image queues a set_source",
+            _rec_kind(last) == kaya.wire.TX_SET_PROPERTY
+            # body: u64 widget, u32 prop, u32 source kind, value {u32 type,...}
+            and int.from_bytes(last[16:20], "little") == kaya.wire.PROP_SOURCE
+            and int.from_bytes(last[20:24], "little") == kaya.wire.SOURCE_CONST
+            and int.from_bytes(last[24:28], "little") == kaya.wire.VALUE_BLOB,
+        )
+        try:
+            kaya.image("gallery.png")
+            check("image rejects str with a clear TypeError", False)
+        except TypeError:
+            check("image rejects str with a clear TypeError", True)
+        try:
+            kaya.label(text=b"bytes are not text")
+            check("label rejects bytes text", False)
+        except TypeError:
+            check("label rejects bytes text", True)
+
+        avatars = kaya.collection(Avatar)
+        check(
+            "bytes field maps to blob in the schema",
+            avatars._variants[0].schema
+            == [kaya.wire.VALUE_STR, kaya.wire.VALUE_BLOB],
+        )
+        with kaya.for_each(avatars) as av:
+            kaya.image(source=av.pic)
+        set_prop = next(
+            r for r in reversed(kaya._tx)
+            if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+        )
+        check(
+            "template blob bind lowers to bind_source_element",
+            int.from_bytes(set_prop[16:20], "little") == kaya.wire.PROP_SOURCE
+            and int.from_bytes(set_prop[20:24], "little")
+            == kaya.wire.SOURCE_ELEMENT,
+        )
+
+with app_img.build():
+    before = len(kaya._tx)
+    avatars.insert("a", Avatar("ann", b"\x01\x02\x03"))
+    insert_rec = kaya._tx[-1]
+    check(
+        "blob-field insert registers and queues one insert",
+        len(kaya._tx) == before + 1
+        and _rec_kind(insert_rec) == kaya.wire.TX_COLLECTION_INSERT,
+    )
+    check(
+        "blob field encodes as a fresh handle",
+        isinstance(avatars._encode(Avatar("b", b"\x04"))[1][1],
+                   kaya.wire.BlobHandle),
+    )
+    avatars.patch("a", pic=b"\x05\x06")  # re-registers at encode time
+    check(
+        "blob-field patch is an update_field",
+        _rec_kind(kaya._tx[-1]) == kaya.wire.TX_COLLECTION_UPDATE_FIELD,
+    )
+    try:
+        avatars.insert("b", Avatar("bob", "not bytes"))
+        check("str into a blob field raises", False)
+    except TypeError:
+        check("str into a blob field raises", True)
+
 # A break abandons the For template mid-trace; the transaction exit
 # refuses to ship the half-authored blueprint.
 app3 = kaya.App()

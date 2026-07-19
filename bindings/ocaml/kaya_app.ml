@@ -283,6 +283,16 @@ let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)
 
+(* An image's content: one registration copy of the encoded bytes into
+   core-owned memory. The handle is consumed by the next submit from
+   this guest, referenced or not — so every write re-registers — and
+   the caller's bytes are free to drop the moment this returns. *)
+let set_source (Widget id) data tx =
+  emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
+
+let bind_source (Widget id) (Signal s) tx =
+  emit tx (Kaya_wire.tx_bind_source id s)
+
 (* One-shot commands: momentary verbs into widget-owned state, riding
    the open transaction like any record — the insert and the clear
    beside it submit together or not at all. Fire-and-forget: no model
@@ -371,6 +381,18 @@ let checkbox ?text ?checked ?on_toggle () tx =
       let (Widget id) = w in
       Hashtbl.replace tx.app.widget_toggles id handler
   | None -> ());
+  w
+
+(* An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
+   decodes natively, and decode failure renders the placeholder, never
+   a crash. [source] takes the encoded bytes — one registration copy
+   into core memory; the handle is consumed by the next submit, and
+   the guest's bytes are free to drop the moment the call returns.
+   [bind] takes a Blob signal instead. Display-only, like a label. *)
+let image ?source ?bind () tx =
+  let w = widget Kaya_wire.kind_image tx in
+  Option.iter (fun data -> set_source w data tx) source;
+  Option.iter (fun s -> bind_source w s tx) bind;
   w
 
 (* A container from its children: runs each child declaration (their
@@ -522,6 +544,29 @@ let i64_field index : ('a, int64) field =
 let f64_field index : ('a, float) field =
   { fd_index = index; fd_to_value = (fun x -> Kaya_wire.F64 x) }
 
+(* A blob field's MODEL value carries the guest's own bytes (as a
+   binary Str — OCaml strings are byte sequences), so record_items
+   reads back exactly what was written; the wire side registers a
+   fresh copy with the core at encode time (see encode_field). *)
+let blob_field index : ('a, bytes) field =
+  { fd_index = index; fd_to_value = (fun d -> Kaya_wire.Str (Bytes.to_string d)) }
+
+(* The model-to-wire crossing for one record field: scalars pass
+   through; a blob field's model value (the guest's bytes) registers a
+   fresh copy with the core here, at encode time — handles are
+   single-submit, so insert, update, and update_field each re-register
+   (one copy into core memory per write; the model keeps the guest's
+   own bytes). *)
+let encode_field tag v =
+  if tag = Kaya_wire.value_blob then
+    match v with
+    | Kaya_wire.Str s ->
+        Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string s))
+    | _ -> invalid_arg "kaya: blob field out of shape"
+  else v
+
+let encode_fields schema fields = List.map2 encode_field schema fields
+
 type 'a record_collection = {
   rc_handle : collection;
   rc_type : 'a record_type;
@@ -545,19 +590,23 @@ let collection_of rt tx =
 let insert_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
-  emit tx (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key 0 fields);
+  emit tx
+    (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key 0
+       (encode_fields rc.rc_type.rt_schema fields));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 let update_record rc key value tx =
   let fields = rc.rc_type.rt_to_values value in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
-  emit tx (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key 0 fields);
+  emit tx
+    (Kaya_wire.tx_collection_update rc.rc_handle.cid rc.rc_handle.cpath key 0
+       (encode_fields rc.rc_type.rt_schema fields));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* One field's delta: the rest of the record never travels; the
    model's copy updates the same slot. *)
 let update_field rc key fd value tx =
-  let wire = fd.fd_to_value value in
+  let mv = fd.fd_to_value value in
   let current =
     match
       List.find_opt
@@ -570,11 +619,12 @@ let update_field rc key fd value tx =
         | None -> invalid_arg "kaya: update of missing key")
     | None -> invalid_arg "kaya: update of missing instance"
   in
-  let updated = List.mapi (fun i v -> if i = fd.fd_index then wire else v) current in
+  let updated = List.mapi (fun i v -> if i = fd.fd_index then mv else v) current in
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 updated;
   emit tx
     (Kaya_wire.tx_collection_update_field rc.rc_handle.cid rc.rc_handle.cpath key
-       fd.fd_index 0 wire);
+       fd.fd_index 0
+       (encode_field (List.nth rc.rc_type.rt_schema fd.fd_index) mv));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
 (* The typed model: what this guest wrote, in insertion order. *)
@@ -662,7 +712,8 @@ let sum_insert sc key value tx =
   model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
   emit tx
     (Kaya_wire.tx_collection_insert sc.sc_handle.cid sc.sc_handle.cpath key
-       variant fields);
+       variant
+       (encode_fields (List.nth sc.sc_type.st_schemas variant) fields));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
 (* Update replaces a record wholesale; a different constructor than
@@ -673,7 +724,8 @@ let sum_update sc key value tx =
   model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
   emit tx
     (Kaya_wire.tx_collection_update sc.sc_handle.cid sc.sc_handle.cpath key
-       variant fields);
+       variant
+       (encode_fields (List.nth sc.sc_type.st_schemas variant) fields));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
 (* The typed model, in insertion order; [match] eliminates the
@@ -709,7 +761,7 @@ let sum_get sc key tx =
    the model refuses a drifted entry — the guard is checked, not
    trusted. *)
 let sum_update_field sc key ~variant fd value tx =
-  let wire = fd.fd_to_value value in
+  let mv = fd.fd_to_value value in
   let stored, current =
     match
       List.find_opt
@@ -724,11 +776,14 @@ let sum_update_field sc key ~variant fd value tx =
   in
   if stored <> variant then
     invalid_arg "kaya: update_field witnessed a constructor the entry no longer holds";
-  let updated = List.mapi (fun i v -> if i = fd.fd_index then wire else v) current in
+  let updated = List.mapi (fun i v -> if i = fd.fd_index then mv else v) current in
   model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant updated;
   emit tx
     (Kaya_wire.tx_collection_update_field sc.sc_handle.cid sc.sc_handle.cpath
-       key fd.fd_index variant wire);
+       key fd.fd_index variant
+       (encode_field
+          (List.nth (List.nth sc.sc_type.st_schemas variant) fd.fd_index)
+          mv));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
 (* The collection-derived signal, over the sum's entries. *)
@@ -807,6 +862,12 @@ module Tpl = struct
   let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) t =
     emit t.tpl_tx (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
 
+  (* Bind an image's source to one field of the element; a (_, bytes)
+     field only — the phantom pins it at compile time. Per-entry
+     content: the core stamps each copy with its entry's blob. *)
+  let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) t =
+    emit t.tpl_tx (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
+
 
   let add_child (Node parent) (Node child) t =
     emit t.tpl_tx (Kaya_wire.tx_add_child parent child)
@@ -856,6 +917,13 @@ module Tpl = struct
         let (Node id) = n in
         Hashtbl.replace t.tpl_tx.app.node_toggles id handler
     | None -> ());
+    n
+
+  (* The template image: [bind_field] takes a (_, bytes) field of the
+     element — each stamped copy displays its own entry's bytes. *)
+  let image ?bind_field ?(level = 0) () t =
+    let n = widget Kaya_wire.kind_image t in
+    Option.iter (fun fd -> bind_source_field ~level n fd t) bind_field;
     n
 
   let container kind children t =
