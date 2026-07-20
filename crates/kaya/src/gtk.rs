@@ -120,15 +120,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Entry(entry)
                 }
                 WidgetKind::Column => {
-                    // Axis only — native-default spacing (0) and align
-                    // (fill) left untouched so the layout milestone
-                    // observes the true baseline, not a hand-tuned one.
-                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+                    // Normalized layout default (uniform across backends):
+                    // 8-unit spacing between children; the box hugs the
+                    // top-left of its parent (Start/Start) rather than
+                    // centering/filling. Children are pinned to the
+                    // leading edge at natural size on add (see AddChild).
+                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+                    column.set_halign(gtk4::Align::Start);
+                    column.set_valign(gtk4::Align::Start);
                     core.columns.push(column.clone());
                     NativeWidget::Column(column)
                 }
                 WidgetKind::Row => {
-                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                    row.set_halign(gtk4::Align::Start);
+                    row.set_valign(gtk4::Align::Start);
                     NativeWidget::Row(row)
                 }
                 WidgetKind::Checkbox => {
@@ -281,6 +287,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .get(&child)
                 .expect("scene validated the id")
                 .widget();
+            // Normalized layout default: children sit at natural size on
+            // the leading edge. GtkWidget's default halign is Fill, which
+            // stretches a child to the full cross-axis extent (and makes
+            // labels read as centered-in-fill); Start pins it left/top at
+            // its intrinsic size instead.
+            child_widget.set_halign(gtk4::Align::Start);
+            child_widget.set_valign(gtk4::Align::Start);
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(column) => column.append(&child_widget),
                 NativeWidget::Row(row) => row.append(&child_widget),

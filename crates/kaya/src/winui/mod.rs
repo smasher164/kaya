@@ -394,12 +394,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Column => {
                     let panel = StackPanel::new()?;
+                    // Uniform layout default: 8-unit gap between adjacent
+                    // children (matches AppKit/SwiftUI). Children stay at
+                    // natural size, packed to the start and leading-aligned
+                    // — the StackPanel's own defaults.
+                    panel.SetSpacing(8.0)?;
                     core.columns.push(panel.clone());
                     NativeWidget::Column(panel)
                 }
                 WidgetKind::Row => {
                     let panel = StackPanel::new()?;
                     panel.SetOrientation(Orientation::Horizontal)?;
+                    panel.SetSpacing(8.0)?;
                     NativeWidget::Row(panel)
                 }
                 WidgetKind::Checkbox => {

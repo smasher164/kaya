@@ -96,6 +96,43 @@ Two minor bugs surfaced: GTK spawns a phantom 1×1 top-level window
 alongside the real one; Android Views draws behind the activity action
 bar (activity chrome, not the layout backend). Both noted for later.
 
+## Normalized (2026-07-19)
+
+Native defaults being non-viable, all seven backends were set to ONE
+uniform, deliberate default set — the normalization vocabulary. Not
+user-facing props: deliberate defaults, identical semantics everywhere,
+each expressed in the toolkit's idiom.
+
+- **Spacing**: 8 units (platform-logical: pt/dp/DIP) between children.
+- **Main axis**: children at natural size, packed to the start — content
+  hugs the top-leading corner of the surface.
+- **Cross axis**: leading, at natural size (not centered, not filled).
+
+Per-backend spelling: AppKit `setSpacing`+`.Leading`/`.Top`; SwiftUI
+`VStack(alignment:.leading,spacing:8)`/`HStack(.top,8)` + a root
+`.frame(maxWidth/Height:.infinity, alignment:.topLeading)`; UIKit
+`spacing`+`.Leading`/`.Top` and the root stack pinned top-leading via
+safe-area anchors (killing the `distribution=.fill` balloon); GTK
+`Box(_,8)` + box `Align::Start` + per-child `halign/valign=Start` on add;
+WinUI `StackPanel.Spacing=8`; Android Views `setDividerDrawable`(8dp)+
+`SHOW_DIVIDER_MIDDLE`+`setBaselineAligned(false)` and a `NoActionBar`
+theme; Compose `spacedBy(8.dp)`+`Alignment.Start`/`.Top` + root
+`Box(contentAlignment=TopStart)`. All seven now render the scene as the
+same top-left, 8-unit, leading, natural-size arrangement (side-by-side
+artifact assembled separately).
+
+Residual divergences, all deliberately out of scope:
+- **Slider fill-vs-hug** — fills (AppKit/SwiftUI/GTK/Compose) vs hugs
+  (UIKit/WinUI/Views). Needs the explicit `grow` prop (flex weight). On
+  UIKit the hugging slider is now so narrow it overlaps its neighbor
+  label — the sharpest reason `grow` is the next prop.
+- **Window sizing** — fit-to-content (AppKit/GTK) vs fixed/large. Window
+  milestone.
+- **Widget chrome** — Material pills / bordered rects / blue tap-text.
+  Kept native by design.
+- **Android status-bar inset** — with NoActionBar the first label sits
+  under the translucent status bar; a future edge-to-edge/insets pass.
+
 ## The capability axes that matter for normalization
 
 1. **Linear stack** — a main axis + children in order.

@@ -19,13 +19,11 @@ use objc2::rc::Retained;
 use objc2::{
     AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
 };
-use objc2_core_foundation::CGRect;
 use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{
     UIApplication, UIApplicationDelegate, UIApplicationMain, UIButton, UIButtonType,
     UIControlEvents, UIControlState, UIImage, UIImageView, UILabel, UILayoutConstraintAxis,
-    UIScreen, UIStackView, UISlider, UISwitch, UITextField, UIView, UIViewAutoresizing,
-    UIViewController, UIWindow,
+    UIScreen, UIStackView, UISlider, UISwitch, UITextField, UIView, UIViewController, UIWindow,
 };
 
 use crate::protocol::{
@@ -147,19 +145,30 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 WidgetKind::Column => {
                     let stack = UIStackView::new(mtm);
-                    // Axis only — native-default spacing/alignment left
-                    // untouched so the layout milestone observes the true
-                    // baseline (UIStackView defaults: spacing 0, .fill).
+                    // The uniform layout default (matches AppKit/SwiftUI):
+                    // 8pt between children; children at natural size packed
+                    // to the start of the main axis (top) and aligned to the
+                    // leading (left) cross edge. Distribution defaults to
+                    // .fill along the axis, but the root stack hugs its
+                    // content (see Mount), so there is no free space to
+                    // stretch into — children keep their intrinsic heights.
                     unsafe {
                         stack.setAxis(UILayoutConstraintAxis::Vertical);
+                        stack.setSpacing(8.0);
+                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Leading);
                     }
                     core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Row => {
                     let stack = UIStackView::new(mtm);
+                    // Same uniform default on the horizontal axis: 8pt
+                    // between children, aligned to the top cross edge, at
+                    // natural size.
                     unsafe {
                         stack.setAxis(UILayoutConstraintAxis::Horizontal);
+                        stack.setSpacing(8.0);
+                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Top);
                     }
                     NativeWidget::Row(stack)
                 }
@@ -352,14 +361,25 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
         }
         ApplyOp::Mount { window: _, root } => {
             let root_view = core.widgets.get(&root).expect("scene validated the id");
-            let bounds: CGRect = core.content.bounds();
-            root_view.view().setFrame(bounds);
+            let view = root_view.view();
+            // Hug content, pinned to the top-leading of the safe area — the
+            // UIKit equivalent of AppKit's fit-to-content. Filling the whole
+            // screen (the old flexible-mask frame) left free space that
+            // distribution=.fill absorbed by stretching one child (the
+            // "balloon" pathology); at natural size there is nothing to
+            // stretch, so children keep their intrinsic sizes and pack from
+            // the top-left.
+            core.content.addSubview(&view);
+            let guide = core.content.safeAreaLayoutGuide();
             unsafe {
-                root_view.view().setAutoresizingMask(
-                    UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight,
-                );
+                view.setTranslatesAutoresizingMaskIntoConstraints(false);
+                view.topAnchor()
+                    .constraintEqualToAnchor(&guide.topAnchor())
+                    .setActive(true);
+                view.leadingAnchor()
+                    .constraintEqualToAnchor(&guide.leadingAnchor())
+                    .setActive(true);
             }
-            core.content.addSubview(root_view.view());
         }
         ApplyOp::Command { id, command } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");

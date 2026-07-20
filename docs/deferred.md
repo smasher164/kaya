@@ -90,10 +90,11 @@ Landed history lives in git; this file only carries what is still open.
   spacing), so layout regressions are invisible to the gate layer. The
   `layout` scene (guests/rust/layout.rs + tools/scenes/layout.steps) is
   an eyeball-only observation vehicle under KAYA_RECORD; its two expects
-  only prove the tree built. DECISION DEFERRED until after the
-  native-default observation: whether to add a geometry Stage method so
-  layout can be gate-tested rather than recorded-and-looked-at. Pairs
-  with "failures become guards" — right now it isn't guarded.
+  only prove the tree built. DECISION (maintainer, 2026-07-19):
+  declined for now — keep layout eyeball-only, do NOT build a geometry
+  Stage method ("idk if geometry detection will pay off"). So layout
+  stays unguarded by the gate layer by choice; revisit only if layout
+  regressions start biting.
 - bench-encode blob leg: register+reference throughput with an MB/s
   floor, so payload-path structural regressions trip at gate time.
   (Adding it means a second phase in each language's encode_bench

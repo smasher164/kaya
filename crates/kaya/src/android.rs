@@ -327,6 +327,44 @@ fn drain_transactions(env: &mut JNIEnv) -> jni::errors::Result<()> {
     }
 }
 
+/// The normalized layout default's spacing rung: 8 dp between adjacent
+/// children. LinearLayout has no spacing property, so it is synthesized
+/// as a transparent divider of that size shown only *between* children
+/// (SHOW_DIVIDER_MIDDLE = 2) — no leading gap before the first child,
+/// no trailing gap after the last. Applied to both axes: the
+/// LinearLayout takes the divider's intrinsic height (vertical column)
+/// or width (horizontal row) as the inter-child gap. Cross-axis stays
+/// the native TOP|START, so children pack to the leading corner at
+/// natural size, matching the AppKit/SwiftUI normalized default.
+fn set_child_spacing(
+    env: &mut JNIEnv,
+    view: &JObject,
+    activity: &JObject,
+) -> jni::errors::Result<()> {
+    // 8 dp -> px through the display metrics density.
+    let resources = env
+        .call_method(activity, "getResources", "()Landroid/content/res/Resources;", &[])?
+        .l()?;
+    let metrics = env
+        .call_method(&resources, "getDisplayMetrics", "()Landroid/util/DisplayMetrics;", &[])?
+        .l()?;
+    let density = env.get_field(&metrics, "density", "F")?.f()?;
+    let px = (8.0 * density).round() as i32;
+
+    let divider = env.new_object("android/graphics/drawable/GradientDrawable", "()V", &[])?;
+    env.call_method(&divider, "setSize", "(II)V", &[JValue::Int(px), JValue::Int(px)])?;
+    // Transparent: the gap is space, not a visible rule.
+    env.call_method(&divider, "setColor", "(I)V", &[JValue::Int(0)])?;
+    env.call_method(
+        view,
+        "setDividerDrawable",
+        "(Landroid/graphics/drawable/Drawable;)V",
+        &[JValue::Object(&divider)],
+    )?;
+    env.call_method(view, "setShowDividers", "(I)V", &[JValue::Int(2)])?;
+    Ok(())
+}
+
 fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
     let activity = GLOBALS.get().expect("attach ran").activity.clone();
     match op {
@@ -348,14 +386,24 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             let mut tag_key = None;
             match kind {
                 WidgetKind::Column => {
-                    // Axis only (LinearLayout.VERTICAL = 1). Native-default
-                    // gravity (TOP|START) left untouched so the layout
-                    // milestone observes the true baseline.
+                    // Normalized default: vertical axis (LinearLayout.VERTICAL
+                    // = 1), children packed to the top at natural size (native
+                    // TOP|START), 8 dp between adjacent children.
                     env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(1)])?;
+                    set_child_spacing(env, &view, activity.as_obj())?;
                 }
                 WidgetKind::Row => {
-                    // LinearLayout.HORIZONTAL = 0.
+                    // Normalized default: horizontal axis
+                    // (LinearLayout.HORIZONTAL = 0), children packed to the
+                    // leading edge at natural size, 8 dp between them.
                     env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(0)])?;
+                    // Cross-axis = top (START). LinearLayout defaults
+                    // baselineAligned=true, which drops shorter children to
+                    // the text baseline; turn it off so unequal-height
+                    // children align to the row's top edge, matching the
+                    // Compose Alignment.Top and the AppKit/SwiftUI default.
+                    env.call_method(&view, "setBaselineAligned", "(Z)V", &[JValue::Bool(0)])?;
+                    set_child_spacing(env, &view, activity.as_obj())?;
                 }
                 WidgetKind::Button => {
                     // The tag is the click's identity, emitted verbatim;

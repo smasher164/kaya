@@ -474,10 +474,12 @@ object KayaCompose {
 fun KayaRender(node: KayaNode) {
     when (node.kind) {
         KayaCompose.KIND_COLUMN ->
-            // Native-default arrangement (Top) and alignment (Start) —
-            // no explicit spacing/alignment so the layout milestone
-            // observes the true baseline.
-            Column {
+            // Normalized default: children packed to the top at natural
+            // size, leading-aligned (Alignment.Start), 8 dp between them.
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.Start,
+            ) {
                 node.children.forEach { KayaRender(it) }
             }
         KayaCompose.KIND_BUTTON ->
@@ -485,7 +487,12 @@ fun KayaRender(node: KayaNode) {
                 Text(node.text)
             }
         KayaCompose.KIND_ROW ->
-            Row {
+            // Normalized default: children packed to the leading edge at
+            // natural size, top-aligned (Alignment.Top), 8 dp between them.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
                 node.children.forEach { KayaRender(it) }
             }
         KayaCompose.KIND_LABEL -> Text(node.text)
@@ -562,7 +569,9 @@ fun KayaRender(node: KayaNode) {
 
 @Composable
 fun KayaRoot() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    // Normalized default: the root is pinned to the top-leading corner,
+    // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
         KayaSceneModel.root?.let { KayaRender(it) }
     }
 }

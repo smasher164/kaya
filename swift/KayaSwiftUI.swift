@@ -461,9 +461,8 @@ struct KayaRender: View {
     var body: some View {
         switch node.kind {
         case kindColumn:
-            // Native-default spacing/alignment — no explicit spacing so
-            // the layout milestone observes the true baseline.
-            VStack {
+            // Normalized: 8-pt spacing, leading (cross-axis start).
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(node.children) { child in
                     KayaRender(node: child)
                 }
@@ -473,7 +472,8 @@ struct KayaRender: View {
                 KayaHost.emit(node.tag)
             }
         case kindRow:
-            HStack {
+            // Normalized: 8-pt spacing, top (cross-axis start).
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(node.children) { child in
                     KayaRender(node: child)
                 }
@@ -584,6 +584,9 @@ struct KayaRoot: View {
             }
         }
         .padding()
+        // Normalized: pack content to the top-leading corner of the
+        // surface rather than letting the window center it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             kayaPlaceWindow()
             kayaStartCommandPump()
