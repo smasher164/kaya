@@ -10,8 +10,8 @@ import dev.kaya.KayaApp;
  * harness (KAYA_SELFTEST=grow) asserts both splits plus root-fills,
  * byte-for-byte against every other language and backend.
  *
- * setGrow directly after construction is Java's spelling — the
- * language has no named or optional arguments.
+ * The grow chain at construction is Java's declarative spelling;
+ * Tx.setGrow is the dynamic path this scene has no reason to use.
  */
 final class Grow {
     static void app() {
@@ -22,17 +22,12 @@ final class Grow {
             KayaApp.Signal<String> one = tx.signal("one");
 
             tx.mount(tx.column(() -> {
-                KayaApp.Widget label = tx.label(probe); // label#0
-                tx.setGrow(label, 1.0);
-                KayaApp.Widget quarter = tx.button("quarter");
-                tx.setGrow(quarter, 1.0);
-                KayaApp.Widget band = tx.row(() -> {
-                    KayaApp.Widget tick = tx.label(one); // label#1
-                    tx.setGrow(tick, 1.0);
-                    KayaApp.Widget three = tx.button("three");
-                    tx.setGrow(three, 3.0);
-                });
-                tx.setGrow(band, 2.0);
+                tx.label(probe).grow(1.0); // label#0
+                tx.button("quarter").grow(1.0);
+                tx.row(() -> {
+                    tx.label(one).grow(1.0); // label#1
+                    tx.button("three").grow(3.0);
+                }).grow(2.0);
             }));
             return null;
         });

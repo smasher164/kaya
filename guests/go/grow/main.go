@@ -26,17 +26,12 @@ func main() {
 		one := tx.Signal("one")
 
 		tx.Mount(tx.Column(func() {
-			label := tx.Label(probe) // label#0
-			tx.SetGrow(label, 1.0)
-			quarter := tx.Button("quarter", nil)
-			tx.SetGrow(quarter, 1.0)
-			band := tx.Row(func() {
-				tick := tx.Label(one) // label#1
-				tx.SetGrow(tick, 1.0)
-				three := tx.Button("three", nil)
-				tx.SetGrow(three, 3.0)
-			})
-			tx.SetGrow(band, 2.0)
+			tx.Label(probe).Grow(1)   // label#0
+			tx.Button("quarter", nil).Grow(1)
+			tx.Row(func() {
+				tx.Label(one).Grow(1) // label#1
+				tx.Button("three", nil).Grow(3)
+			}).Grow(2)
 		}))
 	})
 

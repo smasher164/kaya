@@ -79,9 +79,9 @@ done
 # gate until a guest failed to compile.
 check rust    crates/kaya/src/app.rs              grow "pub fn grow\("
 check python  bindings/python/kaya/__init__.py    grow "def grow\(self, weight\)"
-check go      bindings/go/app.go                  grow "func \(tx \*Tx\) SetGrow\("
+check go      bindings/go/app.go                  grow "func \(w Widget\) Grow\("
 check csharp  bindings/csharp/KayaApp.cs          grow "public void SetGrow\("
-check java    bindings/java/dev/kaya/KayaApp.java grow "public void setGrow\("
+check java    bindings/java/dev/kaya/KayaApp.java grow "public Widget grow\("
 check swift   bindings/swift/KayaApp.swift        grow "func setGrow\("
 check haskell bindings/haskell/KayaApp.hs         grow "^grow ::"
 check ocaml   bindings/ocaml/kaya_app.ml          grow "^let grow "

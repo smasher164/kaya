@@ -30,14 +30,22 @@ Landed history lives in git; this file only carries what is still open.
   add/move/destroy.
   ~~The remaining 7 bindings need the grow sugar / the scenes exist
   only as Rust guests~~ LANDED (2026-07-20): every binding spells grow
-  in its own idiom — Python `grow=` kwargs plus `Widget.grow`, Go
-  `SetGrow`, C# `grow:` optional args plus `SetGrow`, Java `setGrow`,
-  Swift `grow:` labeled args plus `setGrow`, OCaml a `grow weight decl`
-  combinator, Haskell a `grow` combinator over `setGrow` (Build-only:
-  no language has template grow, so it stays off Declare until all
-  do) — and the grow/layout scenes run as guests in all of them,
-  including the Kotlin jvm pair that gives the Android jvm suite its
-  legs. check-sugar-surface now gates the grow spelling per binding.
+  declaratively in its own idiom — Python `grow=` kwargs plus
+  `Widget.grow`, C# `grow:` optional args, Swift `grow:` labeled args,
+  OCaml a `grow weight decl` combinator, Haskell a `grow` combinator
+  over `setGrow` (Build-only: no language has template grow, so it
+  stays off Declare until all do), and Go and Java a construction
+  CHAIN — `tx.Label(s).Grow(1)` / `tx.label(s).grow(1)`. The chain is
+  Akhil's call over my named-setter first cut ("the sugar looks very
+  imperative" — right): their handles now carry the minting
+  transaction, so chains read declaratively, and a `closed` flag set
+  when the build ends (committed or rolled back) makes a chain on an
+  outlived widget die loudly rather than append into an orphaned
+  record list. The Set*/set* setters stay underneath as the dynamic
+  path everywhere. The grow/layout scenes run as guests in all
+  languages, including the Kotlin jvm pair that gives the Android jvm
+  suite its legs. check-sugar-surface gates the DECLARATIVE spelling
+  per binding.
   Still out on purpose: the C floor's grow/layout scenes (the floor
   documents the explicit wire; a separate exercise), and Rust's
   chained `.grow()` form, which waits on proxy handles with the style

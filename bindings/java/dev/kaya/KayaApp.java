@@ -147,12 +147,37 @@ public final class KayaApp {
         }
     }
 
-    /** A live widget: exactly one thing on screen. */
+    /**
+     * A live widget: exactly one thing on screen. It carries the
+     * transaction that minted it so construction chains read
+     * declaratively (tx.label(s).grow(1)); the id alone is the
+     * widget's name, and a Widget stored past its build keeps naming
+     * the same widget — only the chain methods die with it.
+     */
     public static final class Widget {
         final long id;
+        final Tx tx;
 
-        Widget(long id) {
+        Widget(long id, Tx tx) {
             this.id = id;
+            this.tx = tx;
+        }
+
+        /**
+         * Weight this widget within its row/column at construction —
+         * the declarative chain. Appends to the transaction that
+         * minted the widget, so it belongs in the build body; on a
+         * Widget that outlived its build it fails loudly — use
+         * Tx.setGrow inside a live transaction for dynamic changes.
+         */
+        public Widget grow(double weight) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: grow on a widget outside its build transaction"
+                    + " — use Tx.setGrow inside a live transaction");
+            }
+            tx.setGrow(this, weight);
+            return this;
         }
     }
 
@@ -245,6 +270,14 @@ public final class KayaApp {
      * applies atomically when it returns.
      */
     public final class Tx {
+        /**
+         * Set when the enclosing build finishes with this transaction,
+         * committed or rolled back: a construction chain
+         * (Widget.grow) on a widget that outlived its build must die
+         * loudly, not append into an orphaned record list.
+         */
+        boolean closed;
+
         private final List<byte[]> records = new ArrayList<>();
 
         // How to undo this transaction's model edits: a snapshot per
@@ -425,7 +458,7 @@ public final class KayaApp {
         }
 
         public Widget widget(int kind) {
-            Widget w = new Widget(++widgets);
+            Widget w = new Widget(++widgets, this);
             records.add(KayaWire.txCreateWidget(w.id, kind));
             autoParent(w.id);
             return w;
@@ -641,7 +674,7 @@ public final class KayaApp {
         public <R> Stamped<Widget, R> forEach(
                 Collection c, java.util.function.Function<Tpl, R> body) {
             c.assertRoot();
-            Widget w = new Widget(++widgets);
+            Widget w = new Widget(++widgets, this);
             // The For parents into the enclosing scope, but the record
             // must land after template_end — an addChild inside the
             // blueprint would cross zones.
@@ -673,7 +706,7 @@ public final class KayaApp {
          * break leaves the trace open — caught at submit. */
         RowTrace beginRowTrace(Collection c) {
             c.assertRoot();
-            Widget w = new Widget(++widgets);
+            Widget w = new Widget(++widgets, this);
             long parent = currentParent();
             records.add(KayaWire.txCreateFor(w.id, c.id));
             openFors.add(c.id);
@@ -703,7 +736,7 @@ public final class KayaApp {
         }
 
         public <R> Stamped<Widget, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
-            Widget w = new Widget(++widgets);
+            Widget w = new Widget(++widgets, this);
             long parent = currentParent();
             records.add(KayaWire.txCreateWhen(w.id, s.id));
             parents.add(0L);
@@ -1108,8 +1141,11 @@ public final class KayaApp {
         } finally {
             // Every exit clears the ambient slot — a stale currentTx
             // would let the operator sugar reach a closed transaction
-            // (the divergence the other bindings never had).
+            // (the divergence the other bindings never had) — and
+            // marks the transaction over, so late construction chains
+            // (Widget.grow) die loudly on either exit path.
             currentTx = null;
+            tx.closed = true;
         }
         tx.submitIfAny();
         return out;

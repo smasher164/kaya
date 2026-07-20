@@ -37,17 +37,14 @@ final class Layout {
                 tx.row(() -> {
                     tx.checkbox("check", null);
                     tx.label(mixed); // label#2
-                    KayaApp.Widget s = tx.slider(0.0, 1.0, 0.5, null);
-                    tx.setGrow(s, 1.0);
+                    tx.slider(0.0, 1.0, 0.5, null).grow(1.0);
                 });
 
                 // Proportional grow: two growers of unequal weight in
                 // one row.
                 tx.row(() -> {
-                    KayaApp.Widget thin = tx.slider(0.0, 1.0, 0.25, null);
-                    tx.setGrow(thin, 1.0);
-                    KayaApp.Widget wide = tx.slider(0.0, 1.0, 0.75, null);
-                    tx.setGrow(wide, 3.0);
+                    tx.slider(0.0, 1.0, 0.25, null).grow(1.0);
+                    tx.slider(0.0, 1.0, 0.75, null).grow(3.0);
                 });
 
                 // Nesting: a column inside the root column, a row

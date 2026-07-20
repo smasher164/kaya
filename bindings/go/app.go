@@ -38,8 +38,15 @@ type Scalar interface {
 // mint and consume these without free-function detours.)
 type Signal[V Scalar] struct{ id uint64 }
 
-// Widget is a live widget: exactly one thing on screen.
-type Widget struct{ id uint64 }
+// Widget is a live widget: exactly one thing on screen. It carries
+// the transaction that minted it so construction chains read
+// declaratively (tx.Label(s).Grow(1)); the id alone is the widget's
+// name, and a Widget stored past its build transaction keeps naming
+// the same widget — only the chain methods die with it.
+type Widget struct {
+	id uint64
+	tx *Tx
+}
 
 // Node is a template node: a blueprint entry, stamped per collection
 // entry. Never on screen by itself; clicks on its copies arrive with
@@ -308,6 +315,10 @@ type Tx struct {
 	// the app registry only on commit — an abandoned transaction
 	// abandons its registrations with its records.
 	pendingDerived []pendingDerived
+	// Set when Build finishes with this transaction, committed or not:
+	// a construction chain (Widget.Grow) on a widget that outlived its
+	// build must die loudly, not append into an orphaned record list.
+	closed bool
 }
 
 type pendingDerived struct {
@@ -342,6 +353,9 @@ func (a *App) Build(fn func(*Tx)) {
 			a.tplDepth = 0
 		}
 		a.journal = nil
+		// Committed or abandoned, this transaction is over: late
+		// construction chains must die loudly either way.
+		tx.closed = true
 	}()
 	fn(tx)
 	committed = true
@@ -383,7 +397,7 @@ func (tx *Tx) Write[V Scalar](s Signal[V], value V) {
 
 func (tx *Tx) Widget(kind uint32) Widget {
 	tx.app.c.widget++
-	w := Widget{tx.app.c.widget}
+	w := Widget{id: tx.app.c.widget, tx: tx}
 	tx.records = append(tx.records, TxCreateWidget(w.id, kind))
 	tx.autoParent(w.id)
 	return w
@@ -418,12 +432,24 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 
 // SetGrow sets a widget's flex weight within its row/column: 0 is
 // natural size, positive weights divide the container's leftover
-// main-axis space in proportion (see Prop::Grow in the core). Go's
-// declarative spelling and its dynamic path are the same call — the
-// language has no optional arguments, so the setter directly after
-// construction is the constructor form.
+// main-axis space in proportion (see Prop::Grow in the core). The
+// dynamic path — collapsing a pane is SetGrow(w, 0) and back; the
+// declarative spelling is the Grow chain at construction.
 func (tx *Tx) SetGrow(w Widget, weight float64) {
 	tx.records = append(tx.records, TxSetGrow(w.id, weight))
+}
+
+// Grow weights this widget within its row/column at construction —
+// the declarative chain: tx.Label(s).Grow(1). It appends to the
+// transaction that minted the widget, so it belongs in the build
+// expression; on a Widget that outlived its build, it fails loudly —
+// use Tx.SetGrow inside a live transaction for dynamic changes.
+func (w Widget) Grow(weight float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Grow on a widget outside its build transaction — use Tx.SetGrow inside a live transaction")
+	}
+	w.tx.SetGrow(w, weight)
+	return w
 }
 
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
@@ -580,7 +606,7 @@ func (tx *Tx) Collection() Collection {
 func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	assertRoot(c)
 	tx.app.c.widget++
-	w := Widget{tx.app.c.widget}
+	w := Widget{id: tx.app.c.widget, tx: tx}
 	// The For parents into the enclosing scope, but the record must
 	// land after template_end — an add_child inside the blueprint
 	// would cross zones.
@@ -608,7 +634,7 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 	assertRoot(c)
 	tx.app.c.widget++
-	w := Widget{tx.app.c.widget}
+	w := Widget{id: tx.app.c.widget, tx: tx}
 	parent := tx.currentParent()
 	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
@@ -629,7 +655,7 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 // false.
 func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 	tx.app.c.widget++
-	w := Widget{tx.app.c.widget}
+	w := Widget{id: tx.app.c.widget, tx: tx}
 	parent := tx.currentParent()
 	tx.records = append(tx.records, TxCreateWhen(w.id, s.id))
 	tx.app.parents = append(tx.app.parents, 0)

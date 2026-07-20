@@ -44,17 +44,14 @@ func main() {
 			tx.Row(func() {
 				tx.Checkbox("check", nil)
 				tx.Label(mixed) // label#2
-				s := tx.Slider(0.0, 1.0, 0.5, nil)
-				tx.SetGrow(s, 1.0)
+				tx.Slider(0.0, 1.0, 0.5, nil).Grow(1)
 			})
 
 			// Proportional grow: two growers of unequal weight in one
 			// row.
 			tx.Row(func() {
-				thin := tx.Slider(0.0, 1.0, 0.25, nil)
-				tx.SetGrow(thin, 1.0)
-				wide := tx.Slider(0.0, 1.0, 0.75, nil)
-				tx.SetGrow(wide, 3.0)
+				tx.Slider(0.0, 1.0, 0.25, nil).Grow(1)
+				tx.Slider(0.0, 1.0, 0.75, nil).Grow(3)
 			})
 
 			// Nesting: a column inside the root column, a row inside
