@@ -43,6 +43,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "todos" => Some(include_str!("../../../tools/scenes/todos.steps")),
         "reorder" => Some(include_str!("../../../tools/scenes/reorder.steps")),
         "feed" => Some(include_str!("../../../tools/scenes/feed.steps")),
+        "layout" => Some(include_str!("../../../tools/scenes/layout.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }

@@ -348,14 +348,14 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
             let mut tag_key = None;
             match kind {
                 WidgetKind::Column => {
-                    // LinearLayout.VERTICAL = 1, Gravity.CENTER = 17.
+                    // Axis only (LinearLayout.VERTICAL = 1). Native-default
+                    // gravity (TOP|START) left untouched so the layout
+                    // milestone observes the true baseline.
                     env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(1)])?;
-                    env.call_method(&view, "setGravity", "(I)V", &[JValue::Int(17)])?;
                 }
                 WidgetKind::Row => {
-                    // LinearLayout.HORIZONTAL = 0, Gravity.CENTER = 17.
+                    // LinearLayout.HORIZONTAL = 0.
                     env.call_method(&view, "setOrientation", "(I)V", &[JValue::Int(0)])?;
-                    env.call_method(&view, "setGravity", "(I)V", &[JValue::Int(17)])?;
                 }
                 WidgetKind::Button => {
                     // The tag is the click's identity, emitted verbatim;

@@ -147,10 +147,11 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 WidgetKind::Column => {
                     let stack = UIStackView::new(mtm);
+                    // Axis only — native-default spacing/alignment left
+                    // untouched so the layout milestone observes the true
+                    // baseline (UIStackView defaults: spacing 0, .fill).
                     unsafe {
                         stack.setAxis(UILayoutConstraintAxis::Vertical);
-                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
-                        stack.setSpacing(8.0);
                     }
                     core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
@@ -159,8 +160,6 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     let stack = UIStackView::new(mtm);
                     unsafe {
                         stack.setAxis(UILayoutConstraintAxis::Horizontal);
-                        stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Center);
-                        stack.setSpacing(8.0);
                     }
                     NativeWidget::Row(stack)
                 }

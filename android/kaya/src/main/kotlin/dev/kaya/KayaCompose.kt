@@ -474,10 +474,10 @@ object KayaCompose {
 fun KayaRender(node: KayaNode) {
     when (node.kind) {
         KayaCompose.KIND_COLUMN ->
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
+            // Native-default arrangement (Top) and alignment (Start) —
+            // no explicit spacing/alignment so the layout milestone
+            // observes the true baseline.
+            Column {
                 node.children.forEach { KayaRender(it) }
             }
         KayaCompose.KIND_BUTTON ->
@@ -485,10 +485,7 @@ fun KayaRender(node: KayaNode) {
                 Text(node.text)
             }
         KayaCompose.KIND_ROW ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Row {
                 node.children.forEach { KayaRender(it) }
             }
         KayaCompose.KIND_LABEL -> Text(node.text)

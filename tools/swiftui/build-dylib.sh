@@ -23,22 +23,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-if ! /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
-    for app in /Applications/Xcode.app /Applications/Xcode-*.app; do
-        if [ -d "$app/Contents/Developer" ]; then
-            export DEVELOPER_DIR="$app/Contents/Developer"
-            break
-        fi
-    done
-fi
+# shellcheck source=tools/lib/swift-toolchain.sh
+source "$ROOT/tools/lib/swift-toolchain.sh"
 
 cargo build --lib
 tools/gen-header.sh --check
 
 mkdir -p target/swiftui
-SDKROOT_MAC=$(/usr/bin/xcrun -sdk macosx --show-sdk-path)
-/usr/bin/xcrun swiftc \
-    -sdk "$SDKROOT_MAC" \
+kaya_swiftc \
     -emit-library \
     -import-objc-header crates/kaya/include/kaya.h \
     swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \

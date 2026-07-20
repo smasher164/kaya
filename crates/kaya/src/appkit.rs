@@ -20,7 +20,7 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSLayoutAttribute, NSSlider,
+    NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSSlider,
     NSStackView, NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow,
     NSWindowStyleMask,
 };
@@ -120,17 +120,16 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             let native = match kind {
                 WidgetKind::Column => {
                     let stack = NSStackView::new(mtm);
+                    // Axis only — the native default spacing and cross-axis
+                    // alignment are left untouched so the layout milestone
+                    // observes the true baseline, not a hand-tuned one.
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
-                    stack.setAlignment(NSLayoutAttribute::CenterX);
-                    stack.setSpacing(8.0);
                     core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Row => {
                     let stack = NSStackView::new(mtm);
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
-                    stack.setAlignment(NSLayoutAttribute::CenterY);
-                    stack.setSpacing(8.0);
                     NativeWidget::Row(stack)
                 }
                 WidgetKind::Button => {

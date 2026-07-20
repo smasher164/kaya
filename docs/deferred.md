@@ -70,6 +70,30 @@ Landed history lives in git; this file only carries what is still open.
 
 ## Testing / infrastructure
 
+- The `layout` scene is half-wired: it exists (guests/rust/layout.rs,
+  tools/scenes/layout.steps, harness arm, Android guest arm) and is
+  functionally green on mac, but is NOT built or run by any platform
+  suite (validate-mac scene list, validate-linux, run-sim, run-emulator,
+  deploy-win) — every capture had to `cargo build --example layout` by
+  hand. check-steps passes anyway (it validates script well-formedness,
+  not runner wiring), so nothing flags the gap. DECISION: either wire it
+  into the suites as a cheap functional leg (its two label expects prove
+  the tree builds) or accept it as an observation-only scene and say so.
+  Ties to the geometry-guard decision below (an eyeball-only scene has
+  little to assert in an automated suite).
+- Ergonomic: a `kaya::park(&ctx)` keep-alive primitive for static
+  (handler-less) scenes, so they don't reach for `Messages::<()>` just
+  to block until Shutdown (see traps.md).
+- Layout has no structural guard: the harness observes only
+  semantic/textual state (child_texts, read_text, is_focused,
+  image_size) — there is no geometry observation (frame/position/measured
+  spacing), so layout regressions are invisible to the gate layer. The
+  `layout` scene (guests/rust/layout.rs + tools/scenes/layout.steps) is
+  an eyeball-only observation vehicle under KAYA_RECORD; its two expects
+  only prove the tree built. DECISION DEFERRED until after the
+  native-default observation: whether to add a geometry Stage method so
+  layout can be gate-tested rather than recorded-and-looked-at. Pairs
+  with "failures become guards" — right now it isn't guarded.
 - bench-encode blob leg: register+reference throughput with an MB/s
   floor, so payload-path structural regressions trip at gate time.
   (Adding it means a second phase in each language's encode_bench

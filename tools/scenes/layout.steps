@@ -1,0 +1,8 @@
+# The layout observation scene: no assertions on geometry — the harness
+# cannot see layout yet, so this scene exists to be recorded and looked
+# at (KAYA_RECORD=1). The two expects only prove the tree built end to
+# end and clear the zero-expect guard; label#4 is the deepest-nested
+# label, so reading it proves nesting reached the leaf.
+settle 1500
+expect label#0 "Layout probe"
+expect label#4 "deep"

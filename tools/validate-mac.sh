@@ -23,6 +23,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
+# shellcheck source=tools/lib/swift-toolchain.sh
+source "$ROOT/tools/lib/swift-toolchain.sh"
 # The one Python import mechanism: the kaya package resolves from
 # here (the guests' sys.path shims are gone).
 export PYTHONPATH="$ROOT/bindings/python"
@@ -100,13 +102,7 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     if [ ! -x "$REC_BIN" ]; then
         mkdir -p target/tools
         rm -f target/tools/record-suite-*
-        if RSWIFTC="$(env -u DEVELOPER_DIR -u SDKROOT xcrun --find swiftc 2>/dev/null)"; then
-            RSDK_ARGS=()
-        else
-            RSWIFTC=/usr/bin/swiftc
-            RSDK_ARGS=(-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)
-        fi
-        env -u DEVELOPER_DIR -u SDKROOT "$RSWIFTC" -O "${RSDK_ARGS[@]}" \
+        kaya_swiftc -O \
             -framework ScreenCaptureKit -framework AVFoundation \
             -o "$REC_BIN" tools/record-suite/main.swift || exit 1
     fi

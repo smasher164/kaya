@@ -29,17 +29,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-if SWIFTC="$(xcrun --find swiftc 2>/dev/null)"; then
-    SDK_ARGS=()
-else
-    SWIFTC=/usr/bin/swiftc
-    SDK="/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-    if [ ! -d "$SDK" ]; then
-        echo "swift-typecheck: no swiftc via xcrun and no CommandLineTools SDK" >&2
-        exit 1
-    fi
-    SDK_ARGS=(-sdk "$SDK")
-fi
+# shellcheck source=tools/lib/swift-toolchain.sh
+source "$ROOT/tools/lib/swift-toolchain.sh"
+kaya_resolve_swiftc || exit 1
 
 # swiftc requires top-level code to live in a file named main.swift;
 # each example program typechecks in its own pass.
@@ -51,7 +43,7 @@ for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swi
     # checked-in <name>+Kaya.swift companion; compile it alongside.
     companions=$(ls "${example%.swift}"+*.swift 2>/dev/null || true)
     # shellcheck disable=SC2086
-    if ! env -u DEVELOPER_DIR "$SWIFTC" "${SDK_ARGS[@]}" -typecheck \
+    if ! kaya_swiftc -typecheck \
         -import-objc-header crates/kaya/include/kaya.h \
         bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift $companions "$TMP/main.swift"; then
         echo "swift-typecheck: FAIL ($example)"

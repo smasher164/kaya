@@ -94,6 +94,13 @@ these the hard way.
 - **A spec field named `record` collided** with Python's framer and
   C#/Java contextual keywords — renamed `fields`. Run every new spec
   name past all reserved lists (the generator does this).
+- **`kaya::Messages::new()` cannot infer `M` in a handler-less scene** —
+  a static scene (no `on_click`/`on_toggle`/…) leaves the message type
+  unconstrained and fails to compile. Write `Messages::<()>::new()` and
+  block on `next` for keep-alive (a real app stays open; the block is
+  the "park until Shutdown" idiom). Candidate ergonomic guard: a named
+  `kaya::park(&ctx)` keep-alive primitive so static scenes don't reach
+  for `Messages` at all (see deferred.md).
 
 ## Process / testing
 
@@ -123,3 +130,26 @@ these the hard way.
 - **Recording mode**: anchor video to steps in-band or by fiducial,
   never by launch/stop wall-times; recorders drop buffered tails;
   sparse-VFR stills need a covering frame.
+- **`swiftc`/`xcrun` in the nix shell resolve nix's macOS SDK, not
+  Xcode's** — hand-building anything Swift, or any `-target
+  *-apple-ios*`, fails with "framework not found" (UIKit, etc.). Guard:
+  `tools/lib/swift-toolchain.sh` — source it and invoke `kaya_swiftc`
+  (it resolves a real Apple toolchain + macOS SDK, preferring a full
+  Xcode.app, and handles the `DEVELOPER_DIR`/`SDKROOT` unsetting). All
+  three former copies (validate-mac, swift-typecheck, build-dylib) now
+  route through it; any new Swift build should too, instead of
+  re-deriving the dance. For an iOS `cargo build` (not a direct swiftc),
+  use tools/ios/run-sim.sh's build path rather than a bare
+  `cargo build --target *-apple-ios*`.
+- **Observation captures orphan the app process and can grab the user's
+  screen.** A non-selftest launch blocks forever on `recv` (correct app
+  behavior — a real app stays open), and on macOS **closing the window
+  does NOT exit the NSApp**, so a capture that forgets to `kill` the
+  launched process leaves a live window/proc behind. And a full-screen
+  `screencapture` grabs whatever the user has frontmost (their browser,
+  editor — a privacy leak on a shared machine). Guards: capture ONE
+  window by id (`CGWindowListCopyWindowInfo` → `screencapture -l<id>`),
+  never full-screen; ALWAYS terminate the launched **app process** in a
+  finally step. Do NOT tear down the simulator/emulator device pools —
+  the runners deliberately keep them warm across runs (re-boot is slow);
+  only the app process/window is the leak, not the device.

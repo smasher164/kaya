@@ -120,16 +120,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Entry(entry)
                 }
                 WidgetKind::Column => {
-                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-                    column.set_valign(gtk4::Align::Center);
-                    column.set_halign(gtk4::Align::Center);
+                    // Axis only — native-default spacing (0) and align
+                    // (fill) left untouched so the layout milestone
+                    // observes the true baseline, not a hand-tuned one.
+                    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
                     core.columns.push(column.clone());
                     NativeWidget::Column(column)
                 }
                 WidgetKind::Row => {
-                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-                    row.set_valign(gtk4::Align::Center);
-                    row.set_halign(gtk4::Align::Center);
+                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
                     NativeWidget::Row(row)
                 }
                 WidgetKind::Checkbox => {

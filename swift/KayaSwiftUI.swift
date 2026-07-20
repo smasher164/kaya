@@ -461,7 +461,9 @@ struct KayaRender: View {
     var body: some View {
         switch node.kind {
         case kindColumn:
-            VStack(spacing: 8) {
+            // Native-default spacing/alignment — no explicit spacing so
+            // the layout milestone observes the true baseline.
+            VStack {
                 ForEach(node.children) { child in
                     KayaRender(node: child)
                 }
@@ -471,7 +473,7 @@ struct KayaRender: View {
                 KayaHost.emit(node.tag)
             }
         case kindRow:
-            HStack(spacing: 8) {
+            HStack {
                 ForEach(node.children) { child in
                     KayaRender(node: child)
                 }
