@@ -452,6 +452,18 @@ public final class KayaApp {
             records.add(KayaWire.txSetChecked(w.id, checked));
         }
 
+        /**
+         * Set a widget's flex weight within its row/column: 0 is
+         * natural size, positive weights divide the container's
+         * leftover main-axis space in proportion (see Prop::Grow in
+         * the core). Java has no named or optional arguments, so the
+         * setter directly after construction is both the declarative
+         * spelling and the dynamic path.
+         */
+        public void setGrow(Widget w, double weight) {
+            records.add(KayaWire.txSetGrow(w.id, weight));
+        }
+
         public void bindChecked(Widget w, Signal<Boolean> s) {
             records.add(KayaWire.txBindChecked(w.id, s.id));
         }

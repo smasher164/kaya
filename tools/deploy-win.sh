@@ -70,7 +70,8 @@ for arg in "$@"; do
         todos_rust|todos_python|todos_go|todos_csharp) SUITE="$arg" ;;
         reorder_rust|reorder_python|reorder_go|reorder_csharp) SUITE="$arg" ;;
         feed_rust|feed_python|feed_go|feed_csharp) SUITE="$arg" ;;
-        grow_rust|layout_rust) SUITE="$arg" ;;
+        grow_rust|grow_python|grow_go|grow_csharp) SUITE="$arg" ;;
+        layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -132,7 +133,7 @@ timing build
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
-for guest in milestone2 entry gallery todos reorder feed; do
+for guest in milestone2 entry gallery todos reorder feed grow layout; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum
     # surfaces (kaya-gen) carry a checked-in *_kaya.go beside it.
@@ -181,6 +182,8 @@ scp -q \
     "$ROOT/guests/python/milestone2.py" \
     "$ROOT/guests/python/entry.py" \
     "$ROOT/guests/python/gallery.py" \
+    "$ROOT/guests/python/grow.py" \
+    "$ROOT/guests/python/layout.py" \
     "$ROOT/guests/python/todos.py" \
     "$ROOT/guests/python/reorder.py" \
     "$ROOT/guests/python/feed.py" \
@@ -524,10 +527,17 @@ case "$SUITE" in
         run_suite feed_python
         run_suite feed_go
         run_suite feed_csharp
-        # The grow scene (the layout contract, asserted as shares).
-        # Rust only so far; the other guests come with the breadth phase.
+        # The grow scene (the layout contract, asserted as shares and
+        # root-fills) and the layout observation scene, every language
+        # this platform runs.
         run_suite grow_rust
+        run_suite grow_python
+        run_suite grow_go
+        run_suite grow_csharp
         run_suite layout_rust
+        run_suite layout_python
+        run_suite layout_go
+        run_suite layout_csharp
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;

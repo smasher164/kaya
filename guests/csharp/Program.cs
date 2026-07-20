@@ -20,6 +20,8 @@ static class Program
             case "todos": TodosScene.Run(); break;
             case "reorder": ReorderScene.Run(); break;
             case "feed": Feed.FeedScene.Run(); break;
+            case "grow": GrowScene.Run(); break;
+            case "layout": LayoutScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }

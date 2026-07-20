@@ -351,7 +351,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos reorder feed encodebench; do
+for guest in milestone2 entry gallery todos reorder feed grow layout encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -427,16 +427,29 @@ run feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib
     _build/default/guests/ocaml/feed.exe
 run feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
 
-# The grow scene (the layout contract: a column of nothing but growers
-# splits weight/Sigma-weight, read back as shares). Rust only so far —
-# the scene lands depth-first like every other, and the remaining seven
-# guests come with the breadth phase.
+# The grow scene (the layout contract: both containers hold nothing
+# but growers, splits read back as shares plus root-fills), every
+# language against AppKit — each guest spelled in its own sugar tier.
 run grow-rust env KAYA_SELFTEST=grow target/debug/examples/grow
+run grow-python env KAYA_SELFTEST=grow python3 guests/python/grow.py
+run grow-go env KAYA_SELFTEST=grow target/go-guests/grow
+run grow-csharp env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/grow.exe
+run grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
 # The layout scene: the cross-backend observation vehicle. It asserts
 # only that the tree built (layout itself is checked by the grow scene's
 # shares), but it is the scene the recordings are compared from, so it
-# has to be a recorded leg on every backend.
+# has to be a recorded leg on every backend and every language.
 run layout-rust env KAYA_SELFTEST=layout target/debug/examples/layout
+run layout-python env KAYA_SELFTEST=layout python3 guests/python/layout.py
+run layout-go env KAYA_SELFTEST=layout target/go-guests/layout
+run layout-csharp env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/layout.exe
+run layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
 
 drain
 
@@ -520,10 +533,24 @@ run feed-haskell-swiftui env KAYA_SELFTEST=feed "$(hs_bin feed)"
 KAYA_SELFTEST_SCRIPT="$(scene_script grow)"
 export KAYA_SELFTEST_SCRIPT
 run grow-rust-swiftui env KAYA_SELFTEST=grow target/debug/examples/grow
+run grow-python-swiftui env KAYA_SELFTEST=grow python3 guests/python/grow.py
+run grow-go-swiftui env KAYA_SELFTEST=grow target/go-guests/grow
+run grow-csharp-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run grow-ocaml-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/grow.exe
+run grow-haskell-swiftui env KAYA_SELFTEST=grow "$(hs_bin grow)"
 drain
 KAYA_SELFTEST_SCRIPT="$(scene_script layout)"
 export KAYA_SELFTEST_SCRIPT
 run layout-rust-swiftui env KAYA_SELFTEST=layout target/debug/examples/layout
+run layout-python-swiftui env KAYA_SELFTEST=layout python3 guests/python/layout.py
+run layout-go-swiftui env KAYA_SELFTEST=layout target/go-guests/layout
+run layout-csharp-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run layout-ocaml-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/layout.exe
+run layout-haskell-swiftui env KAYA_SELFTEST=layout "$(hs_bin layout)"
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs

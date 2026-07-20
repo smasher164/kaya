@@ -416,6 +416,16 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 	tx.records = append(tx.records, TxSetChecked(w.id, checked))
 }
 
+// SetGrow sets a widget's flex weight within its row/column: 0 is
+// natural size, positive weights divide the container's leftover
+// main-axis space in proportion (see Prop::Grow in the core). Go's
+// declarative spelling and its dynamic path are the same call — the
+// language has no optional arguments, so the setter directly after
+// construction is the constructor form.
+func (tx *Tx) SetGrow(w Widget, weight float64) {
+	tx.records = append(tx.records, TxSetGrow(w.id, weight))
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }

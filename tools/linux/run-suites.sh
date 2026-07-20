@@ -165,7 +165,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos reorder feed; do
+for guest in milestone2 entry gallery todos reorder feed grow layout; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -231,15 +231,30 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
     run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
-    # The grow scene (the layout contract): a column of nothing but
-    # growers splits weight/Sigma-weight, read back as shares. Rust only
-    # so far — the scene lands depth-first and the other guests come
-    # with the breadth phase.
+    # The grow scene (the layout contract: both containers hold
+    # nothing but growers, splits read back as shares plus root-fills),
+    # every sugar-tier language. The C floor stays out on purpose — its
+    # scenes document the explicit wire, and grow there is a separate
+    # exercise (see the ledger).
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
+    run "$proto" grow-python env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
+        python3 guests/python/grow.py
+    run "$proto" grow-go env KAYA_SELFTEST=grow /tmp/go-guests/grow
+    run "$proto" grow-csharp env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grow.exe
+    run "$proto" grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
-    # too.
+    # too — in every language.
     run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
+    run "$proto" layout-python env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
+        python3 guests/python/layout.py
+    run "$proto" layout-go env KAYA_SELFTEST=layout /tmp/go-guests/layout
+    run "$proto" layout-csharp env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/layout.exe
+    run "$proto" layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
 done
 drain
 

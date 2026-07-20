@@ -279,6 +279,24 @@ let widget kind tx =
   Widget id
 
 let set_text (Widget id) text tx = emit tx (Kaya_wire.tx_set_text id text)
+
+(* Set a widget's flex weight within its row/column: 0 is natural
+   size, positive weights divide the container's leftover main-axis
+   space in proportion (see Prop::Grow in the core). [set_grow] is the
+   dynamic path; [grow] below is the declarative spelling. *)
+let set_grow (Widget id) weight tx = emit tx (Kaya_wire.tx_set_grow id weight)
+
+(* [grow w d] declares [d] and weights it — a combinator over any
+   widget decl, containers included, so a weighted tree reads in
+   place:
+
+     column [ grow 1.0 (label ~bind:probe ());
+              grow 2.0 (row [ ... ]) ]
+*)
+let grow weight d tx =
+  let w = d tx in
+  set_grow w weight tx;
+  w
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)

@@ -37,7 +37,7 @@ kaya_resolve_swiftc || exit 1
 # each example program typechecks in its own pass.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swift/gallery.swift guests/swift/todos.swift guests/swift/reorder.swift guests/swift/feed.swift; do
+for example in guests/swift/milestone2.swift guests/swift/entry.swift guests/swift/gallery.swift guests/swift/todos.swift guests/swift/reorder.swift guests/swift/feed.swift guests/swift/grow.swift guests/swift/layout.swift; do
     cp "$example" "$TMP/main.swift"
     # A guest with generated sum surfaces (kaya-swift-gen) has a
     # checked-in <name>+Kaya.swift companion; compile it alongside.

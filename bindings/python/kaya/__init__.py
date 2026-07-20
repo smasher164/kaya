@@ -308,6 +308,14 @@ class Widget:
         """Give this widget the keyboard focus."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
 
+    def grow(self, weight):
+        """Set this widget's flex weight within its row/column: 0 is
+        natural size, positive weights divide the container's leftover
+        main-axis space in proportion. The declarative spelling is the
+        `grow=` argument at construction; this is the dynamic path —
+        collapsing a pane is `grow(0)` and back."""
+        _records().append(wire.tx_set_grow(self.id, float(weight)))
+
 
 class Node:
     """A template node: a blueprint entry, stamped per collection entry.
@@ -901,28 +909,43 @@ def collection(record_type=None):
     return handle
 
 
-def column():
+def _set_grow(handle, grow):
+    # The one kind-agnostic prop: every constructor takes `grow=`, the
+    # declarative spelling of Widget.grow (see that docstring for the
+    # contract).
+    if grow is not None:
+        _records().append(wire.tx_set_grow(handle.id, float(grow)))
+
+
+def column(grow=None):
     """A column container: `with kaya.column():` parents everything
-    declared inside it."""
-    return _Container(_widget(wire.KIND_COLUMN))
+    declared inside it. `grow` is its flex weight within the enclosing
+    container."""
+    handle = _widget(wire.KIND_COLUMN)
+    _set_grow(handle, grow)
+    return _Container(handle)
 
 
-def button(text=None, on_click=None):
+def button(text=None, on_click=None, grow=None):
     handle = _widget(wire.KIND_BUTTON)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("button text", text)))
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
+    _set_grow(handle, grow)
     return handle
 
 
-def row():
+def row(grow=None):
     """A row container: column turned sideways; `with kaya.row():`
-    parents everything declared inside it."""
-    return _Container(_widget(wire.KIND_ROW))
+    parents everything declared inside it. `grow` is its flex weight
+    within the enclosing container."""
+    handle = _widget(wire.KIND_ROW)
+    _set_grow(handle, grow)
+    return _Container(handle)
 
 
-def checkbox(text=None, checked=None, on_toggle=None):
+def checkbox(text=None, checked=None, on_toggle=None, grow=None):
     """A labeled on/off box. The box owns its checked bit the way an
     entry owns its text: `on_toggle` receives the new state (a bool;
     template copies get the stamped keys first), and the app folds it
@@ -942,10 +965,11 @@ def checkbox(text=None, checked=None, on_toggle=None):
             _records().append(wire.tx_set_checked(handle.id, checked))
     if on_toggle is not None:
         _app._register(handle, wire.OCC_TOGGLED, on_toggle)
+    _set_grow(handle, grow)
     return handle
 
 
-def slider(value=None, min=None, max=None, on_change=None):
+def slider(value=None, min=None, max=None, on_change=None, grow=None):
     """A slider over a numeric range. Uncontrolled, like the entry: the
     widget owns its position and reports each change to `on_change`
     (the new value as a float; template copies get the stamped keys
@@ -968,10 +992,11 @@ def slider(value=None, min=None, max=None, on_change=None):
             _records().append(wire.tx_set_value(handle.id, value))
     if on_change is not None:
         _app._register(handle, wire.OCC_VALUE_CHANGED, on_change)
+    _set_grow(handle, grow)
     return handle
 
 
-def entry(text=None, on_change=None):
+def entry(text=None, on_change=None, grow=None):
     """A single-line text field. Uncontrolled, by doctrine: the widget
     owns its text and reports each edit to `on_change` (the new content
     as a str; template copies get the stamped keys first) — the app
@@ -981,10 +1006,11 @@ def entry(text=None, on_change=None):
         _records().append(wire.tx_set_text(handle.id, _text_value("entry text", text)))
     if on_change is not None:
         _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    _set_grow(handle, grow)
     return handle
 
 
-def label(text=None, bind=None):
+def label(text=None, bind=None, grow=None):
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed)."""
     handle = _widget(wire.KIND_LABEL)
@@ -998,10 +1024,11 @@ def label(text=None, bind=None):
         _records().append(
             wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
         )
+    _set_grow(handle, grow)
     return handle
 
 
-def image(source=None):
+def image(source=None, grow=None):
     """An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
     decodes natively, and decode failure renders the placeholder, never
     a crash. `source` is the encoded bytes — one registration copy into
@@ -1027,6 +1054,7 @@ def image(source=None):
                 f"element field), not {type(source).__name__} — text "
                 "belongs on kaya.label"
             )
+    _set_grow(handle, grow)
     return handle
 
 

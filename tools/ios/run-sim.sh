@@ -602,6 +602,32 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -o "$BUNDLES/feedswift-bin"
     APP=$(make_bundle feedswift dev.kaya.feedswift "$BUNDLES/feedswift-bin")
     queue_leg run_bundle_on feed-swift "$APP" dev.kaya.feedswift feed-swift feed
+
+    # The layout contract through the Swift binding: grow asserted as
+    # shares and root-fills, layout observed.
+    cp guests/swift/grow.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/growswift-bin"
+    APP=$(make_bundle growswift dev.kaya.growswift "$BUNDLES/growswift-bin")
+    queue_leg run_bundle_on grow-swift "$APP" dev.kaya.growswift grow-swift grow
+
+    cp guests/swift/layout.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/layoutswift-bin"
+    APP=$(make_bundle layoutswift dev.kaya.layoutswift "$BUNDLES/layoutswift-bin")
+    queue_leg run_bundle_on layout-swift "$APP" dev.kaya.layoutswift layout-swift layout
     drain
     timing swift-build+legs
 fi

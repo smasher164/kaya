@@ -605,6 +605,14 @@ sealed class Tx
     public void SetChecked(Widget w, bool isChecked) =>
         Records.Add(KayaWire.TxSetChecked(w.Id, isChecked));
 
+    /// Set a widget's flex weight within its row/column: 0 is natural
+    /// size, positive weights divide the container's leftover main-axis
+    /// space in proportion (see Prop::Grow in the core). The
+    /// declarative spelling is the `grow:` argument at construction;
+    /// this is the dynamic path.
+    public void SetGrow(Widget w, double weight) =>
+        Records.Add(KayaWire.TxSetGrow(w.Id, weight));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -644,49 +652,54 @@ sealed class Tx
     // the same records — children first, then the container, then the
     // AddChilds; never a scene value interpreted later.
 
-    public Widget Button(string text = null, Action<Tx> onClick = null)
+    public Widget Button(string text = null, Action<Tx> onClick = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindButton);
         if (text != null) SetText(w, text);
         if (onClick != null) App.OnClick(w, onClick);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
-    public Widget Entry(Action<Tx, string> onChange = null)
+    public Widget Entry(Action<Tx, string> onChange = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindEntry);
         if (onChange != null) App.OnChange(w, onChange);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
-    public Widget Label(string text = null, Signal? bind = null)
+    public Widget Label(string text = null, Signal? bind = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindLabel);
         if (text != null) SetText(w, text);
         if (bind is Signal s) BindText(w, s);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
     /// A slider over min..max at value, with its change handler
     /// co-located.
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
-        Action<Tx, double> onChange = null)
+        Action<Tx, double> onChange = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindSlider);
         Records.Add(KayaWire.TxSetMin(w.Id, min));
         Records.Add(KayaWire.TxSetMax(w.Id, max));
         Records.Add(KayaWire.TxSetValue(w.Id, value));
         if (onChange != null) App.OnValueChanged(w, onChange);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
     public Widget Checkbox(string text = null, bool? isChecked = null,
-        Action<Tx, bool> onToggle = null)
+        Action<Tx, bool> onToggle = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindCheckbox);
         if (text != null) SetText(w, text);
         if (isChecked is bool c) SetChecked(w, c);
         if (onToggle != null) App.OnToggle(w, onToggle);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
@@ -696,24 +709,28 @@ sealed class Tx
     /// copy into core memory, consumed by the next submit, so the
     /// caller's array is free to drop the moment this returns; `bind`
     /// a Signal carrying the image bytes.
-    public Widget Image(byte[] source = null, Signal? bind = null)
+    public Widget Image(byte[] source = null, Signal? bind = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindImage);
         if (source != null) SetSource(w, source);
         if (bind is Signal s) BindSource(w, s);
+        if (grow is double g) SetGrow(w, g);
         return w;
     }
 
     /// A container parents everything declared inside its body (the
     /// ambient stack). Statement position is the point: a foreach over
     /// a generated row trace stands between siblings.
-    public Widget Column(Action body) => ContainerOf(KayaWire.KindColumn, body);
+    public Widget Column(Action body, double? grow = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow);
 
-    public Widget Row(Action body) => ContainerOf(KayaWire.KindRow, body);
+    public Widget Row(Action body, double? grow = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow);
 
-    Widget ContainerOf(uint kind, Action body)
+    Widget ContainerOf(uint kind, Action body, double? grow = null)
     {
         var parent = Widget(kind);
+        if (grow is double g) SetGrow(parent, g);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);

@@ -72,6 +72,20 @@ for kind in $kinds; do
     check_kind "$kind"
 done
 
+# The grow prop's layer-3 spelling, per language idiom (a kwarg, a
+# named setter, a combinator — decided 2026-07-20, see the ledger).
+# Props are not kinds, so the constructor loop above cannot see them;
+# without this, a binding shipping wire-only grow would pass every
+# gate until a guest failed to compile.
+check rust    crates/kaya/src/app.rs              grow "pub fn grow\("
+check python  bindings/python/kaya/__init__.py    grow "def grow\(self, weight\)"
+check go      bindings/go/app.go                  grow "func \(tx \*Tx\) SetGrow\("
+check csharp  bindings/csharp/KayaApp.cs          grow "public void SetGrow\("
+check java    bindings/java/dev/kaya/KayaApp.java grow "public void setGrow\("
+check swift   bindings/swift/KayaApp.swift        grow "func setGrow\("
+check haskell bindings/haskell/KayaApp.hs         grow "^grow ::"
+check ocaml   bindings/ocaml/kaya_app.ml          grow "^let grow "
+
 if [ "$status" -ne 0 ]; then
     echo "check-sugar-surface: FAIL"
     exit 1

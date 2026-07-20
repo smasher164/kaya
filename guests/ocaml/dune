@@ -1,6 +1,6 @@
 (executables
- (names milestone2 entry gallery todos reorder feed encodebench)
- (modules milestone2 entry gallery todos reorder feed encodebench)
+ (names milestone2 entry gallery todos reorder feed grow layout encodebench)
+ (modules milestone2 entry gallery todos reorder feed grow layout encodebench)
  (libraries kaya_guest_binding unix)
  (preprocess
   (pps kaya_ppx)))

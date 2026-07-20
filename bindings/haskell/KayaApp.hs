@@ -61,6 +61,8 @@ module KayaApp
     bindText,
     bindChecked,
     bindSource,
+    setGrow,
+    grow,
     bindTextElement,
     KayaFieldType (..),
     KayaRecord (..),
@@ -564,6 +566,26 @@ focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
 
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
+
+-- | Set a widget's flex weight within its row\/column: 0 is natural
+-- size, positive weights divide the container's leftover main-axis
+-- space in proportion (see Prop::Grow in the core). The dynamic path;
+-- 'grow' is the declarative spelling. Build-only on purpose: no
+-- language has template grow yet, so it stays off 'Declare' until all
+-- of them do.
+setGrow :: Widget -> Double -> Build ()
+setGrow (Widget w) weight = emitB (W.txSetGrow w weight)
+
+-- | @grow w act@ declares @act@ and weights it — composes over any
+-- widget declaration, containers included, so a weighted tree reads in
+-- place:
+--
+-- > column [ grow 1 (labelBound probe), grow 2 (row [ ... ]) ]
+grow :: Double -> Build Widget -> Build Widget
+grow weight act = do
+  w <- act
+  setGrow w weight
+  return w
 
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)

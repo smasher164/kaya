@@ -377,6 +377,14 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk feed-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity feed
+    # The layout contract through the JVM binding: grow asserted as
+    # shares and root-fills, layout observed.
+    run_apk grow-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity grow
+    run_apk layout-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity layout
     drain
     timing legs-jvm
 fi

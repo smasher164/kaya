@@ -32,6 +32,8 @@ class MainActivity : Activity() {
             "todos" -> Todos::app
             "reorder" -> Reorder::app
             "feed" -> Feed::app
+            "grow" -> Grow::app
+            "layout" -> Layout::app
             else -> Milestone2::app
         }
         Thread(scene, "kaya-app").start()

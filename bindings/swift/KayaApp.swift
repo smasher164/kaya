@@ -721,6 +721,15 @@ final class KayaAppTx {
         tx.setChecked(w.id, checked)
     }
 
+    /// Set a widget's flex weight within its row/column: 0 is natural
+    /// size, positive weights divide the container's leftover
+    /// main-axis space in proportion (see Prop::Grow in the core). The
+    /// declarative spelling is the `grow:` argument at construction;
+    /// this is the dynamic path.
+    func setGrow(_ w: KayaWidget, _ weight: Double) {
+        tx.setGrow(w.id, weight)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }
@@ -766,23 +775,33 @@ final class KayaAppTx {
     // the container and its addChilds. Sugar over the record calls,
     // never a scene value interpreted later.
 
-    func button(_ text: String? = nil, onClick: ((KayaAppTx) throws -> Void)? = nil) -> KayaWidget {
+    func button(
+        _ text: String? = nil, onClick: ((KayaAppTx) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_BUTTON))
         if let text { setText(w, text) }
         if let onClick { app.onClick(w, onClick) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
-    func entry(onChange: ((KayaAppTx, String) throws -> Void)? = nil) -> KayaWidget {
+    func entry(
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil, grow: Double? = nil
+    ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_ENTRY))
         if let onChange { app.onChange(w, onChange) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
-    func label(_ text: String? = nil, bind: KayaSignal? = nil) -> KayaWidget {
+    func label(
+        _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+    ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_LABEL))
         if let text { setText(w, text) }
         if let bind { bindText(w, bind) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
@@ -790,24 +809,28 @@ final class KayaAppTx {
     /// co-located.
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
-        onChange: ((KayaAppTx, Double) throws -> Void)? = nil
+        onChange: ((KayaAppTx, Double) throws -> Void)? = nil,
+        grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SLIDER))
         tx.setMin(w.id, min)
         tx.setMax(w.id, max)
         tx.setValue(w.id, value)
         if let onChange { app.onValueChanged(w, onChange) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
     func checkbox(
         _ text: String? = nil, checked: Bool? = nil,
-        onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil
+        onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
+        grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_CHECKBOX))
         if let text { setText(w, text) }
         if let checked { setChecked(w, checked) }
         if let onToggle { app.onToggle(w, onToggle) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
@@ -817,28 +840,34 @@ final class KayaAppTx {
     /// copy into core memory; the handle is consumed by the next
     /// submit, and the guest's bytes are free to drop the moment the
     /// call returns. `bind` is a Signal carrying a blob handle.
-    func image(_ source: Data? = nil, bind: KayaSignal? = nil) -> KayaWidget {
+    func image(
+        _ source: Data? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+    ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_IMAGE))
         if let source { setSource(w, source) }
         if let bind { bindSource(w, bind) }
+        if let grow { setGrow(w, grow) }
         return w
     }
 
-    func column(@KayaChildren _ children: () -> Void) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_COLUMN), children)
+    func column(grow: Double? = nil, @KayaChildren _ children: () -> Void) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_COLUMN), children, grow: grow)
     }
 
-    func row(@KayaChildren _ children: () -> Void) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_ROW), children)
+    func row(grow: Double? = nil, @KayaChildren _ children: () -> Void) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_ROW), children, grow: grow)
     }
 
-    private func containerOf(_ kind: UInt32, _ children: () -> Void) -> KayaWidget {
+    private func containerOf(
+        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil
+    ) -> KayaWidget {
         // Parent before children: statement-shaped construction is
         // parent-first in every language (expression trees are
         // children-first because arguments evaluate before the call) —
         // creation order is observable (column#N) and derivable from
         // the construction style, never per-language trivia.
         let parent = widget(kind)
+        if let grow { setGrow(parent, grow) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         children()
         let ids = app.childFrames.removeLast().ids
