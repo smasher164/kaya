@@ -510,9 +510,26 @@ normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,
   AppKit reserves space, XAML distinguishes Collapsed from Hidden.
+- The mounted root fills its window. AppKit's contentView and UIKit's
+  root view do this by construction; a GTK child obeys its own align and
+  hugs its content in a corner instead, which leaves no free space
+  anywhere in the tree and silently makes every grow weight divide
+  nothing. Settled when `grow` landed.
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
-- Grow distribution normalized to explicit weights.
+- Grow distribution normalized to explicit weights. Settled when `grow`
+  landed: weight 0 is natural size, and the positive-weight children
+  divide the *leftover* main-axis space in proportion to their weights,
+  their own natural sizes not entering the division — the contract CSS
+  states as `flex-basis: 0`, and the one Compose `Modifier.weight`, XAML
+  star sizing, and Android `layout_weight` (at a 0 main-axis size)
+  already implement. Those backends get it for free. The two that have
+  no native weight must construct it: AppKit expresses the ratios as
+  pairwise Auto Layout constraints between growers (hugging priority
+  alone is *ordinal* — it picks who stretches first, not by how much,
+  and would render 1:3 differently on every platform), and GTK4 needs a
+  custom `GtkLayoutManager`, since `hexpand` is a boolean that splits
+  space equally among expanders and cannot express a ratio at all.
 - Height-for-width (wrapping labels in stacks) gets dedicated conformance
   tests from day one; it is the most notorious cross-engine divergence.
 - One logical coordinate unit, with defined fractional-scale rounding.

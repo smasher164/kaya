@@ -1,16 +1,18 @@
-//! The layout scene: the native-default observation vehicle. No layout
-//! props exist yet — row/column carry only their axis — so this scene
-//! exists to be *looked at* under KAYA_RECORD, not asserted on. It
-//! stresses the axes where the seven backends' native defaults diverge:
-//! main-axis free-space distribution, cross-axis alignment of
-//! unequal-height children, and nesting. The recording tells us which
-//! native defaults read as good, bad, or ugly before we design any
-//! spacing/grow/align vocabulary.
+//! The layout scene: the native-default observation vehicle, and now
+//! also the `grow` conformance scene. It stresses the axes where the
+//! seven backends' native defaults diverge: main-axis free-space
+//! distribution, cross-axis alignment of unequal-height children, and
+//! nesting. The recording (KAYA_RECORD) tells us which native defaults
+//! read as good, bad, or ugly before we design the rest of the
+//! spacing/align vocabulary.
 //!
 //! The two label expects (KAYA_SELFTEST=layout) only prove the tree
-//! built end to end and clear the zero-expect guard — layout itself is
-//! not yet harness-observable (there is no geometry Stage method; that
-//! decision is deferred until after this observation).
+//! built end to end and clear the zero-expect guard. This scene stays
+//! an observation vehicle and asserts no geometry: it has two columns,
+//! and a container target indexes by creation order, which legitimately
+//! differs per language — so no column here can be named safely (see
+//! tools/check-steps.sh). The `grow` contract is asserted in the `grow`
+//! scene instead, whose single column is unambiguous.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     // No event vocabulary: this scene registers no handlers, so the
@@ -41,7 +43,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.row(|tx| {
                 tx.checkbox("check");
                 tx.label(mixed); // label#2
-                tx.slider(0.0, 1.0, 0.5);
+                // grow=1: the slider fills the leftover row width instead
+                // of hugging its intrinsic size — the first explicit
+                // layout prop, exercised.
+                let s = tx.slider(0.0, 1.0, 0.5);
+                tx.grow(s, 1.0);
+            });
+
+            // Proportional grow: two growers of unequal weight in one
+            // row. The single-grower case above only proves a grower
+            // absorbs leftover space, which an ordinal priority also
+            // does; only two growers pin down the actual contract, that
+            // they divide the leftover 1:3 regardless of their own
+            // intrinsic sizes. Sliders because they have an intrinsic
+            // width to be overridden.
+            tx.row(|tx| {
+                let thin = tx.slider(0.0, 1.0, 0.25);
+                tx.grow(thin, 1.0);
+                let wide = tx.slider(0.0, 1.0, 0.75);
+                tx.grow(wide, 3.0);
             });
 
             // Nesting: a column inside the root column, with a row inside

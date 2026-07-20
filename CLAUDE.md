@@ -74,6 +74,11 @@ in docs/deferred.md.
    semantics, all languages), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
+   One gate sits outside validate-mac because it needs docker:
+   `tools/check-gtk.sh` compile-checks the GTK backend, which
+   check-targets structurally cannot (gtk-sys needs the distro's
+   pkg-config world). Run it after any gtk.rs change — a green
+   check-targets does NOT mean every backend compiles.
 3. `tools/validate-mac.sh` — every scene × every language × AppKit and
    SwiftUI (opens windows briefly; needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:

@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x8a6b17e10c7a5c34
+	SpecHash uint64 = 0x5a48b5ad11a4cb51
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -33,6 +33,7 @@ const (
 	PropMin = 4
 	PropMax = 5
 	PropSource = 6
+	PropGrow = 7
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -493,6 +494,38 @@ func TxBindSourceElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropSource)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetGrow: set_property with a constant grow value.
+func TxSetGrow(widgetID uint64, grow float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropGrow)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, grow)
+	return endRecord(b)
+}
+
+// TxBindGrow: set_property with a signal-bound grow value.
+func TxBindGrow(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropGrow)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindGrowElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindGrowElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropGrow)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

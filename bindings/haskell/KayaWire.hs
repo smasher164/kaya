@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x8a6b17e10c7a5c34
+specHash = 0x5a48b5ad11a4cb51
 
 valueBool :: Word32
 valueBool = 1
@@ -64,6 +64,8 @@ propMax :: Word32
 propMax = 5
 propSource :: Word32
 propSource = 6
+propGrow :: Word32
+propGrow = 7
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -356,6 +358,25 @@ txBindSource widgetId signalId = wireRecord txKindSetProperty
 txBindSourceElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindSourceElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propSource <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant grow value.
+txSetGrow :: Word64 -> Double -> Builder
+txSetGrow widgetId grow = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGrow <> word32LE sourceConst
+    <> encodeValue (VF64 grow))
+
+-- set_property with a signal-bound grow value.
+txBindGrow :: Word64 -> Word64 -> Builder
+txBindGrow widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGrow <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindGrowElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindGrowElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGrow <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- Decode one value at offset `at` from the record base; returns the

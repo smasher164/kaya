@@ -65,5 +65,44 @@ for f in tools/scenes/*.steps; do
         status=1
     }
 done
+
+# Every scene script must be reachable by name from harness::script.
+# That match ends in a catch-all returning the milestone2 script, so an
+# unregistered scene does not fail — it silently runs a DIFFERENT
+# script, and a leg that passes then proves nothing about the scene it
+# claims to be. Registration is easy to forget precisely because
+# nothing downstream complains.
+registered() {
+    python3 -c '
+import glob
+import os
+import re
+import sys
+
+source = open("crates/kaya/src/harness.rs").read()
+# The arms look like:  "grow" => Some(include_str!(".../grow.steps")),
+arms = set(re.findall(r"\"([a-z0-9_]+)\"\s*=>\s*Some\(include_str!", source))
+missing = [
+    name
+    for name in sorted(
+        os.path.splitext(os.path.basename(p))[0] for p in glob.glob("tools/scenes/*.steps")
+    )
+    # milestone2 is the catch-all arm itself, reached as "1" and as any
+    # unknown name; it is registered by being the default.
+    if name not in arms and name != "milestone2"
+]
+print("\n".join(missing))
+sys.exit(1 if missing else 0)
+'
+}
+
+if out="$(registered)"; then
+    :
+else
+    echo "check-steps: scene script(s) not registered in harness::script — KAYA_SELFTEST=<name> would silently run the milestone2 script instead of failing:" >&2
+    echo "$out" >&2
+    status=1
+fi
+
 [ "$status" = 0 ] && echo "check-steps: OK"
 exit "$status"

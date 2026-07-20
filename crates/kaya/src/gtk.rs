@@ -21,6 +21,260 @@ use crate::protocol::{
 };
 use crate::scene::Scene;
 
+/// Where a child's grow weight is parked so the layout manager can find
+/// it. GTK's own channel for per-child layout data is a `GtkLayoutChild`
+/// subclass, which would mean a second GObject type and a factory method
+/// on the manager; a keyed data item on the child widget carries the one
+/// f64 we need with none of that, and lives and dies with the widget.
+const GROW_KEY: &str = "kaya-grow";
+
+fn grow_weight(widget: &gtk4::Widget) -> f64 {
+    // SAFETY: the key is private to this module and only ever set to an
+    // f64 by set_grow_weight below.
+    unsafe {
+        widget
+            .data::<f64>(GROW_KEY)
+            .map(|p| *p.as_ref())
+            .unwrap_or(0.0)
+    }
+}
+
+fn set_grow_weight(widget: &gtk4::Widget, weight: f64) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(GROW_KEY, weight) }
+}
+
+/// Reconcile a child's main-axis alignment with its weight.
+///
+/// Without this, `grow` on GTK would silently do nothing. GTK applies a
+/// widget's own halign/valign *inside* the rect its parent allocated, so
+/// a grower still carrying the normalized `Start` alignment would be
+/// handed its full share and then shrink itself back to natural size
+/// within it — the layout manager's arithmetic correct and completely
+/// invisible. `Fill` on the main axis is what makes a child actually
+/// occupy what it was given; the cross axis keeps `Start`, which is the
+/// normalized default and what makes labels read left-aligned rather
+/// than centered in a stretched box.
+fn reconcile_grow_align(child: &gtk4::Widget) {
+    let Some(parent) = child.parent() else { return };
+    // The axis comes from our own manager, not from GtkBox::orientation:
+    // that property belongs to the GtkBoxLayout we replaced, so reading
+    // it back off the Box is asking a manager that is no longer there.
+    let Some(layout) = parent.layout_manager() else {
+        return;
+    };
+    let Some(flex) = layout.downcast_ref::<flex::FlexLayout>() else {
+        return;
+    };
+    let fill_or_start = if grow_weight(child) > 0.0 {
+        gtk4::Align::Fill
+    } else {
+        gtk4::Align::Start
+    };
+    match flex.orientation() {
+        gtk4::Orientation::Vertical => child.set_valign(fill_or_start),
+        _ => child.set_halign(fill_or_start),
+    }
+}
+
+/// The flex layout manager: GTK's half of the `grow` contract.
+///
+/// GtkBox cannot express this. Its only knob is the boolean
+/// `hexpand`/`vexpand`, and extra space is split *equally* among the
+/// children that set it — there is no per-child weight anywhere in the
+/// widget, so a 1:3 request is not merely awkward to spell, it is
+/// unrepresentable. Hence a real layout manager, which is also the
+/// GTK-blessed way to add a layout policy rather than fighting one.
+///
+/// The policy is the one on [`Prop::Grow`]: weight-0 children take their
+/// natural main-axis size, and the growers divide what is left in
+/// proportion to their weights, their own natural sizes not entering the
+/// division.
+mod flex {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    pub struct FlexLayoutInner {
+        pub orientation: std::cell::Cell<gtk4::Orientation>,
+        pub spacing: std::cell::Cell<i32>,
+    }
+
+    // Hand-written rather than derived: gtk4::Orientation has no Default,
+    // and ObjectSubclass requires one because GObject constructs the
+    // instance before any of our code runs. FlexLayout::new overwrites
+    // both fields immediately.
+    impl Default for FlexLayoutInner {
+        fn default() -> Self {
+            Self {
+                orientation: std::cell::Cell::new(gtk4::Orientation::Vertical),
+                spacing: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FlexLayoutInner {
+        const NAME: &'static str = "KayaFlexLayout";
+        type Type = FlexLayout;
+        type ParentType = gtk4::LayoutManager;
+    }
+
+    impl ObjectImpl for FlexLayoutInner {}
+
+    impl FlexLayoutInner {
+        fn is_main(&self, orientation: gtk4::Orientation) -> bool {
+            orientation == self.orientation.get()
+        }
+    }
+
+    impl LayoutManagerImpl for FlexLayoutInner {
+        fn measure(
+            &self,
+            widget: &gtk4::Widget,
+            orientation: gtk4::Orientation,
+            for_size: i32,
+        ) -> (i32, i32, i32, i32) {
+            let (mut minimum, mut natural, mut count) = (0, 0, 0);
+            let mut child = widget.first_child();
+            while let Some(c) = child {
+                if c.is_visible() {
+                    let (cmin, cnat, _, _) = c.measure(orientation, for_size);
+                    if self.is_main(orientation) {
+                        // Along the axis the children queue on, extents
+                        // add up; across it they overlap, so the widest
+                        // child sets the requirement.
+                        minimum += cmin;
+                        natural += cnat;
+                    } else {
+                        minimum = minimum.max(cmin);
+                        natural = natural.max(cnat);
+                    }
+                    count += 1;
+                }
+                child = c.next_sibling();
+            }
+            if self.is_main(orientation) && count > 1 {
+                let gaps = self.spacing.get() * (count - 1);
+                minimum += gaps;
+                natural += gaps;
+            }
+            (minimum, natural, -1, -1)
+        }
+
+        fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {
+            let vertical = self.orientation.get() == gtk4::Orientation::Vertical;
+            let (main_total, cross_total) = if vertical {
+                (height, width)
+            } else {
+                (width, height)
+            };
+
+            // Pass 1: what the non-growers need, and the weight pool.
+            let mut children = Vec::new();
+            let mut child = widget.first_child();
+            while let Some(c) = child {
+                if c.is_visible() {
+                    let weight = super::grow_weight(&c);
+                    let natural = if weight > 0.0 {
+                        // A grower's own natural size is deliberately not
+                        // consulted: the contract is flex-basis 0, so it
+                        // starts from nothing and lives on its share.
+                        0
+                    } else {
+                        c.measure(self.orientation.get(), -1).1
+                    };
+                    children.push((c.clone(), weight, natural));
+                }
+                child = c.next_sibling();
+            }
+            if children.is_empty() {
+                return;
+            }
+            let gaps = self.spacing.get() * (children.len() as i32 - 1);
+            let fixed: i32 = children.iter().map(|(_, _, nat)| *nat).sum();
+            let leftover = (main_total - fixed - gaps).max(0);
+            let pool: f64 = children.iter().map(|(_, w, _)| *w).sum();
+
+            // Pass 2: place them. The growers' shares are handed out
+            // exactly, without clamping to their minimum sizes — the
+            // split is the contract, while what a too-small container
+            // should do is the overflow policy DESIGN still defers. A
+            // clamp here would silently turn 1:3 into something else in
+            // a tight window, which is the one failure this whole verb
+            // exists to catch.
+            let mut offset = 0;
+            let mut spent = 0;
+            let growers = children.iter().filter(|(_, w, _)| *w > 0.0).count();
+            let mut seen = 0;
+            for (c, weight, natural) in &children {
+                let extent = if *weight > 0.0 {
+                    seen += 1;
+                    if seen == growers {
+                        // The last grower absorbs the rounding dust, so
+                        // the children always fill the container exactly
+                        // instead of leaving a stray pixel.
+                        leftover - spent
+                    } else {
+                        let share = (leftover as f64 * weight / pool).round() as i32;
+                        spent += share;
+                        share
+                    }
+                } else {
+                    *natural
+                };
+                let (w, h, x, y) = if vertical {
+                    (cross_total, extent, 0, offset)
+                } else {
+                    (extent, cross_total, offset, 0)
+                };
+                let transform = gtk4::gsk::Transform::new()
+                    .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                c.allocate(w, h, baseline, Some(transform));
+                offset += extent + self.spacing.get();
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct FlexLayout(ObjectSubclass<FlexLayoutInner>)
+            @extends gtk4::LayoutManager;
+    }
+
+    impl FlexLayout {
+        pub fn new(orientation: gtk4::Orientation, spacing: i32) -> Self {
+            let this: Self = glib::Object::new();
+            this.imp().orientation.set(orientation);
+            this.imp().spacing.set(spacing);
+            this
+        }
+
+        /// The axis this manager stacks on — the authority now that the
+        /// GtkBoxLayout that used to own the property has been replaced.
+        pub fn orientation(&self) -> gtk4::Orientation {
+            self.imp().orientation.get()
+        }
+    }
+
+    /// Read a child's main-axis extent as the manager allocated it.
+    ///
+    /// The allocation, not `width()`/`height()`: those report the CSS
+    /// box, which the theme insets inside the allocation — Adwaita takes
+    /// 10pt out of a button's height — so they answer "how big is the
+    /// widget drawn" when the layout contract asks "how much of the axis
+    /// was it given". Reading them turned an exactly correct 25/75 split
+    /// into 27/73. Same trap as AppKit's alignment rect versus frame,
+    /// and the reason child_shares specifies the layout rect everywhere.
+    pub fn child_extent(child: &gtk4::Widget, vertical: bool) -> f64 {
+        let allocation = child.allocation();
+        if vertical {
+            f64::from(allocation.height())
+        } else {
+            f64::from(allocation.width())
+        }
+    }
+}
+
 enum NativeWidget {
     Column(gtk4::Box),
     Button(gtk4::Button),
@@ -128,6 +382,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                     column.set_halign(gtk4::Align::Start);
                     column.set_valign(gtk4::Align::Start);
+                    // The flex manager replaces GtkBox's own layout
+                    // wholesale; the Box stays only as the child-holding
+                    // container. Spacing moves with it, since the
+                    // manager now owns the gaps.
+                    column.set_layout_manager(Some(flex::FlexLayout::new(
+                        gtk4::Orientation::Vertical,
+                        8,
+                    )));
                     core.columns.push(column.clone());
                     NativeWidget::Column(column)
                 }
@@ -135,6 +397,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                     row.set_halign(gtk4::Align::Start);
                     row.set_valign(gtk4::Align::Start);
+                    row.set_layout_manager(Some(flex::FlexLayout::new(
+                        gtk4::Orientation::Horizontal,
+                        8,
+                    )));
                     NativeWidget::Row(row)
                 }
                 WidgetKind::Checkbox => {
@@ -265,6 +531,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Slider(scale), Prop::Max, Value::F64(v)) => {
                     scale.adjustment().set_upper(v);
                 }
+                // Kind-agnostic, like the prop itself: the weight rides
+                // on the widget and the parent's flex manager reads it
+                // at allocate time.
+                (w, Prop::Grow, Value::F64(weight)) => {
+                    let widget = w.widget();
+                    set_grow_weight(&widget, weight);
+                    reconcile_grow_align(&widget);
+                    // The split belongs to the whole sibling set, so the
+                    // parent re-runs, not just this child.
+                    if let Some(parent) = widget.parent() {
+                        parent.queue_resize();
+                    }
+                }
                 (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => {
                     // Encoded bytes in, native decode:
                     // gdk::Texture::from_bytes reads encoded PNG/JPEG.
@@ -299,6 +578,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 NativeWidget::Row(row) => row.append(&child_widget),
                 _ => panic!("kaya: add_child parent is not a container"),
             }
+            // Only now is the parent — and so the main axis — known, so
+            // a weight that arrived before the child was attached gets
+            // its alignment here rather than being dropped.
+            reconcile_grow_align(&child_widget);
         }
         ApplyOp::Mount { window: _, root } => {
             let root_widget = core
@@ -306,6 +589,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .get(&root)
                 .expect("scene validated the id")
                 .widget();
+            // The root fills its window, as it does on every other
+            // backend — AppKit's contentView and UIKit's root view fill
+            // by construction, while a GTK child obeys its own align and
+            // would otherwise hug its content in the top-left corner.
+            // Without this there is no leftover space anywhere in the
+            // tree, so every grow weight in the scene divides nothing.
+            root_widget.set_halign(gtk4::Align::Fill);
+            root_widget.set_valign(gtk4::Align::Fill);
             core.window.set_child(Some(&root_widget));
         }
         ApplyOp::Command { id, command } => {
@@ -520,6 +811,26 @@ impl crate::harness::Stage for GtkStage {
                 child = widget.next_sibling();
             }
             texts.join("|")
+        })
+    }
+
+    fn child_shares(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let column = &core.columns[i];
+            // Pending resizes must land before the sizes mean anything;
+            // otherwise the first read after mount sees zeros.
+            while glib::MainContext::default().iteration(false) {}
+            // Vertical because the target kind is Column, matching the
+            // other backends: only columns are registered.
+            let mut extents = Vec::new();
+            let mut child = column.first_child();
+            while let Some(widget) = child {
+                extents.push(flex::child_extent(&widget, true));
+                child = widget.next_sibling();
+            }
+            crate::harness::shares(&extents)
         })
     }
 

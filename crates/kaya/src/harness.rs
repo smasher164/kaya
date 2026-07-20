@@ -44,6 +44,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "reorder" => Some(include_str!("../../../tools/scenes/reorder.steps")),
         "feed" => Some(include_str!("../../../tools/scenes/feed.steps")),
         "layout" => Some(include_str!("../../../tools/scenes/layout.steps")),
+        "grow" => Some(include_str!("../../../tools/scenes/grow.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -84,6 +85,17 @@ pub enum Step {
     /// focus command is verified by (there is no other way to see
     /// focus land).
     ExpectFocused(Target),
+    /// Expect the container's children to occupy the given `,`-joined
+    /// percentages of the main axis — the observation layout weights
+    /// are verified by.
+    ///
+    /// Shares, never sizes: absolute geometry is a *metric*, which
+    /// DESIGN leaves platform-flavored, so a size assertion could not
+    /// be shared byte-for-byte the way every other expect is. A share
+    /// is *semantics*, and identical everywhere by construction — give
+    /// a container none but growing children and the split is exactly
+    /// weight/Σweight whatever the platform's control metrics are.
+    ExpectShares(Target, String),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -116,6 +128,21 @@ pub trait Stage: Send + 'static {
     /// panic on the first reorder leg (which is how the GTK gap
     /// reached the Linux suite).
     fn child_texts(&self, target: Target) -> String;
+    /// The main-axis extents of the container's children, in child
+    /// order, each as a whole percentage of their sum, joined with `,`
+    /// — the observation expect_shares verifies, and the only way a
+    /// layout weight is observable at all.
+    ///
+    /// Their sum, not the container's extent: spacing and padding are
+    /// platform metrics, so dividing by the container would leak them
+    /// into the number and break the byte-for-byte comparison. Read the
+    /// alignment/layout rect where the toolkit distinguishes it from
+    /// the drawing frame (AppKit inflates a slider's frame past its
+    /// alignment rect, which would read 1:3 as 2.90:1).
+    ///
+    /// No default, like child_texts: a backend that forgets it must
+    /// fail to compile rather than pass a layout leg vacuously.
+    fn child_shares(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -188,6 +215,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_order wants a target and a string: {line:?}")
                 })?;
                 Step::ExpectOrder(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_shares" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_shares wants a target and a string: {line:?}")
+                })?;
+                Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -292,7 +325,15 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     // mangled the text into a comment must fail, not pass.
     if !steps
         .iter()
-        .any(|s| matches!(s, Step::Expect(..) | Step::ExpectOrder(..) | Step::ExpectFocused(..)))
+        .any(|s| {
+            matches!(
+                s,
+                Step::Expect(..)
+                    | Step::ExpectOrder(..)
+                    | Step::ExpectFocused(..)
+                    | Step::ExpectShares(..)
+            )
+        })
     {
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
         return;
@@ -336,6 +377,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("{t:?} ordered {got:?}, wanted {want:?}"));
                 }
             }
+            Step::ExpectShares(t, want) => {
+                let got = stage.child_shares(*t);
+                if got == *want {
+                    observed.push(got);
+                } else {
+                    failures.push(format!("{t:?} splits {got:?}, wanted {want:?}"));
+                }
+            }
             Step::ExpectFocused(t) => {
                 if stage.is_focused(*t) {
                     observed.push(format!("{t:?} focused"));
@@ -350,6 +399,28 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     } else {
         stage.finish(1, &format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")));
     }
+}
+
+/// Format child main-axis extents as whole-percentage shares of their
+/// sum, joined with `,` — the one implementation every backend's
+/// `child_shares` formats through.
+///
+/// Shared because the *rounding* has to be identical everywhere, not
+/// just the arithmetic: expect_shares compares byte-for-byte, so a
+/// backend that rounded 24.6 to 24 while another rounded to 25 would
+/// fail a leg over a formatting difference and read as a layout bug.
+/// An empty container, or one whose children are all zero-extent,
+/// reports the empty string rather than dividing by zero.
+pub fn shares(extents: &[f64]) -> String {
+    let total: f64 = extents.iter().sum();
+    if total <= 0.0 {
+        return String::new();
+    }
+    extents
+        .iter()
+        .map(|e| format!("{}", (e / total * 100.0).round() as i64))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Resolve `#last` against a registry length; panics on out-of-range,
@@ -390,6 +461,30 @@ mod tests {
         assert!(parse("warp reality#0").is_err());
         assert_eq!(resolve(-1, 3), 2);
         assert_eq!(resolve(1, 3), 1);
+        assert_eq!(
+            parse("expect_shares column#1 \"25,75\"").unwrap()[0],
+            Step::ExpectShares(
+                Target { kind: TargetKind::Column, index: 1 },
+                "25,75".into()
+            )
+        );
+    }
+
+    /// Shares are percentages of the children's *sum*, so container
+    /// spacing and padding — platform metrics both — stay out of the
+    /// number, and every backend rounds identically.
+    #[test]
+    fn shares_are_percentages_of_the_child_sum() {
+        assert_eq!(shares(&[78.0, 234.0]), "25,75");
+        // Same split, different absolute metrics: the whole point.
+        assert_eq!(shares(&[7.8, 23.4]), "25,75");
+        // Spacing is not subtracted here because it was never added:
+        // a container 8pt wider does not move the shares.
+        assert_eq!(shares(&[1.0, 1.0, 2.0]), "25,25,50");
+        // Degenerate containers report nothing rather than dividing by
+        // zero, so a backend cannot pass a leg with a collapsed tree.
+        assert_eq!(shares(&[]), "");
+        assert_eq!(shares(&[0.0, 0.0]), "");
     }
 
     /// A `;` inside a comment is prose, not a statement separator —
@@ -445,6 +540,9 @@ mod tests {
         fn child_texts(&self, _: Target) -> String {
             "a|b".into()
         }
+        fn child_shares(&self, _: Target) -> String {
+            "25,75".into()
+        }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -488,6 +586,34 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("ordered"), "{verdict}");
+    }
+
+    /// expect_shares counts as an expect for the zero-expect guard, and
+    /// compares against the stage's child_shares.
+    ///
+    /// The zero-expect half is the load-bearing half: a scene whose only
+    /// assertion is a layout one — which is exactly what a conformance
+    /// scene is — would otherwise be rejected as asserting nothing, and
+    /// the natural "fix" is to weaken the scene rather than the guard.
+    #[test]
+    fn expect_shares_is_an_expect() {
+        let steps = parse("expect_shares column#0 \"25,75\"").unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (25,75)");
+        // A wrong split fails loudly rather than being tolerated: the
+        // whole point of the verb is that an ordinal or equal-split
+        // implementation cannot pass.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_shares column#0 \"50,50\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("splits"), "{verdict}");
     }
 
     /// The verdict format is load-bearing: the suites grep

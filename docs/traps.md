@@ -6,6 +6,30 @@ these the hard way.
 
 ## Platform / toolkit
 
+- **Layout readback must use the layout rect, never the drawing box.**
+  Every toolkit separates the rect it *allocated* to a widget from the
+  box it *draws* it in, and only the first is what a layout contract
+  talks about. AppKit inflates a slider's frame 2pt a side past its
+  alignment rect; GTK's Adwaita theme insets a button 10pt inside its
+  allocation via the CSS box. Reading the drawing box turned an exactly
+  correct 25/75 grow split into 2.90:1 on AppKit and 27/73 on GTK —
+  both times the layout code was right and the *measurement* was wrong,
+  which is the expensive way to debug it. Use
+  `alignmentRectForFrame(frame)` on AppKit and `allocation()` rather
+  than `width()`/`height()` on GTK. Guard: `Stage::child_shares` states
+  it in its contract, and the `grow` scene fails loudly when a backend
+  ignores it (the GTK implementation still got it wrong first time).
+- **A conformance scene must keep every share above every platform's
+  minimum control size.** A share below it is clamped by the toolkit,
+  and the scene then silently measures the minimum instead of the
+  contract. Three shares of a 144pt column put the smallest at 28pt,
+  under GTK's 34pt minimum button height; the `grow` scene uses two
+  children at 25/75 (38 and 114pt) for exactly this reason.
+- **A GTK child hugs where an AppKit contentView fills.** The mounted
+  root obeys its own align on GTK, so it sat in the top-left at natural
+  size and left no free space anywhere in the tree — every grow weight
+  then divided nothing. The backend now forces Fill on the root; the
+  normalization is recorded in DESIGN's layout worklist.
 - **ART truncates VarHandle byte-buffer-view addresses to 32 bits** in
   the interpreter, and its `Unsafe` (Object, long) volatile accessors
   are heap-only. The working JVM ring formulation: Unsafe absolute

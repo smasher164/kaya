@@ -20,12 +20,12 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
-    NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSLayoutAttribute, NSSlider,
-    NSStackView, NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow,
-    NSWindowStyleMask,
+    NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSLayoutAttribute,
+    NSLayoutConstraint, NSLayoutConstraintOrientation, NSLayoutRelation, NSSlider, NSStackView,
+    NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSData, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+    NSArray, NSData, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
 
 use crate::protocol::{
@@ -75,6 +75,13 @@ struct CoreState {
     sliders: Vec<(Retained<NSSlider>, Retained<ButtonTarget>)>,
     images: Vec<Retained<NSImageView>>,
     columns: Vec<Retained<NSStackView>>,
+    // Flex bookkeeping. A weight is set on a child but solved on its
+    // parent — the split is a property of the whole sibling set — so
+    // the enclosing stack has to be findable from the child, and its
+    // constraints rebuilt whole whenever any of that set changes.
+    parents: HashMap<WidgetId, WidgetId>,
+    grow: HashMap<WidgetId, f64>,
+    grow_constraints: HashMap<WidgetId, Vec<Retained<NSLayoutConstraint>>>,
     // Held so targets and the delegates outlive the objects that
     // reference them weakly.
     _targets: Vec<Retained<ButtonTarget>>,
@@ -112,6 +119,97 @@ fn drain_transactions() {
             }
         }
     });
+}
+
+/// Re-solve one stack's flex split from scratch.
+///
+/// The blessed semantics are stated once on [`Prop::Grow`] and in
+/// DESIGN's layout-normalization worklist: weight 0 is natural size, and
+/// the positive-weight children divide the leftover main-axis space in
+/// proportion to their weights, their own natural sizes not entering the
+/// division.
+///
+/// AppKit has no weight of its own, so this expresses the split as
+/// pairwise Auto Layout constraints: every grower is pinned to the first
+/// grower's main-axis dimension times the ratio of their weights, which
+/// is exactly "proportional to weight" once the stack has handed the
+/// non-growers their natural sizes. Dropping the growers' hugging
+/// priority to the floor is what lets the stack stretch them at all —
+/// on its own that would only produce AppKit's ordinal behaviour, which
+/// is why the ratio constraints carry the actual contract.
+///
+/// The whole set is rebuilt on every change rather than patched: one
+/// weight moving re-proportions every sibling, so there is no smaller
+/// correct unit of work.
+fn resolve_grow(core: &mut CoreState, parent: WidgetId) {
+    // Only the axis is needed: the stack sizes the non-growers itself,
+    // and the ratios are expressed between the growers directly.
+    let axis = match core.widgets.get(&parent) {
+        Some(NativeWidget::Column(_)) => NSLayoutAttribute::Height,
+        Some(NativeWidget::Row(_)) => NSLayoutAttribute::Width,
+        // Destroyed, or never a container: nothing to solve.
+        _ => return,
+    };
+    if let Some(old) = core.grow_constraints.remove(&parent) {
+        NSLayoutConstraint::deactivateConstraints(&NSArray::from_retained_slice(&old));
+    }
+
+    // Sorted so the reference grower — and therefore the exact set of
+    // constraints emitted — is a function of the scene, not of hash
+    // order. Same scene, same constraints, every run.
+    let mut children: Vec<WidgetId> = core
+        .parents
+        .iter()
+        .filter(|&(_, &p)| p == parent)
+        .map(|(&child, _)| child)
+        .collect();
+    children.sort_by_key(|id| id.0);
+
+    let orientation = match axis {
+        NSLayoutAttribute::Height => NSLayoutConstraintOrientation::Vertical,
+        _ => NSLayoutConstraintOrientation::Horizontal,
+    };
+    let mut growers: Vec<(Retained<objc2_app_kit::NSView>, f64)> = Vec::new();
+    for child in children {
+        let Some(widget) = core.widgets.get(&child) else {
+            continue;
+        };
+        let view = widget.view().retain();
+        let weight = core.grow.get(&child).copied().unwrap_or(0.0);
+        // A weight that stopped being positive has to have its hugging
+        // restored, or the child would keep stretching after its grow
+        // went back to 0.
+        view.setContentHuggingPriority_forOrientation(
+            if weight > 0.0 { 1.0 } else { 250.0 },
+            orientation,
+        );
+        if weight > 0.0 {
+            growers.push((view, weight));
+        }
+    }
+
+    // One grower needs no ratio — the lowered hugging already hands it
+    // the leftover. Ratios only mean anything between two of them.
+    if growers.len() < 2 {
+        return;
+    }
+    let (reference, reference_weight) = growers[0].clone();
+    let made: Vec<Retained<NSLayoutConstraint>> = growers[1..]
+        .iter()
+        .map(|(view, weight)| unsafe {
+            NSLayoutConstraint::constraintWithItem_attribute_relatedBy_toItem_attribute_multiplier_constant(
+                view,
+                axis,
+                NSLayoutRelation::Equal,
+                Some(&reference),
+                axis,
+                weight / reference_weight,
+                0.0,
+            )
+        })
+        .collect();
+    NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&made));
+    core.grow_constraints.insert(parent, made);
 }
 
 fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
@@ -251,12 +349,40 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 None => stack.arrangedSubviews().count() as isize,
             };
             stack.insertArrangedSubview_atIndex(&child_view, index);
+            // Order does not enter the ratios, but the parent is recorded
+            // again in case the move crossed containers.
+            core.parents.insert(child, parent);
+            resolve_grow(core, parent);
         }
         ApplyOp::Destroy { id } => {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             widget.view().removeFromSuperview();
+            core.grow.remove(&id);
+            // Constraints referencing a destroyed view have to go before
+            // the sibling set is re-solved; a stack that is itself being
+            // destroyed simply drops its (now empty) entry.
+            core.grow_constraints.remove(&id);
+            if let Some(parent) = core.parents.remove(&id) {
+                resolve_grow(core, parent);
+            }
         }
         ApplyOp::SetProp { id, prop, value } => {
+            // Grow is handled ahead of the per-kind table, and not as an
+            // arm inside it: it is the one prop that is kind-agnostic and
+            // whose effect lands on the parent rather than the widget, so
+            // it needs `core` mutably while the table holds a widget
+            // borrow.
+            if let (Prop::Grow, Value::F64(weight)) = (prop, &value) {
+                debug_assert!(
+                    core.widgets.contains_key(&id),
+                    "scene validated the id"
+                );
+                core.grow.insert(id, *weight);
+                if let Some(&parent) = core.parents.get(&id) {
+                    resolve_grow(core, parent);
+                }
+                return;
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
@@ -315,6 +441,11 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 }
                 _ => panic!("kaya: add_child parent is not a container"),
             }
+            core.parents.insert(child, parent);
+            // The sibling set changed, so the split changes with it —
+            // even when this child has no weight of its own, since the
+            // leftover it consumes is what the growers divide.
+            resolve_grow(core, parent);
         }
         ApplyOp::Mount { window: _, root } => {
             let root_view = core.widgets.get(&root).expect("scene validated the id");
@@ -550,6 +681,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             sliders: Vec::new(),
             images: Vec::new(),
             columns: Vec::new(),
+            parents: HashMap::new(),
+            grow: HashMap::new(),
+            grow_constraints: HashMap::new(),
             _targets: Vec::new(),
             _entry_delegates: Vec::new(),
             _window: window,
@@ -690,6 +824,28 @@ impl crate::harness::Stage for AppKitStage {
                 }
             }
             texts.join("|")
+        })
+    }
+
+    fn child_shares(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let stack = &core.columns[i];
+            // Constraints are solved lazily; without this the first read
+            // after mount would see the pre-layout frames.
+            stack.layoutSubtreeIfNeeded();
+            // The alignment rect, not the frame: AppKit inflates some
+            // controls' frames past the rect Auto Layout actually
+            // constrains (a slider by 2pt a side), which would report a
+            // 1:3 split as 2.90:1.
+            // Height because the target kind is Column: only columns
+            // are registered, so the main axis is always vertical here.
+            let mut extents = Vec::new();
+            for child in stack.arrangedSubviews() {
+                let rect = child.alignmentRectForFrame(child.frame());
+                extents.push(rect.size.height);
+            }
+            crate::harness::shares(&extents)
         })
     }
 

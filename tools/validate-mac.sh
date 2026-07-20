@@ -43,7 +43,8 @@ timing() {
 # check keeps guests from compiling against an ABI the source has left
 # behind.
 cargo build --lib --example milestone2 --example entry \
-    --example gallery --example todos --example reorder --example feed || exit 1
+    --example gallery --example todos --example reorder --example feed \
+    --example grow || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -425,6 +426,12 @@ run feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dyli
 run feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/feed.exe
 run feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
+
+# The grow scene (the layout contract: a column of nothing but growers
+# splits weight/Sigma-weight, read back as shares). Rust only so far —
+# the scene lands depth-first like every other, and the remaining seven
+# guests come with the breadth phase.
+run grow-rust env KAYA_SELFTEST=grow target/debug/examples/grow
 
 drain
 

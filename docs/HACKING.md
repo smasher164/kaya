@@ -93,7 +93,11 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   serial; KAYA_RECORD=1 for recording mode). Legs open real windows.
 - Linux: `tools/validate-linux.sh` (docker; X11 + Wayland rings;
   container builds use a separate target dir — never share mac build
-  artifacts with the container).
+  artifacts with the container). After touching `gtk.rs`, reach first
+  for `tools/check-gtk.sh` — a `cargo check` in the cached image, the
+  compile rung `check-targets.sh` cannot provide for GTK. Every bug in
+  the first flex-layout-manager cut needed the container to surface;
+  this is the cheap version of that trip.
 - iOS: `tools/ios/run-sim.sh` (env reaches the app via SIMCTL_CHILD_*).
 - Android: `tools/android/run-emulator.sh` (env via intent extras;
   scripts fold newlines to `;` for transport — comments are stripped

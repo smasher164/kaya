@@ -1,0 +1,20 @@
+# The grow conformance scene: the layout contract as an assertion
+# rather than a recording.
+#
+# column#0 is the scene's ONLY column, which is what makes naming it
+# safe — container targets index by creation order and that order
+# legitimately differs per language (see tools/check-steps.sh).
+#
+# Every one of its children is a grower and there are no others, so the
+# split is exactly weight/Sigma-weight: 1 and 3 out of a pool of 4
+# divide it 25/75 on every backend, whatever a label or a button happens
+# to measure there. Shares and never sizes — a size is a platform metric
+# and could not be compared byte-for-byte at all.
+#
+# The shares are kept large on purpose. A share that falls under a
+# platform's minimum control size gets clamped by the toolkit, and the
+# scene would then be measuring GTK's 34pt minimum button height rather
+# than the contract.
+settle 1500
+expect label#0 "grow probe"
+expect_shares column#0 "25,75"

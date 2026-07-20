@@ -39,8 +39,8 @@ use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
-    Application, ApplicationInitializationCallback, FocusState, RoutedEventHandler, UIElement,
-    UnhandledExceptionEventHandler, Window,
+    Application, ApplicationInitializationCallback, FocusState, FrameworkElement,
+    RoutedEventHandler, UIElement, UnhandledExceptionEventHandler, Window,
 };
 
 use crate::protocol::{
@@ -1112,6 +1112,25 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
             Ok(texts.join("|"))
+        })
+    }
+
+    fn child_shares(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let panel = &core.columns[i];
+            // Measure/arrange are lazy; force them or the first read
+            // after mount sees zeros.
+            panel.UpdateLayout()?;
+            let children = panel.Children()?;
+            // Height because the target kind is Column, as in the other
+            // backends: only columns are registered.
+            let mut extents = Vec::new();
+            for at in 0..children.Size()? {
+                let child = children.GetAt(at)?;
+                extents.push(child.cast::<FrameworkElement>()?.ActualHeight()?);
+            }
+            Ok(crate::harness::shares(&extents))
         })
     }
 

@@ -24,8 +24,10 @@ fi
 # Usage: check-targets.sh [native|ios|android|windows|all]   (default all)
 #
 # The Linux/GTK backend is the one absentee: gtk-sys needs the
-# distro's pkg-config world, so its compile check lives where it can
-# run — the validate-linux docker suite.
+# distro's pkg-config world, so its compile check cannot run here.
+# It has its own gate — tools/check-gtk.sh, a cargo check inside the
+# cached container — which is the one to run after touching gtk.rs.
+# Do not read a green here as "every backend compiles".
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

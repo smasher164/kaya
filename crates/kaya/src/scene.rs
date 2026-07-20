@@ -207,6 +207,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         Prop::Value | Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
         Prop::Source => matches!(kind, WidgetKind::Image),
+        // Layout weight is kind-agnostic: any child of a row/column may
+        // grow, so it applies to every widget kind.
+        Prop::Grow => true,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -236,6 +239,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Checked => ValueType::Bool,
         Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
         Prop::Source => ValueType::Blob,
+        Prop::Grow => ValueType::F64,
     }
 }
 
@@ -248,6 +252,21 @@ fn check_prop_value(prop: Prop, value: &Value) {
         value.type_of() == prop_value_type(prop),
         "kaya: {prop:?} cannot hold {value:?}"
     );
+    // Grow's domain is narrower than its type. A negative weight has no
+    // reading under "divide the leftover in proportion to the weights" —
+    // it is not a small share, it is not a contract at all — and every
+    // backend would have to invent its own answer: the AppKit path would
+    // build a constraint with a negative multiplier, the GTK one would
+    // hand out a negative allocation, and neither would look like the
+    // other. Nonsense dies at the root, where the answer is the same in
+    // all eight languages, rather than turning into seven silent
+    // behaviours.
+    if let (Prop::Grow, Value::F64(weight)) = (prop, value) {
+        assert!(
+            *weight >= 0.0 && weight.is_finite(),
+            "kaya: grow weight must be finite and non-negative, got {weight}"
+        );
+    }
 }
 
 /// An entry's record against its collection's schema: arity, then each
@@ -2220,6 +2239,44 @@ mod tests {
             TxOp::WriteSignal {
                 id: SignalId(1),
                 value: v("nope"),
+            },
+        ]);
+    }
+
+    /// A negative weight has no reading under the grow contract, so it
+    /// dies at the root rather than becoming a different improvisation
+    /// in each of seven backends.
+    #[test]
+    #[should_panic(expected = "grow weight must be finite and non-negative")]
+    fn negative_grow_weight_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget {
+                id: WidgetId(1),
+                kind: WidgetKind::Column,
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(-1.0)),
+            },
+        ]);
+    }
+
+    /// Zero is the default and must stay legal — the guard rejects
+    /// negatives, not the "no weight" case that every non-grower has.
+    #[test]
+    fn zero_grow_weight_is_legal() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget {
+                id: WidgetId(1),
+                kind: WidgetKind::Column,
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Grow,
+                value: PropValue::Const(Value::F64(0.0)),
             },
         ]);
     }

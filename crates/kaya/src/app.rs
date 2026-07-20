@@ -781,6 +781,15 @@ impl Tx<'_> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
+    /// A child's flex-grow weight within its enclosing row/column: 0
+    /// (the default) is natural size; the positive-weight children
+    /// divide the leftover main-axis space in proportion to their
+    /// weights, ignoring their own natural sizes. Kind-agnostic — any
+    /// child may grow. See [`Prop::Grow`] for the full contract.
+    pub fn grow(&mut self, widget: WidgetId, weight: f64) {
+        self.set(widget, Prop::Grow, weight);
+    }
+
     /// One-shot commands: momentary verbs into widget-owned state,
     /// riding this transaction like any write — the insert and the
     /// clear beside it commit together or not at all. Fire-and-forget:

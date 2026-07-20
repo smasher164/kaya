@@ -1069,6 +1069,43 @@ impl crate::harness::Stage for AndroidStage {
         })
     }
 
+    fn child_shares(&self, t: crate::harness::Target) -> String {
+        let column = {
+            let core = CORE.lock().unwrap();
+            let core = core.as_ref().expect("core set up");
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            core.columns[i].clone()
+        };
+        Self::on_ui(move |env| {
+            let count = env
+                .call_method(column.as_obj(), "getChildCount", "()I", &[])
+                .and_then(|v| v.i())
+                .expect("kaya: child count read failed");
+            // getHeight because the target kind is Column, as in the
+            // other backends: only columns are registered. Measured
+            // heights, read after the layout pass the harness's settle
+            // has already allowed for.
+            let mut extents = Vec::new();
+            for at in 0..count {
+                let child = env
+                    .call_method(
+                        column.as_obj(),
+                        "getChildAt",
+                        "(I)Landroid/view/View;",
+                        &[JValue::Int(at)],
+                    )
+                    .and_then(|v| v.l())
+                    .expect("kaya: child read failed");
+                let height = env
+                    .call_method(&child, "getHeight", "()I", &[])
+                    .and_then(|v| v.i())
+                    .expect("kaya: child height read failed");
+                extents.push(f64::from(height));
+            }
+            crate::harness::shares(&extents)
+        })
+    }
+
     fn finish(&self, code: i32, verdict: &str) {
         let verdict = verdict.to_owned();
         // A library must not kill its host, but the selftest app is the

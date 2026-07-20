@@ -106,6 +106,8 @@
 
 #define PROP_SOURCE 6
 
+#define PROP_GROW 7
+
 #define SOURCE_CONST 0
 
 #define SOURCE_SIGNAL 1
@@ -290,6 +292,8 @@
 #define KAYA_PROP_MAX 5
 
 #define KAYA_PROP_SOURCE 6
+
+#define KAYA_PROP_GROW 7
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.

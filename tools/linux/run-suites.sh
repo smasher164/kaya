@@ -18,7 +18,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -224,6 +224,11 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
     run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
+    # The grow scene (the layout contract): a column of nothing but
+    # growers splits weight/Sigma-weight, read back as shares. Rust only
+    # so far — the scene lands depth-first and the other guests come
+    # with the breadth phase.
+    run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
 done
 drain
 

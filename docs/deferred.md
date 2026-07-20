@@ -10,7 +10,38 @@ Landed history lives in git; this file only carries what is still open.
 
 - **Layout props**: spacing/grow/alignment; the layout-normalization
   worklist scenes. Recording mode (KAYA_RECORD=1) was built partly as
-  the cross-backend comparison vehicle for this.
+  the cross-backend comparison vehicle for this. `grow` is landing now
+  (spec + AppKit + GTK + Rust + the `grow` and `layout` scenes); still
+  open on it: the SwiftUI and Compose interpreters need the prop in all
+  four layers, the remaining 7 bindings need the `grow` sugar, and
+  **WinUI cannot express it at all as it stands** — both containers are
+  `StackPanel`, which has no star sizing, so Windows needs a migration
+  to `Grid` with `RowDefinition`/`ColumnDefinition` at `GridLength`
+  star. That is its own milestone: `Grid`, `ColumnDefinition`,
+  `RowDefinition` and `GridLength` are not even in the generated
+  bindings (the type filter in tools/winui-bindgen never names them),
+  so it means extending the filter, regenerating, and rewriting every
+  child insertion to maintain attached `Grid.Row`/`Grid.Column`
+  properties and reindex them on add/move/remove. `alignment` is the
+  prerequisite for grow being *visible* in a nested stack: kaya's
+  normalized cross-axis default is leading/natural, so a nested *column*
+  is only as wide as its content (rows do stretch to the parent's width,
+  as the AppKit frame dump confirmed).
+- ~~A geometry verb for the harness~~ LANDED as `expect_shares` /
+  `Stage::child_shares`, with the `grow` scene as its first user.
+  Shares, not sizes: a size is a platform metric and could never be
+  compared byte-for-byte, so the verb reports each child's main-axis
+  extent as a whole percentage of the children's *sum* (spacing and
+  padding excluded, since those are metrics too), and the scene gives
+  its column nothing but growers so the split is exactly
+  weight/Σweight. Traps found doing it: read the alignment/layout rect,
+  not the frame (AppKit inflates a slider's frame ±2 a side and would
+  report 1:3 as 2.90:1); force the pending layout pass before reading or
+  the first read after mount sees stale or zero geometry; and rounding
+  lives in one shared `harness::shares` so two backends cannot disagree
+  by a percentage point and read as a layout bug. Still open: the verb
+  exists in the five Rust backends but not the two interpreters, and
+  `grow` itself is implemented only on AppKit and GTK.
 - **Window vocabulary** (DESIGN open question #4): create_window,
   per-window mount targets, lifecycle (CloseRequested + veto default,
   Present, Close), sizing/titles, dialogs/modality, mobile capability

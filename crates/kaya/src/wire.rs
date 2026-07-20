@@ -74,6 +74,7 @@ pub const PROP_VALUE: u32 = 3;
 pub const PROP_MIN: u32 = 4;
 pub const PROP_MAX: u32 = 5;
 pub const PROP_SOURCE: u32 = 6;
+pub const PROP_GROW: u32 = 7;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -239,6 +240,7 @@ fn prop(raw: u32) -> Prop {
         PROP_MIN => Prop::Min,
         PROP_MAX => Prop::Max,
         PROP_SOURCE => Prop::Source,
+        PROP_GROW => Prop::Grow,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -769,6 +771,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Min => PROP_MIN,
         Prop::Max => PROP_MAX,
         Prop::Source => PROP_SOURCE,
+        Prop::Grow => PROP_GROW,
     }
 }
 

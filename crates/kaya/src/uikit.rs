@@ -688,6 +688,23 @@ impl crate::harness::Stage for UiKitStage {
         })
     }
 
+    fn child_shares(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.columns.len());
+            let stack = &core.columns[i];
+            // Constraints solve lazily; without this the first read
+            // after mount sees the pre-layout frames.
+            stack.layoutIfNeeded();
+            // Height because the target kind is Column, as in the other
+            // backends: only columns are registered.
+            let mut extents = Vec::new();
+            for child in unsafe { stack.arrangedSubviews() } {
+                extents.push(child.frame().size.height);
+            }
+            crate::harness::shares(&extents)
+        })
+    }
+
     fn finish(&self, code: i32, verdict: &str) {
         if code == 0 {
             println!("{verdict}");

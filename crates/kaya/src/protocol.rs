@@ -270,6 +270,23 @@ pub enum Prop {
     Max,
     /// An image's encoded source bytes (Blob-valued).
     Source,
+    /// A child's flex-grow weight within its row/column (F64-valued;
+    /// 0 = natural size, the default). Kind-agnostic — any child may
+    /// grow.
+    ///
+    /// The normalized semantics, uniform on every backend: children
+    /// with weight 0 are laid out at their natural main-axis size, and
+    /// the children with weight > 0 divide the space left over in
+    /// proportion to their weights. A grower's own natural size does
+    /// not enter the division — weights 1 and 3 split the leftover
+    /// 1:3 whatever the two children would have measured. This is the
+    /// contract shared by CSS `flex-basis: 0`, Compose's
+    /// `Modifier.weight`, XAML star sizing, and Android's
+    /// `layout_weight` at a 0 main-axis size; the backends that have no
+    /// native weight (AppKit, GTK) construct it explicitly rather than
+    /// approximating it with a priority, which would be merely ordinal
+    /// and would render differently per platform.
+    Grow,
 }
 
 /// The one-shot command vocabulary: momentary verbs aimed at

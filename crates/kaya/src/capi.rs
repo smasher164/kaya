@@ -219,6 +219,7 @@ pub const KAYA_PROP_VALUE: u32 = 3;
 pub const KAYA_PROP_MIN: u32 = 4;
 pub const KAYA_PROP_MAX: u32 = 5;
 pub const KAYA_PROP_SOURCE: u32 = 6;
+pub const KAYA_PROP_GROW: u32 = 7;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -226,6 +227,7 @@ const _: () = assert!(
         && KAYA_PROP_MIN == wire::PROP_MIN
         && KAYA_PROP_MAX == wire::PROP_MAX
         && KAYA_PROP_SOURCE == wire::PROP_SOURCE
+        && KAYA_PROP_GROW == wire::PROP_GROW
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
