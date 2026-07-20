@@ -70,6 +70,7 @@ for arg in "$@"; do
         todos_rust|todos_python|todos_go|todos_csharp) SUITE="$arg" ;;
         reorder_rust|reorder_python|reorder_go|reorder_csharp) SUITE="$arg" ;;
         feed_rust|feed_python|feed_go|feed_csharp) SUITE="$arg" ;;
+        grow_rust|layout_rust) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -110,7 +111,8 @@ timing vm-ready
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc \
-        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed)
+        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
+        --example grow --example layout)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -154,7 +156,7 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -172,6 +174,8 @@ scp -q \
     "$TARGET/examples/todos.exe" \
     "$TARGET/examples/reorder.exe" \
     "$TARGET/examples/feed.exe" \
+    "$TARGET/examples/grow.exe" \
+    "$TARGET/examples/layout.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
     "$ROOT/guests/python/milestone2.py" \
@@ -222,6 +226,8 @@ verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
 verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
 verify_remote "$TARGET/examples/reorder.exe" 'C:\kaya\reorder.exe'
 verify_remote "$TARGET/examples/feed.exe" 'C:\kaya\feed.exe'
+verify_remote "$TARGET/examples/grow.exe" 'C:\kaya\grow.exe'
+verify_remote "$TARGET/examples/layout.exe" 'C:\kaya\layout.exe'
 timing deploy
 
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
@@ -429,6 +435,16 @@ run_one_suite() {
     printf '%s\n' "$out"
     # The suite's verdict lives in the output file, not in any ssh exit
     # code; a failure that isn't parsed here would read as green.
+    #
+    # The verdict TEXT is the authority and the exit code only
+    # corroborates it. EXIT=0 alone was not enough: WinUI's window-Closed
+    # handler used to overwrite a failing run's exit code with 0 (Exit()
+    # closes the window, the handler fires, last writer won), so a scene
+    # that printed FAILED still exited 0 and the leg reported PASS. Any
+    # future way of losing the code is caught here regardless of cause.
+    if grep -q "KAYA_SELFTEST: FAILED" <<<"$out"; then
+        return 1
+    fi
     grep -q "EXIT=0" <<<"$out"
 }
 
@@ -508,6 +524,10 @@ case "$SUITE" in
         run_suite feed_python
         run_suite feed_go
         run_suite feed_csharp
+        # The grow scene (the layout contract, asserted as shares).
+        # Rust only so far; the other guests come with the breadth phase.
+        run_suite grow_rust
+        run_suite layout_rust
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;

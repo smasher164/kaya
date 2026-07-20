@@ -29,6 +29,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -62,8 +63,25 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // ("0x0" before a source lands or after a failed decode).
     var imageBitmap by mutableStateOf<ImageBitmap?>(null)
     var imageSize by mutableStateOf("0x0")
+    /**
+     * This child's flex weight within its enclosing row/column. 0 is
+     * natural size; positive weights divide the leftover main-axis space
+     * in proportion. See Prop::Grow in protocol.rs.
+     */
+    var grow by mutableStateOf(0.0)
     val children = mutableStateListOf<KayaNode>()
 }
+
+/**
+ * The main-axis extent each node was allocated, by node id — what
+ * `expect_shares` reads back.
+ *
+ * Measured from the laid-out track (onGloballyPositioned on the cell),
+ * never from the child's own drawn size: on every backend the layout
+ * rect and the drawing box differ, and only the first is what the grow
+ * contract talks about.
+ */
+val kayaMainExtents = HashMap<Long, Double>()
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -110,6 +128,7 @@ object KayaCompose {
     private const val PROP_MIN = 4
     private const val PROP_MAX = 5
     private const val PROP_SOURCE = 6
+    private const val PROP_GROW = 7
     private const val VALUE_BOOL = 1
     private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
@@ -210,6 +229,7 @@ object KayaCompose {
                         PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
+                        PROP_GROW -> KayaSceneModel.nodes[id]!!.grow = readF64(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -354,9 +374,20 @@ object KayaCompose {
         return out as T
     }
 
-    private fun target(spec: String, registry: List<KayaNode>): KayaNode {
-        val index = spec.substringAfter('#')
-        return if (index == "last") registry.last() else registry[index.toInt()]
+    /**
+     * Resolves `kind#index` against the registry the verb reads,
+     * mirroring harness.rs's parse_target: a kind that names a
+     * different registry, a malformed index, or one out of range is a
+     * loud step failure — never an exception, and never a silently
+     * misresolved read (`row#0` once indexed the COLUMNS registry,
+     * which is the false-verdict class).
+     */
+    private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
+        val bits = spec.split('#')
+        if (bits.size != 2 || bits[0] != kind) return null
+        if (bits[1] == "last") return registry.lastOrNull()
+        val i = bits[1].toIntOrNull() ?: return null
+        return registry.getOrNull(i)
     }
 
     private fun quoted(parts: List<String>): String =
@@ -378,23 +409,39 @@ object KayaCompose {
                 Log.i("kaya", "KAYA_HARNESS: +${offset}ms $line")
                 when (parts[0]) {
                     "settle" -> Thread.sleep(parts[1].toLong())
-                    "click" -> onUi(activity) {
-                        KayaPresent.emitClicked(target(parts[1], KayaSceneModel.buttons).tag)
+                    "click" -> {
+                        val ok = onUi(activity) {
+                            target(parts[1], "button", KayaSceneModel.buttons)
+                                ?.also { KayaPresent.emitClicked(it.tag) } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
                     }
-                    "toggle" -> onUi(activity) {
-                        val node = target(parts[1], KayaSceneModel.checkboxes)
-                        node.checked = parts[2] == "on"
-                        KayaPresent.emitToggled(node.tag, node.checked)
+                    "toggle" -> {
+                        val ok = onUi(activity) {
+                            target(parts[1], "checkbox", KayaSceneModel.checkboxes)?.also { node ->
+                                node.checked = parts[2] == "on"
+                                KayaPresent.emitToggled(node.tag, node.checked)
+                            } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
                     }
-                    "set_value" -> onUi(activity) {
-                        val node = target(parts[1], KayaSceneModel.sliders)
-                        node.value = parts[2].toDouble()
-                        KayaPresent.emitValueChanged(node.tag, node.value)
+                    "set_value" -> {
+                        val ok = onUi(activity) {
+                            target(parts[1], "slider", KayaSceneModel.sliders)?.also { node ->
+                                node.value = parts[2].toDouble()
+                                KayaPresent.emitValueChanged(node.tag, node.value)
+                            } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
                     }
-                    "set_text" -> onUi(activity) {
-                        val node = target(parts[1], KayaSceneModel.entries)
-                        node.text = quoted(parts.drop(2))
-                        KayaPresent.emitTextChanged(node.tag, node.text)
+                    "set_text" -> {
+                        val ok = onUi(activity) {
+                            target(parts[1], "entry", KayaSceneModel.entries)?.also { node ->
+                                node.text = quoted(parts.drop(2))
+                                KayaPresent.emitTextChanged(node.tag, node.text)
+                            } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
                     }
                     "expect" -> {
                         val want = quoted(parts.drop(2))
@@ -405,15 +452,15 @@ object KayaCompose {
                         // harness.rs's routing.
                         val got = onUi(activity) {
                             if (parts[1].startsWith("entry"))
-                                target(parts[1], KayaSceneModel.entries).text
+                                target(parts[1], "entry", KayaSceneModel.entries)?.text
                             else if (parts[1].startsWith("image"))
-                                target(parts[1], KayaSceneModel.images).imageSize
-                            else target(parts[1], KayaSceneModel.labels).text
+                                target(parts[1], "image", KayaSceneModel.images)?.imageSize
+                            else target(parts[1], "label", KayaSceneModel.labels)?.text
                         }
-                        if (got == want) {
-                            observed.add(got)
-                        } else {
-                            failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else -> failures.add("${parts[1]} reads \"$got\", wanted \"$want\"")
                         }
                     }
                     "expect_focused" -> {
@@ -423,13 +470,13 @@ object KayaCompose {
                         // Counts as an expect for the zero-expect
                         // rule, exactly as in harness.rs.
                         val focused = onUi(activity) {
-                            KayaSceneModel.focusedId ==
-                                target(parts[1], KayaSceneModel.entries).id
+                            target(parts[1], "entry", KayaSceneModel.entries)
+                                ?.let { KayaSceneModel.focusedId == it.id }
                         }
-                        if (focused) {
-                            observed.add("${parts[1]} focused")
-                        } else {
-                            failures.add("${parts[1]} does not hold focus")
+                        when (focused) {
+                            true -> observed.add("${parts[1]} focused")
+                            false -> failures.add("${parts[1]} does not hold focus")
+                            null -> failures.add("no such target ${parts[1]}")
                         }
                     }
                     "expect_order" -> {
@@ -438,14 +485,46 @@ object KayaCompose {
                         // cannot observe a move.
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
-                            target(parts[1], KayaSceneModel.columns).children
-                                .filter { it.kind == KIND_LABEL }
-                                .joinToString("|") { it.text }
+                            target(parts[1], "column", KayaSceneModel.columns)?.children
+                                ?.filter { it.kind == KIND_LABEL }
+                                ?.joinToString("|") { it.text }
                         }
-                        if (got == want) {
-                            observed.add(got)
-                        } else {
-                            failures.add("${parts[1]} children read \"$got\", wanted \"$want\"")
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else ->
+                                failures.add("${parts[1]} children read \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_shares" -> {
+                        // The container's children as whole-percentage
+                        // shares of their sum — the observation grow
+                        // weights are verified by. Percent of the
+                        // children's sum and not of the container, so
+                        // spacing and padding (platform metrics both)
+                        // stay out of the number; the rounding matches
+                        // harness::shares exactly, because expect_shares
+                        // compares byte-for-byte across all seven
+                        // backends.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            target(parts[1], "column", KayaSceneModel.columns)?.let { container ->
+                                val extents = container.children
+                                    .map { kayaMainExtents[it.id] ?: 0.0 }
+                                val total = extents.sum()
+                                if (total <= 0.0) {
+                                    ""
+                                } else {
+                                    extents.joinToString(",") {
+                                        Math.round((it / total) * 100).toString()
+                                    }
+                                }
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target ${parts[1]}")
+                            got == want -> observed.add(got)
+                            else -> failures.add("${parts[1]} splits \"$got\", wanted \"$want\"")
                         }
                     }
                     else -> failures.add("unknown step $line")
@@ -480,7 +559,20 @@ fun KayaRender(node: KayaNode) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
-                node.children.forEach { KayaRender(it) }
+                node.children.forEach { child ->
+                    // Every child rides in a cell, whether it grows or
+                    // not: the cell is what carries Modifier.weight —
+                    // Compose's native per-child weight, which already
+                    // means "divide the leftover in proportion", so the
+                    // contract needs no arithmetic here — and it is also
+                    // the track whose measured height expect_shares
+                    // reads. A weightless cell just wraps its content.
+                    var cell = Modifier.onGloballyPositioned {
+                        kayaMainExtents[child.id] = it.size.height.toDouble()
+                    }
+                    if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                    Box(cell) { KayaRender(child) }
+                }
             }
         KayaCompose.KIND_BUTTON ->
             Button(onClick = { KayaPresent.emitClicked(node.tag) }) {
@@ -493,7 +585,13 @@ fun KayaRender(node: KayaNode) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                node.children.forEach { KayaRender(it) }
+                node.children.forEach { child ->
+                    var cell = Modifier.onGloballyPositioned {
+                        kayaMainExtents[child.id] = it.size.width.toDouble()
+                    }
+                    if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                    Box(cell) { KayaRender(child) }
+                }
             }
         KayaCompose.KIND_LABEL -> Text(node.text)
         KayaCompose.KIND_CHECKBOX ->

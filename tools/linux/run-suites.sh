@@ -8,6 +8,13 @@ set -uo pipefail
 
 cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
+# harness-extract.sh (recording mode) refuses to run outside the dev
+# shell, and the container is not one — it is the pinned image, which is
+# the same guarantee by other means. Hand it the fingerprint it checks
+# for so recording mode works in here; without this every leg passed and
+# then produced no stills at all.
+KAYA_DEV_SHELL="$(cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
+export KAYA_DEV_SHELL
 # The one Python import mechanism: the kaya package resolves from
 # here (the guests' sys.path shims are gone).
 export PYTHONPATH=/work/bindings/python
@@ -18,7 +25,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -229,6 +236,10 @@ for proto in x11 wayland; do
     # so far — the scene lands depth-first and the other guests come
     # with the breadth phase.
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
+    # The layout scene: the cross-backend observation vehicle the
+    # recordings are compared from, so it has to be a recorded leg here
+    # too.
+    run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
 done
 drain
 

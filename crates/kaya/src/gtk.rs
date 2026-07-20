@@ -44,6 +44,30 @@ fn set_grow_weight(widget: &gtk4::Widget, weight: f64) {
     unsafe { widget.set_data(GROW_KEY, weight) }
 }
 
+/// Install the flex layout manager on a container the first time one of
+/// its children grows.
+///
+/// Lazy on purpose. GtkBox lays out perfectly well on its own and does
+/// it the way GTK apps do; the only thing it cannot say is "divide the
+/// leftover 1:3". So the toolkit keeps the layout until a scene asks
+/// for that, and containers that never grow anything never leave GTK's
+/// own behaviour. The manager takes the spacing with it, since it owns
+/// the gaps once installed.
+fn ensure_flex(container: &gtk4::Widget) {
+    let Some(container_box) = container.downcast_ref::<gtk4::Box>() else {
+        return;
+    };
+    if container_box
+        .layout_manager()
+        .and_then(|l| l.downcast::<flex::FlexLayout>().ok())
+        .is_some()
+    {
+        return;
+    }
+    let orientation = container_box.orientation();
+    container_box.set_layout_manager(Some(flex::FlexLayout::new(orientation, 8)));
+}
+
 /// Reconcile a child's main-axis alignment with its weight.
 ///
 /// Without this, `grow` on GTK would silently do nothing. GTK applies a
@@ -57,9 +81,11 @@ fn set_grow_weight(widget: &gtk4::Widget, weight: f64) {
 /// than centered in a stretched box.
 fn reconcile_grow_align(child: &gtk4::Widget) {
     let Some(parent) = child.parent() else { return };
-    // The axis comes from our own manager, not from GtkBox::orientation:
-    // that property belongs to the GtkBoxLayout we replaced, so reading
-    // it back off the Box is asking a manager that is no longer there.
+    // The axis comes from our own manager, never from
+    // GtkBox::orientation: once ensure_flex has replaced the box layout,
+    // that property belongs to a manager that is no longer there. No
+    // flex manager means nothing in this container grows, so there is no
+    // alignment to reconcile.
     let Some(layout) = parent.layout_manager() else {
         return;
     };
@@ -382,14 +408,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let column = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
                     column.set_halign(gtk4::Align::Start);
                     column.set_valign(gtk4::Align::Start);
-                    // The flex manager replaces GtkBox's own layout
-                    // wholesale; the Box stays only as the child-holding
-                    // container. Spacing moves with it, since the
-                    // manager now owns the gaps.
-                    column.set_layout_manager(Some(flex::FlexLayout::new(
-                        gtk4::Orientation::Vertical,
-                        8,
-                    )));
+                    // No flex manager yet, deliberately: GtkBox's own
+                    // layout stays until a child actually carries a
+                    // weight (see ensure_flex). Replacing it eagerly
+                    // would put every scene through our arithmetic and
+                    // throw away GTK's own behaviour, when the point is
+                    // that each platform flows like itself.
                     core.columns.push(column.clone());
                     NativeWidget::Column(column)
                 }
@@ -397,10 +421,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                     row.set_halign(gtk4::Align::Start);
                     row.set_valign(gtk4::Align::Start);
-                    row.set_layout_manager(Some(flex::FlexLayout::new(
-                        gtk4::Orientation::Horizontal,
-                        8,
-                    )));
                     NativeWidget::Row(row)
                 }
                 WidgetKind::Checkbox => {
@@ -537,6 +557,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (w, Prop::Grow, Value::F64(weight)) => {
                     let widget = w.widget();
                     set_grow_weight(&widget, weight);
+                    // The first positive weight in this container is what
+                    // takes the layout away from GtkBox.
+                    if weight > 0.0 {
+                        if let Some(parent) = widget.parent() {
+                            ensure_flex(&parent);
+                        }
+                    }
                     reconcile_grow_align(&widget);
                     // The split belongs to the whole sibling set, so the
                     // parent re-runs, not just this child.
@@ -580,7 +607,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
             // Only now is the parent — and so the main axis — known, so
             // a weight that arrived before the child was attached gets
-            // its alignment here rather than being dropped.
+            // its manager and alignment here rather than being dropped.
+            if grow_weight(&child_widget) > 0.0 {
+                match core.widgets.get(&parent).expect("scene validated the id") {
+                    NativeWidget::Column(c) => ensure_flex(c.upcast_ref()),
+                    NativeWidget::Row(r) => ensure_flex(r.upcast_ref()),
+                    _ => {}
+                }
+            }
             reconcile_grow_align(&child_widget);
         }
         ApplyOp::Mount { window: _, root } => {

@@ -9,22 +9,109 @@ these the hard way.
 - **Layout readback must use the layout rect, never the drawing box.**
   Every toolkit separates the rect it *allocated* to a widget from the
   box it *draws* it in, and only the first is what a layout contract
-  talks about. AppKit inflates a slider's frame 2pt a side past its
-  alignment rect; GTK's Adwaita theme insets a button 10pt inside its
-  allocation via the CSS box. Reading the drawing box turned an exactly
-  correct 25/75 grow split into 2.90:1 on AppKit and 27/73 on GTK —
-  both times the layout code was right and the *measurement* was wrong,
-  which is the expensive way to debug it. Use
-  `alignmentRectForFrame(frame)` on AppKit and `allocation()` rather
-  than `width()`/`height()` on GTK. Guard: `Stage::child_shares` states
-  it in its contract, and the `grow` scene fails loudly when a backend
-  ignores it (the GTK implementation still got it wrong first time).
+  talks about. Three dialects of the same trap, all met while landing
+  `grow`: AppKit inflates a slider's frame 2pt a side past its
+  alignment rect (read 1:3 as 2.90:1); GTK's Adwaita theme insets a
+  button 10pt inside its allocation via the CSS box (27/73); and on a
+  WinUI Grid the layout rect is the *track*, not the child — a
+  TextBlock reports its text height however tall its row is, so
+  reading children gave 37/63. Every time the layout code was right and
+  the *measurement* was wrong, which is the expensive way to debug it.
+  Use `alignmentRectForFrame(frame)` on AppKit, `allocation()` rather
+  than `width()`/`height()` on GTK, and `RowDefinition::ActualHeight`
+  rather than the child's `ActualHeight` on WinUI. Guard:
+  `Stage::child_shares` states it in its contract, and the `grow` scene
+  fails loudly when a backend ignores it — which it did, for all three.
 - **A conformance scene must keep every share above every platform's
   minimum control size.** A share below it is clamped by the toolkit,
   and the scene then silently measures the minimum instead of the
   contract. Three shares of a 144pt column put the smallest at 28pt,
   under GTK's 34pt minimum button height; the `grow` scene uses two
   children at 25/75 (38 and 114pt) for exactly this reason.
+- **A failing Windows leg used to report PASS.** WinUI's window-`Closed`
+  handler called `request_exit(0)`, and `Application.Exit()` closes the
+  window — so a failing verdict stored 1, Exit() fired Closed, and the
+  handler overwrote it with 0 microseconds later. deploy-win greps
+  `EXIT=0`, so a scene printing `KAYA_SELFTEST: FAILED` reported PASS,
+  and had done for every Windows failure there has ever been. Two
+  guards: `request_exit` is now first-writer-wins (whoever decides the
+  outcome owns it; a window closing afterwards is a consequence, not a
+  new decision), and deploy-win now treats the *verdict text* as
+  authoritative with the exit code only corroborating — so any future
+  way of losing the code is caught whatever its cause. The general
+  lesson: a runner that reads only an exit code trusts every layer
+  between the assertion and the process boundary.
+- **An interpreter leg inherits the previous group's scene script.** The
+  Rust backends embed their script at build time (`include_str!`), but
+  SwiftUI and Compose read `KAYA_SELFTEST_SCRIPT` from the environment —
+  and validate-mac exports it once per scene group. A new leg added
+  after a group therefore runs the PREVIOUS scene's script against the
+  new scene's tree, which surfaces as an index-out-of-range deep inside
+  the interpreter, not as anything resembling "wrong script". Every
+  interpreter leg must export its own script immediately before it.
+- **The interpreters resolved `kind#index` by index alone.** `row#0`
+  silently read `columns[0]` — a wrong-widget read, the false-verdict
+  class — and a malformed or out-of-range index was a hard trap
+  (Swift's "Index out of range") rather than a failure. check-steps
+  parses every checked-in scene with the RUST grammar, so only an
+  env-supplied script could reach it, which is exactly how it was found
+  (a hand-run `expect_shares row#2` probe). Both interpreters now match
+  the kind against the registry the verb reads and bounds-check the
+  index; the outcome is a loud "no such target …", never a crash and
+  never a misresolved read.
+- **SwiftUI runs speculative zero-size layout passes.** A custom
+  `Layout` is asked to place its subviews at `bounds.size == .zero`, and
+  those passes arrive AFTER the real ones — so recording measurements
+  unconditionally clobbered a correct 96/286 split with 0/0, which
+  `expect_shares` then read as the empty string. Record geometry only
+  from passes with a positive main-axis extent; a degenerate pass is not
+  a placement.
+- **A widget that does not fill its assigned track lies beneath a
+  passing `expect_shares`.** The verb reads the layout rect (correctly —
+  see the first trap), so a size cap on the CONTROL keeps the gate green
+  while the screen shows something else: the SwiftUI interpreter's
+  Slider carried `.frame(maxWidth: 200)` — its stand-in for a natural
+  width SwiftUI sliders do not have — which capped the drawn control
+  below its track and rendered the layout scene's 1:3 row as 38/62
+  while KayaFlex had assigned a contract-exact 125pt/375pt. The
+  hypothesis recorded at the time ("SwiftUI's minimum Slider width
+  clamps the share") was wrong; pixel-measuring the still against the
+  arithmetic pinned the cap in one pass. Growers now lift the cap
+  (weight-0 sliders keep the 200pt stand-in), and the recording
+  pipeline is the guard for the drawn layer — this divergence class is
+  precisely what it exists to catch.
+- **`layoutPriority` is SwiftUI's version of the ordinal trap.** It
+  looks like the proportional knob and is not: it decides the *order* in
+  which children claim scarce space, never the ratio. `.frame(maxWidth:
+  .infinity)` is the other near-miss — several flexible children split
+  the remainder *equally*. SwiftUI has no per-child weight, exactly like
+  GtkBox and the two Apple stack views; the `Layout` protocol is the
+  sanctioned way to add one (and the sanctioned replacement for the
+  older GeometryReader hack, which fills greedily and breaks the
+  surrounding sizing).
+- **A VStack returns its natural size however large a frame it is
+  offered.** `.frame(maxWidth: .infinity, maxHeight: .infinity)` makes
+  the FRAME fill; the stack inside is then aligned within it at its own
+  size. So wrapping the mounted root in a big frame does not make the
+  root fill, and nothing below it ever has leftover space to divide.
+  The root has to be a layout that accepts the proposal.
+- **The Linux container is not a nix dev shell.** `harness-extract.sh`
+  guards on `KAYA_DEV_SHELL` and refused inside the image, so recording
+  mode on Linux passed every leg and produced NO stills at all — a
+  silent, complete loss of the artifact the run existed to make.
+  `tools/linux/run-suites.sh` now computes and exports the fingerprint.
+  The general shape: a guard meant to catch "wrong toolchain" fires
+  inside a container that is the pinned toolchain by other means.
+- **Android's addView installs fresh layout params.** A weight written
+  before the child was attached is discarded by the add, so
+  `layout_weight` has to be re-stamped from AddChild as well as from
+  the prop write.
+- **A WinUI Grid places by attached property, not child order.** Unlike
+  a StackPanel, a Grid puts each child where its `Grid.Row`/
+  `Grid.Column` says, and two children sharing an index silently
+  overlap rather than erroring. Appending to `Children` in the right
+  order does nothing on its own; the backend tracks logical order
+  itself and restamps the indices after every add, move, and destroy.
 - **A GTK child hugs where an AppKit contentView fills.** The mounted
   root obeys its own align on GTK, so it sat in the top-left at natural
   size and left no free space anywhere in the tree — every grow weight

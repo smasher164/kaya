@@ -41,6 +41,7 @@ private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
 private let propSource: UInt32 = 6
+private let propGrow: UInt32 = 7
 private let valueBool: UInt32 = 1
 private let valueF64: UInt32 = 3
 private let valueStr: UInt32 = 4
@@ -67,6 +68,10 @@ final class KayaNode: Identifiable {
     // ("0x0" before a source lands or after a failed decode).
     var image: KayaPlatformImage?
     var imageSize = "0x0"
+    /// This child's flex weight within its enclosing row/column. 0 is
+    /// natural size; positive weights divide the leftover main-axis
+    /// space in proportion. See Prop::Grow in protocol.rs.
+    var grow = 0.0
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -237,6 +242,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMax, valueF64):
                     kayaScene.nodes[id]!.maxValue =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propGrow, valueF64):
+                    kayaScene.nodes[id]!.grow =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -331,9 +339,16 @@ func kayaStartSelftest() {
     }.start()
 }
 
-private func kayaTarget(_ spec: Substring, _ registry: [KayaNode]) -> KayaNode {
-    let index = spec.split(separator: "#")[1]
-    let i = index == "last" ? registry.count - 1 : Int(index)!
+/// Resolves `kind#index` against the registry the verb reads, mirroring
+/// harness.rs's parse_target: a kind that names a different registry, a
+/// malformed index, or one out of range is a loud step failure — never
+/// a trap, and never a silently misresolved read (`row#0` once indexed
+/// the COLUMNS registry, which is the false-verdict class).
+private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode]) -> KayaNode? {
+    let bits = spec.split(separator: "#")
+    guard bits.count == 2, bits[0] == kind else { return nil }
+    if bits[1] == "last" { return registry.last }
+    guard let i = Int(bits[1]), registry.indices.contains(i) else { return nil }
     return registry[i]
 }
 
@@ -370,73 +385,126 @@ private func kayaRunScript(_ script: String) {
             case "settle":
                 Thread.sleep(forTimeInterval: Double(parts[1])! / 1000)
             case "click":
-                DispatchQueue.main.sync {
-                    KayaHost.emit(kayaTarget(parts[1], kayaScene.buttons).tag)
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "button", kayaScene.buttons) else {
+                        return false
+                    }
+                    KayaHost.emit(node.tag)
+                    return true
                 }
+                if !ok { failures.append("no such target \(parts[1])") }
             case "toggle":
-                DispatchQueue.main.sync {
-                    let node = kayaTarget(parts[1], kayaScene.checkboxes)
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "checkbox", kayaScene.checkboxes) else {
+                        return false
+                    }
                     node.checked = parts[2] == "on"
                     KayaHost.emitToggled(node.tag, node.checked)
+                    return true
                 }
+                if !ok { failures.append("no such target \(parts[1])") }
             case "set_value":
-                DispatchQueue.main.sync {
-                    let node = kayaTarget(parts[1], kayaScene.sliders)
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else {
+                        return false
+                    }
                     node.value = Double(parts[2])!
                     KayaHost.emitValue(node.tag, node.value)
+                    return true
                 }
+                if !ok { failures.append("no such target \(parts[1])") }
             case "set_text":
-                DispatchQueue.main.sync {
-                    let node = kayaTarget(parts[1], kayaScene.entries)
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "entry", kayaScene.entries) else {
+                        return false
+                    }
                     node.text = kayaQuoted(Array(parts[2...]))
                     KayaHost.emitText(node.tag, node.text)
+                    return true
                 }
+                if !ok { failures.append("no such target \(parts[1])") }
             case "expect":
                 let want = kayaQuoted(Array(parts[2...]))
                 // The target kind picks the observation: an entry reads
                 // the field's own displayed text, an image its decoded
                 // size ("WxH"/"0x0"), everything else reads label text
                 // — harness.rs's routing.
-                let got = DispatchQueue.main.sync {
+                let got = DispatchQueue.main.sync { () -> String? in
                     parts[1].hasPrefix("entry")
-                        ? kayaTarget(parts[1], kayaScene.entries).text
+                        ? kayaTarget(parts[1], "entry", kayaScene.entries)?.text
                         : parts[1].hasPrefix("image")
-                            ? kayaTarget(parts[1], kayaScene.images).imageSize
-                            : kayaTarget(parts[1], kayaScene.labels).text
+                            ? kayaTarget(parts[1], "image", kayaScene.images)?.imageSize
+                            : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
-                if got == want {
+                if let got, got == want {
                     observed.append(got)
-                } else {
+                } else if let got {
                     failures.append("\(parts[1]) reads \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_focused":
                 // The model's focusedId is the observation the focus
                 // command lands as (the entry view's FocusState mirrors
                 // it into SwiftUI). Counts as an expect for the
                 // zero-expect rule, exactly as in harness.rs.
-                let focused = DispatchQueue.main.sync {
-                    kayaScene.focusedId == kayaTarget(parts[1], kayaScene.entries).id
+                let focused = DispatchQueue.main.sync { () -> Bool? in
+                    guard let node = kayaTarget(parts[1], "entry", kayaScene.entries) else {
+                        return nil
+                    }
+                    return kayaScene.focusedId == node.id
                 }
-                if focused {
+                switch focused {
+                case true?:
                     observed.append("\(parts[1]) focused")
-                } else {
+                case false?:
                     failures.append("\(parts[1]) does not hold focus")
+                case nil:
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_order":
                 // The container's label children in child order, joined
                 // with `|` — reads the tree the moves actually edited,
                 // which the creation-ordered registries cannot see.
                 let want = kayaQuoted(Array(parts[2...]))
-                let got = DispatchQueue.main.sync {
-                    kayaTarget(parts[1], kayaScene.columns).children
+                let got = DispatchQueue.main.sync { () -> String? in
+                    kayaTarget(parts[1], "column", kayaScene.columns)?.children
                         .filter { $0.kind == kindLabel }
                         .map { $0.text }
                         .joined(separator: "|")
                 }
-                if got == want {
+                if let got, got == want {
                     observed.append(got)
-                } else {
+                } else if let got {
                     failures.append("\(parts[1]) ordered \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "expect_shares":
+                // The container's children as whole-percentage shares of
+                // their sum — the observation grow weights are verified
+                // by. Percent of the children's sum and not of the
+                // container, so spacing and padding (platform metrics
+                // both) stay out of the number; the rounding matches
+                // harness::shares exactly, because expect_shares
+                // compares byte-for-byte across all seven backends.
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let container = kayaTarget(parts[1], "column", kayaScene.columns)
+                    else { return nil }
+                    let extents = container.children.map { kayaMainExtents[$0.id] ?? 0 }
+                    let total = extents.reduce(0, +)
+                    guard total > 0 else { return "" }
+                    return extents
+                        .map { String(Int((($0 / total) * 100).rounded())) }
+                        .joined(separator: ",")
+                }
+                if let got, got == want {
+                    observed.append(got)
+                } else if let got {
+                    failures.append("\(parts[1]) splits \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("no such target \(parts[1])")
                 }
             default:
                 failures.append("unknown step \(line)")
@@ -455,16 +523,167 @@ private func kayaRunScript(_ script: String) {
     exit(1)
 }
 
+/// The main-axis extent each node was allocated, by node id — what
+/// `expect_shares` reads back.
+///
+/// A plain dictionary and not a field on the @Observable node: writing
+/// model state from inside a layout pass would invalidate the very pass
+/// that wrote it. Main-actor only, like the rest of the scene model.
+var kayaMainExtents: [UInt64: Double] = [:]
+
+/// SwiftUI's half of the `grow` contract.
+///
+/// VStack/HStack cannot express it: SwiftUI's only per-child knob is
+/// `layoutPriority`, which is *ordinal* — it decides who gets scarce
+/// space first, not in what proportion — so a 1:3 request is
+/// unrepresentable with the built-in stacks. The Layout protocol is the
+/// blessed way to add a layout policy, and it lets the same arithmetic
+/// every other backend performs be written once here.
+///
+/// The policy is [`Prop::Grow`]: weight-0 children take their natural
+/// main-axis size, and the growers divide what is left in proportion to
+/// their weights, their own natural sizes not entering the division.
+struct KayaFlex: Layout {
+    let vertical: Bool
+    let spacing: CGFloat
+    /// Parallel to `subviews`, in the same order — the weights live on
+    /// the model, not on the views.
+    let nodes: [KayaNode]
+    /// Whether to fill the cross axis as well as the main one. True only
+    /// for the mounted root, which fills its window the way AppKit's
+    /// contentView and UIKit's root view do by construction. Nested
+    /// containers hug their cross axis: a row is as tall as its tallest
+    /// child, not as tall as the column it sits in.
+    var fillCross = false
+
+    private func main(_ size: CGSize) -> CGFloat { vertical ? size.height : size.width }
+    private func cross(_ size: CGSize) -> CGFloat { vertical ? size.width : size.height }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let natural = subviews.map { $0.sizeThatFits(.unspecified) }
+        let gaps = spacing * CGFloat(max(0, subviews.count - 1))
+        let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
+        let naturalCross = natural.map { cross($0) }.max() ?? 0
+        // Fill what we are offered when a size is proposed, and hug when
+        // it is not. Filling is what creates the free space the growers
+        // divide — and it is what the other backends do, where a stack
+        // has no intrinsic size and stretches to its parent while its
+        // children keep their own.
+        // Fill the MAIN axis from the proposal — that is what creates
+        // the free space the growers divide — and hug the cross axis.
+        // Filling both made a row claim its column's whole height, which
+        // showed up in the recording as a band of empty space around the
+        // slider row.
+        let mainExtent = proposal.replacingUnspecifiedDimensions(
+            by: CGSize(width: naturalMain, height: naturalMain))
+        let filledMain = vertical ? mainExtent.height : mainExtent.width
+        let filledCross = vertical ? mainExtent.width : mainExtent.height
+        let crossExtent = fillCross ? max(naturalCross, filledCross) : naturalCross
+        return vertical
+            ? CGSize(width: crossExtent, height: filledMain)
+            : CGSize(width: filledMain, height: crossExtent)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        guard !subviews.isEmpty else { return }
+        let gaps = spacing * CGFloat(subviews.count - 1)
+        // A grower's own natural size is deliberately not consulted: the
+        // contract is flex-basis 0, so it starts from nothing.
+        var extents = subviews.indices.map { i -> CGFloat in
+            weight(i) > 0 ? 0 : main(subviews[i].sizeThatFits(.unspecified))
+        }
+        let fixed = extents.reduce(0, +)
+        let leftover = max(0, main(bounds.size) - fixed - gaps)
+        let pool = subviews.indices.map { weight($0) }.reduce(0, +)
+        if pool > 0 {
+            let growers = subviews.indices.filter { weight($0) > 0 }
+            var spent: CGFloat = 0
+            for (n, i) in growers.enumerated() {
+                if n == growers.count - 1 {
+                    // The last grower absorbs the rounding dust so the
+                    // children fill the container exactly.
+                    extents[i] = leftover - spent
+                } else {
+                    let share = (leftover * CGFloat(weight(i) / pool)).rounded()
+                    extents[i] = share
+                    spent += share
+                }
+            }
+        }
+
+        var offset: CGFloat = 0
+        for i in subviews.indices {
+            let extent = extents[i]
+            let origin =
+                vertical
+                ? CGPoint(x: bounds.minX, y: bounds.minY + offset)
+                : CGPoint(x: bounds.minX + offset, y: bounds.minY)
+            // The cross axis is offered the container's full extent and
+            // the child decides: a nested container fills it, a label
+            // keeps its intrinsic width. That reproduces the stack
+            // behaviour the other backends have natively.
+            let sized =
+                vertical
+                ? ProposedViewSize(width: bounds.width, height: extent)
+                : ProposedViewSize(width: extent, height: bounds.height)
+            subviews[i].place(at: origin, anchor: .topLeading, proposal: sized)
+            // Degenerate passes are not placements. SwiftUI runs
+            // speculative layouts at zero size, and their zeros arrive
+            // AFTER the real ones — recording them clobbered a correct
+            // 96/286 split into 0/0, which expect_shares then read as
+            // the empty string.
+            if i < nodes.count && main(bounds.size) > 0 {
+                // The allocated track, not the view's drawn size — the
+                // layout rect is what the contract talks about.
+                kayaMainExtents[nodes[i].id] = Double(extent)
+            }
+            offset += extent + spacing
+        }
+    }
+
+    private func weight(_ i: Int) -> Double {
+        i < nodes.count ? nodes[i].grow : 0
+    }
+}
+
 struct KayaRender: View {
     let node: KayaNode
+    /// The mounted root fills its window; nested containers do not.
+    var isRoot = false
 
     var body: some View {
         switch node.kind {
         case kindColumn:
-            // Normalized: 8-pt spacing, leading (cross-axis start).
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(node.children) { child in
-                    KayaRender(node: child)
+            // Normalized: 8-unit spacing, leading (cross-axis start).
+            //
+            // VStack unless a child actually carries a weight. The
+            // custom Layout can express grow and VStack cannot, but it
+            // also replaces SwiftUI's own stack behaviour wholesale —
+            // and the point is that each platform flows like itself, not
+            // that all seven produce the same pixels. So the toolkit
+            // keeps the layout until a scene asks for something the
+            // toolkit has no way to say.
+            // The root always takes the flex path: it has to FILL its
+            // window — the same normalization GTK needed — and a VStack
+            // returns its natural size however large a frame it is
+            // offered, so nothing below it would ever have leftover
+            // space to divide. Nested containers keep VStack until one
+            // of their own children actually grows.
+            if isRoot || node.children.contains(where: { $0.grow > 0 }) {
+                KayaFlex(vertical: true, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                    ForEach(node.children) { child in
+                        KayaRender(node: child)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(node.children) { child in
+                        KayaRender(node: child)
+                    }
                 }
             }
         case kindButton:
@@ -472,10 +691,19 @@ struct KayaRender: View {
                 KayaHost.emit(node.tag)
             }
         case kindRow:
-            // Normalized: 8-pt spacing, top (cross-axis start).
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(node.children) { child in
-                    KayaRender(node: child)
+            // Normalized: 8-unit spacing, top (cross-axis start).
+            // HStack until a weight appears — see the column arm.
+            if isRoot || node.children.contains(where: { $0.grow > 0 }) {
+                KayaFlex(vertical: false, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                    ForEach(node.children) { child in
+                        KayaRender(node: child)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(node.children) { child in
+                        KayaRender(node: child)
+                    }
                 }
             }
         case kindLabel:
@@ -512,7 +740,14 @@ struct KayaRender: View {
                     }),
                 in: node.minValue...node.maxValue
             )
-            .frame(maxWidth: 200)
+            // SwiftUI's Slider has no natural width — unconstrained it
+            // swallows whatever a stack offers — so 200 stands in as the
+            // intrinsic size every other toolkit's slider has. A grower
+            // must NOT keep that cap: its extent is the track KayaFlex
+            // assigned, and capping the drawn control below its track
+            // rendered a 1:3 row as 38/62 while expect_shares (which
+            // reads the track, correctly) kept passing.
+            .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindEntry:
             KayaEntry(node: node)
         case kindImage:
@@ -580,7 +815,7 @@ struct KayaRoot: View {
     var body: some View {
         Group {
             if let root = scene.root {
-                KayaRender(node: root)
+                KayaRender(node: root, isRoot: true)
             }
         }
         .padding()

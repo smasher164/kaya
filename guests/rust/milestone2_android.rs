@@ -35,6 +35,9 @@ mod feed;
 #[path = "layout.rs"]
 mod layout;
 
+#[path = "grow.rs"]
+mod grow;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -47,6 +50,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("reorder") => reorder::app(ctx),
         Ok("feed") => feed::app(ctx),
         Ok("layout") => layout::app(ctx),
+        Ok("grow") => grow::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

@@ -32,9 +32,10 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, Image, Orientation, Slider, StackPanel, TextBlock, TextBox,
+    Button, CheckBox, ColumnDefinition, Grid, Image, RowDefinition, Slider, TextBlock, TextBox,
     TextChangedEventHandler,
 };
+use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -49,8 +50,8 @@ use crate::protocol::{
 use crate::scene::Scene;
 
 enum NativeWidget {
-    Column(StackPanel),
-    Row(StackPanel),
+    Column(Grid),
+    Row(Grid),
     Checkbox { check: CheckBox, caption: TextBlock },
     Slider(Slider),
     // The caption TextBlock is the button's text surface.
@@ -81,8 +82,15 @@ struct CoreState {
     scene: Scene,
     occurrences: OccSink,
     widgets: HashMap<WidgetId, NativeWidget>,
-    // Which panel each widget sits in, for Destroy's detach.
-    parents: HashMap<WidgetId, StackPanel>,
+    // Which grid each widget sits in, for Destroy's detach.
+    parents: HashMap<WidgetId, Grid>,
+    // Grid places by attached Row/Column index, not by child order, so
+    // the logical order has to be tracked here and stamped back onto the
+    // children after every structural change. This is also the order the
+    // definitions are rebuilt in — one definition per child, carrying
+    // that child's grow weight.
+    child_order: HashMap<WidgetId, Vec<WidgetId>>,
+    grow: HashMap<WidgetId, f64>,
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index. Clicks emit the stored
     // tag directly; the other controls fire their real events for
@@ -94,7 +102,7 @@ struct CoreState {
     entries: Vec<TextBox>,
     sliders: Vec<Slider>,
     images: Vec<Image>,
-    columns: Vec<StackPanel>,
+    columns: Vec<Grid>,
     window: Window,
 }
 
@@ -122,6 +130,8 @@ static DISPATCHER: OnceLock<SharedDispatcher> = OnceLock::new();
 /// inside XAML dispatch tears down under the framework's feet (observed as
 /// an access violation in XAML rundown).
 static EXIT_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// Whether EXIT_CODE has been claimed — see request_exit.
+static EXIT_DECIDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // The composed Application, kept from CreateInstance: the composition
 // outer (KayaApplication) answers only its own interfaces and does not
@@ -133,7 +143,17 @@ thread_local! {
 }
 
 fn request_exit(code: i32) {
-    EXIT_CODE.store(code, std::sync::atomic::Ordering::Relaxed);
+    // First writer wins, and it is not a nicety: Application.Exit()
+    // closes the window, which fires Closed, which calls back in here
+    // with 0. A plain store therefore overwrote a failing verdict's 1
+    // with the close handler's 0 microseconds later, and every failing
+    // Windows leg exited 0 — the suite greps EXIT=0, so a FAILED scene
+    // reported PASS. Whoever decides the outcome first owns it; a
+    // window closing afterwards is a consequence of that decision, not
+    // a new one.
+    if !EXIT_DECIDED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        EXIT_CODE.store(code, std::sync::atomic::Ordering::Relaxed);
+    }
     APP.with_borrow(|app| match app.as_ref() {
         Some(app) => {
             if let Err(e) = app.Exit() {
@@ -353,6 +373,87 @@ fn trace_enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_TRACE").is_some())
 }
 
+/// Rebuild one grid's track definitions and restamp its children's
+/// attached indices.
+///
+/// A Grid does not lay out by child order the way a StackPanel does: a
+/// child sits wherever its attached Grid.Row/Grid.Column says, and two
+/// children with the same index overlap silently rather than erroring.
+/// So the logical order kaya maintains has to be written back after
+/// every structural change — add, move, or destroy — and the whole set
+/// is rebuilt rather than patched, because inserting in the middle
+/// shifts every later child's index anyway.
+///
+/// The track sizes carry the layout contract directly: `Auto` for a
+/// weight-0 child (natural size) and `Star(w)` for a grower. WinUI's
+/// star sizing already means "divide what is left after the Auto tracks
+/// in proportion to the star values", which is exactly [`Prop::Grow`],
+/// so unlike AppKit and GTK there is no arithmetic to do here — only the
+/// weights to hand over.
+fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
+    let (grid, vertical) = match core.widgets.get(&parent) {
+        Some(NativeWidget::Column(g)) => (g.clone(), true),
+        Some(NativeWidget::Row(g)) => (g.clone(), false),
+        // Destroyed, or never a container: nothing to place.
+        _ => return Ok(()),
+    };
+    let empty = Vec::new();
+    let order = core.child_order.get(&parent).unwrap_or(&empty);
+
+    if vertical {
+        let defs = grid.RowDefinitions()?;
+        defs.Clear()?;
+        for child in order {
+            let def = RowDefinition::new()?;
+            def.SetHeight(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+            defs.Append(&def)?;
+        }
+    } else {
+        let defs = grid.ColumnDefinitions()?;
+        defs.Clear()?;
+        for child in order {
+            let def = ColumnDefinition::new()?;
+            def.SetWidth(track(core.grow.get(child).copied().unwrap_or(0.0)))?;
+            defs.Append(&def)?;
+        }
+    }
+
+    for (index, child) in order.iter().enumerate() {
+        let Some(widget) = core.widgets.get(child) else {
+            continue;
+        };
+        // The attached setters take a FrameworkElement, one step down
+        // from the UIElement the widget table hands out; every widget
+        // kaya creates is one.
+        let element: FrameworkElement = widget.element()?.cast()?;
+        let index = index as i32;
+        if vertical {
+            Grid::SetRow(&element, index)?;
+        } else {
+            Grid::SetColumn(&element, index)?;
+        }
+    }
+    Ok(())
+}
+
+/// One child's track: natural size, or a share of the leftover.
+fn track(weight: f64) -> GridLength {
+    if weight > 0.0 {
+        GridLength {
+            Value: weight,
+            GridUnitType: GridUnitType::Star,
+        }
+    } else {
+        // Auto and not `*`: a weight-0 child takes its natural size and
+        // takes no part in the division, which is what makes the growers'
+        // shares come out of the leftover rather than the whole.
+        GridLength {
+            Value: 0.0,
+            GridUnitType: GridUnitType::Auto,
+        }
+    }
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -393,20 +494,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => {
-                    let panel = StackPanel::new()?;
+                    // Grid and not StackPanel: a StackPanel sizes every
+                    // child to its natural extent along the stacking axis
+                    // and has no per-child weight of any kind, so
+                    // proportional grow is not merely awkward there but
+                    // unrepresentable. Grid's star sizing *is* the
+                    // contract — a definition of Star(w) takes w/Σw of
+                    // what is left after the Auto definitions — so the
+                    // weights map across with no arithmetic of our own.
+                    //
+                    // The cost is that Grid places by attached Row/Column
+                    // index rather than by child order, so every
+                    // structural change has to restamp them (see
+                    // reindex).
+                    let grid = Grid::new()?;
                     // Uniform layout default: 8-unit gap between adjacent
-                    // children (matches AppKit/SwiftUI). Children stay at
-                    // natural size, packed to the start and leading-aligned
-                    // — the StackPanel's own defaults.
-                    panel.SetSpacing(8.0)?;
-                    core.columns.push(panel.clone());
-                    NativeWidget::Column(panel)
+                    // children, matching every other backend. Grid spells
+                    // it per axis; only the stacking one applies, since
+                    // the cross axis holds a single track.
+                    grid.SetRowSpacing(8.0)?;
+                    core.columns.push(grid.clone());
+                    NativeWidget::Column(grid)
                 }
                 WidgetKind::Row => {
-                    let panel = StackPanel::new()?;
-                    panel.SetOrientation(Orientation::Horizontal)?;
-                    panel.SetSpacing(8.0)?;
-                    NativeWidget::Row(panel)
+                    let grid = Grid::new()?;
+                    grid.SetColumnSpacing(8.0)?;
+                    NativeWidget::Row(grid)
                 }
                 WidgetKind::Checkbox => {
                     // The box owns its checked bit; Checked/Unchecked
@@ -544,18 +657,67 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 None => children.Append(&child_elem)?,
             }
+            // The Children collection is now in the new order, but on a
+            // Grid that collection does not place anything — without the
+            // restamp below the move would be invisible, which is
+            // precisely what expect_order exists to catch.
+            let order = core.child_order.entry(parent).or_default();
+            order.retain(|&id| id != child);
+            match before {
+                Some(anchor) => {
+                    let at = order
+                        .iter()
+                        .position(|&id| id == anchor)
+                        .expect("kaya: move_child anchor not among siblings");
+                    order.insert(at, child);
+                }
+                None => order.push(child),
+            }
+            reindex(core, parent)?;
         }
         ApplyOp::Destroy { id } => {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
+            core.grow.remove(&id);
+            core.child_order.remove(&id);
             if let Some(panel) = core.parents.remove(&id) {
                 let children = panel.Children()?;
                 let mut index = 0u32;
                 if children.IndexOf(&widget.element()?, &mut index)? {
                     children.RemoveAt(index)?;
                 }
+                // Find the parent by its grid, since only the grid was
+                // stored; the surviving siblings all shift up a track.
+                let parent = core
+                    .child_order
+                    .iter()
+                    .find(|(_, order)| order.contains(&id))
+                    .map(|(&parent, _)| parent);
+                if let Some(parent) = parent {
+                    core.child_order
+                        .entry(parent)
+                        .or_default()
+                        .retain(|&child| child != id);
+                    reindex(core, parent)?;
+                }
             }
         }
         ApplyOp::SetProp { id, prop, value } => {
+            // Grow is handled ahead of the per-kind table: it is the one
+            // kind-agnostic prop, and its effect lands on the parent's
+            // track definitions rather than on the widget itself.
+            if let (Prop::Grow, Value::F64(weight)) = (prop, &value) {
+                debug_assert!(core.widgets.contains_key(&id), "scene validated the id");
+                core.grow.insert(id, *weight);
+                let parent = core
+                    .child_order
+                    .iter()
+                    .find(|(_, order)| order.contains(&id))
+                    .map(|(&parent, _)| parent);
+                if let Some(parent) = parent {
+                    reindex(core, parent)?;
+                }
+                return Ok(());
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 (NativeWidget::Button { caption, .. }, Prop::Text, Value::Str(s)) => {
@@ -635,6 +797,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Image(image) => children.Append(image)?,
             }
             core.parents.insert(child, panel);
+            core.child_order.entry(parent).or_default().push(child);
+            // A new child means a new track and a shifted set of indices.
+            reindex(core, parent)?;
         }
         ApplyOp::Mount { window: _, root } => {
             match core.widgets.get(&root).expect("scene validated the id") {
@@ -975,6 +1140,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             sliders: Vec::new(),
             images: Vec::new(),
             columns: Vec::new(),
+            child_order: HashMap::new(),
+            grow: HashMap::new(),
             window,
         });
     });
@@ -1118,17 +1285,24 @@ impl crate::harness::Stage for WinUiStage {
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.columns.len());
-            let panel = &core.columns[i];
+            let grid = &core.columns[i];
             // Measure/arrange are lazy; force them or the first read
             // after mount sees zeros.
-            panel.UpdateLayout()?;
-            let children = panel.Children()?;
-            // Height because the target kind is Column, as in the other
-            // backends: only columns are registered.
+            grid.UpdateLayout()?;
+            // The ROW's resolved height, not the child's ActualHeight:
+            // on a Grid the track is the layout rect, and a child only
+            // fills it if it stretches. A TextBlock never does — it
+            // reports its text height however tall its row is — so
+            // reading children turned an exactly correct 25/75 split
+            // into 37/63. Same trap as AppKit's alignment rect and
+            // GTK's CSS box, in its third dialect.
+            //
+            // Rows and not columns because the target kind is Column, as
+            // in the other backends: only columns are registered.
+            let defs = grid.RowDefinitions()?;
             let mut extents = Vec::new();
-            for at in 0..children.Size()? {
-                let child = children.GetAt(at)?;
-                extents.push(child.cast::<FrameworkElement>()?.ActualHeight()?);
+            for at in 0..defs.Size()? {
+                extents.push(defs.GetAt(at)?.ActualHeight()?);
             }
             Ok(crate::harness::shares(&extents))
         })

@@ -400,7 +400,8 @@ SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
 if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
-        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed
+        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
+        --example grow --example layout
     timing build-rust
     APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
     queue_leg run_bundle_on rust "$APP" dev.kaya.milestone2 rust
@@ -414,6 +415,12 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     queue_leg run_bundle_on reorder-rust "$APP" dev.kaya.reorder reorder-rust reorder
     APP=$(make_bundle feed dev.kaya.feed "$TARGET_DIR/examples/feed")
     queue_leg run_bundle_on feed-rust "$APP" dev.kaya.feed feed-rust feed
+    # The layout contract on UIKit: grow asserted as shares, plus the
+    # observation scene the recordings are compared from.
+    APP=$(make_bundle grow dev.kaya.grow "$TARGET_DIR/examples/grow")
+    queue_leg run_bundle_on grow-rust "$APP" dev.kaya.grow grow-rust grow
+    APP=$(make_bundle layout dev.kaya.layout "$TARGET_DIR/examples/layout")
+    queue_leg run_bundle_on layout-rust "$APP" dev.kaya.layout layout-rust layout
     drain
     timing legs-rust
 fi
@@ -544,6 +551,18 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle feedrs-swiftui dev.kaya.feedswiftui "$TARGET_DIR/examples/feed")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on feed-swiftui "$APP" dev.kaya.feedswiftui feed-swiftui feed feed
+
+    # The layout contract on the SwiftUI interpreter, mirroring the
+    # UIKit suite above: grow asserted as shares, layout observed.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example grow
+    APP=$(make_bundle growrs-swiftui dev.kaya.growswiftui "$TARGET_DIR/examples/grow")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on grow-swiftui "$APP" dev.kaya.growswiftui grow-swiftui grow grow
+
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example layout
+    APP=$(make_bundle layoutrs-swiftui dev.kaya.layoutswiftui "$TARGET_DIR/examples/layout")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on layout-swiftui "$APP" dev.kaya.layoutswiftui layout-swiftui layout layout
     drain
     timing swiftui-build+legs
 fi

@@ -9,24 +9,63 @@ Landed history lives in git; this file only carries what is still open.
 ## Next milestones (in rough priority order)
 
 - **Layout props**: spacing/grow/alignment; the layout-normalization
-  worklist scenes. Recording mode (KAYA_RECORD=1) was built partly as
-  the cross-backend comparison vehicle for this. `grow` is landing now
-  (spec + AppKit + GTK + Rust + the `grow` and `layout` scenes); still
-  open on it: the SwiftUI and Compose interpreters need the prop in all
-  four layers, the remaining 7 bindings need the `grow` sugar, and
-  **WinUI cannot express it at all as it stands** — both containers are
-  `StackPanel`, which has no star sizing, so Windows needs a migration
-  to `Grid` with `RowDefinition`/`ColumnDefinition` at `GridLength`
-  star. That is its own milestone: `Grid`, `ColumnDefinition`,
-  `RowDefinition` and `GridLength` are not even in the generated
-  bindings (the type filter in tools/winui-bindgen never names them),
-  so it means extending the filter, regenerating, and rewriting every
-  child insertion to maintain attached `Grid.Row`/`Grid.Column`
-  properties and reindex them on add/move/remove. `alignment` is the
-  prerequisite for grow being *visible* in a nested stack: kaya's
-  normalized cross-axis default is leading/natural, so a nested *column*
-  is only as wide as its content (rows do stretch to the parent's width,
-  as the AppKit frame dump confirmed).
+  worklist scenes.
+  **`grow` is LANDED on all seven backends** — spec, the `grow` and
+  `layout` scenes, the `expect_shares` verb, and every backend green on
+  its own suite (mac 76 legs, Linux X11+Wayland, Windows 26, iOS UIKit
+  and SwiftUI suites both carrying grow/layout legs, Android Views and
+  Compose). `check-verbs` is green.
+  How each backend expresses it, which is the useful map for the next
+  layout prop: **native weights** on WinUI (`Grid` star sizing),
+  Compose (`Modifier.weight`) and Android Views (`layout_weight` with a
+  0 main-axis size); **constructed** on AppKit and UIKit (pairwise
+  `NSLayoutConstraint` multipliers between growers), GTK4 (a custom
+  `GtkLayoutManager`) and SwiftUI (a custom `Layout`). Four of the seven
+  toolkits have no per-child weight concept at all.
+  WinUI's `StackPanel`→`Grid` migration is DONE (star sizing is
+  literally the contract, so the weights map straight onto
+  `GridLength` with no arithmetic); its cost was that Grid places by
+  attached `Grid.Row`/`Grid.Column` rather than by child order, so the
+  backend now tracks logical order itself and restamps every child on
+  add/move/destroy.
+  STILL OPEN on grow: the remaining 7 bindings need the `grow` sugar
+  (only Rust has `tx.grow`), and the `grow`/`layout` scenes exist only
+  as Rust guests — the other 7 guest languages have neither. The
+  Android `jvm` suite rides with that item, not separately: it is a
+  *binding* suite (the milestone2kt JVM guest), so its grow/layout legs
+  need the Java sugar plus a Kotlin guest scene and land when those do.
+  Also open: `expect_shares` can only name columns — `row` is not a
+  target kind in the harness grammar at all — so the HORIZONTAL grow
+  contract is asserted nowhere; a backend that grew only columns would
+  pass today's whole matrix. Adding `row#N` targets plus a row
+  assertion in the `grow` scene is the guard (found when a hand-run
+  `expect_shares row#2` probe crashed the SwiftUI interpreter; the
+  interpreters now reject unknown targets loudly, but the axis is
+  still uncovered).
+  `alignment` is the prerequisite for grow being *visible* in a nested
+  stack: kaya's normalized cross-axis default is leading/natural, so a
+  nested *column* is only as wide as its content (rows do stretch to the
+  parent's width, as the AppKit frame dump confirmed).
+- **The recording pipeline, for the cross-backend comparison it was
+  built for.** Recording mode works end to end on macOS (per-leg stills
+  land in `target/recordings/mac/<leg>/steps/`), and the Linux path was
+  silently broken until now — the container is not a nix dev shell, so
+  `harness-extract.sh`'s guard refused and EVERY Linux leg passed while
+  producing no stills at all. `tools/linux/run-suites.sh` now exports the
+  fingerprint. Two things are still open:
+  1. **GTK stills come out black** (the bare Xvfb root plus a cursor).
+     The legs pass; only the frames are empty. Likely cause: a scene
+     whose steps are all *terminal* expects gives the extractor nothing
+     but teardown frames — `layout.steps` is `settle 1500` then two
+     expects that fire at +1500ms, exactly when the window is going
+     away. A mid-scene settle (or an extractor bias for expects that
+     end a script) would give it a frame worth capturing.
+  2. **Windows, iOS and Android recordings are unattempted.** Each
+     runner supports KAYA_RECORD, but none has been run since the scenes
+     were added.
+  This blocks refreshing the "Seven backends, one layout" artifact with
+  current renders, which is what the recordings are for. The artifact is
+  UNTOUCHED so far — every image in it predates `grow`.
 - ~~A geometry verb for the harness~~ LANDED as `expect_shares` /
   `Stage::child_shares`, with the `grow` scene as its first user.
   Shares, not sizes: a size is a platform metric and could never be
@@ -34,14 +73,12 @@ Landed history lives in git; this file only carries what is still open.
   extent as a whole percentage of the children's *sum* (spacing and
   padding excluded, since those are metrics too), and the scene gives
   its column nothing but growers so the split is exactly
-  weight/Σweight. Traps found doing it: read the alignment/layout rect,
-  not the frame (AppKit inflates a slider's frame ±2 a side and would
-  report 1:3 as 2.90:1); force the pending layout pass before reading or
-  the first read after mount sees stale or zero geometry; and rounding
-  lives in one shared `harness::shares` so two backends cannot disagree
-  by a percentage point and read as a layout bug. Still open: the verb
-  exists in the five Rust backends but not the two interpreters, and
-  `grow` itself is implemented only on AppKit and GTK.
+  weight/Σweight. Traps found doing it are in docs/traps.md. The verb
+  now exists in all five Rust backends and both interpreters.
+  Known limitation: `expect_shares` reads back the extents a container
+  recorded during layout, and on SwiftUI only the custom `Layout` path
+  records them — so the verb is meaningful on containers that actually
+  grow something, which is what a conformance scene always is.
 - **Window vocabulary** (DESIGN open question #4): create_window,
   per-window mount targets, lifecycle (CloseRequested + veto default,
   Present, Close), sizing/titles, dialogs/modality, mobile capability
@@ -101,31 +138,39 @@ Landed history lives in git; this file only carries what is still open.
 
 ## Testing / infrastructure
 
-- The `layout` scene is half-wired: it exists (guests/rust/layout.rs,
-  tools/scenes/layout.steps, harness arm, Android guest arm) and is
-  functionally green on mac, but is NOT built or run by any platform
-  suite (validate-mac scene list, validate-linux, run-sim, run-emulator,
-  deploy-win) — every capture had to `cargo build --example layout` by
-  hand. check-steps passes anyway (it validates script well-formedness,
-  not runner wiring), so nothing flags the gap. DECISION: either wire it
-  into the suites as a cheap functional leg (its two label expects prove
-  the tree builds) or accept it as an observation-only scene and say so.
-  Ties to the geometry-guard decision below (an eyeball-only scene has
-  little to assert in an automated suite).
+- ~~The `layout` scene is half-wired~~ RESOLVED: `layout` and `grow` are
+  now built and run by every platform suite (validate-mac on both
+  AppKit and SwiftUI, validate-linux on X11 and Wayland, deploy-win,
+  run-sim, run-emulator on both Views and Compose). Packaging notes for
+  whoever adds the next scene: iOS needs a bundle per example in
+  run-sim.sh; Android has ONE apk whose guest
+  (guests/rust/milestone2_android.rs) is a scene selector keyed on
+  KAYA_SELFTEST, so a new scene needs a `mod` + match arm there; Windows
+  needs a tools/guest/run_<scene>_<lang>.cmd plus build/scp/verify/kill
+  entries in deploy-win.sh. NOTE the gap this exposed: check-steps
+  validates script well-formedness and scene REGISTRATION (harness.rs),
+  but nothing checks that a scene is actually RUN by a suite — a scene
+  can still exist, be registered, and be exercised nowhere.
 - Ergonomic: a `kaya::park(&ctx)` keep-alive primitive for static
   (handler-less) scenes, so they don't reach for `Messages::<()>` just
   to block until Shutdown (see traps.md).
-- Layout has no structural guard: the harness observes only
-  semantic/textual state (child_texts, read_text, is_focused,
-  image_size) — there is no geometry observation (frame/position/measured
-  spacing), so layout regressions are invisible to the gate layer. The
-  `layout` scene (guests/rust/layout.rs + tools/scenes/layout.steps) is
-  an eyeball-only observation vehicle under KAYA_RECORD; its two expects
-  only prove the tree built. DECISION (maintainer, 2026-07-19):
-  declined for now — keep layout eyeball-only, do NOT build a geometry
-  Stage method ("idk if geometry detection will pay off"). So layout
-  stays unguarded by the gate layer by choice; revisit only if layout
-  regressions start biting.
+- The WinUI bindings have no regeneration gate:
+  crates/kaya/src/winui/bindings.rs comes from tools/winui-bindgen, but
+  unlike gen-header/gen-bindings/gen-guests there is no `--check`
+  proving the checked-in file matches the generator — a hand edit (or a
+  filter change without regeneration) goes unnoticed until the next
+  regeneration clobbers it. deploy-win compiling the file is the only
+  gate today, and it proves compilability, not provenance.
+- ~~Layout has no structural guard~~ SUPERSEDED (2026-07-20). The
+  2026-07-19 decision was to keep layout eyeball-only and NOT build a
+  geometry Stage method. That was revisited when `grow` landed, because
+  a proportional split is a *semantic* contract and eyeballing it does
+  not scale to seven backends. `expect_shares` is the resulting verb —
+  and it earned its place immediately, catching three real bugs that
+  inspection had missed (AppKit's inflated frame, GTK's CSS box, WinUI's
+  track-vs-child). It works precisely because it reports SHARES rather
+  than sizes, which sidesteps the original objection: sizes are metrics
+  and would have been unassertable across platforms.
 - bench-encode blob leg: register+reference throughput with an MB/s
   floor, so payload-path structural regressions trip at gate time.
   (Adding it means a second phase in each language's encode_bench

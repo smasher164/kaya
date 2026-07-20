@@ -505,8 +505,22 @@ native engines is the coherent choice.
 
 Normalize semantics but not metrics: API constructs must mean the same
 thing everywhere, while the numbers the platforms produce (control sizes,
-spacing, wrap points, baselines) stay platform-flavored. The known
-normalization worklist:
+spacing, wrap points, baselines) stay platform-flavored. Two backends
+render the same tree differently and both look right — that is the
+system working, the way one document takes different stylesheets.
+
+A corollary for implementers, learned the hard way while landing `grow`:
+**take over a native container's layout only where the toolkit cannot
+express the semantics, and only in the containers that ask for it.** The
+first cut installed a custom layout on *every* GtkBox and *every* SwiftUI
+stack, which routed scenes that never used a weight through kaya's
+arithmetic and discarded whatever those toolkits do idiomatically —
+pixel-consistency by the back door, the very goal this section rejects.
+Both are now lazy: GtkBox keeps GTK's layout until a child in that box
+actually grows, and VStack/HStack stay VStack/HStack until one of their
+children does.
+
+The known normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,
   AppKit reserves space, XAML distinguishes Collapsed from Hidden.
@@ -523,13 +537,25 @@ normalization worklist:
   their own natural sizes not entering the division — the contract CSS
   states as `flex-basis: 0`, and the one Compose `Modifier.weight`, XAML
   star sizing, and Android `layout_weight` (at a 0 main-axis size)
-  already implement. Those backends get it for free. The two that have
-  no native weight must construct it: AppKit expresses the ratios as
-  pairwise Auto Layout constraints between growers (hugging priority
-  alone is *ordinal* — it picks who stretches first, not by how much,
-  and would render 1:3 differently on every platform), and GTK4 needs a
-  custom `GtkLayoutManager`, since `hexpand` is a boolean that splits
-  space equally among expanders and cannot express a ratio at all.
+  already implement. Those three get it for free — on WinUI a
+  `Grid` whose tracks are `Auto` for the natural-size children and
+  `Star(w)` for the growers *is* the contract, which is why the
+  row/column containers are Grids and not StackPanels (a StackPanel has
+  no per-child weight at all). The other FOUR toolkits have no weight
+  concept whatsoever and must construct it: AppKit and UIKit express the
+  ratios as pairwise Auto Layout constraints between growers, GTK4 needs
+  a custom `GtkLayoutManager`, and SwiftUI a custom `Layout`. Each of
+  those four offers a near-miss that looks like the answer and is not —
+  content-hugging priority on the Apple stacks and `layoutPriority` on
+  SwiftUI are *ordinal* (who stretches first, not by how much), while
+  GTK's `hexpand` and SwiftUI's `.frame(maxWidth: .infinity)` are
+  *boolean* (split the remainder equally). Reaching for any of them
+  yields a 1:3 that renders differently on every platform. (SwiftUI's
+  Slider is additionally the lone control with no natural main-axis
+  size at all — unconstrained it swallows whatever a stack offers — so
+  the interpreter stands in 200pt as its weight-0 natural width and
+  lifts the cap for growers, whose extent is the track KayaFlex
+  assigned.)
 - Height-for-width (wrapping labels in stacks) gets dedicated conformance
   tests from day one; it is the most notorious cross-engine divergence.
 - One logical coordinate unit, with defined fractional-scale rounding.

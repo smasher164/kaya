@@ -62,8 +62,20 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.MenuFlyout".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase".to_string(),
         "Microsoft.UI.Xaml.Style".to_string(),
-        "Microsoft.UI.Xaml.Controls.StackPanel".to_string(),
         "Microsoft.UI.Xaml.Controls.Orientation".to_string(),
+        // Grid, not StackPanel, is what carries the row/column
+        // containers: proportional `grow` needs star sizing, and a
+        // StackPanel sizes children to their natural extent along its
+        // stacking axis with no weight concept anywhere. GridLength
+        // with GridUnitType::Star is the whole reason these are here;
+        // Grid's Row/Column attached properties place each child.
+        "Microsoft.UI.Xaml.Controls.Grid".to_string(),
+        "Microsoft.UI.Xaml.Controls.RowDefinition".to_string(),
+        "Microsoft.UI.Xaml.Controls.ColumnDefinition".to_string(),
+        "Microsoft.UI.Xaml.Controls.RowDefinitionCollection".to_string(),
+        "Microsoft.UI.Xaml.Controls.ColumnDefinitionCollection".to_string(),
+        "Microsoft.UI.Xaml.GridLength".to_string(),
+        "Microsoft.UI.Xaml.GridUnitType".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
         "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBase".to_string(),

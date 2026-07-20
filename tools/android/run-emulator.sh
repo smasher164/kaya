@@ -278,6 +278,14 @@ if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
     run_apk feed-rust \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed
+    # The layout contract on the Views backend: grow asserted as shares,
+    # plus the observation scene the recordings are compared from.
+    run_apk grow-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity grow
+    run_apk layout-rust \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity layout
     drain
     timing legs-rust
 fi
@@ -324,6 +332,16 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2/.MainActivity feed \
         --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script feed)'"
+    run_apk grow-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity grow \
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
+    run_apk layout-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity layout \
+        --es KAYA_BACKEND compose \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
     drain
     timing legs-compose
 fi

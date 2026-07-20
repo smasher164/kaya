@@ -102,6 +102,10 @@ struct CoreState {
     sliders: Vec<(GlobalRef, u64)>,
     images: Vec<GlobalRef>,
     columns: Vec<GlobalRef>,
+    /// Grow weights by widget, so AddChild can re-stamp a weight that
+    /// arrived before the child had a parent (addView installs fresh
+    /// layout params and would otherwise drop it).
+    grow: HashMap<WidgetId, f64>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -295,6 +299,7 @@ fn setup(
         sliders: Vec::new(),
         images: Vec::new(),
         columns: Vec::new(),
+        grow: HashMap::new(),
     });
 
     if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -336,6 +341,58 @@ fn drain_transactions(env: &mut JNIEnv) -> jni::errors::Result<()> {
 /// or width (horizontal row) as the inter-child gap. Cross-axis stays
 /// the native TOP|START, so children pack to the leading corner at
 /// natural size, matching the AppKit/SwiftUI normalized default.
+/// Apply one child's grow weight to its LinearLayout params — Android's
+/// half of the `grow` contract, and the cheapest of the seven.
+///
+/// LinearLayout has real per-child weights, and `layout_weight` with a 0
+/// main-axis dimension is exactly [`Prop::Grow`]: the zero makes the
+/// child contribute nothing to the natural pass, so the whole leftover
+/// is divided among the weighted children in proportion. No constraint
+/// arithmetic and no custom layout, unlike AppKit/UIKit and GTK.
+///
+/// Re-applied from AddChild as well as from the prop write: addView
+/// installs fresh default params, which would otherwise discard a weight
+/// that arrived before the child was attached.
+fn apply_grow(env: &mut JNIEnv, view: &JObject, weight: f64) -> jni::errors::Result<()> {
+    let params = env
+        .call_method(view, "getLayoutParams", "()Landroid/view/ViewGroup$LayoutParams;", &[])?
+        .l()?;
+    if params.is_null() {
+        // Not attached yet: AddChild will call back here once addView
+        // has installed the params.
+        return Ok(());
+    }
+    // The parent decides which axis is the main one; a weight means
+    // nothing without it.
+    let parent = env
+        .call_method(view, "getParent", "()Landroid/view/ViewParent;", &[])?
+        .l()?;
+    if parent.is_null() {
+        return Ok(());
+    }
+    let vertical = env
+        .call_method(&parent, "getOrientation", "()I", &[])?
+        .i()?
+        == 1;
+    env.set_field(&params, "weight", "F", JValue::Float(weight as f32))?;
+    // 0 on the main axis for a grower (flex-basis 0), WRAP_CONTENT (-2)
+    // when the weight goes back to 0 — or the child would stay collapsed
+    // after it stopped growing.
+    let main = if weight > 0.0 { 0 } else { -2 };
+    if vertical {
+        env.set_field(&params, "height", "I", JValue::Int(main))?;
+    } else {
+        env.set_field(&params, "width", "I", JValue::Int(main))?;
+    }
+    env.call_method(
+        view,
+        "setLayoutParams",
+        "(Landroid/view/ViewGroup$LayoutParams;)V",
+        &[JValue::Object(&params)],
+    )?;
+    Ok(())
+}
+
 fn set_child_spacing(
     env: &mut JNIEnv,
     view: &JObject,
@@ -660,6 +717,12 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                         )?;
                     }
                 }
+                // Kind-agnostic, like the prop itself: the weight lands
+                // on the child's layout params, which the parent reads.
+                (Prop::Grow, Value::F64(weight)) => {
+                    with_core(|core| core.grow.insert(id, weight));
+                    apply_grow(env, view.as_obj(), weight)?;
+                }
                 (prop, value) => {
                     panic!("kaya: android cannot apply {prop:?} = {value:?} here")
                 }
@@ -678,6 +741,12 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 "(Landroid/view/View;)V",
                 &[JValue::Object(child_view.as_obj())],
             )?;
+            // addView installed fresh params; re-stamp any weight that
+            // arrived before the child had a parent to weigh it against.
+            let weight = with_core(|core| core.grow.get(&child).copied().unwrap_or(0.0));
+            if weight > 0.0 {
+                apply_grow(env, child_view.as_obj(), weight)?;
+            }
         }
         ApplyOp::Mount { window: _, root } => {
             let root_view = with_widget(root, |w| w.view.clone());
@@ -714,6 +783,13 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Run a closure against the core state. Never held across a JNI call
+/// that can dispatch back into native code — see CoreState's note.
+fn with_core<T>(f: impl FnOnce(&mut CoreState) -> T) -> T {
+    let mut core = CORE.lock().unwrap();
+    f(core.as_mut().expect("core set up"))
 }
 
 fn with_widget<T>(id: WidgetId, f: impl FnOnce(&NativeWidget) -> T) -> T {

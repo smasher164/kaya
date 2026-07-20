@@ -44,7 +44,7 @@ timing() {
 # behind.
 cargo build --lib --example milestone2 --example entry \
     --example gallery --example todos --example reorder --example feed \
-    --example grow || exit 1
+    --example grow --example layout || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -432,6 +432,11 @@ run feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
 # the scene lands depth-first like every other, and the remaining seven
 # guests come with the breadth phase.
 run grow-rust env KAYA_SELFTEST=grow target/debug/examples/grow
+# The layout scene: the cross-backend observation vehicle. It asserts
+# only that the tree built (layout itself is checked by the grow scene's
+# shares), but it is the scene the recordings are compared from, so it
+# has to be a recorded leg on every backend.
+run layout-rust env KAYA_SELFTEST=layout target/debug/examples/layout
 
 drain
 
@@ -505,6 +510,20 @@ run feed-csharp-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libk
 run feed-ocaml-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/feed.exe
 run feed-haskell-swiftui env KAYA_SELFTEST=feed "$(hs_bin feed)"
+
+# The layout and grow scenes against the SwiftUI interpreter — the same
+# examples, KAYA_BACKEND=swiftui. Each scene exports its OWN script:
+# the Rust backends embed theirs at build time, but the interpreter
+# reads KAYA_SELFTEST_SCRIPT from the environment, so a leg that does
+# not set it silently runs the previous group's script against this
+# scene's tree.
+KAYA_SELFTEST_SCRIPT="$(scene_script grow)"
+export KAYA_SELFTEST_SCRIPT
+run grow-rust-swiftui env KAYA_SELFTEST=grow target/debug/examples/grow
+drain
+KAYA_SELFTEST_SCRIPT="$(scene_script layout)"
+export KAYA_SELFTEST_SCRIPT
+run layout-rust-swiftui env KAYA_SELFTEST=layout target/debug/examples/layout
 unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs
