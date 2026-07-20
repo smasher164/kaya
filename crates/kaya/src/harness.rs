@@ -32,6 +32,18 @@
 //! offset from the run's start (`KAYA_HARNESS: +<ms> <step>`): the
 //! transcript is the timeline a recording mode will extract frames by,
 //! relative offsets only, no wall clock.
+//!
+//! `kind#index` is HARNESS grammar and nothing else. App code never
+//! addresses positionally — an app holds the WidgetId its constructor
+//! returned, or names collection rows by their domain keys — and no
+//! binding exposes an index lookup. The harness gets indices because
+//! it drives scenes from OUTSIDE the process, across eight language
+//! guests sharing one byte-identical script, where a handle cannot
+//! exist; even here the indexability policy bites — leaf kinds index
+//! stably because body order is screen order in every language, while
+//! container creation order is not, so tools/check-steps.sh rejects
+//! every container target except the unique-by-convention
+//! `column#0`/`row#0`.
 
 use std::time::{Duration, Instant};
 
@@ -66,6 +78,13 @@ pub enum TargetKind {
     Entry,
     Label,
     Column,
+    /// Rows are targetable under the same convention as columns: only
+    /// index 0, only in a scene that keeps exactly one row, because
+    /// container creation order legitimately differs per language
+    /// (tools/check-steps.sh holds the line). Landed for the
+    /// horizontal grow assertion — before this, a backend that grew
+    /// only columns would have passed the whole matrix.
+    Row,
     Image,
 }
 
@@ -270,6 +289,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "entry" => TargetKind::Entry,
         "label" => TargetKind::Label,
         "column" => TargetKind::Column,
+        "row" => TargetKind::Row,
         "image" => TargetKind::Image,
         other => return Err(format!("unknown target kind {other:?}")),
     };
@@ -407,11 +427,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             Step::Expect(t, want) => {
                 // The target kind picks the observation: an entry
                 // reads its own displayed text, an image its decoded
-                // size, everything else reads label text.
+                // size, a label its text — and nothing else reads at
+                // all: routing any other kind to read_label would
+                // index the LABELS registry with a foreign target and
+                // silently read a different widget (the interpreters
+                // already reject these loudly).
                 let got = match t.kind {
                     TargetKind::Entry => stage.read_text(*t),
                     TargetKind::Image => stage.image_size(*t),
-                    _ => stage.read_label(*t),
+                    TargetKind::Label => stage.read_label(*t),
+                    other => {
+                        failures.push(format!(
+                            "expect reads labels, entries and images — not {other:?}"
+                        ));
+                        continue;
+                    }
                 };
                 if got == *want {
                     observed.push(got);
@@ -420,6 +450,15 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 }
             }
             Step::ExpectOrder(t, want) => {
+                // Container verbs take container targets and nothing
+                // else — resolving a label target against a container
+                // registry (or vice versa) would silently read a
+                // DIFFERENT widget, the false-verdict class the
+                // interpreters already reject loudly.
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    failures.push(format!("{t:?} is not a container target"));
+                    continue;
+                }
                 let got = stage.child_texts(*t);
                 if got == *want {
                     observed.push(got);
@@ -428,6 +467,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 }
             }
             Step::ExpectShares(t, want) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    failures.push(format!("{t:?} is not a container target"));
+                    continue;
+                }
                 let got = stage.child_shares(*t);
                 if got == *want {
                     observed.push(got);

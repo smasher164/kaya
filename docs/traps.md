@@ -59,13 +59,20 @@ these the hard way.
   the kind against the registry the verb reads and bounds-check the
   index; the outcome is a loud "no such target …", never a crash and
   never a misresolved read.
-- **SwiftUI runs speculative zero-size layout passes.** A custom
-  `Layout` is asked to place its subviews at `bounds.size == .zero`, and
-  those passes arrive AFTER the real ones — so recording measurements
-  unconditionally clobbered a correct 96/286 split with 0/0, which
-  `expect_shares` then read as the empty string. Record geometry only
-  from passes with a positive main-axis extent; a degenerate pass is not
-  a placement.
+- **SwiftUI runs speculative layout passes at ARBITRARY sizes, in no
+  useful order — never record observations from inside a pass.** First
+  the zero-size flavor: placements at `bounds == .zero` arriving after
+  the real ones clobbered a correct 96/286 into 0/0. The zero-guard
+  that fixed it then lost to the general flavor: a pass at the row's
+  NATURAL width arrived after the real full-width one and clobbered a
+  correct 25/75 into 26/74 — positive, plausible, unfilterable by any
+  size heuristic. The structural fix is the one Compose had from day
+  one (onGloballyPositioned): record from GeometryReaders, which only
+  ever describe the RENDERED result. Each flex child rides in an
+  invisible max-size frame that accepts its track proposal, and
+  KayaTrackReader on that frame records the track — the layout rect,
+  not the child's drawn size; the root and its offered area are read
+  the same way for expect_root_fills.
 - **A widget that does not fill its assigned track lies beneath a
   passing `expect_shares`.** The verb reads the layout rect (correctly —
   see the first trap), so a size cap on the CONTROL keeps the gate green

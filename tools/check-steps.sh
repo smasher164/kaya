@@ -42,7 +42,12 @@ for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
     for kind, index in re.findall(r"\b(row|column)#(\d+)\b", line):
-        if kind == "column" and index == "0":
+        # Index 0 of either container kind is the blessed pattern, on
+        # one convention: the scene keeps exactly one widget of that
+        # kind, so creation order cannot enter. column#0 is the For
+        # container in milestone2 (root-is-a-row keeps it unique);
+        # row#0 carries the horizontal grow contract in the grow scene.
+        if index == "0":
             continue
         bad.append(f"{path}:{lineno}: {kind}#{index}")
 print("\n".join(bad))
@@ -60,7 +65,7 @@ fi
 status=0
 for f in tools/scenes/*.steps; do
     out="$(lint "$f")" || {
-        echo "check-steps: $f targets a container by creation index — only column#0 (the unique For container) is cross-language stable:" >&2
+        echo "check-steps: $f targets a container by creation index — only column#0/row#0 (unique-by-convention containers) are cross-language stable:" >&2
         echo "$out" >&2
         status=1
     }

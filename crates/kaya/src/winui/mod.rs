@@ -103,6 +103,7 @@ struct CoreState {
     sliders: Vec<Slider>,
     images: Vec<Image>,
     columns: Vec<Grid>,
+    rows: Vec<Grid>,
     window: Window,
 }
 
@@ -519,6 +520,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Row => {
                     let grid = Grid::new()?;
                     grid.SetColumnSpacing(8.0)?;
+                    core.rows.push(grid.clone());
                     NativeWidget::Row(grid)
                 }
                 WidgetKind::Checkbox => {
@@ -1140,6 +1142,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             sliders: Vec::new(),
             images: Vec::new(),
             columns: Vec::new(),
+            rows: Vec::new(),
             child_order: HashMap::new(),
             grow: HashMap::new(),
             window,
@@ -1266,8 +1269,13 @@ impl crate::harness::Stage for WinUiStage {
 
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let children = core.columns[i].Children()?;
+            let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
+                &core.columns
+            } else {
+                &core.rows
+            };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let children = registry[i].Children()?;
             // Child order as the toolkit holds it — the registries are
             // creation-ordered and cannot observe a move.
             let mut texts = Vec::new();
@@ -1284,25 +1292,38 @@ impl crate::harness::Stage for WinUiStage {
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let grid = &core.columns[i];
+            // Kind picks the registry and the definition axis (the
+            // runner rejects any other kind before it gets here). The
+            // first Windows run of the row assertion caught this method
+            // still hard-wired to columns: row#0 resolved against the
+            // COLUMNS registry and reported the column's own splits —
+            // the registry-misresolution class, one backend short of a
+            // clean sweep.
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let grid = &registry[i];
             // Measure/arrange are lazy; force them or the first read
             // after mount sees zeros.
             grid.UpdateLayout()?;
-            // The ROW's resolved height, not the child's ActualHeight:
-            // on a Grid the track is the layout rect, and a child only
-            // fills it if it stretches. A TextBlock never does — it
-            // reports its text height however tall its row is — so
-            // reading children turned an exactly correct 25/75 split
-            // into 37/63. Same trap as AppKit's alignment rect and
-            // GTK's CSS box, in its third dialect.
-            //
-            // Rows and not columns because the target kind is Column, as
-            // in the other backends: only columns are registered.
-            let defs = grid.RowDefinitions()?;
+            // The TRACK's resolved extent, not the child's: on a Grid
+            // the track is the layout rect, and a child only fills it
+            // if it stretches. A TextBlock never does — it reports its
+            // text height however tall its row is — so reading children
+            // turned an exactly correct 25/75 split into 37/63. Same
+            // trap as AppKit's alignment rect and GTK's CSS box, in its
+            // third dialect.
             let mut extents = Vec::new();
-            for at in 0..defs.Size()? {
-                extents.push(defs.GetAt(at)?.ActualHeight()?);
+            if vertical {
+                let defs = grid.RowDefinitions()?;
+                for at in 0..defs.Size()? {
+                    extents.push(defs.GetAt(at)?.ActualHeight()?);
+                }
+            } else {
+                let defs = grid.ColumnDefinitions()?;
+                for at in 0..defs.Size()? {
+                    extents.push(defs.GetAt(at)?.ActualWidth()?);
+                }
             }
             Ok(crate::harness::shares(&extents))
         })

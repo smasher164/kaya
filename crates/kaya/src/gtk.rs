@@ -343,6 +343,7 @@ struct CoreState {
     sliders: Vec<gtk4::Scale>,
     images: Vec<gtk4::Picture>,
     columns: Vec<gtk4::Box>,
+    rows: Vec<gtk4::Box>,
     window: gtk4::Window,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
@@ -421,6 +422,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                     row.set_halign(gtk4::Align::Start);
                     row.set_valign(gtk4::Align::Start);
+                    core.rows.push(row.clone());
                     NativeWidget::Row(row)
                 }
                 WidgetKind::Checkbox => {
@@ -706,6 +708,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 sliders: Vec::new(),
                 images: Vec::new(),
                 columns: Vec::new(),
+                rows: Vec::new(),
                 window: window.upcast(),
                 app: Some(app.clone()),
             });
@@ -831,11 +834,16 @@ impl crate::harness::Stage for GtkStage {
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};
-            let i = crate::harness::resolve(t.index, core.columns.len());
+            let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
+                &core.columns
+            } else {
+                &core.rows
+            };
+            let i = crate::harness::resolve(t.index, registry.len());
             // Child order as the toolkit holds it — the registries are
             // creation-ordered and cannot observe a move.
             let mut texts = Vec::new();
-            let mut child = core.columns[i].first_child();
+            let mut child = registry[i].first_child();
             while let Some(widget) = child {
                 if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
                     if core.labels.iter().any(|l| l == label) {
@@ -851,17 +859,20 @@ impl crate::harness::Stage for GtkStage {
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::WidgetExt;
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let column = &core.columns[i];
+            // Kind picks the registry and the axis: a column's
+            // children split its height, a row's its width (the runner
+            // rejects any other kind before it gets here).
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let container = &registry[i];
             // Pending resizes must land before the sizes mean anything;
             // otherwise the first read after mount sees zeros.
             while glib::MainContext::default().iteration(false) {}
-            // Vertical because the target kind is Column, matching the
-            // other backends: only columns are registered.
             let mut extents = Vec::new();
-            let mut child = column.first_child();
+            let mut child = container.first_child();
             while let Some(widget) = child {
-                extents.push(flex::child_extent(&widget, true));
+                extents.push(flex::child_extent(&widget, vertical));
                 child = widget.next_sibling();
             }
             crate::harness::shares(&extents)

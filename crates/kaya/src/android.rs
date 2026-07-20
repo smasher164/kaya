@@ -102,6 +102,7 @@ struct CoreState {
     sliders: Vec<(GlobalRef, u64)>,
     images: Vec<GlobalRef>,
     columns: Vec<GlobalRef>,
+    rows: Vec<GlobalRef>,
     /// Grow weights by widget, so AddChild can re-stamp a weight that
     /// arrived before the child had a parent (addView installs fresh
     /// layout params and would otherwise drop it).
@@ -301,6 +302,7 @@ fn setup(
         sliders: Vec::new(),
         images: Vec::new(),
         columns: Vec::new(),
+        rows: Vec::new(),
         grow: HashMap::new(),
         root: None,
     });
@@ -389,6 +391,65 @@ fn apply_grow(env: &mut JNIEnv, view: &JObject, weight: f64) -> jni::errors::Res
     }
     env.call_method(
         view,
+        "setLayoutParams",
+        "(Landroid/view/ViewGroup$LayoutParams;)V",
+        &[JValue::Object(&params)],
+    )?;
+    Ok(())
+}
+
+/// Span a nested container across its parent's breadth — the Android
+/// spelling of the rule UIKit pins with a constraint and KayaFlex
+/// spells as "offer the full cross extent": a row in a column is as
+/// wide as the column, a column in a row as tall as the row.
+///
+/// On this backend the rule is load-bearing for grow, not merely
+/// visual: LinearLayout honors layout_weight only when its own axis
+/// extent is definite, and a WRAP_CONTENT row quietly hands weighted
+/// children their NATURAL sizes instead — the grow scene's first row
+/// assertion here read 28/72, the natural ratio of a label and a
+/// button, where the contract said 25/75. Same-axis nesting takes no
+/// stamp: the parent's own distribution governs its main axis.
+///
+/// Re-applied wherever addView runs (AddChild and MoveChild both), for
+/// the same reason grow is: addView installs fresh layout params.
+fn apply_breadth(
+    env: &mut JNIEnv,
+    parent: &JObject,
+    child: &JObject,
+    child_kind: WidgetKind,
+) -> jni::errors::Result<()> {
+    if !matches!(child_kind, WidgetKind::Row | WidgetKind::Column) {
+        return Ok(());
+    }
+    let vertical_parent = env
+        .call_method(parent, "getOrientation", "()I", &[])?
+        .i()?
+        == 1;
+    let horizontal_child = matches!(child_kind, WidgetKind::Row);
+    if vertical_parent != horizontal_child {
+        return Ok(());
+    }
+    let params = env
+        .call_method(
+            child,
+            "getLayoutParams",
+            "()Landroid/view/ViewGroup$LayoutParams;",
+            &[],
+        )?
+        .l()?;
+    if params.is_null() {
+        return Ok(());
+    }
+    // MATCH_PARENT (-1) on the child's own main axis, which is the
+    // parent's cross axis.
+    if horizontal_child {
+        env.set_field(&params, "width", "I", JValue::Int(-1))?;
+    } else {
+        env.set_field(&params, "height", "I", JValue::Int(-1))?;
+    }
+    env.call_method(
+        child,
         "setLayoutParams",
         "(Landroid/view/ViewGroup$LayoutParams;)V",
         &[JValue::Object(&params)],
@@ -575,6 +636,7 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     .push((view.clone(), tag_key.expect("sliders carry a tag"))),
                 WidgetKind::Image => core.images.push(view.clone()),
                 WidgetKind::Column => core.columns.push(view.clone()),
+                WidgetKind::Row => core.rows.push(view.clone()),
                 _ => {}
             }
             core.widgets.insert(id, NativeWidget { view, kind, tag_key });
@@ -627,6 +689,16 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                     )
                     .expect("addView");
                 }
+            }
+            // The re-add installed fresh params, exactly like AddChild:
+            // re-stamp the breadth rule and the weight, or a moved
+            // container would arrive de-spanned and a moved grower
+            // would arrive weightless.
+            let child_kind = with_widget(child, |w| w.kind);
+            apply_breadth(env, parent_view.as_obj(), child_view.as_obj(), child_kind)?;
+            let weight = with_core(|core| core.grow.get(&child).copied().unwrap_or(0.0));
+            if weight > 0.0 {
+                apply_grow(env, child_view.as_obj(), weight)?;
             }
         }
         ApplyOp::Destroy { id } => {
@@ -744,8 +816,11 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 "(Landroid/view/View;)V",
                 &[JValue::Object(child_view.as_obj())],
             )?;
-            // addView installed fresh params; re-stamp any weight that
-            // arrived before the child had a parent to weigh it against.
+            // addView installed fresh params; re-stamp the breadth
+            // rule and any weight that arrived before the child had a
+            // parent to weigh it against.
+            let child_kind = with_widget(child, |w| w.kind);
+            apply_breadth(env, parent_view.as_obj(), child_view.as_obj(), child_kind)?;
             let weight = with_core(|core| core.grow.get(&child).copied().unwrap_or(0.0));
             if weight > 0.0 {
                 apply_grow(env, child_view.as_obj(), weight)?;
@@ -1108,8 +1183,13 @@ impl crate::harness::Stage for AndroidStage {
         let (column, labels) = {
             let core = CORE.lock().unwrap();
             let core = core.as_ref().expect("core set up");
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            (core.columns[i].clone(), core.labels.clone())
+            let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
+                &core.columns
+            } else {
+                &core.rows
+            };
+            let i = crate::harness::resolve(t.index, registry.len());
+            (registry[i].clone(), core.labels.clone())
         };
         Self::on_ui(move |env| {
             // Child order as the toolkit holds it — the registries are
@@ -1153,21 +1233,30 @@ impl crate::harness::Stage for AndroidStage {
     }
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
+        // Kind picks the registry and the axis: a column's children
+        // split its height, a row's its width (the runner rejects any
+        // other kind before it gets here).
+        let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
         let column = {
             let core = CORE.lock().unwrap();
             let core = core.as_ref().expect("core set up");
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            core.columns[i].clone()
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            registry[i].clone()
         };
         Self::on_ui(move |env| {
             let count = env
                 .call_method(column.as_obj(), "getChildCount", "()I", &[])
                 .and_then(|v| v.i())
                 .expect("kaya: child count read failed");
-            // getHeight because the target kind is Column, as in the
-            // other backends: only columns are registered. Measured
-            // heights, read after the layout pass the harness's settle
-            // has already allowed for.
+            // The kind picked the registry above; it picks the axis
+            // here too. The first Android run of the row assertion
+            // caught this loop still hard-wired to getHeight: the row's
+            // tracks were a perfect 78/234 (measured live), and the
+            // verb read the children's HEIGHTS — 19 and 48, "28,72" —
+            // instead. Measured sizes, read after the layout pass the
+            // harness's settle has already allowed for.
+            let method = if vertical { "getHeight" } else { "getWidth" };
             let mut extents = Vec::new();
             for at in 0..count {
                 let child = env
@@ -1179,11 +1268,11 @@ impl crate::harness::Stage for AndroidStage {
                     )
                     .and_then(|v| v.l())
                     .expect("kaya: child read failed");
-                let height = env
-                    .call_method(&child, "getHeight", "()I", &[])
+                let extent = env
+                    .call_method(&child, method, "()I", &[])
                     .and_then(|v| v.i())
-                    .expect("kaya: child height read failed");
-                extents.push(f64::from(height));
+                    .expect("kaya: child extent read failed");
+                extents.push(f64::from(extent));
             }
             crate::harness::shares(&extents)
         })

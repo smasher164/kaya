@@ -98,6 +98,7 @@ final class KayaSceneModel {
     var sliders: [KayaNode] = []
     var images: [KayaNode] = []
     var columns: [KayaNode] = []
+    var rows: [KayaNode] = []
 }
 
 let kayaScene = KayaSceneModel()
@@ -219,6 +220,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindCheckbox: kayaScene.checkboxes.append(node)
                 case kindImage: kayaScene.images.append(node)
                 case kindColumn: kayaScene.columns.append(node)
+                case kindRow: kayaScene.rows.append(node)
                 default: break
                 }
             case applySetProp:
@@ -468,7 +470,13 @@ private func kayaRunScript(_ script: String) {
                 // which the creation-ordered registries cannot see.
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
-                    kayaTarget(parts[1], "column", kayaScene.columns)?.children
+                    // Kind picks the registry, exactly as in the Rust
+                    // harness: a row target must never read a column.
+                    let isRow = parts[1].hasPrefix("row")
+                    return kayaTarget(
+                        parts[1], isRow ? "row" : "column",
+                        isRow ? kayaScene.rows : kayaScene.columns
+                    )?.children
                         .filter { $0.kind == kindLabel }
                         .map { $0.text }
                         .joined(separator: "|")
@@ -490,7 +498,11 @@ private func kayaRunScript(_ script: String) {
                 // compares byte-for-byte across all seven backends.
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
-                    guard let container = kayaTarget(parts[1], "column", kayaScene.columns)
+                    let isRow = parts[1].hasPrefix("row")
+                    guard
+                        let container = kayaTarget(
+                            parts[1], isRow ? "row" : "column",
+                            isRow ? kayaScene.rows : kayaScene.columns)
                     else { return nil }
                     let extents = container.children.map { kayaMainExtents[$0.id] ?? 0 }
                     let total = extents.reduce(0, +)
@@ -553,20 +565,47 @@ private func kayaRunScript(_ script: String) {
     exit(1)
 }
 
-/// The main-axis extent each node was allocated, by node id — what
-/// `expect_shares` reads back.
+/// The main-axis extent each node's TRACK was allocated, by node id —
+/// what `expect_shares` reads back.
 ///
-/// A plain dictionary and not a field on the @Observable node: writing
-/// model state from inside a layout pass would invalidate the very pass
-/// that wrote it. Main-actor only, like the rest of the scene model.
+/// Written by KayaTrackReader, never from inside a layout pass: SwiftUI
+/// runs speculative passes at arbitrary sizes and delivers them in no
+/// useful order — a natural-width pass arriving after the real one once
+/// clobbered a correct 25/75 into 26/74 (and before that, zero-size
+/// passes clobbered 96/286 into 0/0). Geometry only ever describes the
+/// rendered result, so the readers cannot lie that way. Main-actor
+/// only, like the rest of the scene model.
 var kayaMainExtents: [UInt64: Double] = [:]
 
-/// The mounted root's placed size and the area the window offered it —
-/// what `expect_root_fills` compares. The offer is the root layout's
-/// own fully-specified proposal (recorded in sizeThatFits, so no
-/// padding constant ever enters the comparison); speculative probes are
-/// zero, infinite, or unspecified and are skipped. Main-actor only,
-/// like the rest of the scene model.
+/// The invisible frame each flex child rides in IS the track KayaFlex
+/// assigned (the frame accepts the track proposal; the child aligns
+/// top-leading inside it, the normalized cross-axis default). The
+/// reader records the frame's geometry — the layout rect, never the
+/// child's drawn size, which several controls inflate or hug.
+private struct KayaTrackReader: View {
+    let id: UInt64
+    let vertical: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { record(geo.size) }
+                .onChange(of: geo.size) { _, size in record(size) }
+        }
+    }
+
+    private func record(_ size: CGSize) {
+        kayaMainExtents[id] = Double(vertical ? size.height : size.width)
+    }
+}
+
+/// The mounted root's rendered size and the area the window offered it
+/// — what `expect_root_fills` compares. Both come from GeometryReaders
+/// (the offer from the reader wrapping KayaRoot's content, which fills
+/// what it is proposed; the root from a background reader on the
+/// mounted container), so neither can be clobbered by a speculative
+/// layout pass — geometry only ever describes the rendered result.
+/// Main-actor only, like the rest of the scene model.
 var kayaRootSize = CGSize.zero
 var kayaAvailableSize = CGSize.zero
 
@@ -601,16 +640,6 @@ struct KayaFlex: Layout {
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
-        // The root's fully-specified proposal IS the area the window
-        // offers it — expect_root_fills compares the placed size
-        // against this. Probes (zero, infinite, unspecified) are not
-        // offers.
-        if fillCross,
-            let width = proposal.width, let height = proposal.height,
-            width > 0, height > 0, width.isFinite, height.isFinite
-        {
-            kayaAvailableSize = CGSize(width: width, height: height)
-        }
         let natural = subviews.map { $0.sizeThatFits(.unspecified) }
         let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
@@ -638,10 +667,6 @@ struct KayaFlex: Layout {
     func placeSubviews(
         in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) {
-        if fillCross && bounds.size.width > 0 && bounds.size.height > 0 {
-            // The root's own placed size, for expect_root_fills.
-            kayaRootSize = bounds.size
-        }
         guard !subviews.isEmpty else { return }
         let gaps = spacing * CGFloat(subviews.count - 1)
         // A grower's own natural size is deliberately not consulted: the
@@ -684,16 +709,6 @@ struct KayaFlex: Layout {
                 ? ProposedViewSize(width: bounds.width, height: extent)
                 : ProposedViewSize(width: extent, height: bounds.height)
             subviews[i].place(at: origin, anchor: .topLeading, proposal: sized)
-            // Degenerate passes are not placements. SwiftUI runs
-            // speculative layouts at zero size, and their zeros arrive
-            // AFTER the real ones — recording them clobbered a correct
-            // 96/286 split into 0/0, which expect_shares then read as
-            // the empty string.
-            if i < nodes.count && main(bounds.size) > 0 {
-                // The allocated track, not the view's drawn size — the
-                // layout rect is what the contract talks about.
-                kayaMainExtents[nodes[i].id] = Double(extent)
-            }
             offset += extent + spacing
         }
     }
@@ -729,7 +744,15 @@ struct KayaRender: View {
             if isRoot || node.children.contains(where: { $0.grow > 0 }) {
                 KayaFlex(vertical: true, spacing: 8, nodes: node.children, fillCross: isRoot) {
                     ForEach(node.children) { child in
+                        // The invisible frame accepts the track KayaFlex
+                        // proposes; the reader on it records the track's
+                        // geometry (see KayaTrackReader).
                         KayaRender(node: child)
+                            .frame(
+                                maxWidth: .infinity, maxHeight: .infinity,
+                                alignment: .topLeading
+                            )
+                            .background(KayaTrackReader(id: child.id, vertical: true))
                     }
                 }
             } else {
@@ -750,6 +773,11 @@ struct KayaRender: View {
                 KayaFlex(vertical: false, spacing: 8, nodes: node.children, fillCross: isRoot) {
                     ForEach(node.children) { child in
                         KayaRender(node: child)
+                            .frame(
+                                maxWidth: .infinity, maxHeight: .infinity,
+                                alignment: .topLeading
+                            )
+                            .background(KayaTrackReader(id: child.id, vertical: false))
                     }
                 }
             } else {
@@ -866,9 +894,28 @@ struct KayaRoot: View {
     @State private var scene = kayaScene
 
     var body: some View {
-        Group {
-            if let root = scene.root {
-                KayaRender(node: root, isRoot: true)
+        // The outer GeometryReader IS the offer: it fills whatever the
+        // window proposes inside the padding, and expect_root_fills
+        // compares the root's rendered size against it. Both readings
+        // are geometry, so no speculative layout pass can clobber them.
+        GeometryReader { available in
+            Group {
+                if let root = scene.root {
+                    KayaRender(node: root, isRoot: true)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onAppear { kayaRootSize = geo.size }
+                                    .onChange(of: geo.size) { _, size in
+                                        kayaRootSize = size
+                                    }
+                            }
+                        )
+                }
+            }
+            .onAppear { kayaAvailableSize = available.size }
+            .onChange(of: available.size) { _, size in
+                kayaAvailableSize = size
             }
         }
         .padding()

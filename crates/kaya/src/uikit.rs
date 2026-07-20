@@ -80,6 +80,7 @@ struct CoreState {
     sliders: Vec<Retained<UISlider>>,
     images: Vec<Retained<UIImageView>>,
     columns: Vec<Retained<UIStackView>>,
+    rows: Vec<Retained<UIStackView>>,
     // Flex bookkeeping, as on AppKit: a weight is set on a child but
     // solved across the whole sibling set, so the enclosing stack has to
     // be reachable from the child and its constraints rebuilt whole.
@@ -346,6 +347,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Top);
                     }
                     add_filler(core, mtm, id, &stack, UILayoutConstraintAxis::Horizontal);
+                    core.rows.push(stack.clone());
                     NativeWidget::Row(stack)
                 }
                 WidgetKind::Checkbox => {
@@ -749,6 +751,7 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             sliders: Vec::new(),
             images: Vec::new(),
             columns: Vec::new(),
+            rows: Vec::new(),
             parents: HashMap::new(),
             grow: HashMap::new(),
             grow_constraints: HashMap::new(),
@@ -902,8 +905,13 @@ impl crate::harness::Stage for UiKitStage {
 
     fn child_texts(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let stack = &core.columns[i];
+            let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
+                &core.columns
+            } else {
+                &core.rows
+            };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let stack = &registry[i];
             // Child order as the toolkit holds it — the registries are
             // creation-ordered and cannot observe a move.
             let mut texts = Vec::new();
@@ -924,13 +932,16 @@ impl crate::harness::Stage for UiKitStage {
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let stack = &core.columns[i];
+            // Kind picks the registry and the axis: a column's children
+            // split its height, a row's its width (the runner rejects
+            // any other kind before it gets here).
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let stack = &registry[i];
             // Constraints solve lazily; without this the first read
             // after mount sees the pre-layout frames.
             stack.layoutIfNeeded();
-            // Height because the target kind is Column, as in the other
-            // backends: only columns are registered.
             let mut extents = Vec::new();
             for child in unsafe { stack.arrangedSubviews() } {
                 // The trailing filler is plumbing, not a child: counted,
@@ -944,7 +955,11 @@ impl crate::harness::Stage for UiKitStage {
                 {
                     continue;
                 }
-                extents.push(child.frame().size.height);
+                extents.push(if vertical {
+                    child.frame().size.height
+                } else {
+                    child.frame().size.width
+                });
             }
             crate::harness::shares(&extents)
         })

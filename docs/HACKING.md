@@ -110,6 +110,35 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   KAYA_BACKEND=swiftui/compose with the respective dylib env vars — see
   validate-mac.sh for the exact patterns.
 
+## Layout forensics (when a share assertion fails)
+
+A failing `expect_shares` prints the shares it computed, which cannot
+tell you whether the LAYOUT is wrong or the MEASUREMENT is (both have
+happened; the second more often — see the layout-rect trap and the
+axis-hardwired misreads in docs/traps.md). Get ground truth before
+touching layout code:
+
+- **Any platform with stills**: measure the recording still against the
+  arithmetic — a pixel run at exactly `share × extent + gap` proves the
+  tracks; the drawn control hugging inside its track is normal.
+- **Android, live bounds**: uiautomator inside the settle window —
+  ```
+  S=emulator-5554   # adb -s: two emulators run in the pool
+  adb -s $S shell am force-stop dev.kaya.milestone2
+  adb -s $S shell "am start -n dev.kaya.milestone2/.MainActivity \
+      --es KAYA_SELFTEST grow && sleep 0.3 && \
+      uiautomator dump /sdcard/kaya-dump.xml"
+  adb -s $S pull /sdcard/kaya-dump.xml
+  ```
+  The one-shell `&&` chain matters: the selftest exits the app ~2.3s
+  after launch (settle 1500 + verdict + the recording linger), and a
+  host-side round trip plus a ~1.5s dump loses the race. Node bounds
+  in the XML are the allocated tracks. `text=` precedes `class=` in
+  the dump's attribute order.
+- **iOS/macOS**: the pixel measurement above, or expect_shares against
+  a throwaway env script (the interpreters read KAYA_SELFTEST_SCRIPT;
+  Rust backends embed theirs at build time and need a rebuild).
+
 ## Multi-agent work
 
 The breadth phases (same change across 8 bindings or 7 backends)

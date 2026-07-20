@@ -1,25 +1,27 @@
 # The grow conformance scene: the layout contract as an assertion
 # rather than a recording.
 #
-# column#0 is the scene's ONLY column, which is what makes naming it
-# safe — container targets index by creation order and that order
-# legitimately differs per language (see tools/check-steps.sh).
+# column#0 and row#0 are each the scene's ONLY container of their kind,
+# which is what makes naming them safe — container targets index by
+# creation order and that order legitimately differs per language (see
+# tools/check-steps.sh).
 #
-# Every one of its children is a grower and there are no others, so the
-# split is exactly weight/Sigma-weight: 1 and 3 out of a pool of 4
-# divide it 25/75 on every backend, whatever a label or a button happens
-# to measure there. Shares and never sizes — a size is a platform metric
+# Every child of both containers is a grower, so each split is exactly
+# weight/Sigma-weight: 1,1,2 divide the column 25/25/50 and the row's
+# 1,3 divide its width 25/75, whatever a label or a button happens to
+# measure there. Shares and never sizes — a size is a platform metric
 # and could not be compared byte-for-byte at all.
 #
-# The shares are kept large on purpose. A share that falls under a
-# platform's minimum control size gets clamped by the toolkit, and the
-# scene would then be measuring GTK's 34pt minimum button height rather
-# than the contract.
-# root-fills first: a share is a percentage of the children's SUM,
-# which is total-invariant — a mounted root hugging its content at a
-# fraction of the window still splits 25/75, and that blind spot
-# shipped twice (GTK, then UIKit) before this line existed.
+# The shares are kept clear of every platform's minimum control size
+# (GTK's 34pt button height is the binding one at a 320x160 window),
+# or the scene would measure the minimums rather than the contract.
+#
+# root-fills before the shares: a share is a percentage of the
+# children's SUM, which is total-invariant — a mounted root hugging its
+# content at a fraction of the window still splits 25/25/50, and that
+# blind spot shipped twice (GTK, then UIKit) before this line existed.
 settle 1500
 expect label#0 "grow probe"
 expect_root_fills
-expect_shares column#0 "25,75"
+expect_shares column#0 "25,25,50"
+expect_shares row#0 "25,75"

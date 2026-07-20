@@ -75,6 +75,7 @@ struct CoreState {
     sliders: Vec<(Retained<NSSlider>, Retained<ButtonTarget>)>,
     images: Vec<Retained<NSImageView>>,
     columns: Vec<Retained<NSStackView>>,
+    rows: Vec<Retained<NSStackView>>,
     // Flex bookkeeping. A weight is set on a child but solved on its
     // parent — the split is a property of the whole sibling set — so
     // the enclosing stack has to be findable from the child, and its
@@ -234,6 +235,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
                     stack.setSpacing(8.0);
                     stack.setAlignment(NSLayoutAttribute::Top);
+                    core.rows.push(stack.clone());
                     NativeWidget::Row(stack)
                 }
                 WidgetKind::Button => {
@@ -681,6 +683,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             sliders: Vec::new(),
             images: Vec::new(),
             columns: Vec::new(),
+            rows: Vec::new(),
             parents: HashMap::new(),
             grow: HashMap::new(),
             grow_constraints: HashMap::new(),
@@ -829,8 +832,13 @@ impl crate::harness::Stage for AppKitStage {
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.columns.len());
-            let stack = &core.columns[i];
+            // Kind picks the registry and the axis: a column's
+            // children split its height, a row's its width (the runner
+            // rejects any other kind before it gets here).
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let stack = &registry[i];
             // Constraints are solved lazily; without this the first read
             // after mount would see the pre-layout frames.
             stack.layoutSubtreeIfNeeded();
@@ -838,12 +846,10 @@ impl crate::harness::Stage for AppKitStage {
             // controls' frames past the rect Auto Layout actually
             // constrains (a slider by 2pt a side), which would report a
             // 1:3 split as 2.90:1.
-            // Height because the target kind is Column: only columns
-            // are registered, so the main axis is always vertical here.
             let mut extents = Vec::new();
             for child in stack.arrangedSubviews() {
                 let rect = child.alignmentRectForFrame(child.frame());
-                extents.push(rect.size.height);
+                extents.push(if vertical { rect.size.height } else { rect.size.width });
             }
             crate::harness::shares(&extents)
         })

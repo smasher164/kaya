@@ -109,6 +109,7 @@ object KayaSceneModel {
     val sliders = ArrayList<KayaNode>()
     val images = ArrayList<KayaNode>()
     val columns = ArrayList<KayaNode>()
+    val rows = ArrayList<KayaNode>()
 }
 
 object KayaCompose {
@@ -226,6 +227,7 @@ object KayaCompose {
                         KIND_CHECKBOX -> KayaSceneModel.checkboxes.add(node)
                         KIND_IMAGE -> KayaSceneModel.images.add(node)
                         KIND_COLUMN -> KayaSceneModel.columns.add(node)
+                        KIND_ROW -> KayaSceneModel.rows.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -494,7 +496,14 @@ object KayaCompose {
                         // cannot observe a move.
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
-                            target(parts[1], "column", KayaSceneModel.columns)?.children
+                            // Kind picks the registry, exactly as in the
+                            // Rust harness: a row target must never read
+                            // a column.
+                            val isRow = parts[1].startsWith("row")
+                            target(
+                                parts[1], if (isRow) "row" else "column",
+                                if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
+                            )?.children
                                 ?.filter { it.kind == KIND_LABEL }
                                 ?.joinToString("|") { it.text }
                         }
@@ -517,7 +526,11 @@ object KayaCompose {
                         // backends.
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
-                            target(parts[1], "column", KayaSceneModel.columns)?.let { container ->
+                            val isRow = parts[1].startsWith("row")
+                            target(
+                                parts[1], if (isRow) "row" else "column",
+                                if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
+                            )?.let { container ->
                                 val extents = container.children
                                     .map { kayaMainExtents[it.id] ?: 0.0 }
                                 val total = extents.sum()
