@@ -76,6 +76,13 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.ColumnDefinitionCollection".to_string(),
         "Microsoft.UI.Xaml.GridLength".to_string(),
         "Microsoft.UI.Xaml.GridUnitType".to_string(),
+        // The root-fills observation compares the mounted root against
+        // the content island's size — UIElement.XamlRoot is the only
+        // window-content geometry the framework exposes. Size must be
+        // named explicitly too: the filter never pulls referenced types
+        // transitively (see docs/traps.md).
+        "Microsoft.UI.Xaml.XamlRoot".to_string(),
+        "Windows.Foundation.Size".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
         "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBase".to_string(),

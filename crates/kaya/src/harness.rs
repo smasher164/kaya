@@ -96,6 +96,16 @@ pub enum Step {
     /// a container none but growing children and the split is exactly
     /// weight/Σweight whatever the platform's control metrics are.
     ExpectShares(Target, String),
+    /// Expect the mounted root to fill the window's content area — the
+    /// observation "the root fills its window" (a DESIGN normalization)
+    /// is verified by, and the one thing shares can NEVER see: a share
+    /// is a percentage of the children's sum, which is total-invariant,
+    /// so a root that hugs its content at a fraction of the window
+    /// still splits 25/75 and passes every share assertion. That blind
+    /// spot shipped twice (GTK's root hugged top-left; UIKit's root was
+    /// pinned top+leading only) and both times only a recording caught
+    /// it — this step is the gate that does instead.
+    ExpectRootFills,
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -128,6 +138,17 @@ pub trait Stage: Send + 'static {
     /// panic on the first reorder leg (which is how the GTK gap
     /// reached the Linux suite).
     fn child_texts(&self, target: Target) -> String;
+    /// Whether the mounted root fills the window's content area, read
+    /// from the toolkit after forcing pending layout: the empty string
+    /// when it does (within one device unit — rounding is not a hug),
+    /// otherwise a short platform-flavored description of the two
+    /// rects, which only ever appears in failure text and is never
+    /// compared across platforms. "Content area" is the platform's own
+    /// notion — the safe area on iOS, the contentView on macOS, the
+    /// window's child area on GTK and WinUI, the content parent on
+    /// Android. No default, like child_shares: a backend that forgets
+    /// it must fail to compile rather than pass the fill leg vacuously.
+    fn root_fills(&self) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -222,6 +243,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
+            "expect_root_fills" => {
+                if !rest.is_empty() {
+                    return Err(format!(
+                        "expect_root_fills takes no arguments — the mounted root is the target: {line:?}"
+                    ));
+                }
+                Step::ExpectRootFills
+            }
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -304,6 +333,26 @@ fn gate_wait() {
     }
 }
 
+/// A recorded leg must outlive its last sample time. The extractor
+/// takes the final expect's still at that step's own transcript moment,
+/// and the window closes within ONE capture-frame period of that moment
+/// — the verdict and exit follow the last step by milliseconds. Any
+/// anchor drift then hands the covering-frame rule a teardown frame:
+/// the GTK stills were the bare Xvfb root, because the arithmetic
+/// anchor (kill-time minus duration) drifts ~150ms and at 15fps that is
+/// two black frames. Holding the window briefly after the steps makes
+/// every sampled moment a live one whatever the anchor error, on every
+/// backend alike. Without a recorder this is a no-op; the pre-flight
+/// failures (bad script, no expects) skip it — they ran no steps worth
+/// sampling.
+fn record_linger() {
+    if std::env::var_os("KAYA_RECORD").is_some()
+        || std::env::var_os("KAYA_HARNESS_GATE").is_some()
+    {
+        std::thread::sleep(Duration::from_millis(750));
+    }
+}
+
 fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     if log.is_some() {
         gate_wait();
@@ -332,6 +381,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     | Step::ExpectOrder(..)
                     | Step::ExpectFocused(..)
                     | Step::ExpectShares(..)
+                    | Step::ExpectRootFills
             )
         })
     {
@@ -385,6 +435,18 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("{t:?} splits {got:?}, wanted {want:?}"));
                 }
             }
+            Step::ExpectRootFills => {
+                // Empty means fills; anything else is the platform's
+                // own description of the hug, for the failure text
+                // alone — the pass observation is the byte-identical
+                // "root fills" on every backend.
+                let hug = stage.root_fills();
+                if hug.is_empty() {
+                    observed.push("root fills".to_owned());
+                } else {
+                    failures.push(format!("root hugs ({hug})"));
+                }
+            }
             Step::ExpectFocused(t) => {
                 if stage.is_focused(*t) {
                     observed.push(format!("{t:?} focused"));
@@ -394,6 +456,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             }
         }
     }
+    record_linger();
     if failures.is_empty() {
         stage.finish(0, &format!("KAYA_SELFTEST: OK ({})", observed.join(", ")));
     } else {
@@ -543,6 +606,9 @@ mod tests {
         fn child_shares(&self, _: Target) -> String {
             "25,75".into()
         }
+        fn root_fills(&self) -> String {
+            String::new()
+        }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -614,6 +680,58 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("splits"), "{verdict}");
+    }
+
+    /// expect_root_fills parses bare (a target would be a lie — the
+    /// mounted root is the only thing it can mean), counts as an expect
+    /// for the zero-expect guard, and reads the stage's root_fills:
+    /// empty is the fill, anything else is the hug's description.
+    #[test]
+    fn expect_root_fills_is_an_expect() {
+        let steps = parse("expect_root_fills").unwrap();
+        assert_eq!(steps[0], Step::ExpectRootFills);
+        assert!(parse("expect_root_fills column#0").is_err());
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (root fills)");
+        struct Hugger(Sender<(i32, String)>);
+        impl Stage for Hugger {
+            fn click(&self, _: Target) {}
+            fn toggle(&self, _: Target, _: bool) {}
+            fn set_value(&self, _: Target, _: f64) {}
+            fn set_text(&self, _: Target, _: &str) {}
+            fn read_label(&self, _: Target) -> String {
+                String::new()
+            }
+            fn read_text(&self, _: Target) -> String {
+                String::new()
+            }
+            fn is_focused(&self, _: Target) -> bool {
+                false
+            }
+            fn image_size(&self, _: Target) -> String {
+                String::new()
+            }
+            fn child_texts(&self, _: Target) -> String {
+                String::new()
+            }
+            fn child_shares(&self, _: Target) -> String {
+                String::new()
+            }
+            fn root_fills(&self) -> String {
+                "34x27pt inside 390x844pt".into()
+            }
+            fn finish(&self, code: i32, verdict: &str) {
+                let _ = self.0.send((code, verdict.to_owned()));
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_root_fills").unwrap(), Hugger(tx));
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("root hugs"), "{verdict}");
     }
 
     /// The verdict format is load-bearing: the suites grep

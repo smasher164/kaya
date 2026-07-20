@@ -104,5 +104,29 @@ else
     status=1
 fi
 
+# Every scene must be WIRED into every platform runner, not merely
+# registered: a scene can exist, parse, and be registered, yet run
+# nowhere on a platform — the layout scene shipped exactly that way
+# (functionally green on mac, absent from every suite), and the iOS
+# SwiftUI suite later missed the grow/layout legs the same silent way.
+# A file-level name check cannot see a per-suite gap inside one runner,
+# but it holds the coarse class: no scene vanishes from a PLATFORM
+# without this failing.
+wired() {
+    local runner scene status=0
+    for scene in tools/scenes/*.steps; do
+        scene="$(basename "${scene%.steps}")"
+        for runner in tools/validate-mac.sh tools/linux/run-suites.sh \
+            tools/deploy-win.sh tools/ios/run-sim.sh tools/android/run-emulator.sh; do
+            if ! grep -q "$scene" "$runner"; then
+                echo "check-steps: scene \"$scene\" is not wired into $runner" >&2
+                status=1
+            fi
+        done
+    done
+    return "$status"
+}
+wired || status=1
+
 [ "$status" = 0 ] && echo "check-steps: OK"
 exit "$status"

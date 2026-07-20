@@ -102,6 +102,57 @@ these the hard way.
   `tools/linux/run-suites.sh` now computes and exports the fingerprint.
   The general shape: a guard meant to catch "wrong toolchain" fires
   inside a container that is the pinned toolchain by other means.
+- **`simctl recordVideo` is observable only through its own log line.**
+  Its output file stays ZERO bytes until finalize (a growth poll can
+  never prove liveness — one burned 20s and then killed a healthy run),
+  it starts capturing at an unknown moment after launch, and it drops
+  its buffered tail on stop. The one true signal is the "Recording
+  started" line it prints; wait for that before planting any fiducial,
+  or the film contains neither flip edge and the run dies at
+  extraction AFTER every leg passed. Two corollaries paid for
+  separately: a fiducial stamp must be written only for an OBSERVED
+  render (a poll that times out and stamps anyway anchors the film to
+  a moment that never appeared in it), and a fiducial is an EDGE,
+  never an absolute level — the simulator home screen accumulates one
+  bright placeholder icon per installed scene bundle, and by this
+  milestone "dark" read YAVG 107, over the fixed <100 threshold, while
+  the flip's drop stayed a clean 68. Detect the drop (or, if the
+  recorder attached mid-flip, the rise back), each anchored to its own
+  stamp — and normalize the appearance to light BEFORE flipping: the
+  pool keeps whatever appearance the previous run left, an aborted run
+  leaves it dark, and no drop can fire from a dark base.
+- **Stills accumulate across runs when a scene's script changes
+  shape.** Extraction overwrites stills by step name, so a scene whose
+  script shrank leaves orphans from the longer version — the count
+  guard then reads 13/10 stills as extraction breakage on an otherwise
+  green leg (every Android todos suite tripped at once). Extraction
+  now clears `step-*.png` before writing; stills are derived data with
+  no history worth keeping.
+- **An arithmetic video anchor drifts, and a leg that exits right after
+  its last step leaves only teardown frames under its terminal
+  expects.** The GTK stills were the bare Xvfb root — but not for the
+  reason first written down (the ledger guessed "every frame lands on
+  teardown"; measuring the film showed the window visible from frame 0
+  to 100ms before the recorder stopped, and the SETTLE stills were fine
+  all along). The real mechanism needs two halves: the verdict-and-exit
+  follows the final expect by milliseconds, so the window's close sits
+  within ONE 15fps frame period of the last sampled moment; and the
+  `kill-time − duration` anchor drifts ~150ms, which is two frames at
+  that rate — enough to push the covering frame into the dark tail.
+  Diagnose this class by measuring, not guessing: a per-frame
+  `signalstats` YAVG scan of the film locates the window's visible span
+  in seconds. (Mind the range conversion: yuv420p limited-range video
+  reads ~16 dark/~34 bright where the same frames as full-range PNGs
+  read ~0/~21 — comparing the two uncorrected "proves" a bright still
+  dark.) The structural fix is `record_linger` in harness.rs, mirrored
+  in both interpreters: under KAYA_RECORD or KAYA_HARNESS_GATE a leg
+  holds its window 750ms past the last step, so every sampled moment is
+  a live one whatever the anchor error. The runners thread the flag to
+  where guests can see it (SIMCTL_CHILD_KAYA_RECORD on iOS, an
+  `--es KAYA_RECORD 1` extra on Android); Windows needs none of it —
+  its WGC capturer names frames by VM-clock epoch, one clock end to
+  end, and window-scoped capture simply stops at close instead of
+  filming black.
 - **Android's addView installs fresh layout params.** A weight written
   before the child was attached is discarded by the add, so
   `layout_weight` has to be re-stamped from AddChild as well as from
@@ -117,6 +168,27 @@ these the hard way.
   size and left no free space anywhere in the tree — every grow weight
   then divided nothing. The backend now forces Fill on the root; the
   normalization is recorded in DESIGN's layout worklist.
+- **A share-green backend can still be rendering the contract inside a
+  hugging root — and did, twice more.** UIKit's root was pinned
+  top+leading only (a pre-grow choice to dodge distribution=.fill's
+  balloon pathology), so the grow scene's 25/75 held as a ratio over a
+  few dozen points and rows hugged their widths, collapsing sliders to
+  thumbs; Compose's root Column wrapped its WIDTH even while weighted
+  children filled its height. `expect_shares` is blind to all of it by
+  construction — a share is a percentage of the children's sum, and the
+  sum's absolute size never enters — so every suite stayed green until
+  the first iOS recording showed the nubs. Three lessons now structural:
+  UIKit fills its safe area with a hidden trailing FILLER per container
+  absorbing the leftover whenever nothing grows (UIStackView has no
+  gravity distribution, so something must lose the stretch contest;
+  the filler hides the moment a weight appears, and the child-reading
+  observations skip it by pointer); nested containers whose main axis
+  crosses their parent get an explicit breadth constraint (a row spans
+  its column's width — the near-native behavior every other toolkit
+  ships); and `expect_root_fills` in the grow scene now gates the
+  whole class — the root's placed size against the platform's own
+  offered area, byte-identical "root fills" everywhere, platform
+  numbers only in the failure text.
 - **ART truncates VarHandle byte-buffer-view addresses to 32 bits** in
   the interpreter, and its `Unsafe` (Object, long) volatile accessors
   are heap-only. The working JVM ring formulation: Unsafe absolute

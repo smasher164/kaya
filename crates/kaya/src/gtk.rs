@@ -868,6 +868,46 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn root_fills(&self) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{GtkWindowExt, WidgetExt};
+            let Some(root) = core.window.child() else {
+                return "nothing mounted".to_owned();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let alloc = root.allocation();
+            // The child's slot excludes whatever the window draws for
+            // itself, and how much that is depends on the compositor:
+            // Wayland CSD puts a ~39px headerbar above the child, bare
+            // Xvfb draws nothing (the first cut compared against the
+            // whole window widget and read a perfectly filling Wayland
+            // root as a hug). So "fills" is edge-flush: from wherever
+            // the slot starts, the allocation reaches the window's
+            // left, right and bottom edges. A hugging child leaves the
+            // bottom or right edge unreached and fails either way;
+            // only the top edge is unknowable, since it is exactly
+            // where the decoration lives.
+            let (width, height) = (core.window.width(), core.window.height());
+            // Within two pixels: rounding is not a hug.
+            if alloc.x() <= 2
+                && (alloc.x() + alloc.width() - width).abs() <= 2
+                && (alloc.y() + alloc.height() - height).abs() <= 2
+            {
+                String::new()
+            } else {
+                format!(
+                    "{}x{}px at ({},{}) inside {}x{}px",
+                    alloc.width(),
+                    alloc.height(),
+                    alloc.x(),
+                    alloc.y(),
+                    width,
+                    height,
+                )
+            }
+        })
+    }
+
     fn finish(&self, code: i32, verdict: &str) {
         if code == 0 {
             println!("{verdict}");

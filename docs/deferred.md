@@ -46,26 +46,17 @@ Landed history lives in git; this file only carries what is still open.
   stack: kaya's normalized cross-axis default is leading/natural, so a
   nested *column* is only as wide as its content (rows do stretch to the
   parent's width, as the AppKit frame dump confirmed).
-- **The recording pipeline, for the cross-backend comparison it was
-  built for.** Recording mode works end to end on macOS (per-leg stills
-  land in `target/recordings/mac/<leg>/steps/`), and the Linux path was
-  silently broken until now — the container is not a nix dev shell, so
-  `harness-extract.sh`'s guard refused and EVERY Linux leg passed while
-  producing no stills at all. `tools/linux/run-suites.sh` now exports the
-  fingerprint. Two things are still open:
-  1. **GTK stills come out black** (the bare Xvfb root plus a cursor).
-     The legs pass; only the frames are empty. Likely cause: a scene
-     whose steps are all *terminal* expects gives the extractor nothing
-     but teardown frames — `layout.steps` is `settle 1500` then two
-     expects that fire at +1500ms, exactly when the window is going
-     away. A mid-scene settle (or an extractor bias for expects that
-     end a script) would give it a frame worth capturing.
-  2. **Windows, iOS and Android recordings are unattempted.** Each
-     runner supports KAYA_RECORD, but none has been run since the scenes
-     were added.
-  This blocks refreshing the "Seven backends, one layout" artifact with
-  current renders, which is what the recordings are for. The artifact is
-  UNTOUCHED so far — every image in it predates `grow`.
+- **What the recording matrix's first pass left for `alignment`**
+  (2026-07-20; the pipeline itself runs end to end on all five
+  platforms, its traps live in docs/traps.md, and its first two finds
+  — the UIKit root hugging its window, the Compose root wrapping its
+  width — are FIXED and now gated by `expect_root_fills` in the grow
+  scene). Still alignment's to own: control-in-track placement
+  (Android Views stretches the control itself into its weighted track
+  where every other backend top-leads a natural-size control inside
+  it — both defensible, currently divergent), and the cross-axis
+  defaults generally, including asserting the HORIZONTAL grow contract
+  once `row` targets exist (the item above).
 - ~~A geometry verb for the harness~~ LANDED as `expect_shares` /
   `Stage::child_shares`, with the `grow` scene as its first user.
   Shares, not sizes: a size is a platform metric and could never be

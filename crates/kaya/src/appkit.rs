@@ -849,6 +849,35 @@ impl crate::harness::Stage for AppKitStage {
         })
     }
 
+    fn root_fills(&self) -> String {
+        Self::on_main(move |core| {
+            // The mounted root IS the contentView (Mount hands it to
+            // setContentView), so it fills by construction — this
+            // measures rather than trusts, and holds the door shut
+            // against a future mount that pins instead of replacing.
+            let Some(view) = core._window.contentView() else {
+                return "nothing mounted".to_owned();
+            };
+            view.layoutSubtreeIfNeeded();
+            let frame = view.frame();
+            let area = core._window.contentLayoutRect();
+            // Within one point: rounding is not a hug.
+            if (frame.size.width - area.size.width).abs() <= 1.0
+                && (frame.size.height - area.size.height).abs() <= 1.0
+            {
+                String::new()
+            } else {
+                format!(
+                    "{}x{}pt inside {}x{}pt",
+                    frame.size.width as i64,
+                    frame.size.height as i64,
+                    area.size.width as i64,
+                    area.size.height as i64,
+                )
+            }
+        })
+    }
+
     fn finish(&self, code: i32, verdict: &str) {
         if code == 0 {
             println!("{verdict}");

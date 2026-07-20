@@ -204,12 +204,18 @@ run_apk_on() {
     # SIGINT so the file finalizes, then pulled and mined for stills at
     # the harness transcript's offsets.
     local rec_pid=
+    # The guest must know it is being filmed: the harness holds its
+    # window briefly after the last step when recording (see
+    # record_linger in harness.rs), and the only way in is a KAYA_*
+    # extra, which MainActivity maps to an environment variable.
+    local rec_extra=()
     if [ -n "${KAYA_RECORD:-}" ]; then
         adb -s "$serial" shell rm -f "/data/local/tmp/kaya-rec.mp4"
         adb -s "$serial" shell screenrecord "/data/local/tmp/kaya-rec.mp4" &
         rec_pid=$!
+        rec_extra=(--es KAYA_RECORD 1)
     fi
-    adb -s "$serial" shell am start -W -n "$component" --es KAYA_SELFTEST "$script" "$@" >/dev/null
+    adb -s "$serial" shell am start -W -n "$component" --es KAYA_SELFTEST "$script" ${rec_extra[@]+"${rec_extra[@]}"} "$@" >/dev/null
     # The selftest exits the app at ~2.5s; grab the scene while it is
     # still up. logcat then reads the verdict from the buffer even if it
     # was emitted before the watch attached.

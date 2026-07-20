@@ -15,6 +15,11 @@
 # platform's minimum control size gets clamped by the toolkit, and the
 # scene would then be measuring GTK's 34pt minimum button height rather
 # than the contract.
+# root-fills first: a share is a percentage of the children's SUM,
+# which is total-invariant — a mounted root hugging its content at a
+# fraction of the window still splits 25/75, and that blind spot
+# shipped twice (GTK, then UIKit) before this line existed.
 settle 1500
 expect label#0 "grow probe"
+expect_root_fills
 expect_shares column#0 "25,75"

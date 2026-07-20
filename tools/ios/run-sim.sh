@@ -124,6 +124,7 @@ rec_suite_start() {
     # different udids coexist; same-device sessions are what wedge).
     REC_PIDS=()
     T_MARKS=()
+    L_MARKS=()
     local i udid
     i=0
     for udid in "${UDIDS[@]}"; do
@@ -164,6 +165,26 @@ rec_suite_start() {
         echo "recording: sessions still wedged after a service reset; giving up"
         exit 1
     fi
+    # simctl announces capture in its own log ("Recording started") —
+    # and nothing else can: the output file stays ZERO bytes until
+    # finalize, so no file-based signal exists. Flipping the fiducial
+    # before the announcement films neither edge, and the run dies at
+    # extraction after every leg passed. Wait for the announcement,
+    # bounded.
+    i=0
+    local tries
+    for udid in "${UDIDS[@]}"; do
+        tries=0
+        until grep -q "Recording started" "$REC_ROOT/rec-$i.log" 2>/dev/null; do
+            tries=$((tries + 1))
+            if [ "$tries" -gt 75 ]; then
+                echo "recording: recorder $i never announced 'Recording started'" >&2
+                exit 1
+            fi
+            sleep 0.4
+        done
+        i=$((i + 1))
+    done
     # recordVideo's own clock is unrecoverable from either end: it
     # starts capturing at an unknown moment after launch AND drops its
     # buffered tail when stopped. So plant a fiducial per device: flip
@@ -171,28 +192,88 @@ rec_suite_start() {
     # actually VISIBLE — the ui command returns seconds before the
     # render lands on a busy, freshly booted simulator, and stamping
     # the command time skews every still by that latency. The
-    # screenshot poll pins the stamp to the render within ~300ms.
-    sleep 1
-    i=0
-    local luma
+    # screenshot poll pins the stamp to the render within ~300ms — and
+    # a stamp is only ever written for an OBSERVED render: stamping
+    # after an unrendered flip once anchored a film to a moment that
+    # never appeared in it.
+    #
+    # The flip is an EDGE, never an absolute level: the home screen
+    # accumulates one bright placeholder icon per installed scene
+    # bundle, and by this milestone their tiles held the dark
+    # appearance at YAVG ~107 — an absolute <100 test concluded the
+    # flip "never rendered" while staring straight at it. Measured
+    # flip delta on that icon-heavy screen: 68; the threshold is 25.
+    #
+    # The pool's appearance is whatever the previous run left behind —
+    # an aborted run leaves devices already dark, and a drop edge
+    # cannot fire from a dark base. Normalize to light first; this
+    # pre-flip is never stamped, so a plain settle suffices.
     for udid in "${UDIDS[@]}"; do
+        xcrun simctl ui "$udid" appearance light
+    done
+    sleep 2
+    i=0
+    local luma seen base
+    for udid in "${UDIDS[@]}"; do
+        xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
+        base=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
+            -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
+            | awk -F. 'NR==1{print $1}')
+        [ -n "$base" ] || base=175
         xcrun simctl ui "$udid" appearance dark
-        for _ in $(seq 1 25); do
+        seen=0
+        for _ in $(seq 1 50); do
             xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
             luma=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
                 -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
                 | awk -F. 'NR==1{print $1}')
-            if [ -n "$luma" ] && [ "$luma" -lt 100 ]; then
+            if [ -n "$luma" ] && [ "$luma" -le $((base - 25)) ]; then
+                seen=1
                 break
             fi
             sleep 0.2
         done
+        if [ "$seen" = 0 ]; then
+            echo "recording: dark fiducial never rendered on device $i (base $base, last ${luma:-none})" >&2
+            exit 1
+        fi
         T_MARKS[i]=$(date +%s%3N)
         echo "${T_MARKS[$i]}" >"$REC_ROOT/t_mark-$i"
         i=$((i + 1))
     done
+    # The flip BACK is a second fiducial, stamped the same way. A
+    # recorder that attaches mid-flip produces a film that OPENS dark —
+    # the dark EDGE is then not in the film at all, and the run used to
+    # die at extraction ("no dark fiducial") after every leg passed.
+    # With both edges stamped, extraction anchors on whichever edge the
+    # film actually contains.
+    i=0
     for udid in "${UDIDS[@]}"; do
+        xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
+        base=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
+            -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
+            | awk -F. 'NR==1{print $1}')
+        [ -n "$base" ] || base=107
         xcrun simctl ui "$udid" appearance light
+        seen=0
+        for _ in $(seq 1 50); do
+            xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
+            luma=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
+                -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
+                | awk -F. 'NR==1{print $1}')
+            if [ -n "$luma" ] && [ "$luma" -ge $((base + 25)) ]; then
+                seen=1
+                break
+            fi
+            sleep 0.2
+        done
+        if [ "$seen" = 0 ]; then
+            echo "recording: light fiducial never rendered on device $i (base $base, last ${luma:-none})" >&2
+            exit 1
+        fi
+        L_MARKS[i]=$(date +%s%3N)
+        echo "${L_MARKS[$i]}" >"$REC_ROOT/l_mark-$i"
+        i=$((i + 1))
     done
     sleep 1
     rm -f "$REC_ROOT/.flip-probe.png"
@@ -215,26 +296,39 @@ rec_suite_stop() {
         done
         wait "$pid" 2>/dev/null || true
     done
-    # Locate each device's appearance-flip fiducial: the first big
-    # scene change (everything before it is the static home screen),
-    # sanity-checked against the second (the flip back, ~1s later).
+    # Locate each device's appearance-flip fiducial. Both edges were
+    # stamped when they became VISIBLE, and both are EDGES, not levels:
+    # the home screen's icon load moves the absolute luma of "dark"
+    # from run to run (it read 107 this milestone — over any fixed
+    # threshold — while the flip's drop stayed a clean 68). Anchor on
+    # whichever edge the film contains: the drop to dark if the
+    # recorder was live for it, else the rise back to light (the
+    # recorder attached mid-flip). Boot and install churn is
+    # bright-to-bright and crosses neither threshold.
     # awk takes what it needs but reads the whole stream: head -1
     # would SIGPIPE ffprobe, which set -o pipefail turns fatal.
     local ANCHORS=()
     local t_flip
     i=0
     while [ "$i" -lt "${#UDIDS[@]}" ]; do
-        # The fiducial is the first scene change that is DARK (the
-        # appearance flip, YAVG ~76): a freshly booted simulator's
-        # home screen churns with boot and install animations, all
-        # bright (~157), and "first change" alone picks those up.
         t_flip=$(ffprobe -v quiet -f lavfi \
             "movie=$REC_ROOT/suite-$i.mov,select=gt(scene\,0.3),signalstats" \
             -show_entries frame=pts_time:frame_tags=lavfi.signalstats.YAVG \
             -of csv=p=0 2>/dev/null \
-            | awk -F, '$2 + 0 < 100 {printf "%d", $1 * 1000; exit}')
-        [ -n "$t_flip" ] || { echo "recording: no dark fiducial in suite-$i.mov"; return 1; }
-        ANCHORS[i]=$(( ${T_MARKS[$i]} - t_flip ))
+            | awk -F, 'NR==1{prev=$2+0; next}
+                {cur=$2+0; if (cur <= prev-25) {printf "%d", $1*1000; exit} prev=cur}')
+        if [ -n "$t_flip" ]; then
+            ANCHORS[i]=$(( ${T_MARKS[$i]} - t_flip ))
+        else
+            t_flip=$(ffprobe -v quiet -f lavfi \
+                "movie=$REC_ROOT/suite-$i.mov,select=gt(scene\,0.3),signalstats" \
+                -show_entries frame=pts_time:frame_tags=lavfi.signalstats.YAVG \
+                -of csv=p=0 2>/dev/null \
+                | awk -F, 'NR==1{prev=$2+0; next}
+                    {cur=$2+0; if (cur >= prev+25) {printf "%d", $1*1000; exit} prev=cur}')
+            [ -n "$t_flip" ] || { echo "recording: no fiducial edge in suite-$i.mov"; return 1; }
+            ANCHORS[i]=$(( ${L_MARKS[$i]} - t_flip ))
+        fi
         echo "${ANCHORS[$i]}" >"$REC_ROOT/anchor-$i"
         i=$((i + 1))
     done
@@ -392,6 +486,13 @@ timing() {
     echo "TIMING $1 $((SECONDS - KAYA_T0))s"
     KAYA_T0=$SECONDS
 }
+# The guests must know they are being filmed: the harness holds its
+# window briefly after the last step when recording (see record_linger
+# in harness.rs), and a simulator child only sees SIMCTL_CHILD_-prefixed
+# variables.
+if [ -n "${KAYA_RECORD:-}" ]; then
+    export SIMCTL_CHILD_KAYA_RECORD=1
+fi
 boot_pool
 rec_suite_start
 timing boot

@@ -106,6 +106,8 @@ struct CoreState {
     /// arrived before the child had a parent (addView installs fresh
     /// layout params and would otherwise drop it).
     grow: HashMap<WidgetId, f64>,
+    /// The mounted root's view, for the root-fills observation.
+    root: Option<GlobalRef>,
 }
 
 static CORE: Mutex<Option<CoreState>> = Mutex::new(None);
@@ -300,6 +302,7 @@ fn setup(
         images: Vec::new(),
         columns: Vec::new(),
         grow: HashMap::new(),
+        root: None,
     });
 
     if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -756,6 +759,10 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 "(Landroid/view/View;)V",
                 &[JValue::Object(root_view.as_obj())],
             )?;
+            // setContentView installs MATCH_PARENT params, so the root
+            // fills the content frame by construction — root_fills
+            // measures it anyway rather than trusting this comment.
+            with_core(|core| core.root = Some(root_view.clone()));
         }
         ApplyOp::Command { id, command } => {
             let view = with_widget(id, |w| w.view.clone());
@@ -1179,6 +1186,41 @@ impl crate::harness::Stage for AndroidStage {
                 extents.push(f64::from(height));
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn root_fills(&self) -> String {
+        let root = {
+            let core = CORE.lock().unwrap();
+            let core = core.as_ref().expect("core set up");
+            match &core.root {
+                Some(view) => view.clone(),
+                None => return "nothing mounted".to_owned(),
+            }
+        };
+        Self::on_ui(move |env| {
+            // The content frame (android.R.id.content) is what
+            // setContentView hands the root; JNI dispatches getWidth on
+            // the parent's actual class, so the ViewParent interface
+            // type never enters it.
+            let parent = env
+                .call_method(root.as_obj(), "getParent", "()Landroid/view/ViewParent;", &[])
+                .and_then(|v| v.l())
+                .expect("kaya: root parent read failed");
+            let read = |env: &mut JNIEnv, obj: &JObject, method: &str| -> i32 {
+                env.call_method(obj, method, "()I", &[])
+                    .and_then(|v| v.i())
+                    .expect("kaya: dimension read failed")
+            };
+            let root_obj = root.as_obj();
+            let (rw, rh) = (read(env, &root_obj, "getWidth"), read(env, &root_obj, "getHeight"));
+            let (pw, ph) = (read(env, &parent, "getWidth"), read(env, &parent, "getHeight"));
+            // Within two pixels: rounding is not a hug.
+            if (rw - pw).abs() <= 2 && (rh - ph).abs() <= 2 {
+                String::new()
+            } else {
+                format!("{rw}x{rh}px inside {pw}x{ph}px")
+            }
         })
     }
 

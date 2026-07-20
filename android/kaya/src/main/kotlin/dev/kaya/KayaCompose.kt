@@ -83,6 +83,15 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
  */
 val kayaMainExtents = HashMap<Long, Double>()
 
+/**
+ * The mounted root's laid-out size and the area offered to it — what
+ * `expect_root_fills` compares. Both read from onGloballyPositioned:
+ * the offer from KayaRoot's fillMaxSize box, the root from the wrapper
+ * hugging the mounted container.
+ */
+var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
+var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
+
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     val nodes = HashMap<Long, KayaNode>() // UI thread only
@@ -527,12 +536,44 @@ object KayaCompose {
                             else -> failures.add("${parts[1]} splits \"$got\", wanted \"$want\"")
                         }
                     }
+                    "expect_root_fills" -> {
+                        // The mounted root fills the area offered to it
+                        // — the observation shares can never make: a
+                        // share is a percentage of the children's sum,
+                        // total-invariant by construction, so a hugging
+                        // root still splits 25/75.
+                        val hug = onUi(activity) {
+                            val root = kayaRootSize
+                            val area = kayaAvailableSize
+                            if (area.width <= 0 || area.height <= 0) {
+                                "no root layout recorded"
+                            } else if (
+                                kotlin.math.abs(root.width - area.width) <= 2 &&
+                                kotlin.math.abs(root.height - area.height) <= 2
+                            ) {
+                                ""
+                            } else {
+                                "${root.width}x${root.height}px " +
+                                    "inside ${area.width}x${area.height}px"
+                            }
+                        }
+                        if (hug.isEmpty()) {
+                            observed.add("root fills")
+                        } else {
+                            failures.add("root hugs ($hug)")
+                        }
+                    }
                     else -> failures.add("unknown step $line")
                 }
             }
         }
         if (failures.isEmpty() && observed.isEmpty()) {
             failures.add("script has no expects")
+        }
+        // A recorded leg must outlive its last sample time — see
+        // harness.rs's record_linger; same contract, same constant.
+        if (System.getenv("KAYA_RECORD") != null || System.getenv("KAYA_HARNESS_GATE") != null) {
+            Thread.sleep(750)
         }
         val code = if (failures.isEmpty()) {
             Log.i("kaya", "KAYA_SELFTEST: OK (${observed.joinToString(", ")})")
@@ -550,12 +591,20 @@ object KayaCompose {
 
 /** The interpreter's render: the node tree as Compose declarations. */
 @Composable
-fun KayaRender(node: KayaNode) {
+fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
+    // The mounted root fills its window — the same normalization GTK
+    // and UIKit needed. A Compose Column wraps its width even when
+    // weighted children have forced its height, so the grow scene's
+    // 25/75 held over a content-wide strip while every other backend
+    // spanned the window; nested containers keep wrapping, exactly as
+    // everywhere else.
+    val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
     when (node.kind) {
         KayaCompose.KIND_COLUMN ->
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
             Column(
+                modifier = rootFill,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
@@ -582,6 +631,7 @@ fun KayaRender(node: KayaNode) {
             // Normalized default: children packed to the leading edge at
             // natural size, top-aligned (Alignment.Top), 8 dp between them.
             Row(
+                modifier = rootFill,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
@@ -669,7 +719,19 @@ fun KayaRender(node: KayaNode) {
 fun KayaRoot() {
     // Normalized default: the root is pinned to the top-leading corner,
     // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart) {
-        KayaSceneModel.root?.let { KayaRender(it) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { kayaAvailableSize = it.size },
+        contentAlignment = Alignment.TopStart,
+    ) {
+        KayaSceneModel.root?.let { root ->
+            // The wrapper hugs the mounted container, so its size IS
+            // the root's — what expect_root_fills compares against the
+            // offer recorded above.
+            Box(Modifier.onGloballyPositioned { kayaRootSize = it.size }) {
+                KayaRender(root, isRoot = true)
+            }
+        }
     }
 }

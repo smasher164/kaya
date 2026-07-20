@@ -9,7 +9,7 @@
 //! ends reach it through a slot rather than closure capture.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CString, c_char};
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
@@ -86,6 +86,18 @@ struct CoreState {
     parents: HashMap<WidgetId, WidgetId>,
     grow: HashMap<WidgetId, f64>,
     grow_constraints: HashMap<WidgetId, Vec<Retained<NSLayoutConstraint>>>,
+    /// The mounted root, for the root-fills observation.
+    root: Option<WidgetId>,
+    /// Each container's trailing leftover-absorber by container id (see
+    /// make_filler), plus a pointer set so the child-reading
+    /// observations can skip them — a filler is plumbing, never a
+    /// child.
+    fillers: HashMap<WidgetId, Retained<UIView>>,
+    filler_ptrs: HashSet<usize>,
+    /// A nested container's breadth constraint (the child spans its
+    /// parent's cross axis — see pin_breadth), by CHILD id: rebuilt on
+    /// move, dropped on destroy.
+    breadth: HashMap<WidgetId, Retained<NSLayoutConstraint>>,
     content: Retained<UIView>,
     _targets: Vec<Retained<ButtonTarget>>,
     _window: Retained<UIWindow>,
@@ -181,6 +193,13 @@ fn resolve_grow(core: &mut CoreState, mtm: MainThreadMarker, parent: WidgetId) {
         }
     }
 
+    // The filler absorbs the leftover only while nothing grows; the
+    // moment a weight appears the growers own it (the stack skips
+    // hidden arranged subviews entirely).
+    if let Some(filler) = core.fillers.get(&parent) {
+        filler.setHidden(!growers.is_empty());
+    }
+
     // One grower needs no ratio: the lowered hugging already hands it
     // the leftover. Ratios only mean anything between two of them.
     if growers.len() < 2 {
@@ -204,6 +223,73 @@ fn resolve_grow(core: &mut CoreState, mtm: MainThreadMarker, parent: WidgetId) {
         .collect();
     NSLayoutConstraint::activateConstraints(&NSArray::from_retained_slice(&made), mtm);
     core.grow_constraints.insert(parent, made);
+}
+
+/// Give a container its trailing leftover-absorber.
+///
+/// UIStackView has no gravity distribution: under distribution=.fill —
+/// the only mode that keeps kaya's 8pt spacing — SOMETHING must take
+/// the leftover once the stack is larger than its content, or the
+/// stack stretches the least-hugging real child (the "balloon"
+/// pathology this backend once dodged by hugging the whole root, which
+/// in turn silently left every grow weight nothing to divide). The
+/// filler is that something: an empty view with no intrinsic size and
+/// rock-bottom priorities, absorbing the leftover while nothing grows
+/// and hiding the moment a sibling carries a weight (resolve_grow owns
+/// that bit; the stack skips hidden arranged subviews entirely). The
+/// child-reading observations skip fillers by pointer — plumbing is
+/// not a child.
+fn add_filler(
+    core: &mut CoreState,
+    mtm: MainThreadMarker,
+    id: WidgetId,
+    stack: &UIStackView,
+    axis: UILayoutConstraintAxis,
+) {
+    use objc2::Message;
+    let filler = UIView::new(mtm);
+    unsafe {
+        filler.setContentHuggingPriority_forAxis(1.0, axis);
+        filler.setContentCompressionResistancePriority_forAxis(1.0, axis);
+        stack.addArrangedSubview(&filler);
+    }
+    core.filler_ptrs
+        .insert(Retained::as_ptr(&filler.retain()) as usize);
+    core.fillers.insert(id, filler);
+}
+
+/// Pin a nested container across its parent's breadth.
+///
+/// The normalized cross-axis default is leading/natural — a label in a
+/// column keeps its own width — but a nested CONTAINER whose main axis
+/// runs across the parent spans that breadth: a row in a column is as
+/// wide as the column, a column in a row as tall as the row. Every
+/// other backend has this natively (KayaFlex spells it "offer the
+/// container's full cross extent; the child decides"); without it a
+/// row hugs the sum of its children's intrinsic widths, growers divide
+/// a leftover of zero, and the layout scene's sliders collapsed to
+/// their thumbs. Same-axis nesting takes no constraint — the parent's
+/// own distribution governs its main axis.
+fn pin_breadth(core: &mut CoreState, parent: WidgetId, child: WidgetId) {
+    if let Some(old) = core.breadth.remove(&child) {
+        old.setActive(false);
+    }
+    let (Some(parent_widget), Some(child_widget)) =
+        (core.widgets.get(&parent), core.widgets.get(&child))
+    else {
+        return;
+    };
+    let constraint = match (parent_widget, child_widget) {
+        (NativeWidget::Column(p), NativeWidget::Row(c)) => unsafe {
+            c.widthAnchor().constraintEqualToAnchor(&p.widthAnchor())
+        },
+        (NativeWidget::Row(p), NativeWidget::Column(c)) => unsafe {
+            c.heightAnchor().constraintEqualToAnchor(&p.heightAnchor())
+        },
+        _ => return,
+    };
+    constraint.setActive(true);
+    core.breadth.insert(child, constraint);
 }
 
 fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
@@ -237,14 +323,15 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     // 8pt between children; children at natural size packed
                     // to the start of the main axis (top) and aligned to the
                     // leading (left) cross edge. Distribution defaults to
-                    // .fill along the axis, but the root stack hugs its
-                    // content (see Mount), so there is no free space to
-                    // stretch into — children keep their intrinsic heights.
+                    // .fill along the axis; the trailing filler is what
+                    // keeps that from stretching a real child when the
+                    // stack is larger than its content (see add_filler).
                     unsafe {
                         stack.setAxis(UILayoutConstraintAxis::Vertical);
                         stack.setSpacing(8.0);
                         stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Leading);
                     }
+                    add_filler(core, mtm, id, &stack, UILayoutConstraintAxis::Vertical);
                     core.columns.push(stack.clone());
                     NativeWidget::Column(stack)
                 }
@@ -258,6 +345,7 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         stack.setSpacing(8.0);
                         stack.setAlignment(objc2_ui_kit::UIStackViewAlignment::Top);
                     }
+                    add_filler(core, mtm, id, &stack, UILayoutConstraintAxis::Horizontal);
                     NativeWidget::Row(stack)
                 }
                 WidgetKind::Checkbox => {
@@ -380,12 +468,15 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         .position(|i| unsafe { arranged.objectAtIndex(i) } == anchor_view)
                         .expect("kaya: move_child anchor not among siblings")
                 }
-                None => unsafe { stack.arrangedSubviews() }.count(),
+                // Before the filler, which stays last even across moves.
+                None => unsafe { stack.arrangedSubviews() }.count().saturating_sub(1),
             };
             unsafe { stack.insertArrangedSubview_atIndex(&child_view, index) };
             // Order does not enter the ratios, but the parent is
-            // recorded again in case the move crossed containers.
+            // recorded again in case the move crossed containers — and
+            // the breadth pin follows the child to its new parent.
             core.parents.insert(child, parent);
+            pin_breadth(core, parent, child);
             resolve_grow(core, mtm, parent);
         }
         ApplyOp::Destroy { id } => {
@@ -395,6 +486,15 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             // Constraints referencing a destroyed view go before the
             // sibling set is re-solved.
             core.grow_constraints.remove(&id);
+            if let Some(constraint) = core.breadth.remove(&id) {
+                constraint.setActive(false);
+            }
+            if let Some(filler) = core.fillers.remove(&id) {
+                use objc2::Message;
+                core.filler_ptrs
+                    .remove(&(Retained::as_ptr(&filler.retain()) as usize));
+                filler.removeFromSuperview();
+            }
             if let Some(parent) = core.parents.remove(&id) {
                 resolve_grow(core, mtm, parent);
             }
@@ -463,24 +563,33 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             };
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(stack) | NativeWidget::Row(stack) => unsafe {
-                    stack.addArrangedSubview(&child_view);
+                    // Before the filler, which stays last: appending
+                    // after it would put children past the leftover.
+                    let count = stack.arrangedSubviews().count();
+                    stack.insertArrangedSubview_atIndex(&child_view, count.saturating_sub(1));
                 },
                 _ => panic!("kaya: add_child parent is not a container"),
             }
             core.parents.insert(child, parent);
+            pin_breadth(core, parent, child);
             // The sibling set changed, so the split changes with it.
             resolve_grow(core, mtm, parent);
         }
         ApplyOp::Mount { window: _, root } => {
+            core.root = Some(root);
             let root_view = core.widgets.get(&root).expect("scene validated the id");
             let view = root_view.view();
-            // Hug content, pinned to the top-leading of the safe area — the
-            // UIKit equivalent of AppKit's fit-to-content. Filling the whole
-            // screen (the old flexible-mask frame) left free space that
-            // distribution=.fill absorbed by stretching one child (the
-            // "balloon" pathology); at natural size there is nothing to
-            // stretch, so children keep their intrinsic sizes and pack from
-            // the top-left.
+            // The root fills the safe area — the DESIGN normalization
+            // ("the mounted root fills its window"), the one AppKit gets
+            // by making the root the contentView and GTK by forcing Fill
+            // on mount. This backend once hugged instead, to dodge
+            // distribution=.fill's balloon pathology — which silently
+            // left grow nothing to divide: the ratio held over a total
+            // of a few dozen points, and share-based assertion
+            // (total-invariant by construction) could not see it; the
+            // first iOS recording could. The balloon is the fillers'
+            // problem now (see add_filler), so the root can finally
+            // take its window.
             core.content.addSubview(&view);
             let guide = core.content.safeAreaLayoutGuide();
             unsafe {
@@ -490,6 +599,12 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     .setActive(true);
                 view.leadingAnchor()
                     .constraintEqualToAnchor(&guide.leadingAnchor())
+                    .setActive(true);
+                view.trailingAnchor()
+                    .constraintEqualToAnchor(&guide.trailingAnchor())
+                    .setActive(true);
+                view.bottomAnchor()
+                    .constraintEqualToAnchor(&guide.bottomAnchor())
                     .setActive(true);
             }
         }
@@ -637,6 +752,10 @@ fn setup(mtm: MainThreadMarker, occ_tx: OccSink, tx_rx: Receiver<Transaction>) {
             parents: HashMap::new(),
             grow: HashMap::new(),
             grow_constraints: HashMap::new(),
+            root: None,
+            fillers: HashMap::new(),
+            filler_ptrs: HashSet::new(),
+            breadth: HashMap::new(),
             content: view,
             _targets: Vec::new(),
             _window: window,
@@ -814,9 +933,46 @@ impl crate::harness::Stage for UiKitStage {
             // backends: only columns are registered.
             let mut extents = Vec::new();
             for child in unsafe { stack.arrangedSubviews() } {
+                // The trailing filler is plumbing, not a child: counted,
+                // it would append a phantom extent (0 beside growers,
+                // the whole leftover beside natural-size children) and
+                // break the byte-for-byte share comparison.
+                use objc2::Message;
+                if core
+                    .filler_ptrs
+                    .contains(&(Retained::as_ptr(&child.retain()) as usize))
+                {
+                    continue;
+                }
                 extents.push(child.frame().size.height);
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn root_fills(&self) -> String {
+        Self::on_main(move |core| {
+            let Some(root) = core.root else {
+                return "nothing mounted".to_owned();
+            };
+            let view = core.widgets.get(&root).expect("root outlives the scene").view();
+            core.content.layoutIfNeeded();
+            let frame = view.frame();
+            let area = core.content.safeAreaLayoutGuide().layoutFrame();
+            // Within one point: rounding is not a hug.
+            if (frame.size.width - area.size.width).abs() <= 1.0
+                && (frame.size.height - area.size.height).abs() <= 1.0
+            {
+                String::new()
+            } else {
+                format!(
+                    "{}x{}pt inside {}x{}pt",
+                    frame.size.width as i64,
+                    frame.size.height as i64,
+                    area.size.width as i64,
+                    area.size.height as i64,
+                )
+            }
         })
     }
 

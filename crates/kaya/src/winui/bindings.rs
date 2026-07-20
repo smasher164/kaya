@@ -1532,6 +1532,38 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     })
                 }
+                pub fn MeasureOverride(
+                    &self,
+                    availablesize: super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = &windows_core::Interface::cast::<IFrameworkElementOverrides>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).MeasureOverride)(
+                            windows_core::Interface::as_raw(this),
+                            availablesize,
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ArrangeOverride(
+                    &self,
+                    finalsize: super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = &windows_core::Interface::cast::<IFrameworkElementOverrides>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ArrangeOverride)(
+                            windows_core::Interface::as_raw(this),
+                            finalsize,
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IFrameworkElementOverrides>(self)?;
                     unsafe {
@@ -1578,6 +1610,20 @@ pub mod Microsoft {
                         )
                         .ok()
                     })
+                }
+                pub fn DesiredSize(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DesiredSize)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
                 }
                 pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
@@ -1640,6 +1686,20 @@ pub mod Microsoft {
                             value,
                         )
                         .ok()
+                    }
+                }
+                pub fn RenderSize(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RenderSize)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -2161,6 +2221,30 @@ pub mod Microsoft {
                             &mut result__,
                         )
                         .map(|| result__)
+                    }
+                }
+                pub fn XamlRoot(&self) -> windows_core::Result<XamlRoot> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).XamlRoot)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<XamlRoot>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetXamlRoot)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
                     }
                 }
                 pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -2816,6 +2900,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Measure(
+                    &self,
+                    availablesize: super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Measure)(
+                            windows_core::Interface::as_raw(this),
+                            availablesize,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -3422,8 +3519,18 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IFrameworkElementOverrides_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                MeasureOverride: usize,
-                ArrangeOverride: usize,
+                pub MeasureOverride: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Size,
+                    *mut super::super::super::Windows::Foundation::Size,
+                )
+                    -> windows_core::HRESULT,
+                pub ArrangeOverride: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Size,
+                    *mut super::super::super::Windows::Foundation::Size,
+                )
+                    -> windows_core::HRESULT,
                 pub OnApplyTemplate:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub GoToElementStateCore: unsafe extern "system" fn(
@@ -3677,7 +3784,11 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IUIElement_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                DesiredSize: usize,
+                pub DesiredSize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Foundation::Size,
+                )
+                    -> windows_core::HRESULT,
                 pub AllowDrop: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -3715,7 +3826,10 @@ pub mod Microsoft {
                     -> windows_core::HRESULT,
                 Visibility: usize,
                 SetVisibility: usize,
-                RenderSize: usize,
+                pub RenderSize: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::HRESULT,
                 pub UseLayoutRounding: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -3967,8 +4081,15 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut windows_numerics::Vector2,
                 ) -> windows_core::HRESULT,
-                XamlRoot: usize,
-                SetXamlRoot: usize,
+                pub XamlRoot: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetXamlRoot: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 Shadow: usize,
                 SetShadow: usize,
                 pub RasterizationScale: unsafe extern "system" fn(
@@ -4179,7 +4300,10 @@ pub mod Microsoft {
                 BringIntoViewRequested: usize,
                 pub RemoveBringIntoViewRequested:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
-                Measure: usize,
+                pub Measure: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::HRESULT,
                 Arrange: usize,
                 CapturePointer: usize,
                 ReleasePointerCapture: usize,
@@ -4554,6 +4678,86 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IXamlRoot,
+                IXamlRoot_Vtbl,
+                0x60cb215a_ad15_520a_8b01_4416824f0441
+            );
+            impl windows_core::RuntimeType for IXamlRoot {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IXamlRoot_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Content: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub Size: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::HRESULT,
+                pub RasterizationScale: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f64,
+                )
+                    -> windows_core::HRESULT,
+                pub IsHostVisible: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                Changed: usize,
+                pub RemoveChanged:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IXamlRoot2,
+                IXamlRoot2_Vtbl,
+                0xbdee0f42_71cb_50c5_829b_4614d98c5794
+            );
+            impl windows_core::RuntimeType for IXamlRoot2 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IXamlRoot2_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                ContentIslandEnvironment: usize,
+            }
+            windows_core::imp::define_interface!(
+                IXamlRoot3,
+                IXamlRoot3_Vtbl,
+                0xb71dbf3b_2e0f_5de0_ac68_f0c1f65114c8
+            );
+            impl windows_core::RuntimeType for IXamlRoot3 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IXamlRoot3_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                CoordinateConverter: usize,
+            }
+            windows_core::imp::define_interface!(
+                IXamlRoot4,
+                IXamlRoot4_Vtbl,
+                0x377bec22_632b_52be_b26f_5edf7838e5ca
+            );
+            impl windows_core::RuntimeType for IXamlRoot4 {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IXamlRoot4_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                ContentIsland: usize,
             }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
@@ -5248,6 +5452,20 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn DesiredSize(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DesiredSize)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
@@ -5309,6 +5527,20 @@ pub mod Microsoft {
                             value,
                         )
                         .ok()
+                    }
+                }
+                pub fn RenderSize(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RenderSize)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
                     }
                 }
                 pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -5830,6 +6062,30 @@ pub mod Microsoft {
                             &mut result__,
                         )
                         .map(|| result__)
+                    }
+                }
+                pub fn XamlRoot(&self) -> windows_core::Result<XamlRoot> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).XamlRoot)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<XamlRoot>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetXamlRoot)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
                     }
                 }
                 pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -6485,6 +6741,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Measure(
+                    &self,
+                    availablesize: super::super::super::Windows::Foundation::Size,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Measure)(
+                            windows_core::Interface::as_raw(this),
+                            availablesize,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -7120,6 +7389,86 @@ pub mod Microsoft {
             }
             unsafe impl Send for WindowEventArgs {}
             unsafe impl Sync for WindowEventArgs {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct XamlRoot(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                XamlRoot,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl XamlRoot {
+                pub fn Content(&self) -> windows_core::Result<UIElement> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Content)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Size(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Size>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Size)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RasterizationScale)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn IsHostVisible(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsHostVisible)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RemoveChanged(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveChanged)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for XamlRoot {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IXamlRoot>();
+            }
+            unsafe impl windows_core::Interface for XamlRoot {
+                type Vtable = <IXamlRoot as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IXamlRoot as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for XamlRoot {
+                const NAME: &'static str = "Microsoft.UI.Xaml.XamlRoot";
+            }
+            unsafe impl Send for XamlRoot {}
+            unsafe impl Sync for XamlRoot {}
             pub mod Controls {
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -8165,6 +8514,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -8204,6 +8589,20 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
@@ -8267,6 +8666,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -8800,6 +9213,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -9474,6 +9911,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -10620,6 +11070,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -10808,6 +11294,20 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -10869,6 +11369,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -11402,6 +11916,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -12076,6 +12614,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -13503,6 +14054,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -13542,6 +14129,20 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
@@ -13605,6 +14206,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -14138,6 +14753,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -14812,6 +15451,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -15897,6 +16549,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -15936,6 +16624,20 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
@@ -15999,6 +16701,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -16532,6 +17248,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -17206,6 +17946,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -17966,6 +18719,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -18215,6 +19004,20 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -18276,6 +19079,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -18809,6 +19626,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -19483,6 +20324,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -22042,6 +22896,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -22142,6 +23032,20 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -22203,6 +23107,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -22736,6 +23654,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -23414,6 +24356,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -23722,6 +24677,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<Primitives::IFlyoutBase>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<Primitives::IFlyoutBase>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn Opened<P0>(&self, handler: P0) -> windows_core::Result<i64>
@@ -24577,6 +25556,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -24652,6 +25667,20 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         })
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -24713,6 +25742,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -25246,6 +26289,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -25920,6 +26987,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -27284,6 +28364,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -27671,6 +28787,20 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         })
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -27732,6 +28862,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -28265,6 +29409,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -28939,6 +30107,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -29707,6 +30888,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -30048,6 +31265,20 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30109,6 +31340,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -30642,6 +31887,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -31316,6 +32585,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -32317,6 +33599,42 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
+                    pub fn MeasureOverride(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MeasureOverride)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn ArrangeOverride(
+                        &self,
+                        finalsize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<
+                            super::IFrameworkElementOverrides,
+                        >(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                windows_core::Interface::as_raw(this),
+                                finalsize,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<
                             super::IFrameworkElementOverrides,
@@ -33023,6 +34341,20 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         })
                     }
+                    pub fn DesiredSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DesiredSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -33084,6 +34416,20 @@ pub mod Microsoft {
                                 value,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn RenderSize(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Size>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderSize)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -33617,6 +34963,30 @@ pub mod Microsoft {
                                 &mut result__,
                             )
                             .map(|| result__)
+                        }
+                    }
+                    pub fn XamlRoot(&self) -> windows_core::Result<super::XamlRoot> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::XamlRoot>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
                         }
                     }
                     pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -34291,6 +35661,19 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).RemoveBringIntoViewRequested)(
                                 windows_core::Interface::as_raw(this),
                                 token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn Measure(
+                        &self,
+                        availablesize: super::super::super::super::Windows::Foundation::Size,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Measure)(
+                                windows_core::Interface::as_raw(this),
+                                availablesize,
                             )
                             .ok()
                         }
@@ -36221,6 +37604,44 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn MeasureOverride(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).MeasureOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ArrangeOverride(
+                            &self,
+                            finalsize: super::super::super::super::super::Windows::Foundation::Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalsize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElementOverrides,
@@ -36260,6 +37681,22 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn DesiredSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DesiredSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn AllowDrop(&self) -> windows_core::Result<bool> {
@@ -36329,6 +37766,22 @@ pub mod Microsoft {
                                     value,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn RenderSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -36949,6 +38402,32 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn XamlRoot(&self) -> windows_core::Result<super::super::XamlRoot> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).XamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::XamlRoot>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -37715,6 +39194,20 @@ pub mod Microsoft {
                                 ( windows_core::Interface::vtable ( this ) . RemoveBringIntoViewRequested ) ( windows_core::Interface::as_raw ( this ) , token , ) . ok ( )
                             }
                         }
+                        pub fn Measure(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Measure)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -38069,6 +39562,30 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn XamlRoot(&self) -> windows_core::Result<super::super::XamlRoot> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).XamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::XamlRoot>,
+                        {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
                             }
                         }                        pub fn Opened < P0 , > ( & self , handler : P0 , ) -> windows_core::Result < i64 > where P0 :windows_core::Param < super::super::super::super::super::Windows::Foundation:: EventHandler < windows_core::IInspectable > > ,{
                             let this = self;
@@ -38479,8 +39996,16 @@ pub mod Microsoft {
                             *mut bool,
                         )
                             -> windows_core::HRESULT,
-                        XamlRoot: usize,
-                        SetXamlRoot: usize,
+                        pub XamlRoot: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub SetXamlRoot: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
                         pub Opened: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut core::ffi::c_void,
@@ -39870,6 +41395,44 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn MeasureOverride(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).MeasureOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ArrangeOverride(
+                            &self,
+                            finalsize: super::super::super::super::super::Windows::Foundation::Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalsize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElementOverrides,
@@ -40098,6 +41661,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn DesiredSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DesiredSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -40165,6 +41744,22 @@ pub mod Microsoft {
                                     value,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn RenderSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -40785,6 +42380,32 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn XamlRoot(&self) -> windows_core::Result<super::super::XamlRoot> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).XamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::XamlRoot>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -41549,6 +43170,20 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
                             unsafe {
                                 ( windows_core::Interface::vtable ( this ) . RemoveBringIntoViewRequested ) ( windows_core::Interface::as_raw ( this ) , token , ) . ok ( )
+                            }
+                        }
+                        pub fn Measure(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Measure)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                )
+                                .ok()
                             }
                         }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
@@ -42969,6 +44604,44 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
+                        pub fn MeasureOverride(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).MeasureOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn ArrangeOverride(
+                            &self,
+                            finalsize: super::super::super::super::super::Windows::Foundation::Size,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ArrangeOverride)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalsize,
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn OnApplyTemplate(&self) -> windows_core::Result<()> {
                             let this = &windows_core::Interface::cast::<
                                 super::super::IFrameworkElementOverrides,
@@ -43162,6 +44835,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn DesiredSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DesiredSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn AllowDrop(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -43229,6 +44918,22 @@ pub mod Microsoft {
                                     value,
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn RenderSize(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Size,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderSize)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn UseLayoutRounding(&self) -> windows_core::Result<bool> {
@@ -43849,6 +45554,32 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn XamlRoot(&self) -> windows_core::Result<super::super::XamlRoot> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).XamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetXamlRoot<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::XamlRoot>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetXamlRoot)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
                             }
                         }
                         pub fn RasterizationScale(&self) -> windows_core::Result<f64> {
@@ -44613,6 +46344,20 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
                             unsafe {
                                 ( windows_core::Interface::vtable ( this ) . RemoveBringIntoViewRequested ) ( windows_core::Interface::as_raw ( this ) , token , ) . ok ( )
+                            }
+                        }
+                        pub fn Measure(
+                            &self,
+                            availablesize : super::super::super::super::super::Windows::Foundation:: Size,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Measure)(
+                                    windows_core::Interface::as_raw(this),
+                                    availablesize,
+                                )
+                                .ok()
                             }
                         }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
@@ -47727,6 +49472,17 @@ pub mod Windows {
                     .map(|| result__)
                 }
             }
+            pub fn GetSize(&self) -> windows_core::Result<Size> {
+                let this = self;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetSize)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
             pub fn GetUInt8Array(
                 &self,
                 value: &mut windows_core::Array<u8>,
@@ -47923,6 +49679,20 @@ pub mod Windows {
                     .ok()
                 }
             }
+            pub fn GetSizeArray(
+                &self,
+                value: &mut windows_core::Array<Size>,
+            ) -> windows_core::Result<()> {
+                let this = self;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetSizeArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
         }
         impl windows_core::RuntimeName for IPropertyValue {
             const NAME: &'static str = "Windows.Foundation.IPropertyValue";
@@ -47942,6 +49712,7 @@ pub mod Windows {
             fn GetBoolean(&self) -> windows_core::Result<bool>;
             fn GetString(&self) -> windows_core::Result<windows_core::HSTRING>;
             fn GetGuid(&self) -> windows_core::Result<windows_core::GUID>;
+            fn GetSize(&self) -> windows_core::Result<Size>;
             fn GetUInt8Array(
                 &self,
                 value: &mut windows_core::Array<u8>,
@@ -47997,6 +49768,10 @@ pub mod Windows {
             fn GetGuidArray(
                 &self,
                 value: &mut windows_core::Array<windows_core::GUID>,
+            ) -> windows_core::Result<()>;
+            fn GetSizeArray(
+                &self,
+                value: &mut windows_core::Array<Size>,
             ) -> windows_core::Result<()>;
         }
         impl IPropertyValue_Vtbl {
@@ -48260,6 +50035,25 @@ pub mod Windows {
                         let this: &Identity =
                             &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                         match IPropertyValue_Impl::GetGuid(this) {
+                            Ok(ok__) => {
+                                result__.write(core::mem::transmute_copy(&ok__));
+                                windows_core::HRESULT(0)
+                            }
+                            Err(err) => err.into(),
+                        }
+                    }
+                }
+                unsafe extern "system" fn GetSize<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    result__: *mut Size,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        match IPropertyValue_Impl::GetSize(this) {
                             Ok(ok__) => {
                                 result__.write(core::mem::transmute_copy(&ok__));
                                 windows_core::HRESULT(0)
@@ -48562,6 +50356,27 @@ pub mod Windows {
                         .into()
                     }
                 }
+                unsafe extern "system" fn GetSizeArray<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    value_array_size: *mut u32,
+                    value: *mut *mut Size,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        IPropertyValue_Impl::GetSizeArray(
+                            this,
+                            &mut windows_core::imp::array_proxy(
+                                core::mem::transmute_copy(&value),
+                                value_array_size,
+                            ),
+                        )
+                        .into()
+                    }
+                }
                 Self {
                     base__: windows_core::IInspectable_Vtbl::new::<Identity, IPropertyValue, OFFSET>(
                     ),
@@ -48583,7 +50398,7 @@ pub mod Windows {
                     GetDateTime: 0,
                     GetTimeSpan: 0,
                     GetPoint: 0,
-                    GetSize: 0,
+                    GetSize: GetSize::<Identity, OFFSET>,
                     GetRect: 0,
                     GetUInt8Array: GetUInt8Array::<Identity, OFFSET>,
                     GetInt16Array: GetInt16Array::<Identity, OFFSET>,
@@ -48602,7 +50417,7 @@ pub mod Windows {
                     GetDateTimeArray: 0,
                     GetTimeSpanArray: 0,
                     GetPointArray: 0,
-                    GetSizeArray: 0,
+                    GetSizeArray: GetSizeArray::<Identity, OFFSET>,
                     GetRectArray: 0,
                 }
             }
@@ -48672,7 +50487,10 @@ pub mod Windows {
             GetDateTime: usize,
             GetTimeSpan: usize,
             GetPoint: usize,
-            GetSize: usize,
+            pub GetSize: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut Size,
+            ) -> windows_core::HRESULT,
             GetRect: usize,
             pub GetUInt8Array: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
@@ -48748,7 +50566,11 @@ pub mod Windows {
             GetDateTimeArray: usize,
             GetTimeSpanArray: usize,
             GetPointArray: usize,
-            GetSizeArray: usize,
+            pub GetSizeArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut u32,
+                *mut *mut Size,
+            ) -> windows_core::HRESULT,
             GetRectArray: usize,
         }
         windows_core::imp::define_interface!(
@@ -48841,7 +50663,11 @@ pub mod Windows {
             CreateDateTime: usize,
             CreateTimeSpan: usize,
             CreatePoint: usize,
-            CreateSize: usize,
+            pub CreateSize: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                Size,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             CreateRect: usize,
             pub CreateUInt8Array: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
@@ -48931,7 +50757,12 @@ pub mod Windows {
             CreateDateTimeArray: usize,
             CreateTimeSpanArray: usize,
             CreatePointArray: usize,
-            CreateSizeArray: usize,
+            pub CreateSizeArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                u32,
+                *const Size,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             CreateRectArray: usize,
         }
         #[repr(transparent)]
@@ -49130,6 +50961,17 @@ pub mod Windows {
                     .map(|| result__)
                 }
             }
+            pub fn GetSize(&self) -> windows_core::Result<Size> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetSize)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
             pub fn GetUInt8Array(
                 &self,
                 value: &mut windows_core::Array<u8>,
@@ -49319,6 +51161,20 @@ pub mod Windows {
                 let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
                 unsafe {
                     (windows_core::Interface::vtable(this).GetGuidArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
+            pub fn GetSizeArray(
+                &self,
+                value: &mut windows_core::Array<Size>,
+            ) -> windows_core::Result<()> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetSizeArray)(
                         windows_core::Interface::as_raw(this),
                         value.set_abi_len(),
                         value as *mut _ as _,
@@ -49558,6 +51414,17 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateSize(value: Size) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateSize)(
+                        windows_core::Interface::as_raw(this),
+                        value,
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             pub fn CreateUInt8Array(
                 value: &[u8],
             ) -> windows_core::Result<windows_core::IInspectable> {
@@ -49754,6 +51621,20 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateSizeArray(
+                value: &[Size],
+            ) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateSizeArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.len().try_into().unwrap(),
+                        value.as_ptr(),
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             fn IPropertyValueStatics<
                 R,
                 F: FnOnce(&IPropertyValueStatics) -> windows_core::Result<R>,
@@ -49769,6 +51650,21 @@ pub mod Windows {
         }
         impl windows_core::RuntimeName for PropertyValue {
             const NAME: &'static str = "Windows.Foundation.PropertyValue";
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct Size {
+            pub Width: f32,
+            pub Height: f32,
+        }
+        impl windows_core::TypeKind for Size {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for Size {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Foundation.Size;f4;f4)",
+                );
         }
         #[repr(transparent)]
         #[derive(Clone, Debug, Eq, PartialEq)]

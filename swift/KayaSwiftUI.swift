@@ -506,6 +506,29 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_root_fills":
+                // The mounted root fills the area the window offered it
+                // — the observation shares can never make: a share is a
+                // percentage of the children's sum, total-invariant by
+                // construction, so a hugging root still splits 25/75.
+                let hug = DispatchQueue.main.sync { () -> String in
+                    let root = kayaRootSize
+                    let area = kayaAvailableSize
+                    guard area.width > 0, area.height > 0 else {
+                        return "no root layout recorded"
+                    }
+                    // Within one point: rounding is not a hug.
+                    if abs(root.width - area.width) <= 1, abs(root.height - area.height) <= 1 {
+                        return ""
+                    }
+                    return "\(Int(root.width))x\(Int(root.height))pt "
+                        + "inside \(Int(area.width))x\(Int(area.height))pt"
+                }
+                if hug.isEmpty {
+                    observed.append("root fills")
+                } else {
+                    failures.append("root hugs (\(hug))")
+                }
             default:
                 failures.append("unknown step \(line)")
             }
@@ -513,6 +536,13 @@ private func kayaRunScript(_ script: String) {
     }
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
+    }
+    // A recorded leg must outlive its last sample time — see
+    // harness.rs's record_linger; same contract, same constant.
+    if ProcessInfo.processInfo.environment["KAYA_RECORD"] != nil
+        || ProcessInfo.processInfo.environment["KAYA_HARNESS_GATE"] != nil
+    {
+        Thread.sleep(forTimeInterval: 0.75)
     }
     if failures.isEmpty {
         print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
@@ -530,6 +560,15 @@ private func kayaRunScript(_ script: String) {
 /// model state from inside a layout pass would invalidate the very pass
 /// that wrote it. Main-actor only, like the rest of the scene model.
 var kayaMainExtents: [UInt64: Double] = [:]
+
+/// The mounted root's placed size and the area the window offered it —
+/// what `expect_root_fills` compares. The offer is the root layout's
+/// own fully-specified proposal (recorded in sizeThatFits, so no
+/// padding constant ever enters the comparison); speculative probes are
+/// zero, infinite, or unspecified and are skipped. Main-actor only,
+/// like the rest of the scene model.
+var kayaRootSize = CGSize.zero
+var kayaAvailableSize = CGSize.zero
 
 /// SwiftUI's half of the `grow` contract.
 ///
@@ -562,6 +601,16 @@ struct KayaFlex: Layout {
     func sizeThatFits(
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
+        // The root's fully-specified proposal IS the area the window
+        // offers it — expect_root_fills compares the placed size
+        // against this. Probes (zero, infinite, unspecified) are not
+        // offers.
+        if fillCross,
+            let width = proposal.width, let height = proposal.height,
+            width > 0, height > 0, width.isFinite, height.isFinite
+        {
+            kayaAvailableSize = CGSize(width: width, height: height)
+        }
         let natural = subviews.map { $0.sizeThatFits(.unspecified) }
         let gaps = spacing * CGFloat(max(0, subviews.count - 1))
         let naturalMain = natural.map { main($0) }.reduce(0, +) + gaps
@@ -589,6 +638,10 @@ struct KayaFlex: Layout {
     func placeSubviews(
         in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) {
+        if fillCross && bounds.size.width > 0 && bounds.size.height > 0 {
+            // The root's own placed size, for expect_root_fills.
+            kayaRootSize = bounds.size
+        }
         guard !subviews.isEmpty else { return }
         let gaps = spacing * CGFloat(subviews.count - 1)
         // A grower's own natural size is deliberately not consulted: the

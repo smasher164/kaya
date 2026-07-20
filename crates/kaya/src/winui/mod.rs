@@ -1308,6 +1308,31 @@ impl crate::harness::Stage for WinUiStage {
         })
     }
 
+    fn root_fills(&self) -> String {
+        Self::on_ui(move |core| {
+            // The mounted root is the window's Content; the content
+            // island (XamlRoot) is the framework's own notion of the
+            // area handed to it.
+            let root: FrameworkElement = core.window.Content()?.cast()?;
+            root.UpdateLayout()?;
+            let area = root.XamlRoot()?.Size()?;
+            let (width, height) = (root.ActualWidth()?, root.ActualHeight()?);
+            // Within one device-independent pixel: rounding is not a hug.
+            Ok(
+                if (width - area.Width as f64).abs() <= 1.0
+                    && (height - area.Height as f64).abs() <= 1.0
+                {
+                    String::new()
+                } else {
+                    format!(
+                        "{}x{}dip inside {}x{}dip",
+                        width as i64, height as i64, area.Width as i64, area.Height as i64,
+                    )
+                },
+            )
+        })
+    }
+
     fn finish(&self, code: i32, verdict: &str) {
         if code == 0 {
             println!("{verdict}");

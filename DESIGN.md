@@ -524,11 +524,20 @@ The known normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,
   AppKit reserves space, XAML distinguishes Collapsed from Hidden.
-- The mounted root fills its window. AppKit's contentView and UIKit's
-  root view do this by construction; a GTK child obeys its own align and
-  hugs its content in a corner instead, which leaves no free space
-  anywhere in the tree and silently makes every grow weight divide
-  nothing. Settled when `grow` landed.
+- The mounted root fills its window. Nothing does this "by
+  construction" except AppKit (the root IS the contentView) — every
+  other backend needed the normalization stated explicitly, and two of
+  them shipped hugging before a recording caught it: GTK (a child obeys
+  its own align and sat in a corner), then UIKit (pinned top+leading to
+  dodge distribution=.fill's balloon; the fix pins all four safe-area
+  edges and hands the balloon to per-container trailing fillers, since
+  UIStackView has no gravity distribution), then Compose (a Column
+  wraps its width even when weights fill its height; the root takes
+  fillMaxSize). A hugging root leaves no free space anywhere in the
+  tree, so every grow weight silently divides nothing — and the share
+  verb cannot see it, because shares are percentages of the children's
+  sum, which is total-invariant. `expect_root_fills` in the grow scene
+  is the gate; the class does not get a fourth instance.
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
 - Grow distribution normalized to explicit weights. Settled when `grow`

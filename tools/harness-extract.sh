@@ -113,6 +113,11 @@ fi
 LEAD_MS=$((EPOCH - ANCHOR_MS))
 
 mkdir -p "$OUT"
+# Stills are derived data, and a previous run of a scene whose script
+# has since changed shape leaves orphans the overwrite never touches —
+# the count guard below then reads 13/10 stills as extraction breakage
+# on an otherwise green leg. Start every extraction from a clean slate.
+rm -f "$OUT"/step-*.png
 
 # Legs sharing one suite film each rescan the same packets; a caller
 # that pre-builds the index once (sorted pts_time, one per line) can
