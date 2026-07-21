@@ -125,6 +125,20 @@ pub enum Step {
     /// pinned top+leading only) and both times only a recording caught
     /// it — this step is the gate that does instead.
     ExpectRootFills,
+    /// Expect the container's children to span its content box along
+    /// the main axis — the leftover-consumption half of the grow
+    /// contract, and the second blind spot shares can never see:
+    /// growers that hold their weight RATIO at natural size pass every
+    /// share assertion (shares are percentages of the children's sum,
+    /// which is total-invariant) while consuming none of the leftover.
+    /// root_fills cannot see it either — it stops at the root, and the
+    /// root can be forced full-size by its window while its children
+    /// pool the leftover in container slack. That exact combination
+    /// shipped: AppKit's gravity-areas distribution left the bottom
+    /// pull unenforced, growers sat at ratio'd minimums, every gate
+    /// stayed green, and only a 540x330 window made it visible where
+    /// 320x160 had hidden it. This step is the gate that sees it.
+    ExpectFills(Target),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -183,6 +197,16 @@ pub trait Stage: Send + 'static {
     /// No default, like child_texts: a backend that forgets it must
     /// fail to compile rather than pass a layout leg vacuously.
     fn child_shares(&self, target: Target) -> String;
+    /// Whether the container's children (plumbing like leftover
+    /// fillers excluded) span its content box along the main axis,
+    /// read from the toolkit after forcing pending layout: the empty
+    /// string when they do (within two device units), otherwise a
+    /// short platform-flavored description of the span and the box,
+    /// which only ever appears in failure text and is never compared
+    /// across platforms. The observation expect_fills verifies. No
+    /// default, like child_shares: a backend that forgets it must
+    /// fail to compile rather than pass the consumption leg vacuously.
+    fn container_fills(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -262,6 +286,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
+            "expect_fills" => Step::ExpectFills(parse_target(rest)?),
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -402,6 +427,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     | Step::ExpectFocused(..)
                     | Step::ExpectShares(..)
                     | Step::ExpectRootFills
+                    | Step::ExpectFills(..)
             )
         })
     {
@@ -490,6 +516,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("root hugs ({hug})"));
                 }
             }
+            Step::ExpectFills(t) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    failures.push(format!("{t:?} is not a container target"));
+                    continue;
+                }
+                // Empty means the children span the content box; the
+                // pass observation is the byte-identical
+                // "column#0 fills" every backend and interpreter emits.
+                let slack = stage.container_fills(*t);
+                if slack.is_empty() {
+                    observed.push(format!("{} fills", target_spec(t)));
+                } else {
+                    failures.push(format!("{} leaves leftover ({slack})", target_spec(t)));
+                }
+            }
             Step::ExpectFocused(t) => {
                 if stage.is_focused(*t) {
                     observed.push(format!("{t:?} focused"));
@@ -504,6 +545,28 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
         stage.finish(0, &format!("KAYA_SELFTEST: OK ({})", observed.join(", ")));
     } else {
         stage.finish(1, &format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")));
+    }
+}
+
+/// The steps-file spelling of a target — "column#0" — for observation
+/// strings that echo their target. One implementation so the pass
+/// observations stay byte-identical; the interpreters emit the same
+/// spelling from their own runners.
+fn target_spec(t: &Target) -> String {
+    let kind = match t.kind {
+        TargetKind::Button => "button",
+        TargetKind::Checkbox => "checkbox",
+        TargetKind::Slider => "slider",
+        TargetKind::Entry => "entry",
+        TargetKind::Label => "label",
+        TargetKind::Column => "column",
+        TargetKind::Row => "row",
+        TargetKind::Image => "image",
+    };
+    if t.index < 0 {
+        format!("{kind}#last")
+    } else {
+        format!("{kind}#{}", t.index)
     }
 }
 
@@ -652,6 +715,9 @@ mod tests {
         fn root_fills(&self) -> String {
             String::new()
         }
+        fn container_fills(&self, _: Target) -> String {
+            String::new()
+        }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -766,6 +832,9 @@ mod tests {
             fn root_fills(&self) -> String {
                 "34x27pt inside 390x844pt".into()
             }
+            fn container_fills(&self, _: Target) -> String {
+                "children span 92pt of 298pt".into()
+            }
             fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -775,6 +844,82 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("root hugs"), "{verdict}");
+    }
+
+    /// expect_fills takes a container target, counts as an expect for
+    /// the zero-expect guard, emits the byte-identical "column#0
+    /// fills" observation on pass, and fails with the platform's slack
+    /// description otherwise. The pass half is the load-bearing half:
+    /// growers that hold their ratio at natural size pass every share
+    /// assertion while consuming nothing — this is the verb that sees
+    /// the leftover (the AppKit gravity-areas miss, found only because
+    /// a 540x330 window made 200pt of slack impossible to overlook).
+    #[test]
+    fn expect_fills_is_an_expect() {
+        let steps = parse("expect_fills column#0").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectFills(Target { kind: TargetKind::Column, index: 0 })
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (column#0 fills)");
+        // A non-container target is the false-verdict class: resolving
+        // label#0 against a container registry would read a different
+        // widget. Rejected loudly, exactly like the other container
+        // verbs.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_fills label#0").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("not a container target"), "{verdict}");
+        // Slack fails loudly: the whole point of the verb is that
+        // ratio-at-minimum cannot pass it.
+        struct Pooler(Sender<(i32, String)>);
+        impl Stage for Pooler {
+            fn click(&self, _: Target) {}
+            fn toggle(&self, _: Target, _: bool) {}
+            fn set_value(&self, _: Target, _: f64) {}
+            fn set_text(&self, _: Target, _: &str) {}
+            fn read_label(&self, _: Target) -> String {
+                String::new()
+            }
+            fn read_text(&self, _: Target) -> String {
+                String::new()
+            }
+            fn is_focused(&self, _: Target) -> bool {
+                false
+            }
+            fn image_size(&self, _: Target) -> String {
+                String::new()
+            }
+            fn child_texts(&self, _: Target) -> String {
+                String::new()
+            }
+            fn child_shares(&self, _: Target) -> String {
+                String::new()
+            }
+            fn root_fills(&self) -> String {
+                String::new()
+            }
+            fn container_fills(&self, _: Target) -> String {
+                "children span 92pt of 298pt".into()
+            }
+            fn finish(&self, code: i32, verdict: &str) {
+                let _ = self.0.send((code, verdict.to_owned()));
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_fills row#0").unwrap(), Pooler(tx));
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("row#0 leaves leftover"), "{verdict}");
+        assert!(verdict.contains("92pt of 298pt"), "{verdict}");
     }
 
     /// The verdict format is load-bearing: the suites grep

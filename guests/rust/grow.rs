@@ -39,10 +39,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             //
             // Every share stays clear of every platform's control
             // minimums, or the scene measures the minimums instead of
-            // the contract: the window is 320x160 on the desktops, so
-            // the column's ~152pt divide 38/38/76 — the 38pt button
-            // track clearing GTK's 34pt minimum button height by the
-            // same margin the old two-child 25/75 did.
+            // the contract: the window is 540x330 on the desktops and
+            // the root insets 16, so the column's ~250pt divide
+            // ~63/63/125 — the 63pt button track clearing GTK's 34pt
+            // minimum button height with room to spare.
             let label = tx.label(probe); // label#0
             tx.grow(label, 1.0);
             let quarter = tx.button("quarter");
@@ -50,7 +50,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // The horizontal contract: one row whose children split
             // its WIDTH 1:3. Its own weight (2) makes it a grower like
             // its siblings, keeping the column pure. Width tracks are
-            // roomy — 25/75 of ~304pt is 76 and 228 — because height
+            // roomy — 25/75 of ~508pt is 127 and 381 — because height
             // was the scarce axis, not width.
             let (band, ()) = tx.row(|tx| {
                 let tick = tx.label(one); // label#1

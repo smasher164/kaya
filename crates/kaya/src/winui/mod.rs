@@ -35,7 +35,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, Grid, Image, RowDefinition, Slider, TextBlock, TextBox,
     TextChangedEventHandler,
 };
-use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType};
+use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -806,6 +806,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::Mount { window: _, root } => {
             match core.widgets.get(&root).expect("scene validated the id") {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => {
+                    // The normalized root inset: 16 units INSIDE the
+                    // root (Grid.Padding is inside ActualSize, so the
+                    // root still fills its island and
+                    // expect_root_fills holds).
+                    panel.SetPadding(Thickness {
+                        Left: 16.0,
+                        Top: 16.0,
+                        Right: 16.0,
+                        Bottom: 16.0,
+                    })?;
                     core.window.SetContent(panel)?
                 }
                 NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
@@ -1104,10 +1114,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             SetWindowPos(
                 hwnd,
                 0,
-                6 + (n % 2) * 512,
-                6 + (n / 2) * 372,
-                500,
-                360,
+                6 + (n % 2) * 568,
+                6 + (n / 2) * 390,
+                556,
+                378,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
@@ -1326,6 +1336,55 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
             Ok(crate::harness::shares(&extents))
+        })
+    }
+
+    fn container_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let grid = &registry[i];
+            grid.UpdateLayout()?;
+            // A Grid places tracks from the padding edge with
+            // RowSpacing-sized gaps between adjacent ones and no slack
+            // anywhere else, so the consumed span is the tracks' sum
+            // plus the gaps, and slack shows up as the difference to
+            // the content box (ActualSize minus Padding).
+            let padding = grid.Padding()?;
+            let (inner, sum, gaps) = if vertical {
+                let defs = grid.RowDefinitions()?;
+                let mut sum = 0.0;
+                for at in 0..defs.Size()? {
+                    sum += defs.GetAt(at)?.ActualHeight()?;
+                }
+                (
+                    grid.ActualHeight()? - padding.Top - padding.Bottom,
+                    sum,
+                    grid.RowSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                )
+            } else {
+                let defs = grid.ColumnDefinitions()?;
+                let mut sum = 0.0;
+                for at in 0..defs.Size()? {
+                    sum += defs.GetAt(at)?.ActualWidth()?;
+                }
+                (
+                    grid.ActualWidth()? - padding.Left - padding.Right,
+                    sum,
+                    grid.ColumnSpacing()? * f64::from(defs.Size()?.saturating_sub(1)),
+                )
+            };
+            let span = sum + gaps;
+            Ok(if (span - inner).abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "children span {}dip of {}dip",
+                    span.round() as i64,
+                    inner.round() as i64
+                )
+            })
         })
     }
 

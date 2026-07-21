@@ -538,6 +538,19 @@ The known normalization worklist:
   verb cannot see it, because shares are percentages of the children's
   sum, which is total-invariant. `expect_root_fills` in the grow scene
   is the gate; the class does not get a fourth instance.
+- A normalized root inset. Settled: every backend applies 16 units
+  INSIDE the mounted root — AppKit stack edge insets, GTK CSS padding
+  on the `.kaya-root` class, UIKit layout margins, WinUI
+  `Grid.Padding`, Android `setPadding` (density-scaled: it takes
+  pixels), SwiftUI `.padding(16)` wrapping the offer reader, Compose
+  `.padding(16.dp)` before the offer reader. Inside is load-bearing:
+  padding sits within the root's own extent, so the root still fills
+  its offered area and `expect_root_fills` stays strict — a margin
+  outside the root would shrink it and turn the inset into a
+  root-fills waiver. The desktop window default is likewise one
+  number, 540×330 — SwiftUI's existing default, adopted by AppKit,
+  GTK, and WinUI in the same slice, sized so the grow scene's
+  smallest track stays ~63pt, clear of GTK's 34pt control minimum.
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
 - Grow distribution normalized to explicit weights. Settled when `grow`

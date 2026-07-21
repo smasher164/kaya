@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
@@ -82,6 +83,19 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
  * contract talks about.
  */
 val kayaMainExtents = HashMap<Long, Double>()
+
+/**
+ * The main-axis extent each CONTAINER rendered at, by node id — what
+ * `expect_fills` compares its children's tracks against. Same
+ * measured-geometry discipline as the track extents.
+ */
+val kayaContainerExtents = HashMap<Long, Double>()
+
+/**
+ * The 8-dp inter-child gap in pixels, recorded at composition (the
+ * runner thread has no density to convert with). Written by KayaRoot.
+ */
+var kayaGapPx = 0.0
 
 /**
  * The mounted root's laid-out size and the area offered to it — what
@@ -576,6 +590,45 @@ object KayaCompose {
                             failures.add("root hugs ($hug)")
                         }
                     }
+                    "expect_fills" -> {
+                        // The container's children span its content box
+                        // — the leftover-consumption half of the grow
+                        // contract, which shares (total-invariant) and
+                        // root_fills (root-level only) can never see.
+                        // Span = the measured cell tracks plus the 8-dp
+                        // gaps, against the container's own rendered
+                        // extent; the pass observation matches
+                        // harness.rs byte-for-byte.
+                        val slack = onUi(activity) {
+                            val isRow = parts[1].startsWith("row")
+                            target(
+                                parts[1], if (isRow) "row" else "column",
+                                if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
+                            )?.let { container ->
+                                val extent = kayaContainerExtents[container.id] ?: 0.0
+                                if (extent <= 0.0) {
+                                    "no container layout recorded"
+                                } else {
+                                    val tracks = container.children
+                                        .map { kayaMainExtents[it.id] ?: 0.0 }
+                                    val span = tracks.sum() +
+                                        kayaGapPx * maxOf(0, tracks.size - 1)
+                                    if (kotlin.math.abs(span - extent) <= 2.0) {
+                                        ""
+                                    } else {
+                                        "children span ${Math.round(span)}px " +
+                                            "of ${Math.round(extent)}px"
+                                    }
+                                }
+                            }
+                        }
+                        when {
+                            slack == null -> failures.add("no such target ${parts[1]}")
+                            slack.isEmpty() -> observed.add("${parts[1]} fills")
+                            else ->
+                                failures.add("${parts[1]} leaves leftover ($slack)")
+                        }
+                    }
                     else -> failures.add("unknown step $line")
                 }
             }
@@ -617,7 +670,9 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
             Column(
-                modifier = rootFill,
+                modifier = rootFill.onGloballyPositioned {
+                    kayaContainerExtents[node.id] = it.size.height.toDouble()
+                },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
@@ -644,7 +699,9 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             // Normalized default: children packed to the leading edge at
             // natural size, top-aligned (Alignment.Top), 8 dp between them.
             Row(
-                modifier = rootFill,
+                modifier = rootFill.onGloballyPositioned {
+                    kayaContainerExtents[node.id] = it.size.width.toDouble()
+                },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
@@ -730,11 +787,19 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
 
 @Composable
 fun KayaRoot() {
+    // The runner thread has no density; convert the 8-dp gap here,
+    // where composition provides one (expect_fills sums it between
+    // tracks).
+    kayaGapPx = with(androidx.compose.ui.platform.LocalDensity.current) { 8.dp.toPx().toDouble() }
     // Normalized default: the root is pinned to the top-leading corner,
     // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
     Box(
         modifier = Modifier
             .fillMaxSize()
+            // The normalized root inset: 16 units, applied before the
+            // offer is measured so the available area is the content
+            // box, exactly as the SwiftUI interpreter reads it.
+            .padding(16.dp)
             .onGloballyPositioned { kayaAvailableSize = it.size },
         contentAlignment = Alignment.TopStart,
     ) {

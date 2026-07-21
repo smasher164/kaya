@@ -83,6 +83,10 @@ fn main() {
         // transitively (see docs/traps.md).
         "Microsoft.UI.Xaml.XamlRoot".to_string(),
         "Windows.Foundation.Size".to_string(),
+        // The normalized root inset rides Grid.Padding, whose methods
+        // vanish silently while Thickness is unfiltered (the
+        // transitivity trap again).
+        "Microsoft.UI.Xaml.Thickness".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
         "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBase".to_string(),

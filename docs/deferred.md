@@ -87,16 +87,34 @@ Landed history lives in git; this file only carries what is still open.
   — the UIKit root hugging its window, the Compose root wrapping its
   width — are FIXED and now gated by `expect_root_fills` in the grow
   scene). Still alignment's to own: control-in-track placement
-  (Android Views stretches the control itself into its weighted track
-  where every other backend top-leads a natural-size control inside
-  it — both defensible, currently divergent), and the cross-axis
-  defaults generally, including asserting the HORIZONTAL grow contract
-  once `row` targets exist (the item above).
-  Also found comparing the matrix stills (2026-07-20): **root padding
-  diverges** — the SwiftUI interpreter's KayaRoot carries a `.padding()`
-  (~16pt) no other backend has, so six backends mount content flush to
-  the window edge while one insets it. Whichever default wins, it must
-  be ONE default. Related "presentable floor" items for the same
+  (five backends stretch the control itself into its weighted track —
+  Android's layout_weight, WinUI's default Stretch alignment, GTK's
+  allocation, and both Apple stacks under Fill distribution — where
+  SwiftUI and Compose top-lead a natural-size control inside the
+  track; both defensible, currently divergent, and now VISIBLE on the
+  desktop backends since the AppKit gravity fix made columns actually
+  distribute), and the cross-axis defaults generally, including
+  asserting the HORIZONTAL grow contract once `row` targets exist (the
+  item above).
+  The grow contract's consumption half is now gated: `expect_fills`
+  (children + normalized gaps span the container's content box, both
+  grow-scene containers, all seven backends, no-default
+  Stage::container_fills) — added when the 540x330 default exposed
+  AppKit's gravity-areas distribution pooling 200pt of leftover under
+  share-green ratios; fixed with Fill distribution + the UIKit filler
+  architecture (docs/traps.md has the full autopsy).
+  ~~Also found comparing the matrix stills (2026-07-20): root padding
+  diverges — the SwiftUI interpreter's KayaRoot carries a `.padding()`
+  (~16pt) no other backend has~~ RESOLVED (2026-07-20): the normalized
+  default is **16 units of inset applied INSIDE the mounted root** on
+  all seven backends (AppKit edge insets, GTK CSS padding, UIKit
+  layout margins, WinUI Grid.Padding, Android setPadding
+  density-scaled, SwiftUI `.padding(16)` outside the offer reader,
+  Compose `.padding(16.dp)` before the offer reader) — inside, so the
+  root still fills its offered area and `expect_root_fills` stays
+  strict. The desktop default window normalized to 540×330 (SwiftUI's
+  existing size) in the same slice, keeping the grow scene's smallest
+  track ~63pt, clear of GTK's 34pt control minimum. Related "presentable floor" items for the same
   milestone: a baseline alignment option for text-bearing rows (a
   switch, a label and a slider currently scatter on the cross axis),
   and — separate layer, the Zen Garden one — a way to ask for each

@@ -9,7 +9,7 @@
 //! carrying no data.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 
 use dispatch2::DispatchQueue;
@@ -22,7 +22,8 @@ use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType,
     NSButton, NSControlTextEditingDelegate, NSImage, NSImageView, NSLayoutAttribute,
     NSLayoutConstraint, NSLayoutConstraintOrientation, NSLayoutRelation, NSSlider, NSStackView,
-    NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation, NSWindow, NSWindowStyleMask,
+    NSStackViewDistribution, NSTextField, NSTextFieldDelegate, NSUserInterfaceLayoutOrientation,
+    NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSArray, NSData, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -83,6 +84,11 @@ struct CoreState {
     parents: HashMap<WidgetId, WidgetId>,
     grow: HashMap<WidgetId, f64>,
     grow_constraints: HashMap<WidgetId, Vec<Retained<NSLayoutConstraint>>>,
+    /// One trailing filler per container (see add_filler), plus a
+    /// pointer set so the child-reading observations can skip them —
+    /// a filler is plumbing, never a child.
+    fillers: HashMap<WidgetId, Retained<objc2_app_kit::NSView>>,
+    filler_ptrs: HashSet<usize>,
     // Held so targets and the delegates outlive the objects that
     // reference them weakly.
     _targets: Vec<Retained<ButtonTarget>>,
@@ -142,6 +148,29 @@ fn drain_transactions() {
 /// The whole set is rebuilt on every change rather than patched: one
 /// weight moving re-proportions every sibling, so there is no smaller
 /// correct unit of work.
+/// Under Fill distribution the stack must hand its leftover to
+/// someone — that requirement is the whole fix. The filler is that
+/// someone: an empty view with no intrinsic size, hugging and
+/// compression floored so it always yields first, kept last in the
+/// arranged order and hidden (= detached) the moment real growers
+/// exist. The child-reading observations skip fillers by pointer —
+/// plumbing, never a child.
+fn add_filler(
+    core: &mut CoreState,
+    mtm: MainThreadMarker,
+    id: WidgetId,
+    stack: &NSStackView,
+    orientation: NSLayoutConstraintOrientation,
+) {
+    let filler = objc2_app_kit::NSView::new(mtm);
+    filler.setContentHuggingPriority_forOrientation(1.0, orientation);
+    filler.setContentCompressionResistancePriority_forOrientation(1.0, orientation);
+    stack.addArrangedSubview(&filler);
+    core.filler_ptrs
+        .insert(Retained::as_ptr(&filler) as usize);
+    core.fillers.insert(id, filler);
+}
+
 fn resolve_grow(core: &mut CoreState, parent: WidgetId) {
     // Only the axis is needed: the stack sizes the non-growers itself,
     // and the ratios are expressed between the growers directly.
@@ -191,6 +220,12 @@ fn resolve_grow(core: &mut CoreState, parent: WidgetId) {
 
     // One grower needs no ratio — the lowered hugging already hands it
     // the leftover. Ratios only mean anything between two of them.
+    // The filler absorbs the leftover only while nothing grows; the
+    // moment real growers exist they take it (hidden means detached
+    // here — out of layout entirely, not zero-sized-but-counted).
+    if let Some(filler) = core.fillers.get(&parent) {
+        filler.setHidden(!growers.is_empty());
+    }
     if growers.len() < 2 {
         return;
     }
@@ -227,7 +262,25 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Vertical);
                     stack.setSpacing(8.0);
                     stack.setAlignment(NSLayoutAttribute::Leading);
+                    // Fill, not the gravity-areas default: gravity lets
+                    // the leftover pool in slack that no optional pin
+                    // can claim back (the bottom pull is 250 and LOSES
+                    // to nothing — it simply goes unenforced), so
+                    // growers held their ratio at minimum size and the
+                    // share observation, total-invariant by design,
+                    // could not tell. Fill makes handing the leftover
+                    // to SOMEONE a required constraint; the filler
+                    // below is that someone until real growers exist.
+                    stack.setDistribution(NSStackViewDistribution::Fill);
+                    stack.setDetachesHiddenViews(true);
                     core.columns.push(stack.clone());
+                    add_filler(
+                        core,
+                        mtm,
+                        id,
+                        &stack,
+                        NSLayoutConstraintOrientation::Vertical,
+                    );
                     NativeWidget::Column(stack)
                 }
                 WidgetKind::Row => {
@@ -235,7 +288,16 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                     stack.setOrientation(NSUserInterfaceLayoutOrientation::Horizontal);
                     stack.setSpacing(8.0);
                     stack.setAlignment(NSLayoutAttribute::Top);
+                    stack.setDistribution(NSStackViewDistribution::Fill);
+                    stack.setDetachesHiddenViews(true);
                     core.rows.push(stack.clone());
+                    add_filler(
+                        core,
+                        mtm,
+                        id,
+                        &stack,
+                        NSLayoutConstraintOrientation::Horizontal,
+                    );
                     NativeWidget::Row(stack)
                 }
                 WidgetKind::Button => {
@@ -348,7 +410,9 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                         .expect("kaya: move_child anchor not among siblings")
                         as isize
                 }
-                None => stack.arrangedSubviews().count() as isize,
+                // Before the filler, which stays last even across
+                // moves.
+                None => stack.arrangedSubviews().count().saturating_sub(1) as isize,
             };
             stack.insertArrangedSubview_atIndex(&child_view, index);
             // Order does not enter the ratios, but the parent is recorded
@@ -364,6 +428,11 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             // the sibling set is re-solved; a stack that is itself being
             // destroyed simply drops its (now empty) entry.
             core.grow_constraints.remove(&id);
+            if let Some(filler) = core.fillers.remove(&id) {
+                core.filler_ptrs
+                    .remove(&(Retained::as_ptr(&filler) as usize));
+                filler.removeFromSuperview();
+            }
             if let Some(parent) = core.parents.remove(&id) {
                 resolve_grow(core, parent);
             }
@@ -439,7 +508,13 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
                 .retain();
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(stack) | NativeWidget::Row(stack) => {
-                    stack.addArrangedSubview(&child_view)
+                    // Before the filler, which stays last: appending
+                    // after it would put children past the leftover.
+                    let count = stack.arrangedSubviews().count();
+                    stack.insertArrangedSubview_atIndex(
+                        &child_view,
+                        count.saturating_sub(1) as isize,
+                    );
                 }
                 _ => panic!("kaya: add_child parent is not a container"),
             }
@@ -451,6 +526,18 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
         }
         ApplyOp::Mount { window: _, root } => {
             let root_view = core.widgets.get(&root).expect("scene validated the id");
+            // The normalized root inset: 16 units INSIDE the root (the
+            // root still fills its window — expect_root_fills holds),
+            // on every backend, so content stops kissing the window
+            // edge on six of seven platforms while one padded.
+            if let NativeWidget::Column(stack) | NativeWidget::Row(stack) = root_view {
+                stack.setEdgeInsets(objc2_foundation::NSEdgeInsets {
+                    top: 16.0,
+                    left: 16.0,
+                    bottom: 16.0,
+                    right: 16.0,
+                });
+            }
             core._window.setContentView(Some(root_view.view()));
         }
         ApplyOp::Command { id, command } => {
@@ -643,7 +730,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         }
         None => NSPoint::new(200.0, 200.0),
     };
-    let content_rect = NSRect::new(origin, NSSize::new(320.0, 160.0));
+    // 540x330: the one desktop default (SwiftUI already used it; the
+    // placement grids were already sized for it).
+    let content_rect = NSRect::new(origin, NSSize::new(540.0, 330.0));
     let style = NSWindowStyleMask::Titled
         | NSWindowStyleMask::Closable
         | NSWindowStyleMask::Miniaturizable;
@@ -687,6 +776,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             parents: HashMap::new(),
             grow: HashMap::new(),
             grow_constraints: HashMap::new(),
+            fillers: HashMap::new(),
+            filler_ptrs: HashSet::new(),
             _targets: Vec::new(),
             _entry_delegates: Vec::new(),
             _window: window,
@@ -848,10 +939,62 @@ impl crate::harness::Stage for AppKitStage {
             // 1:3 split as 2.90:1.
             let mut extents = Vec::new();
             for child in stack.arrangedSubviews() {
+                if core.filler_ptrs.contains(&(Retained::as_ptr(&child) as usize)) {
+                    continue;
+                }
                 let rect = child.alignmentRectForFrame(child.frame());
                 extents.push(if vertical { rect.size.height } else { rect.size.width });
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn container_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let stack = &registry[i];
+            stack.layoutSubtreeIfNeeded();
+            // The content box: bounds minus the stack's own edge
+            // insets (where the normalized root inset lives).
+            let insets = stack.edgeInsets();
+            let bounds = stack.bounds();
+            let inner = if vertical {
+                bounds.size.height - insets.top - insets.bottom
+            } else {
+                bounds.size.width - insets.left - insets.right
+            };
+            // First alignment-rect start to last end; fillers are
+            // plumbing, hidden or not, and never count.
+            let mut min_start = f64::MAX;
+            let mut max_end = f64::MIN;
+            for child in stack.arrangedSubviews() {
+                if core.filler_ptrs.contains(&(Retained::as_ptr(&child) as usize)) {
+                    continue;
+                }
+                let rect = child.alignmentRectForFrame(child.frame());
+                let (start, extent) = if vertical {
+                    (rect.origin.y, rect.size.height)
+                } else {
+                    (rect.origin.x, rect.size.width)
+                };
+                min_start = min_start.min(start);
+                max_end = max_end.max(start + extent);
+            }
+            if max_end < min_start {
+                return "no children".to_owned();
+            }
+            let span = max_end - min_start;
+            if (span - inner).abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "children span {}pt of {}pt",
+                    span.round() as i64,
+                    inner.round() as i64
+                )
+            }
         })
     }
 

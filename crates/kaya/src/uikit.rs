@@ -593,6 +593,22 @@ fn apply(core: &mut CoreState, mtm: MainThreadMarker, op: ApplyOp) {
             // problem now (see add_filler), so the root can finally
             // take its window.
             core.content.addSubview(&view);
+            // The normalized root inset: 16 units INSIDE the root (the
+            // root still fills the safe area — expect_root_fills
+            // holds), matching every other backend.
+            if let NativeWidget::Column(stack) | NativeWidget::Row(stack) =
+                core.widgets.get(&root).expect("scene validated the id")
+            {
+                unsafe {
+                    stack.setLayoutMarginsRelativeArrangement(true);
+                    stack.setLayoutMargins(objc2_ui_kit::UIEdgeInsets {
+                        top: 16.0,
+                        left: 16.0,
+                        bottom: 16.0,
+                        right: 16.0,
+                    });
+                }
+            }
             let guide = core.content.safeAreaLayoutGuide();
             unsafe {
                 view.setTranslatesAutoresizingMaskIntoConstraints(false);
@@ -962,6 +978,68 @@ impl crate::harness::Stage for UiKitStage {
                 });
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn container_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let stack = &registry[i];
+            stack.layoutIfNeeded();
+            // The content box: bounds minus layout margins when the
+            // stack arranges relative to them (the root inset), the
+            // raw bounds otherwise (margins exist on every UIView but
+            // only bind arranged layout under the flag).
+            let bounds = stack.bounds();
+            let margins = if unsafe { stack.isLayoutMarginsRelativeArrangement() } {
+                stack.layoutMargins()
+            } else {
+                objc2_ui_kit::UIEdgeInsets {
+                    top: 0.0,
+                    left: 0.0,
+                    bottom: 0.0,
+                    right: 0.0,
+                }
+            };
+            let inner = if vertical {
+                bounds.size.height - margins.top - margins.bottom
+            } else {
+                bounds.size.width - margins.left - margins.right
+            };
+            let mut min_start = f64::MAX;
+            let mut max_end = f64::MIN;
+            for child in unsafe { stack.arrangedSubviews() } {
+                use objc2::Message;
+                if core
+                    .filler_ptrs
+                    .contains(&(Retained::as_ptr(&child.retain()) as usize))
+                {
+                    continue;
+                }
+                let frame = child.frame();
+                let (start, extent) = if vertical {
+                    (frame.origin.y, frame.size.height)
+                } else {
+                    (frame.origin.x, frame.size.width)
+                };
+                min_start = min_start.min(start);
+                max_end = max_end.max(start + extent);
+            }
+            if max_end < min_start {
+                return "no children".to_owned();
+            }
+            let span = max_end - min_start;
+            if (span - inner).abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "children span {}pt of {}pt",
+                    span.round() as i64,
+                    inner.round() as i64
+                )
+            }
         })
     }
 

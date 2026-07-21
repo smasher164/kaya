@@ -834,6 +834,41 @@ fn apply(env: &mut JNIEnv, op: ApplyOp) -> jni::errors::Result<()> {
                 "(Landroid/view/View;)V",
                 &[JValue::Object(root_view.as_obj())],
             )?;
+            // The normalized root inset: 16dp INSIDE the root (the
+            // root still fills the content frame — expect_root_fills
+            // holds), matching every other backend. Density-scaled:
+            // padding is in pixels.
+            let density = {
+                let metrics = env
+                    .call_method(
+                        activity.as_obj(),
+                        "getResources",
+                        "()Landroid/content/res/Resources;",
+                        &[],
+                    )?
+                    .l()?;
+                let metrics = env
+                    .call_method(
+                        &metrics,
+                        "getDisplayMetrics",
+                        "()Landroid/util/DisplayMetrics;",
+                        &[],
+                    )?
+                    .l()?;
+                env.get_field(&metrics, "density", "F")?.f()?
+            };
+            let inset = (16.0 * density).round() as i32;
+            env.call_method(
+                root_view.as_obj(),
+                "setPadding",
+                "(IIII)V",
+                &[
+                    JValue::Int(inset),
+                    JValue::Int(inset),
+                    JValue::Int(inset),
+                    JValue::Int(inset),
+                ],
+            )?;
             // setContentView installs MATCH_PARENT params, so the root
             // fills the content frame by construction — root_fills
             // measures it anyway rather than trusting this comment.
@@ -1275,6 +1310,61 @@ impl crate::harness::Stage for AndroidStage {
                 extents.push(f64::from(extent));
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn container_fills(&self, t: crate::harness::Target) -> String {
+        let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+        let column = {
+            let core = CORE.lock().unwrap();
+            let core = core.as_ref().expect("core set up");
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            registry[i].clone()
+        };
+        Self::on_ui(move |env| {
+            let read = |env: &mut JNIEnv, obj: &JObject, method: &str| -> i32 {
+                env.call_method(obj, method, "()I", &[])
+                    .and_then(|v| v.i())
+                    .expect("kaya: dimension read failed")
+            };
+            let obj = column.as_obj();
+            // The content box: the container's extent minus its own
+            // padding (the normalized root inset arrives as
+            // setPadding; child edges are relative to the container).
+            let (pad_start, pad_end, extent_m, start_m, end_m) = if vertical {
+                ("getPaddingTop", "getPaddingBottom", "getHeight", "getTop", "getBottom")
+            } else {
+                ("getPaddingLeft", "getPaddingRight", "getWidth", "getLeft", "getRight")
+            };
+            let inner = read(env, &obj, extent_m)
+                - read(env, &obj, pad_start)
+                - read(env, &obj, pad_end);
+            let count = read(env, &obj, "getChildCount");
+            let mut min_start = i32::MAX;
+            let mut max_end = i32::MIN;
+            for at in 0..count {
+                let child = env
+                    .call_method(
+                        &obj,
+                        "getChildAt",
+                        "(I)Landroid/view/View;",
+                        &[JValue::Int(at)],
+                    )
+                    .and_then(|v| v.l())
+                    .expect("kaya: child read failed");
+                min_start = min_start.min(read(env, &child, start_m));
+                max_end = max_end.max(read(env, &child, end_m));
+            }
+            if max_end < min_start {
+                return "no children".to_owned();
+            }
+            let span = max_end - min_start;
+            if (span - inner).abs() <= 2 {
+                String::new()
+            } else {
+                format!("children span {span}px of {inner}px")
+            }
         })
     }
 

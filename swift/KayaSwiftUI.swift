@@ -541,6 +541,37 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("root hugs (\(hug))")
                 }
+            case "expect_fills":
+                // The container's children span its content box — the
+                // leftover-consumption half of the grow contract, which
+                // shares (total-invariant) and root_fills (root-level
+                // only) can never see. Span = the tracks KayaFlex
+                // actually assigned plus the 8-unit gaps, against the
+                // container's own rendered extent; the pass observation
+                // matches harness.rs byte-for-byte.
+                let slack = DispatchQueue.main.sync { () -> String? in
+                    let isRow = parts[1].hasPrefix("row")
+                    guard
+                        let container = kayaTarget(
+                            parts[1], isRow ? "row" : "column",
+                            isRow ? kayaScene.rows : kayaScene.columns)
+                    else { return nil }
+                    guard let extent = kayaContainerExtents[container.id], extent > 0 else {
+                        return "no container layout recorded"
+                    }
+                    let tracks = container.children.map { kayaMainExtents[$0.id] ?? 0 }
+                    let span = tracks.reduce(0, +) + 8.0 * Double(max(0, tracks.count - 1))
+                    if abs(span - extent) <= 2 { return "" }
+                    return "children span \(Int(span.rounded()))pt of \(Int(extent.rounded()))pt"
+                }
+                switch slack {
+                case ""?:
+                    observed.append("\(parts[1]) fills")
+                case let s?:
+                    failures.append("\(parts[1]) leaves leftover (\(s))")
+                case nil:
+                    failures.append("no such target \(parts[1])")
+                }
             default:
                 failures.append("unknown step \(line)")
             }
@@ -596,6 +627,32 @@ private struct KayaTrackReader: View {
 
     private func record(_ size: CGSize) {
         kayaMainExtents[id] = Double(vertical ? size.height : size.width)
+    }
+}
+
+/// The main-axis extent each CONTAINER rendered at, by node id — what
+/// `expect_fills` compares its children's tracks against. Same
+/// geometry-only discipline as the track extents: never written from a
+/// layout pass. Main-actor only.
+var kayaContainerExtents: [UInt64: Double] = [:]
+
+/// The container-extent sibling of KayaTrackReader: a background
+/// reader on the container view itself (either branch — flex or
+/// stock stack), recording its rendered main-axis extent.
+private struct KayaBoxReader: View {
+    let id: UInt64
+    let vertical: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { record(geo.size) }
+                .onChange(of: geo.size) { _, size in record(size) }
+        }
+    }
+
+    private func record(_ size: CGSize) {
+        kayaContainerExtents[id] = Double(vertical ? size.height : size.width)
     }
 }
 
@@ -741,27 +798,30 @@ struct KayaRender: View {
             // offered, so nothing below it would ever have leftover
             // space to divide. Nested containers keep VStack until one
             // of their own children actually grows.
-            if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                KayaFlex(vertical: true, spacing: 8, nodes: node.children, fillCross: isRoot) {
-                    ForEach(node.children) { child in
-                        // The invisible frame accepts the track KayaFlex
-                        // proposes; the reader on it records the track's
-                        // geometry (see KayaTrackReader).
-                        KayaRender(node: child)
-                            .frame(
-                                maxWidth: .infinity, maxHeight: .infinity,
-                                alignment: .topLeading
-                            )
-                            .background(KayaTrackReader(id: child.id, vertical: true))
+            Group {
+                if isRoot || node.children.contains(where: { $0.grow > 0 }) {
+                    KayaFlex(vertical: true, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                        ForEach(node.children) { child in
+                            // The invisible frame accepts the track KayaFlex
+                            // proposes; the reader on it records the track's
+                            // geometry (see KayaTrackReader).
+                            KayaRender(node: child)
+                                .frame(
+                                    maxWidth: .infinity, maxHeight: .infinity,
+                                    alignment: .topLeading
+                                )
+                                .background(KayaTrackReader(id: child.id, vertical: true))
+                        }
                     }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(node.children) { child in
-                        KayaRender(node: child)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(node.children) { child in
+                            KayaRender(node: child)
+                        }
                     }
                 }
             }
+            .background(KayaBoxReader(id: node.id, vertical: true))
         case kindButton:
             Button(node.text) {
                 KayaHost.emit(node.tag)
@@ -769,24 +829,27 @@ struct KayaRender: View {
         case kindRow:
             // Normalized: 8-unit spacing, top (cross-axis start).
             // HStack until a weight appears — see the column arm.
-            if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                KayaFlex(vertical: false, spacing: 8, nodes: node.children, fillCross: isRoot) {
-                    ForEach(node.children) { child in
-                        KayaRender(node: child)
-                            .frame(
-                                maxWidth: .infinity, maxHeight: .infinity,
-                                alignment: .topLeading
-                            )
-                            .background(KayaTrackReader(id: child.id, vertical: false))
+            Group {
+                if isRoot || node.children.contains(where: { $0.grow > 0 }) {
+                    KayaFlex(vertical: false, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                        ForEach(node.children) { child in
+                            KayaRender(node: child)
+                                .frame(
+                                    maxWidth: .infinity, maxHeight: .infinity,
+                                    alignment: .topLeading
+                                )
+                                .background(KayaTrackReader(id: child.id, vertical: false))
+                        }
                     }
-                }
-            } else {
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(node.children) { child in
-                        KayaRender(node: child)
+                } else {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(node.children) { child in
+                            KayaRender(node: child)
+                        }
                     }
                 }
             }
+            .background(KayaBoxReader(id: node.id, vertical: false))
         case kindLabel:
             Text(node.text)
         case kindCheckbox:
@@ -918,7 +981,9 @@ struct KayaRoot: View {
                 kayaAvailableSize = size
             }
         }
-        .padding()
+        // The normalized root inset: 16 units, the same default the
+        // other six backends now apply inside their roots.
+        .padding(16)
         // Normalized: pack content to the top-leading corner of the
         // surface rather than letting the window center it.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

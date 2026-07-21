@@ -13,15 +13,29 @@
 # and could not be compared byte-for-byte at all.
 #
 # The shares are kept clear of every platform's minimum control size
-# (GTK's 34pt button height is the binding one at a 320x160 window),
-# or the scene would measure the minimums rather than the contract.
+# (GTK's 34pt button height is the binding one; the 540x330 desktop
+# window with its 16pt root inset leaves the smallest column track
+# ~63pt), or the scene would measure the minimums rather than the
+# contract.
 #
 # root-fills before the shares: a share is a percentage of the
 # children's SUM, which is total-invariant — a mounted root hugging its
 # content at a fraction of the window still splits 25/25/50, and that
 # blind spot shipped twice (GTK, then UIKit) before this line existed.
+#
+# fills after root-fills: the same blindness one level down, and the
+# third instance of the class. A root can be forced full-size by its
+# window while the container pools the leftover as slack BESIDE its
+# children — growers then hold their weight RATIO at natural size,
+# every share still passes, and root-fills sees a full root. AppKit
+# shipped exactly that (gravity-areas distribution) until a 540x330
+# window made 200pt of slack visible; expect_fills is the gate that
+# sees it structurally: the children (plus the normalized 8-unit gaps)
+# must span the container's content box on the main axis.
 settle 1500
 expect label#0 "grow probe"
 expect_root_fills
+expect_fills column#0
+expect_fills row#0
 expect_shares column#0 "25,25,50"
 expect_shares row#0 "25,75"

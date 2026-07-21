@@ -22,6 +22,15 @@ these the hard way.
   rather than the child's `ActualHeight` on WinUI. Guard:
   `Stage::child_shares` states it in its contract, and the `grow` scene
   fails loudly when a backend ignores it — which it did, for all three.
+  Fourth dialect, met landing `expect_fills`: GTK4's own
+  `width()`/`height()` are the CONTENT box — CSS padding lives outside
+  the widget's coordinate space, and child allocations are
+  content-relative — so subtracting the root's `.kaya-root` padding
+  from them double-counts it (read a filling root as "259px spanning
+  227px"). Every OTHER backend's own-extent read is the border box and
+  DOES need its insets subtracted (AppKit bounds vs edgeInsets, UIKit
+  bounds vs layoutMargins, WinUI ActualSize vs Padding, Android
+  getHeight vs getPadding*).
 - **A conformance scene must keep every share above every platform's
   minimum control size.** A share below it is clamped by the toolkit,
   and the scene then silently measures the minimum instead of the
@@ -175,6 +184,33 @@ these the hard way.
   size and left no free space anywhere in the tree — every grow weight
   then divided nothing. The backend now forces Fill on the root; the
   normalization is recorded in DESIGN's layout worklist.
+- **A share-green backend can still be POOLING the leftover beside its
+  children — root_fills does not close the class, it only closes the
+  root-level instance.** AppKit's NSStackView under its default
+  gravity-areas distribution simply never enforces the optional bottom
+  pull (the 250-priority edge pin goes unsatisfied while cost-1
+  huggings sit right there to stretch — constraintsAffectingLayout
+  shows the pull absent from the binding set, not outvoted), so the
+  pairwise ratio constraints held at their MINIMUM: 20/32/40pt tracks
+  in a 298pt column, shares an exact 25/25/50 (the button's 32pt frame
+  is a 20pt alignment rect — ratios hold in alignment space), root
+  full-size by construction (the stack IS the contentView), every gate
+  green, 200pt of dead slack on screen. Found only because the 540x330
+  window default made the slack unmissable where 320x160 had hidden it
+  (~24pt). Fix: distribution=Fill + the same hidden trailing filler
+  UIKit uses (fill must hand the leftover to SOMEONE; the filler is
+  that someone until a weight appears — setDetachesHiddenViews(true),
+  or a hidden NSStackView filler still occupies layout, unlike
+  UIStackView's always-excluded hidden arranged views). Guard:
+  `expect_fills` — children (plus normalized gaps) must SPAN the
+  container's content box, asserted for both containers in the grow
+  scene on all seven backends; `Stage::container_fills` is no-default
+  so a backend cannot skip it silently. Diagnosis pattern worth the
+  price of admission: attach lldb to the live process and ask the
+  engine (`_subtreeDescription`, `[view constraints]`,
+  `constraintsAffectingLayoutForOrientation:`), then TEST the fix by
+  mutating the live process (`setDistribution:` + layout) before
+  writing a line of Rust.
 - **A share-green backend can still be rendering the contract inside a
   hugging root — and did, twice more.** UIKit's root was pinned
   top+leading only (a pre-grow choice to dodge distribution=.fill's

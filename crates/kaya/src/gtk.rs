@@ -633,6 +633,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // tree, so every grow weight in the scene divides nothing.
             root_widget.set_halign(gtk4::Align::Fill);
             root_widget.set_valign(gtk4::Align::Fill);
+            root_widget.add_css_class("kaya-root");
             core.window.set_child(Some(&root_widget));
         }
         ApplyOp::Command { id, command } => {
@@ -686,9 +687,23 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let window = gtk4::ApplicationWindow::builder()
             .application(app)
             .title("kaya milestone 2")
-            .default_width(320)
-            .default_height(160)
+            .default_width(540)
+            .default_height(330)
             .build();
+        // The normalized root inset: 16 units INSIDE the root, via the
+        // CSS box (padding sits inside the allocation, so the root
+        // still fills its window and expect_root_fills holds — margins
+        // would shrink the allocation instead and break it). The class
+        // is stamped on the mounted root in the Mount arm.
+        let css = gtk4::CssProvider::new();
+        css.load_from_data(".kaya-root { padding: 16px; }");
+        if let Some(display) = gtk4::gdk::Display::default() {
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
         window.present();
 
         if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -876,6 +891,51 @@ impl crate::harness::Stage for GtkStage {
                 child = widget.next_sibling();
             }
             crate::harness::shares(&extents)
+        })
+    }
+
+    fn container_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let container = &registry[i];
+            while glib::MainContext::default().iteration(false) {}
+            // width()/height() are ALREADY the content box on GTK4 —
+            // CSS padding lives outside the widget's own coordinate
+            // space, unlike every other backend here, and child
+            // allocations are content-relative. Subtracting the
+            // .kaya-root padding on top of that read a filling root as
+            // 259px spanning 227px on the first Wayland run.
+            let inner = if vertical {
+                container.height()
+            } else {
+                container.width()
+            };
+            let mut min_start = i32::MAX;
+            let mut max_end = i32::MIN;
+            let mut child = container.first_child();
+            while let Some(widget) = child {
+                let alloc = widget.allocation();
+                let (start, extent) = if vertical {
+                    (alloc.y(), alloc.height())
+                } else {
+                    (alloc.x(), alloc.width())
+                };
+                min_start = min_start.min(start);
+                max_end = max_end.max(start + extent);
+                child = widget.next_sibling();
+            }
+            if max_end < min_start {
+                return "no children".to_owned();
+            }
+            let span = max_end - min_start;
+            if (span - inner).abs() <= 2 {
+                String::new()
+            } else {
+                format!("children span {span}px of {inner}px")
+            }
         })
     }
 
