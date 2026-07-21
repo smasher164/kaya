@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x5a48b5ad11a4cb51
+let kayaSpecHash: UInt64 = 0x420c5722bf6d356e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -49,6 +49,7 @@ private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
 private let propSource: UInt32 = 6
 private let propGrow: UInt32 = 7
+private let propSpacing: UInt32 = 8
 private let valueBool: UInt32 = 1
 private let valueF64: UInt32 = 3
 private let valueStr: UInt32 = 4
@@ -79,6 +80,9 @@ final class KayaNode: Identifiable {
     /// natural size; positive weights divide the leftover main-axis
     /// space in proportion. See Prop::Grow in protocol.rs.
     var grow = 0.0
+    /// This container's inter-child gap on its main axis (containers
+    /// only; the normalized default is 8). See Prop::Spacing.
+    var spacing = 8.0
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -253,6 +257,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propGrow, valueF64):
                     kayaScene.nodes[id]!.grow =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propSpacing, valueF64):
+                    kayaScene.nodes[id]!.spacing =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
@@ -567,7 +574,8 @@ private func kayaRunScript(_ script: String) {
                         return "no container layout recorded"
                     }
                     let tracks = container.children.map { kayaMainExtents[$0.id] ?? 0 }
-                    let span = tracks.reduce(0, +) + 8.0 * Double(max(0, tracks.count - 1))
+                    let span =
+                        tracks.reduce(0, +) + container.spacing * Double(max(0, tracks.count - 1))
                     if abs(span - extent) <= 2 { return "" }
                     return "children span \(Int(span.rounded()))pt of \(Int(extent.rounded()))pt"
                 }
@@ -807,7 +815,7 @@ struct KayaRender: View {
             // of their own children actually grows.
             Group {
                 if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                    KayaFlex(vertical: true, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                    KayaFlex(vertical: true, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
                             // The invisible frame accepts the track KayaFlex
                             // proposes; the reader on it records the track's
@@ -821,7 +829,7 @@ struct KayaRender: View {
                         }
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: node.spacing) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
                         }
@@ -838,7 +846,7 @@ struct KayaRender: View {
             // HStack until a weight appears — see the column arm.
             Group {
                 if isRoot || node.children.contains(where: { $0.grow > 0 }) {
-                    KayaFlex(vertical: false, spacing: 8, nodes: node.children, fillCross: isRoot) {
+                    KayaFlex(vertical: false, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
                                 .frame(
@@ -849,7 +857,7 @@ struct KayaRender: View {
                         }
                     }
                 } else {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: node.spacing) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
                         }

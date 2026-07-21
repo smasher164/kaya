@@ -726,6 +726,14 @@ final class KayaAppTx {
     /// main-axis space in proportion (see Prop::Grow in the core). The
     /// declarative spelling is the `grow:` argument at construction;
     /// this is the dynamic path.
+    /// A container's inter-child gap (main axis, DIP; the normalized
+    /// default is 8). Containers only — the scene rejects it anywhere
+    /// else. The declarative spelling is the `spacing:` argument at
+    /// construction; this is the dynamic path.
+    func setSpacing(_ w: KayaWidget, _ gap: Double) {
+        tx.setSpacing(w.id, gap)
+    }
+
     func setGrow(_ w: KayaWidget, _ weight: Double) {
         tx.setGrow(w.id, weight)
     }
@@ -850,16 +858,20 @@ final class KayaAppTx {
         return w
     }
 
-    func column(grow: Double? = nil, @KayaChildren _ children: () -> Void) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_COLUMN), children, grow: grow)
+    func column(
+        grow: Double? = nil, spacing: Double? = nil, @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing)
     }
 
-    func row(grow: Double? = nil, @KayaChildren _ children: () -> Void) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_ROW), children, grow: grow)
+    func row(
+        grow: Double? = nil, spacing: Double? = nil, @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        containerOf(UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing)
     }
 
     private func containerOf(
-        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil
+        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil
     ) -> KayaWidget {
         // Parent before children: statement-shaped construction is
         // parent-first in every language (expression trees are

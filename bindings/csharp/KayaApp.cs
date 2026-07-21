@@ -613,6 +613,13 @@ sealed class Tx
     public void SetGrow(Widget w, double weight) =>
         Records.Add(KayaWire.TxSetGrow(w.Id, weight));
 
+    /// A container's inter-child gap (main axis, DIP; the normalized
+    /// default is 8). Containers only — the scene rejects it anywhere
+    /// else. The declarative spelling is the `spacing:` argument at
+    /// construction; this is the dynamic path.
+    public void SetSpacing(Widget w, double gap) =>
+        Records.Add(KayaWire.TxSetSpacing(w.Id, gap));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -721,16 +728,17 @@ sealed class Tx
     /// A container parents everything declared inside its body (the
     /// ambient stack). Statement position is the point: a foreach over
     /// a generated row trace stands between siblings.
-    public Widget Column(Action body, double? grow = null) =>
-        ContainerOf(KayaWire.KindColumn, body, grow);
+    public Widget Column(Action body, double? grow = null, double? spacing = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow, spacing);
 
-    public Widget Row(Action body, double? grow = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow);
+    public Widget Row(Action body, double? grow = null, double? spacing = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing);
 
-    Widget ContainerOf(uint kind, Action body, double? grow = null)
+    Widget ContainerOf(uint kind, Action body, double? grow = null, double? spacing = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
+        if (spacing is double gap) SetSpacing(parent, gap);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);

@@ -25,11 +25,12 @@ let () =
            grow 1.0 (label ~bind:probe ()) (* label#0 *);
            grow 1.0 (button ~text:"quarter" ());
            grow 2.0
-             (row
-                [
-                  grow 1.0 (label ~bind:one ()) (* label#1 *);
-                  grow 3.0 (button ~text:"three" ());
-                ]);
+             (spacing 12.0
+                (row
+                   [
+                     grow 1.0 (label ~bind:one ()) (* label#1 *);
+                     grow 3.0 (button ~text:"three" ());
+                   ]));
          ]
      in
      mount root);

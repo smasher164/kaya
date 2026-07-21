@@ -365,6 +365,17 @@ the same patterns return through interpreter drop-downs
   into a comment must not false-pass (guard in the harness; comments
   are stripped before `;`-folding so a leading comment can't swallow
   the script).
+- **A value pin cannot see a FORGOTTEN sibling.** capi.rs re-exports
+  the wire constants for kaya.h (cbindgen reads capi, not wire.rs),
+  each pinned by `const _: () = assert!(KAYA_X == wire::X)` — but a
+  NEW wire constant simply absent from capi trips no pin, and the
+  spacing prop shipped to every generated wire file while kaya.h
+  silently lacked KAYA_PROP_SPACING (the Swift binding, which compiles
+  against the header, was the first thing to notice — at suite time,
+  not generation time). Guard: a completeness assert beside the pins
+  (`spec::PROPS.len() == N`) that a new prop trips, walking you to the
+  export block. The general shape: agreement checks need a matching
+  cardinality check, or absence passes them vacuously.
 - **gen-guests --check diffs against git HEAD** — it cannot pass
   pre-commit when generated surfaces changed; prove idempotence
   (second regeneration is byte-identical) and commit generators with

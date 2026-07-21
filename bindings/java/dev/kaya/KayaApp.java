@@ -179,6 +179,21 @@ public final class KayaApp {
             tx.setGrow(this, weight);
             return this;
         }
+
+        /**
+         * This container's inter-child gap at construction — the
+         * declarative chain: tx.column(() -> {...}).spacing(12).
+         * Same transaction discipline as grow.
+         */
+        public Widget spacing(double gap) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: spacing on a widget outside its build transaction"
+                    + " — use Tx.setSpacing inside a live transaction");
+            }
+            tx.setSpacing(this, gap);
+            return this;
+        }
     }
 
     /**
@@ -495,6 +510,15 @@ public final class KayaApp {
          */
         public void setGrow(Widget w, double weight) {
             records.add(KayaWire.txSetGrow(w.id, weight));
+        }
+
+        /**
+         * A container's inter-child gap (main axis, DIP; the
+         * normalized default is 8). Containers only — the scene
+         * rejects it anywhere else.
+         */
+        public void setSpacing(Widget w, double gap) {
+            records.add(KayaWire.txSetSpacing(w.id, gap));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {

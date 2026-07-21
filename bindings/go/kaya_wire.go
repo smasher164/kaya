@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x5a48b5ad11a4cb51
+	SpecHash uint64 = 0x420c5722bf6d356e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -34,6 +34,7 @@ const (
 	PropMax = 5
 	PropSource = 6
 	PropGrow = 7
+	PropSpacing = 8
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -526,6 +527,38 @@ func TxBindGrowElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropGrow)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetSpacing: set_property with a constant spacing value.
+func TxSetSpacing(widgetID uint64, spacing float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, spacing)
+	return endRecord(b)
+}
+
+// TxBindSpacing: set_property with a signal-bound spacing value.
+func TxBindSpacing(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindSpacingElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindSpacingElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropSpacing)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

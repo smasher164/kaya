@@ -23,10 +23,13 @@ main = kayaMain $ \app -> do
           grow 1 (buttonOn "quarter" (return ())),
           grow
             2
-            ( row
-                [ grow 1 (labelBound one), -- label#1
-                  grow 3 (buttonOn "three" (return ()))
-                ]
+            ( spacing
+                12
+                ( row
+                    [ grow 1 (labelBound one), -- label#1
+                      grow 3 (buttonOn "three" (return ()))
+                    ]
+                )
             )
         ]
     mount root

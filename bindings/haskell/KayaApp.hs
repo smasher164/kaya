@@ -62,6 +62,8 @@ module KayaApp
     bindChecked,
     bindSource,
     setGrow,
+    setSpacing,
+    spacing,
     grow,
     bindTextElement,
     KayaFieldType (..),
@@ -585,6 +587,22 @@ grow :: Double -> Build Widget -> Build Widget
 grow weight act = do
   w <- act
   setGrow w weight
+  return w
+
+-- | A container's inter-child gap (main axis, DIP; the normalized
+-- default is 8). Containers only — the scene rejects it anywhere
+-- else. 'setSpacing' is the dynamic path.
+setSpacing :: Widget -> Double -> Build ()
+setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
+
+-- | @spacing g act@ declares @act@ and sets its gap — composes over a
+-- container declaration:
+--
+-- > spacing 12 (column [ ... ])
+spacing :: Double -> Build Widget -> Build Widget
+spacing gap act = do
+  w <- act
+  setSpacing w gap
   return w
 
 bindChecked :: Widget -> Signal -> Build ()

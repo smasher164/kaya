@@ -316,6 +316,13 @@ class Widget:
         collapsing a pane is `grow(0)` and back."""
         _records().append(wire.tx_set_grow(self.id, float(weight)))
 
+    def spacing(self, gap):
+        """Set this container's inter-child gap (main axis, DIP; the
+        normalized default is 8). Containers only — the scene rejects
+        it anywhere else. The declarative spelling is the `spacing=`
+        argument at construction; this is the dynamic path."""
+        _records().append(wire.tx_set_spacing(self.id, float(gap)))
+
 
 class Node:
     """A template node: a blueprint entry, stamped per collection entry.
@@ -909,6 +916,12 @@ def collection(record_type=None):
     return handle
 
 
+def _set_spacing(handle, spacing):
+    if spacing is None:
+        return
+    _records().append(wire.tx_set_spacing(handle.id, float(spacing)))
+
+
 def _set_grow(handle, grow):
     # The one kind-agnostic prop: every constructor takes `grow=`, the
     # declarative spelling of Widget.grow (see that docstring for the
@@ -917,12 +930,14 @@ def _set_grow(handle, grow):
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
-def column(grow=None):
+def column(grow=None, spacing=None):
     """A column container: `with kaya.column():` parents everything
     declared inside it. `grow` is its flex weight within the enclosing
-    container."""
+    container; `spacing` its inter-child gap (main axis, DIP; the
+    normalized default is 8)."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
+    _set_spacing(handle, spacing)
     return _Container(handle)
 
 
@@ -936,12 +951,14 @@ def button(text=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None):
+def row(grow=None, spacing=None):
     """A row container: column turned sideways; `with kaya.row():`
     parents everything declared inside it. `grow` is its flex weight
-    within the enclosing container."""
+    within the enclosing container; `spacing` its inter-child gap
+    (main axis, DIP; the normalized default is 8)."""
     handle = _widget(wire.KIND_ROW)
     _set_grow(handle, grow)
+    _set_spacing(handle, spacing)
     return _Container(handle)
 
 

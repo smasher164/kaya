@@ -27,7 +27,7 @@ final class Grow {
                 tx.row(() -> {
                     tx.label(one).grow(1.0); // label#1
                     tx.button("three").grow(3.0);
-                }).grow(2.0);
+                }).grow(2.0).spacing(12.0);
             }));
             return null;
         });

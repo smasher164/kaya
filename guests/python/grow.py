@@ -22,7 +22,7 @@ with app.window():
     with kaya.column():
         kaya.label(bind=probe, grow=1)  # label#0
         kaya.button("quarter", grow=1)
-        with kaya.row(grow=2):
+        with kaya.row(grow=2, spacing=12):
             kaya.label(bind=one, grow=1)  # label#1
             kaya.button("three", grow=3)
 

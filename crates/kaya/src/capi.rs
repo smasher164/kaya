@@ -220,6 +220,7 @@ pub const KAYA_PROP_MIN: u32 = 4;
 pub const KAYA_PROP_MAX: u32 = 5;
 pub const KAYA_PROP_SOURCE: u32 = 6;
 pub const KAYA_PROP_GROW: u32 = 7;
+pub const KAYA_PROP_SPACING: u32 = 8;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -228,6 +229,16 @@ const _: () = assert!(
         && KAYA_PROP_MAX == wire::PROP_MAX
         && KAYA_PROP_SOURCE == wire::PROP_SOURCE
         && KAYA_PROP_GROW == wire::PROP_GROW
+        && KAYA_PROP_SPACING == wire::PROP_SPACING
+);
+// Completeness, not just agreement: the value pins above cannot see a
+// FORGOTTEN export (the spacing prop shipped to every generated wire
+// file while kaya.h silently lacked it, and the Swift binding was the
+// first thing to notice). A new spec prop trips this count and walks
+// you here.
+const _: () = assert!(
+    crate::spec::PROPS.len() == 8,
+    "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.

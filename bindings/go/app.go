@@ -452,6 +452,25 @@ func (w Widget) Grow(weight float64) Widget {
 	return w
 }
 
+// SetSpacing sets a container's inter-child gap (main axis, DIP; the
+// normalized default is 8). Containers only — the scene rejects it
+// anywhere else. The dynamic path; the declarative spelling is the
+// Spacing chain at construction.
+func (tx *Tx) SetSpacing(w Widget, gap float64) {
+	tx.records = append(tx.records, TxSetSpacing(w.id, gap))
+}
+
+// Spacing sets this container's inter-child gap at construction — the
+// declarative chain: tx.Column(...).Spacing(12). Same transaction
+// discipline as Grow.
+func (w Widget) Spacing(gap float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Spacing on a widget outside its build transaction — use Tx.SetSpacing inside a live transaction")
+	}
+	w.tx.SetSpacing(w, gap)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }

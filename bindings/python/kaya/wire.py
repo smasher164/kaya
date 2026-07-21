@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x5a48b5ad11a4cb51
+SPEC_HASH = 0x420c5722bf6d356e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -32,6 +32,7 @@ PROP_MIN = 4
 PROP_MAX = 5
 PROP_SOURCE = 6
 PROP_GROW = 7
+PROP_SPACING = 8
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -296,6 +297,21 @@ def tx_bind_grow(widget_id, signal_id):
 def tx_bind_grow_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_GROW, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_spacing(widget_id, spacing):
+    """set_property with a constant spacing value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SPACING, SOURCE_CONST) + _enc.value(spacing))
+
+
+def tx_bind_spacing(widget_id, signal_id):
+    """set_property with a signal-bound spacing value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SPACING, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_spacing_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SPACING, SOURCE_ELEMENT, level, field))
 
 
 def parse_value(buf, at):

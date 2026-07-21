@@ -27,7 +27,7 @@ static class GrowScene
                 {
                     tx.Label(bind: one, grow: 1); // label#1
                     tx.Button("three", grow: 3);
-                }, grow: 2);
+                }, grow: 2, spacing: 12);
             }));
         });
 

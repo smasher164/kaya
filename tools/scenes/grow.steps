@@ -23,6 +23,13 @@
 # content at a fraction of the window still splits 25/25/50, and that
 # blind spot shipped twice (GTK, then UIKit) before this line existed.
 #
+# The row also carries the spacing prop's conformance exercise: a
+# non-default 12-unit gap, set through each language's sugar. fills is
+# what gates it — children PLUS GAPS span the content box, so a
+# backend that ignores the write (or an observation that hardcodes the
+# 8-unit default) misses by 4 units and fails. Shares cannot see
+# spacing at all (gaps are excluded from tracks by design).
+#
 # fills after root-fills: the same blindness one level down, and the
 # third instance of the class. A root can be forced full-size by its
 # window while the container pools the leftover as slack BESIDE its

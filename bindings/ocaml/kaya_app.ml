@@ -297,6 +297,19 @@ let grow weight d tx =
   let w = d tx in
   set_grow w weight tx;
   w
+
+(* A container's inter-child gap (main axis, DIP; the normalized
+   default is 8). Containers only — the scene rejects it anywhere
+   else. [set_spacing] is the dynamic path; [spacing] composes over a
+   container decl:
+
+     spacing 12.0 (column [ ... ])
+*)
+let set_spacing (Widget id) gap tx = emit tx (Kaya_wire.tx_set_spacing id gap)
+let spacing gap d tx =
+  let w = d tx in
+  set_spacing w gap tx;
+  w
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)

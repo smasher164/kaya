@@ -31,7 +31,7 @@ func main() {
 			tx.Row(func() {
 				tx.Label(one).Grow(1) // label#1
 				tx.Button("three", nil).Grow(3)
-			}).Grow(2)
+			}).Grow(2).Spacing(12)
 		}))
 	})
 

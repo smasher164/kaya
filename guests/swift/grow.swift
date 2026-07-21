@@ -19,7 +19,7 @@ app.build { tx in
     let root = tx.column {
         tx.label(bind: probe, grow: 1)  // label#0
         tx.button("quarter", grow: 1)
-        tx.row(grow: 2) {
+        tx.row(grow: 2, spacing: 12) {
             tx.label(bind: one, grow: 1)  // label#1
             tx.button("three", grow: 3)
         }

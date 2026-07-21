@@ -538,6 +538,15 @@ The known normalization worklist:
   verb cannot see it, because shares are percentages of the children's
   sum, which is total-invariant. `expect_root_fills` in the grow scene
   is the gate; the class does not get a fourth instance.
+- Spacing normalized to one default and one prop. Settled: 8 units
+  between adjacent children on the main axis unless the container's
+  `spacing` prop (F64, DIP, finite non-negative — nonsense dies at the
+  root like grow's) says otherwise; no leading or trailing gap either
+  way. GTK and WinUI carry native per-container spacing (Box spacing,
+  Grid Row/ColumnSpacing); SwiftUI and Compose thread the node's value
+  into their stacks and flex layouts. `expect_fills` gates the prop
+  (children + gaps must span the content box); shares are gap-blind by
+  design.
 - A normalized root inset. Settled: every backend applies 16 units
   INSIDE the mounted root — AppKit stack edge insets, GTK CSS padding
   on the `.kaya-root` class, UIKit layout margins, WinUI

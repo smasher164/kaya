@@ -573,6 +573,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         parent.queue_resize();
                     }
                 }
+                (NativeWidget::Column(container), Prop::Spacing, Value::F64(gap))
+                | (NativeWidget::Row(container), Prop::Spacing, Value::F64(gap)) => {
+                    // The container's own inter-child gap; the flex
+                    // manager reads the Box spacing at allocate time,
+                    // so both layout paths follow it.
+                    container.set_spacing(gap.round() as i32);
+                }
                 (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => {
                     // Encoded bytes in, native decode:
                     // gdk::Texture::from_bytes reads encoded PNG/JPEG.

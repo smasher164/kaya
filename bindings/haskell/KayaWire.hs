@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x5a48b5ad11a4cb51
+specHash = 0x420c5722bf6d356e
 
 valueBool :: Word32
 valueBool = 1
@@ -66,6 +66,8 @@ propSource :: Word32
 propSource = 6
 propGrow :: Word32
 propGrow = 7
+propSpacing :: Word32
+propSpacing = 8
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -377,6 +379,25 @@ txBindGrow widgetId signalId = wireRecord txKindSetProperty
 txBindGrowElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindGrowElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propGrow <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant spacing value.
+txSetSpacing :: Word64 -> Double -> Builder
+txSetSpacing widgetId spacing = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSpacing <> word32LE sourceConst
+    <> encodeValue (VF64 spacing))
+
+-- set_property with a signal-bound spacing value.
+txBindSpacing :: Word64 -> Word64 -> Builder
+txBindSpacing widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSpacing <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSpacingElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSpacingElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSpacing <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- Decode one value at offset `at` from the record base; returns the

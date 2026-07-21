@@ -742,6 +742,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
                     slider.SetValue(v)?;
                 }
+                (NativeWidget::Column(grid), Prop::Spacing, Value::F64(gap)) => {
+                    // A column's children stack as rows; the gap is the
+                    // row spacing (expect_fills reads it back live).
+                    grid.SetRowSpacing(gap)?;
+                }
+                (NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
+                    grid.SetColumnSpacing(gap)?;
+                }
                 (NativeWidget::Slider(slider), Prop::Min, Value::F64(v)) => {
                     slider.SetMinimum(v)?;
                 }

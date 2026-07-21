@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x5a48b5ad11a4cb51;
+    public const ulong SpecHash = 0x420c5722bf6d356e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -34,6 +34,7 @@ static class KayaWire
     public const uint PropMax = 5;
     public const uint PropSource = 6;
     public const uint PropGrow = 7;
+    public const uint PropSpacing = 8;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -490,6 +491,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropGrow); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant spacing value.
+    public static byte[] TxSetSpacing(ulong widgetId, double spacing)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSpacing); w.Write(SourceConst);
+        EncodeValue(w, spacing);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound spacing value.
+    public static byte[] TxBindSpacing(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSpacing); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindSpacingElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSpacing); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

@@ -50,8 +50,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // The horizontal contract: one row whose children split
             // its WIDTH 1:3. Its own weight (2) makes it a grower like
             // its siblings, keeping the column pure. Width tracks are
-            // roomy — 25/75 of ~508pt is 127 and 381 — because height
-            // was the scarce axis, not width.
+            // roomy — 25/75 of ~496pt (508 minus the 12-unit gap set
+            // below) is 124 and 372 — because height was the scarce
+            // axis, not width.
             let (band, ()) = tx.row(|tx| {
                 let tick = tx.label(one); // label#1
                 tx.grow(tick, 1.0);
@@ -59,6 +60,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.grow(three, 3.0);
             });
             tx.grow(band, 2.0);
+            // The spacing prop's conformance exercise: a non-default
+            // gap on the asserted row, so expect_fills (children +
+            // gaps span the content box) fails on any backend that
+            // ignores the write and keeps its 8-unit default.
+            tx.spacing(band, 12.0);
         });
         tx.mount(root);
     });

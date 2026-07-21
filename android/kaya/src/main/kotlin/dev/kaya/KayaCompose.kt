@@ -31,6 +31,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -70,6 +71,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * in proportion. See Prop::Grow in protocol.rs.
      */
     var grow by mutableStateOf(0.0)
+    /**
+     * This container's inter-child gap on its main axis (containers
+     * only; the normalized default is 8 dp). See Prop::Spacing.
+     */
+    var spacing by mutableStateOf(8.0)
     val children = mutableStateListOf<KayaNode>()
 }
 
@@ -92,10 +98,12 @@ val kayaMainExtents = HashMap<Long, Double>()
 val kayaContainerExtents = HashMap<Long, Double>()
 
 /**
- * The 8-dp inter-child gap in pixels, recorded at composition (the
- * runner thread has no density to convert with). Written by KayaRoot.
+ * The display density, recorded at composition (the runner thread has
+ * none to convert with): expect_fills turns each container's dp
+ * spacing into the pixels its measured tracks are laid out in.
+ * Written by KayaRoot.
  */
-var kayaGapPx = 0.0
+var kayaDensity = 1.0
 
 /**
  * The mounted root's laid-out size and the area offered to it — what
@@ -133,7 +141,7 @@ object KayaCompose {
     // (KAYA_SPEC_HASH); asserted against the core at mount. check-verbs
     // holds the SOURCE current, but only the runtime assert catches a
     // stale compiled APK against a new libkaya.
-    private const val SPEC_HASH = 0x5a48b5ad11a4cb51L
+    private const val SPEC_HASH = 0x420c5722bf6d356eL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -159,6 +167,7 @@ object KayaCompose {
     private const val PROP_MAX = 5
     private const val PROP_SOURCE = 6
     private const val PROP_GROW = 7
+    private const val PROP_SPACING = 8
     private const val VALUE_BOOL = 1
     private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
@@ -265,6 +274,8 @@ object KayaCompose {
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
                         PROP_MAX -> KayaSceneModel.nodes[id]!!.maxValue = readF64(b)
                         PROP_GROW -> KayaSceneModel.nodes[id]!!.grow = readF64(b)
+                        PROP_SPACING ->
+                            KayaSceneModel.nodes[id]!!.spacing = readF64(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -622,7 +633,8 @@ object KayaCompose {
                                     val tracks = container.children
                                         .map { kayaMainExtents[it.id] ?: 0.0 }
                                     val span = tracks.sum() +
-                                        kayaGapPx * maxOf(0, tracks.size - 1)
+                                        container.spacing * kayaDensity *
+                                        maxOf(0, tracks.size - 1)
                                     if (kotlin.math.abs(span - extent) <= 2.0) {
                                         ""
                                     } else {
@@ -683,7 +695,7 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
                 modifier = rootFill.onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
                 },
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
                 node.children.forEach { child ->
@@ -712,7 +724,7 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
                 modifier = rootFill.onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
                 },
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(node.spacing.dp),
                 verticalAlignment = Alignment.Top,
             ) {
                 node.children.forEach { child ->
@@ -800,7 +812,7 @@ fun KayaRoot() {
     // The runner thread has no density; convert the 8-dp gap here,
     // where composition provides one (expect_fills sums it between
     // tracks).
-    kayaGapPx = with(androidx.compose.ui.platform.LocalDensity.current) { 8.dp.toPx().toDouble() }
+    kayaDensity = LocalDensity.current.density.toDouble()
     // Normalized default: the root is pinned to the top-leading corner,
     // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
     Box(

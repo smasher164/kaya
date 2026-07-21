@@ -96,6 +96,12 @@ Landed history lives in git; this file only carries what is still open.
   distribute), and the cross-axis defaults generally, including
   asserting the HORIZONTAL grow contract once `row` targets exist (the
   item above).
+  ~~The `spacing` prop~~ LANDED (2026-07-20): container-only F64,
+  normalized default 8, domain-checked at the root; all four backends,
+  both interpreter fills observations read the per-container value,
+  sugar in all eight bindings (kwargs/chains/combinators mirroring
+  grow's spellings), gated by check-sugar-surface, and exercised by
+  the grow scene's row (12-unit gap) under `expect_fills`.
   The grow contract's consumption half is now gated: `expect_fills`
   (children + normalized gaps span the container's content box, both
   grow-scene containers, all seven backends, no-default

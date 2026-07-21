@@ -270,6 +270,11 @@ pub enum Prop {
     Max,
     /// An image's encoded source bytes (Blob-valued).
     Source,
+    /// A container's inter-child gap on its main axis (F64-valued,
+    /// device-independent units; finite, non-negative). The normalized
+    /// default is 8 — the prop overrides it per container. Spacing is
+    /// a property OF the container, unlike grow, which rides the child.
+    Spacing,
     /// A child's flex-grow weight within its row/column (F64-valued;
     /// 0 = natural size, the default). Kind-agnostic — any child may
     /// grow.

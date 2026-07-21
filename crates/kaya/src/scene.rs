@@ -210,6 +210,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Layout weight is kind-agnostic: any child of a row/column may
         // grow, so it applies to every widget kind.
         Prop::Grow => true,
+        // Spacing is the container's own property — the gap between
+        // ITS children — so only the container kinds carry it.
+        Prop::Spacing => matches!(kind, WidgetKind::Column | WidgetKind::Row),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -240,6 +243,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Value | Prop::Min | Prop::Max => ValueType::F64,
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
+        Prop::Spacing => ValueType::F64,
     }
 }
 
@@ -265,6 +269,15 @@ fn check_prop_value(prop: Prop, value: &Value) {
         assert!(
             *weight >= 0.0 && weight.is_finite(),
             "kaya: grow weight must be finite and non-negative, got {weight}"
+        );
+    }
+    // Same argument as grow's domain: a negative gap has no reading
+    // under "8 units between adjacent children", and every backend
+    // would invent its own overlap. Nonsense dies at the root.
+    if let (Prop::Spacing, Value::F64(gap)) = (prop, value) {
+        assert!(
+            *gap >= 0.0 && gap.is_finite(),
+            "kaya: spacing must be finite and non-negative, got {gap}"
         );
     }
 }

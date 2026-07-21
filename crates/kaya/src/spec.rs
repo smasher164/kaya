@@ -107,6 +107,7 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("max", 5, PropKind::F64),
     ("source", 6, PropKind::Blob),
     ("grow", 7, PropKind::F64),
+    ("spacing", 8, PropKind::F64),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -518,6 +519,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("max", 5),
                 ("source", 6),
                 ("grow", 7),
+                ("spacing", 8),
             ],
         },
         EnumSpec {
@@ -737,6 +739,7 @@ mod tests {
                     ("prop", "max") => wire::PROP_MAX,
                     ("prop", "source") => wire::PROP_SOURCE,
                     ("prop", "grow") => wire::PROP_GROW,
+                    ("prop", "spacing") => wire::PROP_SPACING,
                     ("command", "clear") => wire::COMMAND_CLEAR,
                     ("command", "focus") => wire::COMMAND_FOCUS,
                     ("source", "const") => wire::SOURCE_CONST,

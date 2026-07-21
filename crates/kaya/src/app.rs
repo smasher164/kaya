@@ -790,6 +790,14 @@ impl Tx<'_> {
         self.set(widget, Prop::Grow, weight);
     }
 
+    /// A container's inter-child gap on its main axis, in
+    /// device-independent units (the normalized default is 8).
+    /// Containers only — the scene rejects it anywhere else. See
+    /// [`Prop::Spacing`].
+    pub fn spacing(&mut self, widget: WidgetId, gap: f64) {
+        self.set(widget, Prop::Spacing, gap);
+    }
+
     /// One-shot commands: momentary verbs into widget-owned state,
     /// riding this transaction like any write — the insert and the
     /// clear beside it commit together or not at all. Fire-and-forget:
