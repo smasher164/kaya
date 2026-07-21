@@ -1,0 +1,40 @@
+// The align conformance scene, Swift port — see guests/rust/align.rs
+// and tools/scenes/align.steps for the full rationale. The root
+// column centers children of three different natural widths; the row
+// aligns baselines across a label, a checkbox, and a tall no-baseline
+// image whose bottom sits ON the baseline (the CSS replaced-element
+// rule) — the construction that separates the modes on every
+// platform's control metrics.
+
+import Foundation
+
+// A 2x64 PNG: the tall no-baseline child.
+let tallPNG = Data([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40,
+    0x08, 0x02, 0x00, 0x00, 0x00, 0xbf, 0x44, 0x31, 0x14, 0x00, 0x00, 0x00,
+    0x12, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x08, 0x08, 0x8a, 0x02,
+    0x22, 0x86, 0x51, 0x6a, 0x68, 0x52, 0x00, 0x43, 0x32, 0x7e, 0x01, 0x31,
+    0x01, 0x41, 0x7c, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82,
+])
+
+let app = KayaApp()
+
+app.build { tx in
+    let probe = tx.signal(.str("align probe"))
+    let base = tx.signal(.str("base"))
+
+    tx.mount(
+        tx.column(align: .center) {
+            tx.label(bind: probe)  // label#0
+            tx.button("mid")
+            tx.row(align: .baseline) {
+                tx.label(bind: base)  // label#1
+                tx.button("tick")
+                tx.image(tallPNG)
+            }
+        })
+}
+
+app.run()

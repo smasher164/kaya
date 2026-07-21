@@ -174,6 +174,40 @@ the same patterns return through interpreter drop-downs
   its WGC capturer names frames by VM-clock epoch, one clock end to
   end, and window-scoped capture simply stops at close instead of
   filming black.
+- **GTK 4.12 spells baseline alignment BASELINE_FILL, and its
+  per-child allocated baselines are not comparable across widget
+  kinds.** The boxes legitimately FILL the row under baseline
+  alignment (a stretch-shaped geometry), and `allocated_baseline`
+  reports different anchors per kind — 37 for a label beside 27 for a
+  button whose captions were screenshot-verified ALIGNED (and a
+  CheckButton's anchor is different again — the align scene uses a
+  button, not a checkbox, for its second text child). The honest GTK
+  observation is PARTICIPATION: baselines are allocated (>= 0) into
+  children only under baseline mode and read -1 under every other, so
+  "filled + two participants" is the discriminator, and the agreement
+  itself stays GTK's — the root_fills precedent of leaving a
+  platform's own notion to the platform.
+- **A WinUI measure before the first real layout reads zero text
+  metrics, silently.** Baseline compensation computed at apply time —
+  UpdateLayout on a detached or just-attached grid — got BaselineOffset
+  and ActualHeight of ~0, produced ~0 margins, and the row classified
+  "start" through two full VM cycles. FrameworkElement.Loaded fires
+  after the first real layout; metric-dependent passes hook it as a
+  one-shot. Corollary ruling implemented there: a child with no text
+  baseline contributes its BOTTOM EDGE as its baseline (the CSS
+  replaced-element rule) — text-only compensation aligned label to
+  checkbox at ~14dip, left the tall image at the top, and was
+  geometrically indistinguishable from start.
+- **A conformance scene must CONSTRUCT its geometric separability,
+  never inherit it from platform metrics.** kaya's text controls share
+  similar baseline-to-height ratios, so a hug-height baseline row
+  collapses start/center/end/baseline inside the classification
+  tolerance (measured: on macOS baseline placement equals center
+  EXACTLY with a label beside an entry). The align scene's tall
+  no-baseline image — whose bottom sits on the baseline — stretches
+  the cross axis so the modes land tens of points apart on every
+  platform. The grow scene's minimum-control-size rule was this same
+  lesson's first spelling.
 - **Android's addView installs fresh layout params.** A weight written
   before the child was attached is discarded by the add, so
   `layout_weight` has to be re-stamped from AddChild as well as from

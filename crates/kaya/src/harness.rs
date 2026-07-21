@@ -57,6 +57,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "feed" => Some(include_str!("../../../tools/scenes/feed.steps")),
         "layout" => Some(include_str!("../../../tools/scenes/layout.steps")),
         "grow" => Some(include_str!("../../../tools/scenes/grow.steps")),
+        "align" => Some(include_str!("../../../tools/scenes/align.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -139,6 +140,13 @@ pub enum Step {
     /// stayed green, and only a 540x330 window made it visible where
     /// 320x160 had hidden it. This step is the gate that sees it.
     ExpectFills(Target),
+    /// Expect the container's children to sit at the given cross-axis
+    /// placement — the observation the `align` prop is verified by.
+    /// The stage CLASSIFIES from geometry (which edges or centers
+    /// coincide, whether breadths fill, whether text baselines agree)
+    /// rather than reading the prop back: a backend that ignored the
+    /// write while the model still carried it must fail here.
+    ExpectAligned(Target, String),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -207,6 +215,16 @@ pub trait Stage: Send + 'static {
     /// default, like child_shares: a backend that forgets it must
     /// fail to compile rather than pass the consumption leg vacuously.
     fn container_fills(&self, target: Target) -> String;
+    /// The container's cross-axis placement, CLASSIFIED from geometry
+    /// after forcing pending layout: one of "start", "center", "end",
+    /// "stretch", or "baseline" when the corresponding coincidence
+    /// holds for every child (within two device units), otherwise a
+    /// short platform-flavored description of what was seen (failure
+    /// text only, never compared across platforms). Baseline is
+    /// meaningful on rows alone and classifies via each toolkit's own
+    /// baseline query. The observation expect_aligned verifies. No
+    /// default: a backend that forgets it must fail to compile.
+    fn cross_mode(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -287,6 +305,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectShares(parse_target(target)?, parse_string(text)?)
             }
             "expect_fills" => Step::ExpectFills(parse_target(rest)?),
+            "expect_aligned" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_aligned wants a target and a mode string: {line:?}")
+                })?;
+                Step::ExpectAligned(parse_target(target)?, parse_string(text)?)
+            }
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -428,6 +452,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     | Step::ExpectShares(..)
                     | Step::ExpectRootFills
                     | Step::ExpectFills(..)
+                    | Step::ExpectAligned(..)
             )
         })
     {
@@ -531,6 +556,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("{} leaves leftover ({slack})", target_spec(t)));
                 }
             }
+            Step::ExpectAligned(t, want) => {
+                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
+                    failures.push(format!("{t:?} is not a container target"));
+                    continue;
+                }
+                let got = stage.cross_mode(*t);
+                if got == *want {
+                    observed.push(format!("{} aligns {got}", target_spec(t)));
+                } else {
+                    failures.push(format!(
+                        "{} aligns {got:?}, wanted {want:?}",
+                        target_spec(t)
+                    ));
+                }
+            }
             Step::ExpectFocused(t) => {
                 if stage.is_focused(*t) {
                     observed.push(format!("{t:?} focused"));
@@ -613,7 +653,7 @@ mod tests {
 
     #[test]
     fn scripts_parse_and_grammar_round_trips() {
-        for scene in ["entry", "gallery", "todos", "reorder", "feed", "1"] {
+        for scene in ["entry", "gallery", "todos", "reorder", "feed", "align", "1"] {
             parse(script(scene).unwrap()).unwrap();
         }
         let steps = parse(
@@ -717,6 +757,9 @@ mod tests {
         }
         fn container_fills(&self, _: Target) -> String {
             String::new()
+        }
+        fn cross_mode(&self, _: Target) -> String {
+            "center".into()
         }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
@@ -835,6 +878,9 @@ mod tests {
             fn container_fills(&self, _: Target) -> String {
                 "children span 92pt of 298pt".into()
             }
+            fn cross_mode(&self, _: Target) -> String {
+                "start".into()
+            }
             fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -910,6 +956,9 @@ mod tests {
             fn container_fills(&self, _: Target) -> String {
                 "children span 92pt of 298pt".into()
             }
+            fn cross_mode(&self, _: Target) -> String {
+                "start".into()
+            }
             fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -920,6 +969,44 @@ mod tests {
         assert_eq!(code, 1);
         assert!(verdict.contains("row#0 leaves leftover"), "{verdict}");
         assert!(verdict.contains("92pt of 298pt"), "{verdict}");
+    }
+
+    /// expect_aligned takes a container target and a mode, counts as
+    /// an expect, emits the byte-identical "column#0 aligns center"
+    /// observation on match, and fails with the stage's classification
+    /// otherwise — the classification coming from geometry, so a
+    /// backend that ignores the prop cannot pass by echoing the model.
+    #[test]
+    fn expect_aligned_is_an_expect() {
+        let steps = parse("expect_aligned column#0 \"center\"").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectAligned(
+                Target { kind: TargetKind::Column, index: 0 },
+                "center".into()
+            )
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (column#0 aligns center)");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_aligned label#0 \"center\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("not a container target"), "{verdict}");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_aligned column#0 \"end\"").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("aligns \"center\", wanted \"end\""), "{verdict}");
     }
 
     /// The verdict format is load-bearing: the suites grep

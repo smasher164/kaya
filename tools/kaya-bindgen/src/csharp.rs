@@ -209,6 +209,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "ulong",
                 "EncodeValue(w, new BlobHandle(handle));".to_string(),
             ),
+            crate::PropKind::Enum(_) => (
+                camel(prop),
+                "long",
+                format!("EncodeValue(w, {});", camel(prop)),
+            ),
         };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));

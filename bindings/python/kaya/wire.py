@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x420c5722bf6d356e
+SPEC_HASH = 0xf1448ef515751f08
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -33,6 +33,12 @@ PROP_MAX = 5
 PROP_SOURCE = 6
 PROP_GROW = 7
 PROP_SPACING = 8
+PROP_ALIGN = 9
+ALIGN_START = 0
+ALIGN_CENTER = 1
+ALIGN_END = 2
+ALIGN_STRETCH = 3
+ALIGN_BASELINE = 4
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -312,6 +318,21 @@ def tx_bind_spacing(widget_id, signal_id):
 def tx_bind_spacing_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SPACING, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_align(widget_id, align):
+    """set_property with a constant align value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ALIGN, SOURCE_CONST) + _enc.value(int(align)))
+
+
+def tx_bind_align(widget_id, signal_id):
+    """set_property with a signal-bound align value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ALIGN, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_align_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALIGN, SOURCE_ELEMENT, level, field))
 
 
 def parse_value(buf, at):

@@ -1200,6 +1200,54 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn HorizontalAlignment(&self) -> windows_core::Result<HorizontalAlignment> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetHorizontalAlignment(
+                    &self,
+                    value: HorizontalAlignment,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn VerticalAlignment(&self) -> windows_core::Result<VerticalAlignment> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).VerticalAlignment)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetVerticalAlignment(
+                    &self,
+                    value: VerticalAlignment,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetVerticalAlignment)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn Margin(&self) -> windows_core::Result<Thickness> {
                     let this = self;
                     unsafe {
@@ -1751,6 +1799,33 @@ pub mod Microsoft {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
                         (windows_core::Interface::vtable(this).SetOpacity)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RenderTransformOrigin(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Point>
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetRenderTransformOrigin(
+                    &self,
+                    value: super::super::super::Windows::Foundation::Point,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
                             windows_core::Interface::as_raw(this),
                             value,
                         )
@@ -3012,6 +3087,24 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn TransformToVisual<P0>(
+                    &self,
+                    visual: P0,
+                ) -> windows_core::Result<Media::GeneralTransform>
+                where
+                    P0: windows_core::Param<UIElement>,
+                {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).TransformToVisual)(
+                            windows_core::Interface::as_raw(this),
+                            visual.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -3159,6 +3252,24 @@ pub mod Microsoft {
                 const SIGNATURE: windows_core::imp::ConstBuffer =
                     windows_core::imp::ConstBuffer::from_slice(
                         b"enum(Microsoft.UI.Xaml.GridUnitType;i4)",
+                    );
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct HorizontalAlignment(pub i32);
+            impl HorizontalAlignment {
+                pub const Left: Self = Self(0i32);
+                pub const Center: Self = Self(1i32);
+                pub const Right: Self = Self(2i32);
+                pub const Stretch: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for HorizontalAlignment {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for HorizontalAlignment {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.HorizontalAlignment;i4)",
                     );
             }
             windows_core::imp::define_interface!(
@@ -3445,10 +3556,26 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub SetMaxHeight:
                     unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
-                HorizontalAlignment: usize,
-                SetHorizontalAlignment: usize,
-                VerticalAlignment: usize,
-                SetVerticalAlignment: usize,
+                pub HorizontalAlignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut HorizontalAlignment,
+                )
+                    -> windows_core::HRESULT,
+                pub SetHorizontalAlignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    HorizontalAlignment,
+                )
+                    -> windows_core::HRESULT,
+                pub VerticalAlignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut VerticalAlignment,
+                )
+                    -> windows_core::HRESULT,
+                pub SetVerticalAlignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    VerticalAlignment,
+                )
+                    -> windows_core::HRESULT,
                 pub Margin: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut Thickness,
@@ -3932,8 +4059,16 @@ pub mod Microsoft {
                 SetProjection: usize,
                 Transform3D: usize,
                 SetTransform3D: usize,
-                RenderTransformOrigin: usize,
-                SetRenderTransformOrigin: usize,
+                pub RenderTransformOrigin: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Foundation::Point,
+                )
+                    -> windows_core::HRESULT,
+                pub SetRenderTransformOrigin: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Point,
+                )
+                    -> windows_core::HRESULT,
                 pub IsHitTestVisible: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -4431,7 +4566,12 @@ pub mod Microsoft {
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 AddHandler: usize,
                 RemoveHandler: usize,
-                TransformToVisual: usize,
+                pub TransformToVisual: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub InvalidateMeasure:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub InvalidateArrange:
@@ -5645,6 +5785,33 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn RenderTransformOrigin(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Point>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetRenderTransformOrigin(
+                    &self,
+                    value: super::super::super::Windows::Foundation::Point,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
@@ -6900,6 +7067,24 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn TransformToVisual<P0>(
+                    &self,
+                    visual: P0,
+                ) -> windows_core::Result<Media::GeneralTransform>
+                where
+                    P0: windows_core::Param<UIElement>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).TransformToVisual)(
+                            windows_core::Interface::as_raw(this),
+                            visual.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -7238,6 +7423,24 @@ pub mod Microsoft {
                         .into()
                     }
                 }
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct VerticalAlignment(pub i32);
+            impl VerticalAlignment {
+                pub const Top: Self = Self(0i32);
+                pub const Center: Self = Self(1i32);
+                pub const Bottom: Self = Self(2i32);
+                pub const Stretch: Self = Self(3i32);
+            }
+            impl windows_core::TypeKind for VerticalAlignment {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for VerticalAlignment {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Xaml.VerticalAlignment;i4)",
+                    );
             }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
@@ -7945,6 +8148,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn BorderThickness(&self) -> windows_core::Result<super::Thickness> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -8335,6 +8590,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -8924,6 +9235,33 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetOpacity)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -10220,6 +10558,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -10647,6 +11003,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn BorderThickness(&self) -> windows_core::Result<super::Thickness> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -11037,6 +11445,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -11779,6 +12243,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -13067,6 +13558,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
@@ -13777,6 +14286,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn BorderThickness(&self) -> windows_core::Result<super::Thickness> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -14167,6 +14728,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -14756,6 +15373,33 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetOpacity)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -16052,6 +16696,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -16340,6 +17002,58 @@ pub mod Microsoft {
                         let this = self;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetPadding)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -16814,6 +17528,62 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Margin(&self) -> windows_core::Result<super::Thickness> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -17397,6 +18167,33 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetOpacity)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -18693,6 +19490,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -19079,6 +19894,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -19927,6 +20798,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -21217,6 +22115,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -21685,10 +22601,26 @@ pub mod Microsoft {
                         super::Thickness,
                     )
                         -> windows_core::HRESULT,
-                    HorizontalContentAlignment: usize,
-                    SetHorizontalContentAlignment: usize,
-                    VerticalContentAlignment: usize,
-                    SetVerticalContentAlignment: usize,
+                    pub HorizontalContentAlignment:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut super::HorizontalAlignment,
+                        ) -> windows_core::HRESULT,
+                    pub SetHorizontalContentAlignment:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            super::HorizontalAlignment,
+                        ) -> windows_core::HRESULT,
+                    pub VerticalContentAlignment:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut super::VerticalAlignment,
+                        ) -> windows_core::HRESULT,
+                    pub SetVerticalContentAlignment:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            super::VerticalAlignment,
+                        ) -> windows_core::HRESULT,
                     Background: usize,
                     SetBackground: usize,
                     BackgroundSizing: usize,
@@ -22163,7 +23095,12 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             *mut core::ffi::c_void,
                         ) -> windows_core::HRESULT,
-                    ShowAt: usize,
+                    pub ShowAt: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Point,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     IMenuFlyoutFactory,
@@ -23456,6 +24393,62 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Margin(&self) -> windows_core::Result<super::Thickness> {
                         let this =
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
@@ -24125,6 +25118,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -25415,6 +26435,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -25899,6 +26937,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn ShowAt2<P0>(
+                        &self,
+                        targetelement: P0,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).ShowAt)(
+                                windows_core::Interface::as_raw(this),
+                                targetelement.param().abi(),
+                                point,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn new() -> windows_core::Result<MenuFlyout> {
                         Self::IMenuFlyoutFactory(|this| unsafe {
                             let mut result__ = core::mem::zeroed();
@@ -26232,6 +27288,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -26861,6 +27973,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -28149,6 +29288,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
                         }
                     }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
@@ -28796,6 +29953,58 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn BorderThickness(&self) -> windows_core::Result<super::Thickness> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -29186,6 +30395,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -30127,6 +31392,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -31417,6 +32709,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -31811,6 +33121,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -32727,6 +34093,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34017,6 +35410,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -34293,6 +35704,58 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetPadding)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalContentAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalContentAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalContentAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -34689,6 +36152,62 @@ pub mod Microsoft {
                             &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn HorizontalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::HorizontalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHorizontalAlignment(
+                        &self,
+                        value: super::HorizontalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn VerticalAlignment(
+                        &self,
+                    ) -> windows_core::Result<super::VerticalAlignment> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetVerticalAlignment(
+                        &self,
+                        value: super::VerticalAlignment,
+                    ) -> windows_core::Result<()> {
+                        let this =
+                            &windows_core::Interface::cast::<super::IFrameworkElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -35949,6 +37468,33 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn RenderTransformOrigin(
+                        &self,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetRenderTransformOrigin(
+                        &self,
+                        value: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -37239,6 +38785,24 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TransformToVisual<P0>(
+                        &self,
+                        visual: P0,
+                    ) -> windows_core::Result<super::Media::GeneralTransform>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformToVisual)(
+                                windows_core::Interface::as_raw(this),
+                                visual.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
                     pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -38402,6 +39966,61 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn HorizontalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalContentAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetHorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalContentAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn BorderThickness(
                             &self,
                         ) -> windows_core::Result<super::super::Thickness> {
@@ -38831,6 +40450,68 @@ pub mod Microsoft {
                             >(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn HorizontalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -39462,6 +41143,36 @@ pub mod Microsoft {
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetOpacity)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn RenderTransformOrigin(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Point,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRenderTransformOrigin(
+                            &self,
+                            value: super::super::super::super::super::Windows::Foundation::Point,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -40939,6 +42650,25 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn TransformToVisual<P0>(
+                            &self,
+                            visual: P0,
+                        ) -> windows_core::Result<super::super::Media::GeneralTransform>
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).TransformToVisual)(
+                                    windows_core::Interface::as_raw(this),
+                                    visual.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
@@ -42364,6 +44094,61 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn HorizontalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalContentAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetHorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalContentAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn BorderThickness(
                             &self,
                         ) -> windows_core::Result<super::super::Thickness> {
@@ -42793,6 +44578,68 @@ pub mod Microsoft {
                             >(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn HorizontalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -43617,6 +45464,36 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn RenderTransformOrigin(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Point,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRenderTransformOrigin(
+                            &self,
+                            value: super::super::super::super::super::Windows::Foundation::Point,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -45090,6 +46967,25 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn TransformToVisual<P0>(
+                            &self,
+                            visual: P0,
+                        ) -> windows_core::Result<super::super::Media::GeneralTransform>
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).TransformToVisual)(
+                                    windows_core::Interface::as_raw(this),
+                                    visual.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -45744,6 +47640,61 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn HorizontalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalContentAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetHorizontalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalContentAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalContentAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalContentAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn BorderThickness(
                             &self,
                         ) -> windows_core::Result<super::super::Thickness> {
@@ -46173,6 +48124,68 @@ pub mod Microsoft {
                             >(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetMaxHeight)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn HorizontalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::HorizontalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).HorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetHorizontalAlignment(
+                            &self,
+                            value: super::super::HorizontalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetHorizontalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn VerticalAlignment(
+                            &self,
+                        ) -> windows_core::Result<super::super::VerticalAlignment>
+                        {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).VerticalAlignment)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetVerticalAlignment(
+                            &self,
+                            value: super::super::VerticalAlignment,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IFrameworkElement,
+                            >(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetVerticalAlignment)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -46962,6 +48975,36 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn RenderTransformOrigin(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Point,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RenderTransformOrigin)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetRenderTransformOrigin(
+                            &self,
+                            value: super::super::super::super::super::Windows::Foundation::Point,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetRenderTransformOrigin)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn IsHitTestVisible(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -48433,6 +50476,25 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn TransformToVisual<P0>(
+                            &self,
+                            visual: P0,
+                        ) -> windows_core::Result<super::super::Media::GeneralTransform>
+                        where
+                            P0: windows_core::Param<super::super::UIElement>,
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).TransformToVisual)(
+                                    windows_core::Interface::as_raw(this),
+                                    visual.param().abi(),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn InvalidateMeasure(&self) -> windows_core::Result<()> {
@@ -50064,6 +52126,225 @@ pub mod Microsoft {
                 }
             }
             pub mod Media {
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct GeneralTransform(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    GeneralTransform,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(GeneralTransform, super::DependencyObject);
+                impl GeneralTransform {
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Inverse(&self) -> windows_core::Result<GeneralTransform> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Inverse)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn TransformPoint(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Point>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformPoint)(
+                                windows_core::Interface::as_raw(this),
+                                point,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn TryTransform(
+                        &self,
+                        inpoint: super::super::super::super::Windows::Foundation::Point,
+                        outpoint: &mut super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TryTransform)(
+                                windows_core::Interface::as_raw(this),
+                                inpoint,
+                                outpoint,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn new() -> windows_core::Result<GeneralTransform> {
+                        Self::IGeneralTransformFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                core::ptr::null_mut(),
+                                &mut core::ptr::null_mut(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn InverseCore(&self) -> windows_core::Result<GeneralTransform> {
+                        let this =
+                            &windows_core::Interface::cast::<IGeneralTransformOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).InverseCore)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn TryTransformCore(
+                        &self,
+                        inpoint: super::super::super::super::Windows::Foundation::Point,
+                        outpoint: &mut super::super::super::super::Windows::Foundation::Point,
+                    ) -> windows_core::Result<bool> {
+                        let this =
+                            &windows_core::Interface::cast::<IGeneralTransformOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TryTransformCore)(
+                                windows_core::Interface::as_raw(this),
+                                inpoint,
+                                outpoint,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    fn IGeneralTransformFactory<
+                        R,
+                        F: FnOnce(&IGeneralTransformFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            GeneralTransform,
+                            IGeneralTransformFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for GeneralTransform {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IGeneralTransform>();
+                }
+                unsafe impl windows_core::Interface for GeneralTransform {
+                    type Vtable = <IGeneralTransform as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IGeneralTransform as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for GeneralTransform {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.GeneralTransform";
+                }
+                unsafe impl Send for GeneralTransform {}
+                unsafe impl Sync for GeneralTransform {}
+                windows_core::imp::define_interface!(
+                    IGeneralTransform,
+                    IGeneralTransform_Vtbl,
+                    0x04eedeeb_31e5_54c0_ae3f_8bd06645d339
+                );
+                impl windows_core::RuntimeType for IGeneralTransform {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeneralTransform_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Inverse: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TransformPoint: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Point,
+                        *mut super::super::super::super::Windows::Foundation::Point,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TryTransform: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Point,
+                        *mut super::super::super::super::Windows::Foundation::Point,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    TransformBounds: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IGeneralTransformFactory,
+                    IGeneralTransformFactory_Vtbl,
+                    0x2f1025a3_5391_5d1b_8382_3caaa1d26a96
+                );
+                impl windows_core::RuntimeType for IGeneralTransformFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeneralTransformFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IGeneralTransformOverrides,
+                    IGeneralTransformOverrides_Vtbl,
+                    0xce8970f1_83f8_543f_9cf5_439c461601f1
+                );
+                impl windows_core::RuntimeType for IGeneralTransformOverrides {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IGeneralTransformOverrides_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub InverseCore: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TryTransformCore: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Point,
+                        *mut super::super::super::super::Windows::Foundation::Point,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    TransformBoundsCore: usize,
+                }
                 windows_core::imp::define_interface!(
                     IImageSource,
                     IImageSource_Vtbl,
@@ -51537,6 +53818,17 @@ pub mod Windows {
                     .map(|| result__)
                 }
             }
+            pub fn GetPoint(&self) -> windows_core::Result<Point> {
+                let this = self;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetPoint)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
             pub fn GetSize(&self) -> windows_core::Result<Size> {
                 let this = self;
                 unsafe {
@@ -51744,6 +54036,20 @@ pub mod Windows {
                     .ok()
                 }
             }
+            pub fn GetPointArray(
+                &self,
+                value: &mut windows_core::Array<Point>,
+            ) -> windows_core::Result<()> {
+                let this = self;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetPointArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
             pub fn GetSizeArray(
                 &self,
                 value: &mut windows_core::Array<Size>,
@@ -51777,6 +54083,7 @@ pub mod Windows {
             fn GetBoolean(&self) -> windows_core::Result<bool>;
             fn GetString(&self) -> windows_core::Result<windows_core::HSTRING>;
             fn GetGuid(&self) -> windows_core::Result<windows_core::GUID>;
+            fn GetPoint(&self) -> windows_core::Result<Point>;
             fn GetSize(&self) -> windows_core::Result<Size>;
             fn GetUInt8Array(
                 &self,
@@ -51833,6 +54140,10 @@ pub mod Windows {
             fn GetGuidArray(
                 &self,
                 value: &mut windows_core::Array<windows_core::GUID>,
+            ) -> windows_core::Result<()>;
+            fn GetPointArray(
+                &self,
+                value: &mut windows_core::Array<Point>,
             ) -> windows_core::Result<()>;
             fn GetSizeArray(
                 &self,
@@ -52100,6 +54411,25 @@ pub mod Windows {
                         let this: &Identity =
                             &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                         match IPropertyValue_Impl::GetGuid(this) {
+                            Ok(ok__) => {
+                                result__.write(core::mem::transmute_copy(&ok__));
+                                windows_core::HRESULT(0)
+                            }
+                            Err(err) => err.into(),
+                        }
+                    }
+                }
+                unsafe extern "system" fn GetPoint<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    result__: *mut Point,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        match IPropertyValue_Impl::GetPoint(this) {
                             Ok(ok__) => {
                                 result__.write(core::mem::transmute_copy(&ok__));
                                 windows_core::HRESULT(0)
@@ -52421,6 +54751,27 @@ pub mod Windows {
                         .into()
                     }
                 }
+                unsafe extern "system" fn GetPointArray<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    value_array_size: *mut u32,
+                    value: *mut *mut Point,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        IPropertyValue_Impl::GetPointArray(
+                            this,
+                            &mut windows_core::imp::array_proxy(
+                                core::mem::transmute_copy(&value),
+                                value_array_size,
+                            ),
+                        )
+                        .into()
+                    }
+                }
                 unsafe extern "system" fn GetSizeArray<
                     Identity: IPropertyValue_Impl,
                     const OFFSET: isize,
@@ -52462,7 +54813,7 @@ pub mod Windows {
                     GetGuid: GetGuid::<Identity, OFFSET>,
                     GetDateTime: 0,
                     GetTimeSpan: 0,
-                    GetPoint: 0,
+                    GetPoint: GetPoint::<Identity, OFFSET>,
                     GetSize: GetSize::<Identity, OFFSET>,
                     GetRect: 0,
                     GetUInt8Array: GetUInt8Array::<Identity, OFFSET>,
@@ -52481,7 +54832,7 @@ pub mod Windows {
                     GetGuidArray: GetGuidArray::<Identity, OFFSET>,
                     GetDateTimeArray: 0,
                     GetTimeSpanArray: 0,
-                    GetPointArray: 0,
+                    GetPointArray: GetPointArray::<Identity, OFFSET>,
                     GetSizeArray: GetSizeArray::<Identity, OFFSET>,
                     GetRectArray: 0,
                 }
@@ -52551,7 +54902,10 @@ pub mod Windows {
             ) -> windows_core::HRESULT,
             GetDateTime: usize,
             GetTimeSpan: usize,
-            GetPoint: usize,
+            pub GetPoint: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut Point,
+            ) -> windows_core::HRESULT,
             pub GetSize: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 *mut Size,
@@ -52630,7 +54984,11 @@ pub mod Windows {
             ) -> windows_core::HRESULT,
             GetDateTimeArray: usize,
             GetTimeSpanArray: usize,
-            GetPointArray: usize,
+            pub GetPointArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut u32,
+                *mut *mut Point,
+            ) -> windows_core::HRESULT,
             pub GetSizeArray: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 *mut u32,
@@ -52727,7 +55085,11 @@ pub mod Windows {
             ) -> windows_core::HRESULT,
             CreateDateTime: usize,
             CreateTimeSpan: usize,
-            CreatePoint: usize,
+            pub CreatePoint: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                Point,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             pub CreateSize: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 Size,
@@ -52821,7 +55183,12 @@ pub mod Windows {
             ) -> windows_core::HRESULT,
             CreateDateTimeArray: usize,
             CreateTimeSpanArray: usize,
-            CreatePointArray: usize,
+            pub CreatePointArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                u32,
+                *const Point,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             pub CreateSizeArray: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 u32,
@@ -53020,6 +55387,17 @@ pub mod Windows {
                 unsafe {
                     let mut result__ = core::mem::zeroed();
                     (windows_core::Interface::vtable(this).GetGuid)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
+            pub fn GetPoint(&self) -> windows_core::Result<Point> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetPoint)(
                         windows_core::Interface::as_raw(this),
                         &mut result__,
                     )
@@ -53233,6 +55611,20 @@ pub mod Windows {
                     .ok()
                 }
             }
+            pub fn GetPointArray(
+                &self,
+                value: &mut windows_core::Array<Point>,
+            ) -> windows_core::Result<()> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetPointArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
             pub fn GetSizeArray(
                 &self,
                 value: &mut windows_core::Array<Size>,
@@ -53303,6 +55695,21 @@ pub mod Windows {
                 *mut windows_core::AbiType<T>,
             ) -> windows_core::HRESULT,
             T: core::marker::PhantomData<T>,
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct Point {
+            pub X: f32,
+            pub Y: f32,
+        }
+        impl windows_core::TypeKind for Point {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for Point {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Foundation.Point;f4;f4)",
+                );
         }
         pub struct PropertyValue;
         impl PropertyValue {
@@ -53472,6 +55879,17 @@ pub mod Windows {
                 Self::IPropertyValueStatics(|this| unsafe {
                     let mut result__ = core::mem::zeroed();
                     (windows_core::Interface::vtable(this).CreateGuid)(
+                        windows_core::Interface::as_raw(this),
+                        value,
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
+            pub fn CreatePoint(value: Point) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreatePoint)(
                         windows_core::Interface::as_raw(this),
                         value,
                         &mut result__,
@@ -53678,6 +56096,20 @@ pub mod Windows {
                 Self::IPropertyValueStatics(|this| unsafe {
                     let mut result__ = core::mem::zeroed();
                     (windows_core::Interface::vtable(this).CreateGuidArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.len().try_into().unwrap(),
+                        value.as_ptr(),
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
+            pub fn CreatePointArray(
+                value: &[Point],
+            ) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreatePointArray)(
                         windows_core::Interface::as_raw(this),
                         value.len().try_into().unwrap(),
                         value.as_ptr(),

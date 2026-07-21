@@ -495,6 +495,30 @@ impl AppCtx {
     }
 }
 
+/// A container's cross-axis child placement — the align spec enum,
+/// language-native. Baseline is rows-only (the scene rejects it on
+/// columns at the root). Rides the wire as I64.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Start,
+    Center,
+    End,
+    Stretch,
+    Baseline,
+}
+
+impl Align {
+    fn wire(self) -> i64 {
+        match self {
+            Align::Start => 0,
+            Align::Center => 1,
+            Align::End => 2,
+            Align::Stretch => 3,
+            Align::Baseline => 4,
+        }
+    }
+}
+
 /// A just-built widget: the chain handle every live-zone constructor
 /// returns. It reborrows the transaction, so it lives at most to the
 /// end of its statement — chain construction props on it
@@ -513,15 +537,22 @@ pub struct Widget<'t, 'b, R = ()> {
 impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// This widget's flex weight — the chained spelling of
     /// [`Tx::grow`], which remains the dynamic path.
-    pub fn grow(mut self, weight: f64) -> Self {
+    pub fn grow(self, weight: f64) -> Self {
         self.tx.grow(self.id, weight);
         self
     }
 
     /// This container's inter-child gap — the chained spelling of
     /// [`Tx::spacing`], which remains the dynamic path.
-    pub fn spacing(mut self, gap: f64) -> Self {
+    pub fn spacing(self, gap: f64) -> Self {
         self.tx.spacing(self.id, gap);
+        self
+    }
+
+    /// This container's cross-axis child placement — the chained
+    /// spelling of [`Tx::align`], which remains the dynamic path.
+    pub fn align(self, align: Align) -> Self {
+        self.tx.align(self.id, align);
         self
     }
 
@@ -844,6 +875,13 @@ impl<'a> Tx<'a> {
     /// [`Prop::Spacing`].
     pub fn spacing(&mut self, widget: WidgetId, gap: f64) {
         self.set(widget, Prop::Spacing, gap);
+    }
+
+    /// A container's cross-axis child placement (the normalized
+    /// default is [`Align::Start`]). Containers only; baseline is
+    /// rows-only. See [`Prop::Align`].
+    pub fn align(&mut self, widget: WidgetId, align: Align) {
+        self.set(widget, Prop::Align, align.wire());
     }
 
     /// One-shot commands: momentary verbs into widget-owned state,

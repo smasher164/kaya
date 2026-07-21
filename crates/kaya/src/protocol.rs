@@ -275,6 +275,11 @@ pub enum Prop {
     /// default is 8 — the prop overrides it per container. Spacing is
     /// a property OF the container, unlike grow, which rides the child.
     Spacing,
+    /// A container's cross-axis child placement (I64-valued on the
+    /// wire: one of the `align` spec enum's values — start 0, center
+    /// 1, end 2, stretch 3, baseline 4). Baseline is rows-only; the
+    /// scene rejects it on columns.
+    Align,
     /// A child's flex-grow weight within its row/column (F64-valued;
     /// 0 = natural size, the default). Kind-agnostic — any child may
     /// grow.

@@ -76,6 +76,14 @@ pub const PROP_MAX: u32 = 5;
 pub const PROP_SOURCE: u32 = 6;
 pub const PROP_GROW: u32 = 7;
 pub const PROP_SPACING: u32 = 8;
+pub const PROP_ALIGN: u32 = 9;
+
+/// The align enum's wire values (spec enum "align").
+pub const ALIGN_START: u32 = 0;
+pub const ALIGN_CENTER: u32 = 1;
+pub const ALIGN_END: u32 = 2;
+pub const ALIGN_STRETCH: u32 = 3;
+pub const ALIGN_BASELINE: u32 = 4;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -243,6 +251,7 @@ fn prop(raw: u32) -> Prop {
         PROP_SOURCE => Prop::Source,
         PROP_GROW => Prop::Grow,
         PROP_SPACING => Prop::Spacing,
+        PROP_ALIGN => Prop::Align,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -775,6 +784,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Source => PROP_SOURCE,
         Prop::Grow => PROP_GROW,
         Prop::Spacing => PROP_SPACING,
+        Prop::Align => PROP_ALIGN,
     }
 }
 

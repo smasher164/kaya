@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x420c5722bf6d356e;
+    public const ulong SpecHash = 0xf1448ef515751f08;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -35,6 +35,12 @@ static class KayaWire
     public const uint PropSource = 6;
     public const uint PropGrow = 7;
     public const uint PropSpacing = 8;
+    public const uint PropAlign = 9;
+    public const uint AlignStart = 0;
+    public const uint AlignCenter = 1;
+    public const uint AlignEnd = 2;
+    public const uint AlignStretch = 3;
+    public const uint AlignBaseline = 4;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -516,6 +522,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropSpacing); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant align value.
+    public static byte[] TxSetAlign(ulong widgetId, long align)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlign); w.Write(SourceConst);
+        EncodeValue(w, align);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound align value.
+    public static byte[] TxBindAlign(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlign); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindAlignElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAlign); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

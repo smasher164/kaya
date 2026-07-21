@@ -360,4 +360,38 @@ try:
 except RuntimeError:
     check("break inside a for-trace raises", True)
 
+# A construction-time layout prop MUST reach the record stream — the
+# Swift binding shipped a containerOf that accepted spacing= and
+# silently dropped it, and no geometry gate could see it (render and
+# observation share the node state a wire-dropped write never
+# reaches). Every binding needs this check; Python's is the pattern
+# (ledger: per-binding emission checks, the bindings program).
+with app.build():
+    if True:
+        before = len(kaya._tx)
+        with kaya.column(grow=2, spacing=12, align="center"):
+            kaya.label(text="x", grow=1)
+        queued = kaya._tx[before:]
+        def _prop_write(prop, value_type):
+            return any(
+                _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+                and int.from_bytes(r[16:20], "little") == prop
+                and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+                and int.from_bytes(r[24:28], "little") == value_type
+                for r in queued
+            )
+        check(
+            "column grow= reaches the records",
+            _prop_write(kaya.wire.PROP_GROW, kaya.wire.VALUE_F64),
+        )
+        check(
+            "column spacing= reaches the records",
+            _prop_write(kaya.wire.PROP_SPACING, kaya.wire.VALUE_F64),
+        )
+        check(
+            "column align= reaches the records",
+            _prop_write(kaya.wire.PROP_ALIGN, kaya.wire.VALUE_I64),
+        )
+
 sys.exit(1 if failures else 0)
+

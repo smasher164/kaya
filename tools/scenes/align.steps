@@ -1,0 +1,27 @@
+# The align conformance scene: the cross-axis contract as an
+# assertion, in the two modes the classification cannot confuse with
+# geometry luck.
+#
+# column#0 (the root, the scene's only column) carries align=center:
+# its children have deliberately different natural widths (a label, a
+# button, and the row), so centers coinciding is CENTER and nothing
+# else — starts differ, ends differ, extents differ from the content
+# box. row#0 (the only row) carries align=baseline with a label, a
+# button, and a TALL image (2x64): the image has no text baseline,
+# so its bottom sits ON the baseline (the CSS replaced-element rule),
+# stretching the row's cross axis far past the text children — that
+# construction is what separates the modes, because kaya's text
+# controls alone share similar baseline-to-height ratios and a
+# hug-height row collapses start/center/end/baseline inside the
+# classification tolerance (measured on macOS: baseline placement
+# equaled center exactly with a label beside an entry). The two text
+# children's baselines must coincide at the image's bottom edge.
+#
+# start needs no scene: every other scene's geometry rides the
+# normalized start default. end and stretch have classification arms
+# on every backend; the recordings are their visual record until a
+# scene earns them.
+settle 1500
+expect label#0 "align probe"
+expect_aligned column#0 "center"
+expect_aligned row#0 "baseline"

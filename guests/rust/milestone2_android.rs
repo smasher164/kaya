@@ -35,6 +35,8 @@ mod feed;
 #[path = "layout.rs"]
 mod layout;
 
+#[path = "align.rs"]
+mod align;
 #[path = "grow.rs"]
 mod grow;
 
@@ -50,6 +52,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("reorder") => reorder::app(ctx),
         Ok("feed") => feed::app(ctx),
         Ok("layout") => layout::app(ctx),
+        Ok("align") => align::app(ctx),
         Ok("grow") => grow::app(ctx),
         _ => milestone2::app(ctx),
     }

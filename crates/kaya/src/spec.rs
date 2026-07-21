@@ -95,6 +95,10 @@ pub enum PropKind {
     /// typed setter takes the language's bytes form; the wire carries
     /// the registration handle.
     Blob,
+    /// A closed set of named values — one of the spec's enums, named
+    /// here. Rides the wire as I64; every binding exposes its
+    /// language's native enum over the generated constants.
+    Enum(&'static str),
 }
 
 /// Properties with their wire ids and value kinds; kept in lockstep
@@ -108,6 +112,7 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("source", 6, PropKind::Blob),
     ("grow", 7, PropKind::F64),
     ("spacing", 8, PropKind::F64),
+    ("align", 9, PropKind::Enum("align")),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -520,6 +525,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("source", 6),
                 ("grow", 7),
                 ("spacing", 8),
+                ("align", 9),
+            ],
+        },
+        EnumSpec {
+            name: "align",
+            variants: &[
+                ("start", 0),
+                ("center", 1),
+                ("end", 2),
+                ("stretch", 3),
+                ("baseline", 4),
             ],
         },
         EnumSpec {
@@ -740,6 +756,12 @@ mod tests {
                     ("prop", "source") => wire::PROP_SOURCE,
                     ("prop", "grow") => wire::PROP_GROW,
                     ("prop", "spacing") => wire::PROP_SPACING,
+                    ("prop", "align") => wire::PROP_ALIGN,
+                    ("align", "start") => wire::ALIGN_START,
+                    ("align", "center") => wire::ALIGN_CENTER,
+                    ("align", "end") => wire::ALIGN_END,
+                    ("align", "stretch") => wire::ALIGN_STRETCH,
+                    ("align", "baseline") => wire::ALIGN_BASELINE,
                     ("command", "clear") => wire::COMMAND_CLEAR,
                     ("command", "focus") => wire::COMMAND_FOCUS,
                     ("source", "const") => wire::SOURCE_CONST,

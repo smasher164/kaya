@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x420c5722bf6d356e
+	SpecHash uint64 = 0xf1448ef515751f08
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -35,6 +35,12 @@ const (
 	PropSource = 6
 	PropGrow = 7
 	PropSpacing = 8
+	PropAlign = 9
+	AlignStart = 0
+	AlignCenter = 1
+	AlignEnd = 2
+	AlignStretch = 3
+	AlignBaseline = 4
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -559,6 +565,38 @@ func TxBindSpacingElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropSpacing)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetAlign: set_property with a constant align value.
+func TxSetAlign(widgetID uint64, align int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAlign)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, align)
+	return endRecord(b)
+}
+
+// TxBindAlign: set_property with a signal-bound align value.
+func TxBindAlign(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAlign)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindAlignElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindAlignElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropAlign)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

@@ -213,6 +213,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Spacing is the container's own property — the gap between
         // ITS children — so only the container kinds carry it.
         Prop::Spacing => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        // Alignment likewise: where the container places ITS children
+        // on the cross axis.
+        Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -244,6 +247,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
+        Prop::Align => ValueType::I64,
     }
 }
 
@@ -251,7 +255,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
 /// compile time — but the wire itself is untyped, so an ill-typed
 /// record from a raw guest must die here, not in whichever backend
 /// applies it.
-fn check_prop_value(prop: Prop, value: &Value) {
+fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     assert!(
         value.type_of() == prop_value_type(prop),
         "kaya: {prop:?} cannot hold {value:?}"
@@ -278,6 +282,19 @@ fn check_prop_value(prop: Prop, value: &Value) {
         assert!(
             *gap >= 0.0 && gap.is_finite(),
             "kaya: spacing must be finite and non-negative, got {gap}"
+        );
+    }
+    // Align's domain is the spec enum, and baseline is rows-only: a
+    // column has no text baseline to agree on, so the write dies here
+    // with one message rather than as four backend improvisations.
+    if let (Prop::Align, Value::I64(mode)) = (prop, value) {
+        assert!(
+            (0..=4).contains(mode),
+            "kaya: align must be one of the align enum's values (0..=4), got {mode}"
+        );
+        assert!(
+            !(*mode == 4 && kind == WidgetKind::Column),
+            "kaya: baseline alignment applies to rows only"
         );
     }
 }
@@ -393,7 +410,7 @@ impl Scene {
                     check_prop(kind, prop);
                     match value {
                         PropValue::Const(v) => {
-                            check_prop_value(prop, &v);
+                            check_prop_value(kind, prop, &v);
                             out.push(ApplyOp::SetProp {
                                 id: widget,
                                 prop,
@@ -411,7 +428,7 @@ impl Scene {
                             // A signal's type is fixed at creation
                             // (check_type guards every write), so the
                             // current value speaks for the binding.
-                            check_prop_value(prop, &current);
+                            check_prop_value(kind, prop, &current);
                             self.bindings.entry(id).or_default().push((widget, prop));
                             out.push(ApplyOp::SetProp {
                                 id: widget,
@@ -613,14 +630,15 @@ impl Scene {
                     "kaya: property on node {} not declared in this template case",
                     widget.0
                 );
-                check_prop(self.template_nodes[&widget.0], prop);
+                let node_kind = self.template_nodes[&widget.0];
+                check_prop(node_kind, prop);
                 match &value {
-                    PropValue::Const(v) => check_prop_value(prop, v),
+                    PropValue::Const(v) => check_prop_value(node_kind, prop, v),
                     PropValue::Signal(id) => {
                         let current = self.signals.get(id).unwrap_or_else(|| {
                             panic!("kaya: binding to unknown signal {id:?}")
                         });
-                        check_prop_value(prop, current);
+                        check_prop_value(node_kind, prop, current);
                     }
                     PropValue::Element { level, field } => {
                         let depth = scopes

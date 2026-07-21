@@ -160,6 +160,18 @@ readonly struct Collection
 /// One instance of a collection: the table inside the stamped copy
 /// selected by Path (the empty path for a live-zone collection).
 /// Entries keep insertion order, matching the core's rendering.
+/// A container's cross-axis child placement (the align spec enum;
+/// wire values pinned by the generated KayaWire constants). Baseline
+/// is rows-only — the scene rejects it on columns at the root.
+enum Align : long
+{
+    Start = 0,
+    Center = 1,
+    End = 2,
+    Stretch = 3,
+    Baseline = 4,
+}
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -620,6 +632,14 @@ sealed class Tx
     public void SetSpacing(Widget w, double gap) =>
         Records.Add(KayaWire.TxSetSpacing(w.Id, gap));
 
+    /// A container's cross-axis child placement (the align spec enum;
+    /// the normalized default is Align.Start). Containers only;
+    /// baseline is rows-only — the scene rejects misuse at the root.
+    /// The declarative spelling is the `align:` argument at
+    /// construction; this is the dynamic path.
+    public void SetAlign(Widget w, Align align) =>
+        Records.Add(KayaWire.TxSetAlign(w.Id, (long)align));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -728,17 +748,21 @@ sealed class Tx
     /// A container parents everything declared inside its body (the
     /// ambient stack). Statement position is the point: a foreach over
     /// a generated row trace stands between siblings.
-    public Widget Column(Action body, double? grow = null, double? spacing = null) =>
-        ContainerOf(KayaWire.KindColumn, body, grow, spacing);
+    public Widget Column(
+        Action body, double? grow = null, double? spacing = null, Align? align = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align);
 
-    public Widget Row(Action body, double? grow = null, double? spacing = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing);
+    public Widget Row(
+        Action body, double? grow = null, double? spacing = null, Align? align = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing, align);
 
-    Widget ContainerOf(uint kind, Action body, double? grow = null, double? spacing = null)
+    Widget ContainerOf(
+        uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
+        if (align is Align a) SetAlign(parent, a);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);

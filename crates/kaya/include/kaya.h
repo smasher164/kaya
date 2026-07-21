@@ -110,6 +110,21 @@
 
 #define PROP_SPACING 8
 
+#define PROP_ALIGN 9
+
+/**
+ * The align enum's wire values (spec enum "align").
+ */
+#define ALIGN_START 0
+
+#define ALIGN_CENTER 1
+
+#define ALIGN_END 2
+
+#define ALIGN_STRETCH 3
+
+#define ALIGN_BASELINE 4
+
 #define SOURCE_CONST 0
 
 #define SOURCE_SIGNAL 1
@@ -298,6 +313,21 @@
 #define KAYA_PROP_GROW 7
 
 #define KAYA_PROP_SPACING 8
+
+#define KAYA_PROP_ALIGN 9
+
+/**
+ * The align enum's values (spec enum "align"); baseline is rows-only.
+ */
+#define KAYA_ALIGN_START 0
+
+#define KAYA_ALIGN_CENTER 1
+
+#define KAYA_ALIGN_END 2
+
+#define KAYA_ALIGN_STRETCH 3
+
+#define KAYA_ALIGN_BASELINE 4
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.

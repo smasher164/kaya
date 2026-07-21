@@ -452,6 +452,27 @@ func (w Widget) Grow(weight float64) Widget {
 	return w
 }
 
+// SetAlign sets a container's cross-axis child placement — one of the
+// generated align constants (AlignStart..AlignBaseline), Go's enum
+// idiom. Containers only; baseline is rows-only — the scene rejects
+// misuse at the root. The dynamic path; the declarative spelling is
+// the Align chain at construction.
+func (tx *Tx) SetAlign(w Widget, mode int64) {
+	tx.records = append(tx.records, TxSetAlign(w.id, mode))
+}
+
+// Align sets this container's cross-axis child placement at
+// construction — the declarative chain:
+// tx.Row(...).Align(AlignBaseline). Same transaction discipline as
+// Grow.
+func (w Widget) Align(mode int64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Align on a widget outside its build transaction — use Tx.SetAlign inside a live transaction")
+	}
+	w.tx.SetAlign(w, mode)
+	return w
+}
+
 // SetSpacing sets a container's inter-child gap (main axis, DIP; the
 // normalized default is 8). Containers only — the scene rejects it
 // anywhere else. The dynamic path; the declarative spelling is the

@@ -300,6 +300,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity grow \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
+    run_apk align-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity align \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script align)'"
     run_apk layout-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity layout \
@@ -345,6 +349,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity grow \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
+    run_apk align-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity align \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script align)'"
     run_apk layout-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity layout \

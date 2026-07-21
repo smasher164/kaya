@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x420c5722bf6d356e
+specHash = 0xf1448ef515751f08
 
 valueBool :: Word32
 valueBool = 1
@@ -68,6 +68,18 @@ propGrow :: Word32
 propGrow = 7
 propSpacing :: Word32
 propSpacing = 8
+propAlign :: Word32
+propAlign = 9
+alignStart :: Word32
+alignStart = 0
+alignCenter :: Word32
+alignCenter = 1
+alignEnd :: Word32
+alignEnd = 2
+alignStretch :: Word32
+alignStretch = 3
+alignBaseline :: Word32
+alignBaseline = 4
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -398,6 +410,25 @@ txBindSpacing widgetId signalId = wireRecord txKindSetProperty
 txBindSpacingElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindSpacingElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propSpacing <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant align value.
+txSetAlign :: Word64 -> Int64 -> Builder
+txSetAlign widgetId align = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlign <> word32LE sourceConst
+    <> encodeValue (VI64 align))
+
+-- set_property with a signal-bound align value.
+txBindAlign :: Word64 -> Word64 -> Builder
+txBindAlign widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlign <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindAlignElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindAlignElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAlign <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- Decode one value at offset `at` from the record base; returns the

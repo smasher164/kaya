@@ -127,6 +127,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => ("Bool", *prop),
             crate::PropKind::F64 => ("F64", *prop),
             crate::PropKind::Blob => ("Blob", "handle"),
+            crate::PropKind::Enum(_) => ("I64", *prop),
         };
         c.line("");
         c.line(&format!("(* set_property with a constant {prop} value. *)"));

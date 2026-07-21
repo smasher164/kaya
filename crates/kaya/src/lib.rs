@@ -47,7 +47,7 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, Messages,
+    Align, AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, Messages,
     PropToken, Tpl, TplSource, Tx, ValueKind, props,
 };
 

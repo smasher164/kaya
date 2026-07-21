@@ -44,7 +44,7 @@ timing() {
 # behind.
 cargo build --lib --example milestone2 --example entry \
     --example gallery --example todos --example reorder --example feed \
-    --example grow --example layout || exit 1
+    --example grow --example layout --example align || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -351,7 +351,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout encodebench; do
+for guest in milestone2 entry gallery todos reorder feed grow layout align encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -447,6 +447,19 @@ run grow-csharp-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libk
 run grow-ocaml-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/grow.exe
 run grow-haskell-swiftui env KAYA_SELFTEST=grow "$(hs_bin grow)"
+drain
+# The align scene: the cross-axis contract (center + baseline), every
+# language.
+KAYA_SELFTEST_SCRIPT="$(scene_script align)"
+export KAYA_SELFTEST_SCRIPT
+run align-rust-swiftui env KAYA_SELFTEST=align target/debug/examples/align
+run align-python-swiftui env KAYA_SELFTEST=align python3 guests/python/align.py
+run align-go-swiftui env KAYA_SELFTEST=align target/go-guests/align
+run align-csharp-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run align-ocaml-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/align.exe
+run align-haskell-swiftui env KAYA_SELFTEST=align "$(hs_bin align)"
 drain
 KAYA_SELFTEST_SCRIPT="$(scene_script layout)"
 export KAYA_SELFTEST_SCRIPT

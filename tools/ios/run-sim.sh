@@ -604,6 +604,20 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on grow-swift "$APP" dev.kaya.growswift grow-swift grow grow
 
+    # The align scene: the cross-axis contract (center + baseline).
+    cp guests/swift/align.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/alignswift-bin"
+    APP=$(make_bundle alignswift dev.kaya.alignswift "$BUNDLES/alignswift-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on align-swift "$APP" dev.kaya.alignswift align-swift align align
+
     cp guests/swift/layout.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
@@ -666,6 +680,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle growrs-swiftui dev.kaya.growswiftui "$TARGET_DIR/examples/grow")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on grow-swiftui "$APP" dev.kaya.growswiftui grow-swiftui grow grow
+
+    # The align scene: the cross-axis contract (center + baseline).
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example align
+    APP=$(make_bundle alignrs-swiftui dev.kaya.alignswiftui "$TARGET_DIR/examples/align")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on align-swiftui "$APP" dev.kaya.alignswiftui align-swiftui align align
 
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example layout
     APP=$(make_bundle layoutrs-swiftui dev.kaya.layoutswiftui "$TARGET_DIR/examples/layout")

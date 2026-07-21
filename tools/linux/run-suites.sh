@@ -25,7 +25,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -165,7 +165,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout; do
+for guest in milestone2 entry gallery todos reorder feed grow layout align; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -244,6 +244,16 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grow.exe
     run "$proto" grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
+    # The align scene: the cross-axis contract (center + baseline),
+    # every language.
+    run "$proto" align-rust env KAYA_SELFTEST=align "$CARGO_TARGET_DIR/debug/examples/align"
+    run "$proto" align-python env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
+        python3 guests/python/align.py
+    run "$proto" align-go env KAYA_SELFTEST=align /tmp/go-guests/align
+    run "$proto" align-csharp env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" align-ocaml env KAYA_SELFTEST=align KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/align.exe
+    run "$proto" align-haskell env KAYA_SELFTEST=align "$(hs_bin align)"
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
     # too — in every language.

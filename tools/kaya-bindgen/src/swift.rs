@@ -164,6 +164,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
             crate::PropKind::F64 => (camel(prop), "Double", "f64"),
             crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
         };
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));

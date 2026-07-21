@@ -145,6 +145,17 @@ func kayaRegisterBlob(_ data: Data) -> UInt64 {
 }
 
 /// A live widget: exactly one thing on screen.
+/// A container's cross-axis child placement (the align spec enum;
+/// wire values pinned by the generated constants). Baseline is
+/// rows-only — the scene rejects it on columns at the root.
+enum KayaAlign: Int64 {
+    case start = 0
+    case center = 1
+    case end = 2
+    case stretch = 3
+    case baseline = 4
+}
+
 struct KayaWidget {
     let id: UInt64
 }
@@ -734,6 +745,14 @@ final class KayaAppTx {
         tx.setSpacing(w.id, gap)
     }
 
+    /// A container's cross-axis child placement. Containers only;
+    /// baseline is rows-only — the scene rejects misuse at the root.
+    /// The declarative spelling is the `align:` argument at
+    /// construction; this is the dynamic path.
+    func setAlign(_ w: KayaWidget, _ align: KayaAlign) {
+        tx.setAlign(w.id, align.rawValue)
+    }
+
     func setGrow(_ w: KayaWidget, _ weight: Double) {
         tx.setGrow(w.id, weight)
     }
@@ -859,19 +878,24 @@ final class KayaAppTx {
     }
 
     func column(
-        grow: Double? = nil, spacing: Double? = nil, @KayaChildren _ children: () -> Void
+        grow: Double? = nil, spacing: Double? = nil, align: KayaAlign? = nil,
+        @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing)
+        containerOf(
+            UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing, align: align)
     }
 
     func row(
-        grow: Double? = nil, spacing: Double? = nil, @KayaChildren _ children: () -> Void
+        grow: Double? = nil, spacing: Double? = nil, align: KayaAlign? = nil,
+        @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
-        containerOf(UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing)
+        containerOf(
+            UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing, align: align)
     }
 
     private func containerOf(
-        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil
+        _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil,
+        align: KayaAlign? = nil
     ) -> KayaWidget {
         // Parent before children: statement-shaped construction is
         // parent-first in every language (expression trees are
@@ -880,6 +904,13 @@ final class KayaAppTx {
         // the construction style, never per-language trivia.
         let parent = widget(kind)
         if let grow { setGrow(parent, grow) }
+        // spacing was accepted-but-dropped here for one commit — the
+        // fills observation could not see it (render and observation
+        // share the node state, so a write the WIRE never carried
+        // stays self-consistent); the recordings are the gate for
+        // that class until per-binding emission checks exist.
+        if let spacing { setSpacing(parent, spacing) }
+        if let align { setAlign(parent, align) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         children()
         let ids = app.childFrames.removeLast().ids

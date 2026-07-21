@@ -87,6 +87,10 @@ name = "layout"
 path = "../../guests/rust/layout.rs"
 
 [[example]]
+name = "align"
+path = "../../guests/rust/align.rs"
+
+[[example]]
 name = "grow"
 path = "../../guests/rust/grow.rs"
 

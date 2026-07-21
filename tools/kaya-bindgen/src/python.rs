@@ -147,6 +147,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
             PropKind::Bool => (*prop, "bool", format!("_enc.value({prop})")),
             PropKind::F64 => (*prop, "float", format!("_enc.value({prop})")),
+            PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
             PropKind::Blob => (
                 "handle",
                 "a kaya_blob_register handle, consumed by the next submit",

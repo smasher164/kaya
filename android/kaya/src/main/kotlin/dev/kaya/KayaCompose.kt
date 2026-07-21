@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -30,7 +32,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
@@ -76,6 +80,12 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * only; the normalized default is 8 dp). See Prop::Spacing.
      */
     var spacing by mutableStateOf(8.0)
+    /**
+     * This container's cross-axis child placement (containers only;
+     * wire values of the align spec enum; 0 = start, the normalized
+     * default). See Prop::Align.
+     */
+    var align by mutableStateOf(0L)
     val children = mutableStateListOf<KayaNode>()
 }
 
@@ -96,6 +106,16 @@ val kayaMainExtents = HashMap<Long, Double>()
  * measured-geometry discipline as the track extents.
  */
 val kayaContainerExtents = HashMap<Long, Double>()
+
+/**
+ * Cross-axis observations for expect_aligned: each container's cross
+ * extent, each cell's cross (start, extent) from positionInParent,
+ * and each text child's baseline offset from its own top (a font
+ * metric, pass-invariant) captured by a layout modifier.
+ */
+val kayaContainerCross = HashMap<Long, Double>()
+val kayaCrossRects = HashMap<Long, Pair<Double, Double>>()
+val kayaBaselineOffsets = HashMap<Long, Double>()
 
 /**
  * The display density, recorded at composition (the runner thread has
@@ -141,7 +161,9 @@ object KayaCompose {
     // (KAYA_SPEC_HASH); asserted against the core at mount. check-verbs
     // holds the SOURCE current, but only the runtime assert catches a
     // stale compiled APK against a new libkaya.
-    private const val SPEC_HASH = 0x420c5722bf6d356eL
+    // ULong: the fingerprint's high bit is fair game, and a Kotlin
+    // Long hex literal cannot express it.
+    private const val SPEC_HASH: ULong = 0xf1448ef515751f08uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -168,7 +190,15 @@ object KayaCompose {
     private const val PROP_SOURCE = 6
     private const val PROP_GROW = 7
     private const val PROP_SPACING = 8
+    private const val PROP_ALIGN = 9
+    // The align enum's wire values (spec enum "align").
+    const val ALIGN_START = 0L
+    const val ALIGN_CENTER = 1L
+    const val ALIGN_END = 2L
+    const val ALIGN_STRETCH = 3L
+    const val ALIGN_BASELINE = 4L
     private const val VALUE_BOOL = 1
+    private const val VALUE_I64 = 2
     private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
     private const val VALUE_BLOB = 5
@@ -180,7 +210,7 @@ object KayaCompose {
     @JvmStatic
     fun mount(activity: ComponentActivity) {
         val host = KayaPresent.specHash()
-        check(host == SPEC_HASH) {
+        check(host.toULong() == SPEC_HASH) {
             "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
         }
         startPump(activity)
@@ -276,6 +306,8 @@ object KayaCompose {
                         PROP_GROW -> KayaSceneModel.nodes[id]!!.grow = readF64(b)
                         PROP_SPACING ->
                             KayaSceneModel.nodes[id]!!.spacing = readF64(b)
+                        PROP_ALIGN ->
+                            KayaSceneModel.nodes[id]!!.align = readI64(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -370,6 +402,13 @@ object KayaCompose {
         b.int // len
         check(type == VALUE_F64) { "kaya: expected an f64 value, got type $type" }
         return b.double
+    }
+
+    private fun readI64(b: ByteBuffer): Long {
+        val type = b.int
+        b.int // len
+        check(type == VALUE_I64) { "kaya: expected an i64 value, got type $type" }
+        return b.long
     }
 
     private fun readBool(b: ByteBuffer): Boolean {
@@ -611,6 +650,68 @@ object KayaCompose {
                             failures.add("root hugs ($hug)")
                         }
                     }
+                    "expect_aligned" -> {
+                        // Classified from measured geometry, never the
+                        // model's align field.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) {
+                            val isRow = parts[1].startsWith("row")
+                            target(
+                                parts[1], if (isRow) "row" else "column",
+                                if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
+                            )?.let { container ->
+                                val inner = kayaContainerCross[container.id] ?: 0.0
+                                if (inner <= 0.0) {
+                                    "no container layout recorded"
+                                } else {
+                                    val rects = container.children
+                                        .mapNotNull { kayaCrossRects[it.id] }
+                                    val baselines = container.children.mapNotNull { c ->
+                                        val r = kayaCrossRects[c.id] ?: return@mapNotNull null
+                                        kayaBaselineOffsets[c.id]?.let { r.first + it }
+                                    }
+                                    if (rects.isEmpty()) {
+                                        "no children"
+                                    } else {
+                                        // Multi-match is ambiguity, and
+                                        // ambiguity fails loudly — a
+                                        // first-match answer lets an
+                                        // unseparated scene pass while
+                                        // proving nothing.
+                                        val matches = mutableListOf<String>()
+                                        if (rects.all {
+                                            kotlin.math.abs(it.second - inner) <= 2.0
+                                        }) matches.add("stretch")
+                                        if (rects.all {
+                                            kotlin.math.abs(it.first) <= 2.0
+                                        }) matches.add("start")
+                                        if (rects.all {
+                                            kotlin.math.abs(2 * it.first + it.second - inner) <= 4.0
+                                        }) matches.add("center")
+                                        if (rects.all {
+                                            kotlin.math.abs(it.first + it.second - inner) <= 2.0
+                                        }) matches.add("end")
+                                        if (isRow && baselines.size >= 2 && baselines.all {
+                                            kotlin.math.abs(it - baselines[0]) <= 2.0
+                                        }) matches.add("baseline")
+                                        when (matches.size) {
+                                            1 -> matches[0]
+                                            0 -> "mixed (cross rects " + rects + " in " + inner + "px)"
+                                            else -> "ambiguous (" + matches.joinToString("|") + ")"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        when {
+                            got == null -> failures.add("no such target " + parts[1])
+                            got == want -> observed.add(parts[1] + " aligns " + want)
+                            else ->
+                                failures.add(
+                                    parts[1] + " aligns \"" + got + "\", wanted \"" + want + "\""
+                                )
+                        }
+                    }
                     "expect_fills" -> {
                         // The container's children span its content box
                         // — the leftover-consumption half of the grow
@@ -694,9 +795,14 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             Column(
                 modifier = rootFill.onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
+                    kayaContainerCross[node.id] = it.size.width.toDouble()
                 },
                 verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
-                horizontalAlignment = Alignment.Start,
+                horizontalAlignment = when (node.align) {
+                    KayaCompose.ALIGN_CENTER -> Alignment.CenterHorizontally
+                    KayaCompose.ALIGN_END -> Alignment.End
+                    else -> Alignment.Start
+                },
             ) {
                 node.children.forEach { child ->
                     // Every child rides in a cell, whether it grows or
@@ -708,8 +814,13 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
                     // reads. A weightless cell just wraps its content.
                     var cell = Modifier.onGloballyPositioned {
                         kayaMainExtents[child.id] = it.size.height.toDouble()
+                        kayaCrossRects[child.id] = Pair(
+                            it.positionInParent().x.toDouble(),
+                            it.size.width.toDouble(),
+                        )
                     }
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                    if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxWidth()
                     Box(cell) { KayaRender(child) }
                 }
             }
@@ -723,15 +834,34 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             Row(
                 modifier = rootFill.onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
+                    kayaContainerCross[node.id] = it.size.height.toDouble()
                 },
                 horizontalArrangement = Arrangement.spacedBy(node.spacing.dp),
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = when (node.align) {
+                    KayaCompose.ALIGN_CENTER -> Alignment.CenterVertically
+                    KayaCompose.ALIGN_END -> Alignment.Bottom
+                    else -> Alignment.Top
+                },
             ) {
                 node.children.forEach { child ->
                     var cell = Modifier.onGloballyPositioned {
                         kayaMainExtents[child.id] = it.size.width.toDouble()
+                        kayaCrossRects[child.id] = Pair(
+                            it.positionInParent().y.toDouble(),
+                            it.size.height.toDouble(),
+                        )
+                    }
+                    cell = cell.layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        val fb = placeable[androidx.compose.ui.layout.FirstBaseline]
+                        if (fb != androidx.compose.ui.layout.AlignmentLine.Unspecified) {
+                            kayaBaselineOffsets[child.id] = fb.toDouble()
+                        }
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
                     }
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                    if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxHeight()
+                    if (node.align == KayaCompose.ALIGN_BASELINE) cell = cell.alignByBaseline()
                     Box(cell) { KayaRender(child) }
                 }
             }

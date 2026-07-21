@@ -91,6 +91,11 @@ struct CoreState {
     // that child's grow weight.
     child_order: HashMap<WidgetId, Vec<WidgetId>>,
     grow: HashMap<WidgetId, f64>,
+    /// Container align modes (the align spec enum's wire values):
+    /// reindex stamps the cross alignment onto every child after any
+    /// structural change, so late arrivals are covered by the same
+    /// path that keeps Grid indices honest.
+    aligns: HashMap<WidgetId, i64>,
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index. Clicks emit the stored
     // tag directly; the other controls fire their real events for
@@ -419,6 +424,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         }
     }
 
+    let mode = core.aligns.get(&parent).copied().unwrap_or(0);
     for (index, child) in order.iter().enumerate() {
         let Some(widget) = core.widgets.get(child) else {
             continue;
@@ -433,6 +439,106 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         } else {
             Grid::SetColumn(&element, index)?;
         }
+        // Cross placement from the container's align mode. WinUI's
+        // own default is Stretch; kaya's normalized default is start,
+        // stamped explicitly so the two never drift. Baseline (rows
+        // only) stamps Top here and gets its margin compensation
+        // after the pass below — WinUI has no native baseline
+        // alignment. One carve-out, the BREADTH rule: a nested
+        // container whose main axis crosses its parent spans the
+        // parent's breadth (a row in a column is as wide as the
+        // column — the rule WinUI's Stretch default used to satisfy
+        // for free, and the first stamped run broke: the grow row
+        // hugged and split 31/69 of its own natural width).
+        let crossing = matches!(
+            (widget, vertical),
+            (NativeWidget::Row(_), true) | (NativeWidget::Column(_), false)
+        );
+        if vertical {
+            element.SetHorizontalAlignment(if crossing {
+                bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch
+            } else {
+                match mode {
+                    1 => bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center,
+                    2 => bindings::Microsoft::UI::Xaml::HorizontalAlignment::Right,
+                    3 => bindings::Microsoft::UI::Xaml::HorizontalAlignment::Stretch,
+                    _ => bindings::Microsoft::UI::Xaml::HorizontalAlignment::Left,
+                }
+            })?;
+        } else {
+            element.SetVerticalAlignment(if crossing {
+                bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch
+            } else {
+                match mode {
+                    1 => bindings::Microsoft::UI::Xaml::VerticalAlignment::Center,
+                    2 => bindings::Microsoft::UI::Xaml::VerticalAlignment::Bottom,
+                    3 => bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch,
+                    _ => bindings::Microsoft::UI::Xaml::VerticalAlignment::Top,
+                }
+            })?;
+        }
+    }
+    if mode == 4 && !vertical {
+        baseline_compensate(core, &grid, order)?;
+    }
+    Ok(())
+}
+
+/// WinUI's baseline row: no native primitive exists, so children with
+/// a text baseline get a top margin lifting them to the deepest one.
+/// BaselineOffset is only meaningful after a measure pass; UpdateLayout
+/// forces it synchronously, the child_shares precedent.
+fn baseline_compensate(
+    core: &CoreState,
+    grid: &Grid,
+    order: &[WidgetId],
+) -> windows_core::Result<()> {
+    grid.UpdateLayout()?;
+    let mut offsets: Vec<(FrameworkElement, f64)> = Vec::new();
+    for child in order {
+        let Some(widget) = core.widgets.get(child) else {
+            continue;
+        };
+        let element: FrameworkElement = widget.element()?.cast()?;
+        let baseline = match widget {
+            NativeWidget::Label(text) => Some(text.BaselineOffset()?),
+            NativeWidget::Button { caption, .. } | NativeWidget::Checkbox { caption, .. } => {
+                // The caption sits inside the control; its baseline in
+                // the CONTROL's space is its offset there plus its own
+                // BaselineOffset.
+                let at = caption
+                    .TransformToVisual(&element)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                Some(f64::from(at.Y) + caption.BaselineOffset()?)
+            }
+            // No text baseline: the bottom-edge rule — the child's
+            // baseline IS its bottom (the CSS replaced-element rule),
+            // so a tall image drags the common baseline down and the
+            // text children lift to meet it. Text-only compensation
+            // aligned label to checkbox at ~14dip and left the image
+            // at the top — geometrically indistinguishable from
+            // start, which is exactly how the first Windows run
+            // failed.
+            _ => Some(element.ActualHeight()?),
+        };
+        if let Some(b) = baseline {
+            offsets.push((element, b));
+        }
+    }
+    let Some(deepest) = offsets
+        .iter()
+        .map(|(_, b)| *b)
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+    else {
+        return Ok(());
+    };
+    for (element, baseline) in offsets {
+        element.SetMargin(Thickness {
+            Left: 0.0,
+            Top: deepest - baseline,
+            Right: 0.0,
+            Bottom: 0.0,
+        })?;
     }
     Ok(())
 }
@@ -747,6 +853,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // row spacing (expect_fills reads it back live).
                     grid.SetRowSpacing(gap)?;
                 }
+                (NativeWidget::Column(_), Prop::Align, Value::I64(mode))
+                | (NativeWidget::Row(_), Prop::Align, Value::I64(mode)) => {
+                    core.aligns.insert(id, mode);
+                    reindex(core, id)?;
+                }
                 (NativeWidget::Row(grid), Prop::Spacing, Value::F64(gap)) => {
                     grid.SetColumnSpacing(gap)?;
                 }
@@ -824,7 +935,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Right: 16.0,
                         Bottom: 16.0,
                     })?;
-                    core.window.SetContent(panel)?
+                    core.window.SetContent(panel)?;
+                    // Baseline compensation needs REAL text metrics,
+                    // and at apply time the grid has never had a true
+                    // layout pass (a detached or just-attached measure
+                    // reads zeros — margins came out ~0 and the row
+                    // classified start on the first two Windows runs).
+                    // Loaded fires after the first real layout; the
+                    // one-shot re-runs reindex for every
+                    // baseline-aligned container with live metrics.
+                    let loaded = RoutedEventHandler::new(move |_, _| {
+                        CORE.with_borrow(|core| {
+                            let Some(core) = core.as_ref() else {
+                                return Ok(());
+                            };
+                            let ids: Vec<WidgetId> = core
+                                .aligns
+                                .iter()
+                                .filter(|&(_, &m)| m == 4)
+                                .map(|(&id, _)| id)
+                                .collect();
+                            for id in ids {
+                                reindex(core, id)?;
+                            }
+                            Ok(())
+                        })
+                    });
+                    panel.Loaded(&loaded)?;
                 }
                 NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
                 NativeWidget::Label(label) => core.window.SetContent(label)?,
@@ -1163,6 +1300,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             rows: Vec::new(),
             child_order: HashMap::new(),
             grow: HashMap::new(),
+            aligns: HashMap::new(),
             window,
         });
     });
@@ -1392,6 +1530,102 @@ impl crate::harness::Stage for WinUiStage {
                     span.round() as i64,
                     inner.round() as i64
                 )
+            })
+        })
+    }
+
+    fn cross_mode(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let grid = registry[i].clone();
+            grid.UpdateLayout()?;
+            let padding = grid.Padding()?;
+            let (inner, origin) = if vertical {
+                (grid.ActualWidth()? - padding.Left - padding.Right, padding.Left)
+            } else {
+                (grid.ActualHeight()? - padding.Top - padding.Bottom, padding.Top)
+            };
+            // The registry holds the Grid; the children live in
+            // child_order under its WidgetId — recovered by COM
+            // identity, the registries being creation-ordered clones.
+            let id = core
+                .widgets
+                .iter()
+                .find_map(|(id, w)| match w {
+                    NativeWidget::Column(g) | NativeWidget::Row(g) if *g == grid => Some(*id),
+                    _ => None,
+                })
+                .expect("registry grids live in the widget table");
+            let empty = Vec::new();
+            let order = core.child_order.get(&id).unwrap_or(&empty);
+            let mut rects: Vec<(f64, f64)> = Vec::new();
+            let mut baselines: Vec<f64> = Vec::new();
+            for child in order {
+                let Some(widget) = core.widgets.get(child) else {
+                    continue;
+                };
+                let element: FrameworkElement = widget.element()?.cast()?;
+                let at = element
+                    .TransformToVisual(&grid)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                let (start, extent) = if vertical {
+                    (f64::from(at.X) - origin, element.ActualWidth()?)
+                } else {
+                    (f64::from(at.Y) - origin, element.ActualHeight()?)
+                };
+                rects.push((start, extent));
+                if !vertical {
+                    let baseline = match widget {
+                        NativeWidget::Label(text) => Some(text.BaselineOffset()?),
+                        NativeWidget::Button { caption, .. }
+                        | NativeWidget::Checkbox { caption, .. } => {
+                            let inner_at = caption
+                                .TransformToVisual(&element)?
+                                .TransformPoint(bindings::Windows::Foundation::Point {
+                                    X: 0.0,
+                                    Y: 0.0,
+                                })?;
+                            Some(f64::from(inner_at.Y) + caption.BaselineOffset()?)
+                        }
+                        _ => None,
+                    };
+                    if let Some(b) = baseline {
+                        baselines.push(start + b);
+                    }
+                }
+            }
+            if rects.is_empty() {
+                return Ok("no children".to_owned());
+            }
+            // Multi-match is ambiguity, and ambiguity fails loudly
+            // — a first-match answer lets an unseparated scene pass
+            // while proving nothing (the separability lesson, made
+            // structural).
+            let mut matches = Vec::new();
+            if rects.iter().all(|r| (r.1 - inner).abs() <= 2.0) {
+                matches.push("stretch");
+            }
+            if rects.iter().all(|r| r.0.abs() <= 2.0) {
+                matches.push("start");
+            }
+            if rects.iter().all(|r| ((2.0 * r.0 + r.1) - inner).abs() <= 4.0) {
+                matches.push("center");
+            }
+            if rects.iter().all(|r| ((r.0 + r.1) - inner).abs() <= 2.0) {
+                matches.push("end");
+            }
+            if !vertical
+                && baselines.len() >= 2
+                && baselines.iter().all(|b| (b - baselines[0]).abs() <= 2.0)
+            {
+                matches.push("baseline");
+            }
+            Ok(match matches.as_slice() {
+                [one] => (*one).to_owned(),
+                [] => format!("mixed (cross rects {rects:?} in {inner}dip)"),
+                many => format!("ambiguous ({})", many.join("|")),
             })
         })
     }

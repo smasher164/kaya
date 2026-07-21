@@ -87,6 +87,16 @@ fn main() {
         // vanish silently while Thickness is unfiltered (the
         // transitivity trap again).
         "Microsoft.UI.Xaml.Thickness".to_string(),
+        // The align observation reads child positions through
+        // UIElement.TransformToVisual (and text baselines through
+        // TextBlock.BaselineOffset beneath them); the transform's own
+        // types must be named or the method vanishes silently — the
+        // same transitivity trap as Thickness.
+        "Microsoft.UI.Xaml.Media.GeneralTransform".to_string(),
+        "Windows.Foundation.Point".to_string(),
+        // Per-child cross placement stamps.
+        "Microsoft.UI.Xaml.HorizontalAlignment".to_string(),
+        "Microsoft.UI.Xaml.VerticalAlignment".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.ToggleButton".to_string(),
         "Microsoft.UI.Xaml.Controls.CheckBox".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.RangeBase".to_string(),

@@ -86,16 +86,31 @@ Landed history lives in git; this file only carries what is still open.
   platforms, its traps live in docs/traps.md, and its first two finds
   — the UIKit root hugging its window, the Compose root wrapping its
   width — are FIXED and now gated by `expect_root_fills` in the grow
-  scene). Still alignment's to own: control-in-track placement
-  (five backends stretch the control itself into its weighted track —
-  Android's layout_weight, WinUI's default Stretch alignment, GTK's
-  allocation, and both Apple stacks under Fill distribution — where
-  SwiftUI and Compose top-lead a natural-size control inside the
-  track; both defensible, currently divergent, and now VISIBLE on the
-  desktop backends since the AppKit gravity fix made columns actually
-  distribute), and the cross-axis defaults generally, including
-  asserting the HORIZONTAL grow contract once `row` targets exist (the
-  item above).
+  scene). ~~Still alignment's to own~~ LANDED (2026-07-20): the `align`
+  prop (container-level enum: start/center/end/stretch/baseline,
+  rows-only baseline, first enum prop on the wire) on all four
+  backends with the `expect_aligned` classification verb and the
+  align scene (center + baseline asserted; end/stretch have live
+  classification arms on every backend, recordings as their visual
+  record until a scene earns them). The control-in-track RULING:
+  the child's BOX fills its main-axis grow track (flex-item
+  semantics — CSS/Flutter, and natively GTK/WinUI); whether a
+  control PAINTS its whole box is platform dressing, the Zen Garden
+  layer, not layout contract. Scene separability lesson paid for:
+  kaya's text controls share similar baseline-to-height ratios, so
+  a hug-height baseline row collapses the modes inside tolerance —
+  the align scene CONSTRUCTS separation with a tall no-baseline
+  image whose bottom sits on the baseline (CSS replaced-element
+  rule).
+  Found by adjacency during the sweep: the Swift binding's
+  containerOf ACCEPTED construction-time `spacing:` but never
+  applied it (one commit's worth of silently dropped writes) — and
+  no gate could see it, because the interpreter's render and its
+  fills observation share the node state a wire-dropped write never
+  reaches; recordings are the only current gate for that class.
+  Structural fix belongs to the bindings program: per-binding
+  EMISSION checks (kaya_app_checks.py-style — assert the records a
+  construction emits) in every language, not just Python.
   ~~The `spacing` prop~~ LANDED (2026-07-20): container-only F64,
   normalized default 8, domain-checked at the root; all four backends,
   both interpreter fills observations read the per-container value,

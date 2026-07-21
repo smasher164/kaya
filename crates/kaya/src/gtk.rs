@@ -44,6 +44,27 @@ fn set_grow_weight(widget: &gtk4::Widget, weight: f64) {
     unsafe { widget.set_data(GROW_KEY, weight) }
 }
 
+/// A container's align mode (the align spec enum's wire values), same
+/// object-data pattern as the grow weight: AddChild reads it to stamp
+/// children that arrive after the prop did.
+const ALIGN_KEY: &str = "kaya-align";
+
+fn container_align(widget: &gtk4::Widget) -> i64 {
+    // SAFETY: the key is private to this module and only ever set to
+    // an i64 by set_container_align below.
+    unsafe {
+        widget
+            .data::<i64>(ALIGN_KEY)
+            .map(|p| *p.as_ref())
+            .unwrap_or(0)
+    }
+}
+
+fn set_container_align(widget: &gtk4::Widget, mode: i64) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(ALIGN_KEY, mode) }
+}
+
 /// Install the flex layout manager on a container the first time one of
 /// its children grows.
 ///
@@ -79,6 +100,28 @@ fn ensure_flex(container: &gtk4::Widget) {
 /// occupy what it was given; the cross axis keeps `Start`, which is the
 /// normalized default and what makes labels read left-aligned rather
 /// than centered in a stretched box.
+/// Stamp one child's CROSS-axis alignment from its container's align
+/// mode. Grow reconciliation owns the MAIN axis (Fill for growers);
+/// this owns the other one, so the two never fight. Baseline maps to
+/// GTK's native baseline valign (rows only; the scene rejects it on
+/// columns at the root).
+fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) {
+    use gtk4::prelude::WidgetExt;
+    let align = match mode {
+        1 => gtk4::Align::Center,
+        2 => gtk4::Align::End,
+        3 => gtk4::Align::Fill,
+        4 => gtk4::Align::Baseline,
+        _ => gtk4::Align::Start,
+    };
+    if vertical_container {
+        // A column's cross axis is horizontal.
+        child.set_halign(align);
+    } else {
+        child.set_valign(align);
+    }
+}
+
 fn reconcile_grow_align(child: &gtk4::Widget) {
     let Some(parent) = child.parent() else { return };
     // The axis comes from our own manager, never from
@@ -580,6 +623,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // so both layout paths follow it.
                     container.set_spacing(gap.round() as i32);
                 }
+                (NativeWidget::Column(container), Prop::Align, Value::I64(mode)) => {
+                    use gtk4::prelude::WidgetExt;
+                    let container = container.clone().upcast::<gtk4::Widget>();
+                    set_container_align(&container, mode);
+                    let mut child = container.first_child();
+                    while let Some(widget) = child {
+                        apply_cross_align(&widget, true, mode);
+                        child = widget.next_sibling();
+                    }
+                }
+                (NativeWidget::Row(container), Prop::Align, Value::I64(mode)) => {
+                    use gtk4::prelude::WidgetExt;
+                    let container = container.clone().upcast::<gtk4::Widget>();
+                    set_container_align(&container, mode);
+                    let mut child = container.first_child();
+                    while let Some(widget) = child {
+                        apply_cross_align(&widget, false, mode);
+                        child = widget.next_sibling();
+                    }
+                }
                 (NativeWidget::Image(picture), Prop::Source, Value::Blob(blob)) => {
                     // Encoded bytes in, native decode:
                     // gdk::Texture::from_bytes reads encoded PNG/JPEG.
@@ -609,6 +672,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // its intrinsic size instead.
             child_widget.set_halign(gtk4::Align::Start);
             child_widget.set_valign(gtk4::Align::Start);
+            // ... then the container's align mode overrides the cross
+            // axis for children arriving after the prop did.
+            match core.widgets.get(&parent).expect("scene validated the id") {
+                NativeWidget::Column(c) => apply_cross_align(
+                    &child_widget,
+                    true,
+                    container_align(c.clone().upcast_ref::<gtk4::Widget>()),
+                ),
+                NativeWidget::Row(c) => apply_cross_align(
+                    &child_widget,
+                    false,
+                    container_align(c.clone().upcast_ref::<gtk4::Widget>()),
+                ),
+                _ => {}
+            }
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(column) => column.append(&child_widget),
                 NativeWidget::Row(row) => row.append(&child_widget),
@@ -942,6 +1020,83 @@ impl crate::harness::Stage for GtkStage {
                 String::new()
             } else {
                 format!("children span {span}px of {inner}px")
+            }
+        })
+    }
+
+    fn cross_mode(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
+            let registry = if vertical { &core.columns } else { &core.rows };
+            let i = crate::harness::resolve(t.index, registry.len());
+            let container = &registry[i];
+            while glib::MainContext::default().iteration(false) {}
+            // Cross axis: horizontal for a column, vertical for a row.
+            // width()/height() are the content box and child
+            // allocations are content-relative (the fills lesson), so
+            // the cross box is 0..inner.
+            let inner = if vertical { container.width() } else { container.height() };
+            let mut rects: Vec<(i32, i32)> = Vec::new();
+            let mut baselines: Vec<i32> = Vec::new();
+            let mut child = container.first_child();
+            while let Some(widget) = child {
+                let alloc = widget.allocation();
+                let (start, extent) = if vertical {
+                    (alloc.x(), alloc.width())
+                } else {
+                    (alloc.y(), alloc.height())
+                };
+                rects.push((start, extent));
+                if !vertical {
+                    let b = widget.allocated_baseline();
+                    if b >= 0 {
+                        baselines.push(alloc.y() + b);
+                    }
+                }
+                child = widget.next_sibling();
+            }
+            if rects.is_empty() {
+                return "no children".to_owned();
+            }
+            let all = |f: &dyn Fn(&(i32, i32)) -> bool| rects.iter().all(f);
+            // Baseline first: GTK 4.12 spells it BASELINE_FILL, so the
+            // boxes legitimately fill the row too — but the box hands
+            // children an allocated baseline ONLY under baseline
+            // alignment (plain fill reads -1), which is the honest
+            // discriminator stretch geometry cannot fake. PARTICIPATION
+            // is the whole check: the reported values are not
+            // comparable across widget kinds (a label reports the
+            // box-allocated line, a button its content-relative one —
+            // 37 vs 27 for a visually ALIGNED pair, screenshot-
+            // verified), so the agreement itself is GTK's to keep,
+            // the way root_fills leaves "content area" to each
+            // platform's own notion.
+            if !vertical && baselines.len() >= 2 {
+                return "baseline".to_owned();
+            }
+            // Every geometric mode is tested; more than one match
+            // means the scene's geometry cannot distinguish them, and
+            // a first-match answer would let such a scene pass while
+            // proving nothing — ambiguity fails loudly instead (the
+            // separability lesson, made structural).
+            let mut matches = Vec::new();
+            if all(&|r| (r.1 - inner).abs() <= 2) {
+                matches.push("stretch");
+            }
+            if all(&|r| r.0.abs() <= 2) {
+                matches.push("start");
+            }
+            if all(&|r| ((2 * r.0 + r.1) - inner).abs() <= 4) {
+                matches.push("center");
+            }
+            if all(&|r| ((r.0 + r.1) - inner).abs() <= 2) {
+                matches.push("end");
+            }
+            match matches.as_slice() {
+                [one] => (*one).to_owned(),
+                [] => format!("mixed (cross rects {rects:?} in {inner}px)"),
+                many => format!("ambiguous ({})", many.join("|")),
             }
         })
     }

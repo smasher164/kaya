@@ -221,6 +221,7 @@ pub const KAYA_PROP_MAX: u32 = 5;
 pub const KAYA_PROP_SOURCE: u32 = 6;
 pub const KAYA_PROP_GROW: u32 = 7;
 pub const KAYA_PROP_SPACING: u32 = 8;
+pub const KAYA_PROP_ALIGN: u32 = 9;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -230,6 +231,21 @@ const _: () = assert!(
         && KAYA_PROP_SOURCE == wire::PROP_SOURCE
         && KAYA_PROP_GROW == wire::PROP_GROW
         && KAYA_PROP_SPACING == wire::PROP_SPACING
+        && KAYA_PROP_ALIGN == wire::PROP_ALIGN
+);
+
+/// The align enum's values (spec enum "align"); baseline is rows-only.
+pub const KAYA_ALIGN_START: u32 = 0;
+pub const KAYA_ALIGN_CENTER: u32 = 1;
+pub const KAYA_ALIGN_END: u32 = 2;
+pub const KAYA_ALIGN_STRETCH: u32 = 3;
+pub const KAYA_ALIGN_BASELINE: u32 = 4;
+const _: () = assert!(
+    KAYA_ALIGN_START == wire::ALIGN_START
+        && KAYA_ALIGN_CENTER == wire::ALIGN_CENTER
+        && KAYA_ALIGN_END == wire::ALIGN_END
+        && KAYA_ALIGN_STRETCH == wire::ALIGN_STRETCH
+        && KAYA_ALIGN_BASELINE == wire::ALIGN_BASELINE
 );
 // Completeness, not just agreement: the value pins above cannot see a
 // FORGOTTEN export (the spacing prop shipped to every generated wire
@@ -237,7 +253,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 8,
+    crate::spec::PROPS.len() == 9,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 

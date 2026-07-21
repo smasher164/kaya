@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
             "todos" -> Todos::app
             "reorder" -> Reorder::app
             "feed" -> Feed::app
+            "align" -> Align::app
             "grow" -> Grow::app
             "layout" -> Layout::app
             else -> Milestone2::app

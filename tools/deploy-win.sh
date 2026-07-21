@@ -71,6 +71,7 @@ for arg in "$@"; do
         reorder_rust|reorder_python|reorder_go|reorder_csharp) SUITE="$arg" ;;
         feed_rust|feed_python|feed_go|feed_csharp) SUITE="$arg" ;;
         grow_rust|grow_python|grow_go|grow_csharp) SUITE="$arg" ;;
+        align_rust|align_python|align_go|align_csharp) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -113,7 +114,7 @@ echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc \
         --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
-        --example grow --example layout)
+        --example grow --example layout --example align)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -133,7 +134,7 @@ timing build
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
-for guest in milestone2 entry gallery todos reorder feed grow layout; do
+for guest in milestone2 entry gallery todos reorder feed grow layout align; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum
     # surfaces (kaya-gen) carry a checked-in *_kaya.go beside it.
@@ -157,7 +158,7 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im align.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -176,6 +177,7 @@ scp -q \
     "$TARGET/examples/reorder.exe" \
     "$TARGET/examples/feed.exe" \
     "$TARGET/examples/grow.exe" \
+    "$TARGET/examples/align.exe" \
     "$TARGET/examples/layout.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
@@ -183,6 +185,7 @@ scp -q \
     "$ROOT/guests/python/entry.py" \
     "$ROOT/guests/python/gallery.py" \
     "$ROOT/guests/python/grow.py" \
+    "$ROOT/guests/python/align.py" \
     "$ROOT/guests/python/layout.py" \
     "$ROOT/guests/python/todos.py" \
     "$ROOT/guests/python/reorder.py" \
@@ -230,6 +233,7 @@ verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
 verify_remote "$TARGET/examples/reorder.exe" 'C:\kaya\reorder.exe'
 verify_remote "$TARGET/examples/feed.exe" 'C:\kaya\feed.exe'
 verify_remote "$TARGET/examples/grow.exe" 'C:\kaya\grow.exe'
+verify_remote "$TARGET/examples/align.exe" 'C:\kaya\align.exe'
 verify_remote "$TARGET/examples/layout.exe" 'C:\kaya\layout.exe'
 timing deploy
 
@@ -534,6 +538,12 @@ case "$SUITE" in
         run_suite grow_python
         run_suite grow_go
         run_suite grow_csharp
+        # The align scene (the cross-axis contract: center + baseline),
+        # every language this platform runs.
+        run_suite align_rust
+        run_suite align_python
+        run_suite align_go
+        run_suite align_csharp
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

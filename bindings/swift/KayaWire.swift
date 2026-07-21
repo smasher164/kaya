@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x420c5722bf6d356e
+let kayaSpecHash: UInt64 = 0xf1448ef515751f08
 
 struct KayaTx {
     var bytes = Data()
@@ -496,6 +496,38 @@ struct KayaTx {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SPACING))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(start)
+    }
+
+    /// set_property with a constant align value.
+    mutating func setAlign(_ widgetId: UInt64, _ align: Int64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALIGN))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(align))
+        self.end(start)
+    }
+
+    /// set_property with a signal-bound align value.
+    mutating func bindAlign(_ widgetId: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALIGN))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindAlignElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ALIGN))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)

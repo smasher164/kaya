@@ -588,6 +588,40 @@ The known normalization worklist:
   number, 540×330 — SwiftUI's existing default, adopted by AppKit,
   GTK, and WinUI in the same slice, sized so the grow scene's
   smallest track stays ~63pt, clear of GTK's 34pt control minimum.
+- Alignment normalized to one container-level enum prop (ratified
+  2026-07-20). `align` sets where children sit on the container's
+  CROSS axis: `start` (the default — today's leading/top), `center`,
+  `end`, `stretch` (child breadth = content breadth), and `baseline`
+  (rows only: first text baselines coincide; children without a text
+  baseline align by their bottom edge, the CSS replaced-element rule;
+  a column baseline is rejected at the root, the spacing-on-a-label
+  class). Deliberately the intersection vocabulary — container-level
+  like SwiftUI's `VStack(alignment:)` and Flutter's
+  `crossAxisAlignment`; a per-child `align_self` override and
+  main-axis distribution (`justify`) are deferred until something
+  knocks. The control-in-track ruling that makes align compose: a
+  child's BOX fills its main-axis grow track (flex-item semantics,
+  CSS/Flutter; GTK and WinUI already do this natively — the
+  interpreters' cells are normalized to match), and `align` then
+  governs the cross axis of that box uniformly. First enum-valued
+  prop: `align` rides the wire as I64 with spec-enum constants
+  (`ALIGN_START`..`ALIGN_BASELINE`) generated into every wire file;
+  bindings expose each language's native enum through the ratified
+  prop spellings. Gate: `expect_aligned <container> "<mode>"` — the
+  Stage classifies child cross-placement from geometry (starts,
+  centers, ends, or breadths coincide, ±2) and baseline mode asserts
+  the text children's baselines agree via each toolkit's real query
+  (WinUI TextBlock.BaselineOffset walks, Compose alignment lines,
+  SwiftUI baseline dimensions) — except GTK, where per-child
+  allocated baselines are not comparable across widget kinds, so the
+  observation is PARTICIPATION (baselines allocated only under
+  baseline mode; agreement is GTK's own, the root_fills precedent of
+  per-platform notions). The scene asserts center and baseline —
+  the two modes whose separability it constructs (a tall no-baseline
+  image whose bottom sits on the baseline); start rides every other
+  scene's geometry, and end/stretch have live classification arms
+  with the recordings as their visual record until a scene earns
+  them.
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
 - Grow distribution normalized to explicit weights. Settled when `grow`

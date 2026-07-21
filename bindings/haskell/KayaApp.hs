@@ -66,6 +66,8 @@ module KayaApp
     bindSource,
     setGrow,
     setSpacing,
+    setAlign,
+    Align (..),
     Attr (..),
     WClass (..),
     RowCol,
@@ -592,16 +594,42 @@ setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 -- props on a leaf are type errors before they are scene errors.
 data WClass = BoxW | LeafW
 
+-- | A container's cross-axis child placement (the align spec enum;
+-- the normalized default is 'AlignStart'). 'AlignBaseline' is
+-- rows-only — the scene rejects it on columns at the root.
+data Align
+  = AlignStart
+  | AlignCenter
+  | AlignEnd
+  | AlignStretch
+  | AlignBaseline
+  deriving (Eq, Show)
+
+alignWire :: Align -> Int64
+alignWire AlignStart = 0
+alignWire AlignCenter = 1
+alignWire AlignEnd = 2
+alignWire AlignStretch = 3
+alignWire AlignBaseline = 4
+
+-- | The dynamic path; the declarative spelling is the 'Align' attr.
+setAlign :: Widget -> Align -> Build ()
+setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
+
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
   Grow :: Double -> Attr c
   -- | This container's inter-child gap (main axis, DIP; the
   -- normalized default is 8). Containers only, held by the index.
   Spacing :: Double -> Attr 'BoxW
+  -- | This container's cross-axis child placement. Containers only,
+  -- held by the index like 'Spacing'.
+  Align :: Align -> Attr 'BoxW
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Spacing gap) w = setSpacing w gap
+applyAttr (Align a) w = setAlign w a
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do

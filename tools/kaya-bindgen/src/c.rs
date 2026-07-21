@@ -223,6 +223,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
+            // Enum props ride I64; the KAYA_<ENUM>_* constants are the
+            // domain, generated above from the spec enum.
+            crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
         };
         c.line("");
         c.line(&format!("/* set_property with a constant {prop} value. */"));

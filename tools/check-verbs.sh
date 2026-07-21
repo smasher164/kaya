@@ -88,8 +88,8 @@ else:
     h = m.group(1).lower()
     if not re.search(rf"let kayaSpecHash: UInt64 = 0x{h}\b", swift):
         fail(f"spec hash 0x{h}: expected `let kayaSpecHash: UInt64 = 0x{h}` in KayaSwiftUI.swift")
-    if not re.search(rf"SPEC_HASH = 0x{h}L\b", kotlin):
-        fail(f"spec hash 0x{h}: expected `SPEC_HASH = 0x{h}L` in KayaCompose.kt")
+    if not re.search(rf"SPEC_HASH: ULong = 0x{h}uL\b", kotlin):
+        fail(f"spec hash 0x{h}: expected `SPEC_HASH: ULong = 0x{h}uL` in KayaCompose.kt")
 
 if failures:
     for f in failures:

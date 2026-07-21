@@ -316,6 +316,12 @@ class Widget:
         collapsing a pane is `grow(0)` and back."""
         _records().append(wire.tx_set_grow(self.id, float(weight)))
 
+    def align(self, mode):
+        """Set this container's cross-axis child placement (see
+        kaya.Align; strings accepted). Containers only — the scene
+        rejects it anywhere else; baseline is rows-only."""
+        _records().append(wire.tx_set_align(self.id, _align_value(mode)))
+
     def spacing(self, gap):
         """Set this container's inter-child gap (main axis, DIP; the
         normalized default is 8). Containers only — the scene rejects
@@ -916,6 +922,44 @@ def collection(record_type=None):
     return handle
 
 
+class Align:
+    """The align enum: a container's cross-axis child placement. The
+    `align=` argument (and `Widget.align`) also accepts these names as
+    plain strings — `align="center"` — the Pythonic spelling."""
+
+    START = wire.ALIGN_START
+    CENTER = wire.ALIGN_CENTER
+    END = wire.ALIGN_END
+    STRETCH = wire.ALIGN_STRETCH
+    BASELINE = wire.ALIGN_BASELINE
+
+
+_ALIGN_NAMES = {
+    "start": wire.ALIGN_START,
+    "center": wire.ALIGN_CENTER,
+    "end": wire.ALIGN_END,
+    "stretch": wire.ALIGN_STRETCH,
+    "baseline": wire.ALIGN_BASELINE,
+}
+
+
+def _align_value(align):
+    if isinstance(align, str):
+        try:
+            return _ALIGN_NAMES[align]
+        except KeyError:
+            raise ValueError(
+                f"align must be one of {sorted(_ALIGN_NAMES)}, got {align!r}"
+            ) from None
+    return int(align)
+
+
+def _set_align(handle, align):
+    if align is None:
+        return
+    _records().append(wire.tx_set_align(handle.id, _align_value(align)))
+
+
 def _set_spacing(handle, spacing):
     if spacing is None:
         return
@@ -930,7 +974,7 @@ def _set_grow(handle, grow):
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
-def column(grow=None, spacing=None):
+def column(grow=None, spacing=None, align=None):
     """A column container: `with kaya.column():` parents everything
     declared inside it. `grow` is its flex weight within the enclosing
     container; `spacing` its inter-child gap (main axis, DIP; the
@@ -938,6 +982,7 @@ def column(grow=None, spacing=None):
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
+    _set_align(handle, align)
     return _Container(handle)
 
 
@@ -951,7 +996,7 @@ def button(text=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None, spacing=None):
+def row(grow=None, spacing=None, align=None):
     """A row container: column turned sideways; `with kaya.row():`
     parents everything declared inside it. `grow` is its flex weight
     within the enclosing container; `spacing` its inter-child gap
@@ -959,6 +1004,7 @@ def row(grow=None, spacing=None):
     handle = _widget(wire.KIND_ROW)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
+    _set_align(handle, align)
     return _Container(handle)
 
 

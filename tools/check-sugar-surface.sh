@@ -77,7 +77,7 @@ done
 # Props are not kinds, so the constructor loop above cannot see them;
 # without this, a binding shipping wire-only grow would pass every
 # gate until a guest failed to compile.
-check rust    crates/kaya/src/app.rs              grow "fn grow\(mut self"
+check rust    crates/kaya/src/app.rs              grow "fn grow\(self"
 check python  bindings/python/kaya/__init__.py    grow "def grow\(self, weight\)"
 check go      bindings/go/app.go                  grow "func \(w Widget\) Grow\("
 check csharp  bindings/csharp/KayaApp.cs          grow "public void SetGrow\("
@@ -88,7 +88,7 @@ check ocaml   bindings/ocaml/kaya_app.ml          grow "let label \?grow "
 
 # The spacing prop's layer-3 spelling, same rule: a binding shipping
 # wire-only spacing must fail here, not on a reviewer's eye.
-check rust    crates/kaya/src/app.rs              spacing "fn spacing\(mut self"
+check rust    crates/kaya/src/app.rs              spacing "fn spacing\(self"
 check python  bindings/python/kaya/__init__.py    spacing "def spacing\(self, gap\)"
 check go      bindings/go/app.go                  spacing "func \(w Widget\) Spacing\("
 check csharp  bindings/csharp/KayaApp.cs          spacing "public void SetSpacing\("
@@ -96,6 +96,16 @@ check java    bindings/java/dev/kaya/KayaApp.java spacing "public Widget spacing
 check swift   bindings/swift/KayaApp.swift        spacing "func setSpacing\("
 check haskell bindings/haskell/KayaApp.hs         spacing "Spacing :: Double -> Attr"
 check ocaml   bindings/ocaml/kaya_app.ml          spacing "let row \?grow \?spacing "
+
+# The align prop's layer-3 spelling, same rule again.
+check rust    crates/kaya/src/app.rs              align "fn align\\(self"
+check python  bindings/python/kaya/__init__.py    align "def align\\(self, mode\\)"
+check go      bindings/go/app.go                  align "func \\(w Widget\\) Align\\("
+check csharp  bindings/csharp/KayaApp.cs          align "public void SetAlign\\("
+check java    bindings/java/dev/kaya/KayaApp.java align "public Widget align\\("
+check swift   bindings/swift/KayaApp.swift        align "func setAlign\\("
+check haskell bindings/haskell/KayaApp.hs         align "Align :: Align -> Attr"
+check ocaml   bindings/ocaml/kaya_app.ml          align "let row \\?grow \\?spacing \\?align "
 
 if [ "$status" -ne 0 ]; then
     echo "check-sugar-surface: FAIL"

@@ -33,6 +33,21 @@ import java.util.function.Consumer;
  * </ul>
  */
 public final class KayaApp {
+    /**
+     * A container's cross-axis child placement (the align spec enum;
+     * wire values pinned by the generated KayaWire constants).
+     * Baseline is rows-only — the scene rejects it on columns.
+     */
+    public enum Align {
+        START(0), CENTER(1), END(2), STRETCH(3), BASELINE(4);
+
+        final long wire;
+
+        Align(long wire) {
+            this.wire = wire;
+        }
+    }
+
     private long signals, widgets, collections, nodes;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
@@ -192,6 +207,22 @@ public final class KayaApp {
                     + " — use Tx.setSpacing inside a live transaction");
             }
             tx.setSpacing(this, gap);
+            return this;
+        }
+
+        /**
+         * This container's cross-axis child placement at construction
+         * — the declarative chain:
+         * tx.row(() -> {...}).align(Align.BASELINE). Same transaction
+         * discipline as grow.
+         */
+        public Widget align(Align align) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: align on a widget outside its build transaction"
+                    + " — use Tx.setAlign inside a live transaction");
+            }
+            tx.setAlign(this, align);
             return this;
         }
     }
@@ -519,6 +550,15 @@ public final class KayaApp {
          */
         public void setSpacing(Widget w, double gap) {
             records.add(KayaWire.txSetSpacing(w.id, gap));
+        }
+
+        /**
+         * A container's cross-axis child placement. Containers only;
+         * baseline is rows-only — the scene rejects misuse at the
+         * root.
+         */
+        public void setAlign(Widget w, Align align) {
+            records.add(KayaWire.txSetAlign(w.id, align.wire));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {

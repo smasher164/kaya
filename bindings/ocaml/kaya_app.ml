@@ -292,6 +292,22 @@ let set_grow (Widget id) weight tx = emit tx (Kaya_wire.tx_set_grow id weight)
    else. [set_spacing] is the dynamic path; the declarative spelling
    is the [~spacing] labeled argument on the container. *)
 let set_spacing (Widget id) gap tx = emit tx (Kaya_wire.tx_set_spacing id gap)
+
+(* A container's cross-axis child placement (the align spec enum; the
+   normalized default is [Start]). Containers only; [Baseline] is
+   rows-only — the scene rejects misuse at the root. [set_align] is
+   the dynamic path; the declarative spelling is the [~align] labeled
+   argument on the container. *)
+type align = Start | Center | End | Stretch | Baseline
+
+let align_wire = function
+  | Start -> 0L
+  | Center -> 1L
+  | End -> 2L
+  | Stretch -> 3L
+  | Baseline -> 4L
+
+let set_align (Widget id) a tx = emit tx (Kaya_wire.tx_set_align id (align_wire a))
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)
@@ -419,19 +435,20 @@ let image ?grow ?source ?bind () tx =
    Construction props are labeled optional arguments, the lablgtk
    idiom: [~grow] weights the container within ITS parent, [~spacing]
    sets its own inter-child gap. *)
-let container ?grow ?spacing kind children tx =
+let container ?grow ?spacing ?align kind children tx =
   let handles = List.map (fun child -> child tx) children in
   let parent = widget kind tx in
   Option.iter (fun g -> set_grow parent g tx) grow;
   Option.iter (fun s -> set_spacing parent s tx) spacing;
+  Option.iter (fun a -> set_align parent a tx) align;
   List.iter (fun child -> add_child parent child tx) handles;
   parent
 
-let column ?grow ?spacing children tx =
-  container ?grow ?spacing Kaya_wire.kind_column children tx
+let column ?grow ?spacing ?align children tx =
+  container ?grow ?spacing ?align Kaya_wire.kind_column children tx
 
-let row ?grow ?spacing children tx =
-  container ?grow ?spacing Kaya_wire.kind_row children tx
+let row ?grow ?spacing ?align children tx =
+  container ?grow ?spacing ?align Kaya_wire.kind_row children tx
 
 
 let collection tx =

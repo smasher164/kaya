@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x420c5722bf6d356e
+let kayaSpecHash: UInt64 = 0xf1448ef515751f08
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -50,7 +50,15 @@ private let propMax: UInt32 = 5
 private let propSource: UInt32 = 6
 private let propGrow: UInt32 = 7
 private let propSpacing: UInt32 = 8
+private let propAlign: UInt32 = 9
+// The align enum's wire values (spec enum "align").
+private let alignStart: Int64 = 0
+private let alignCenter: Int64 = 1
+private let alignEnd: Int64 = 2
+private let alignStretch: Int64 = 3
+private let alignBaseline: Int64 = 4
 private let valueBool: UInt32 = 1
+private let valueI64: UInt32 = 2
 private let valueF64: UInt32 = 3
 private let valueStr: UInt32 = 4
 private let valueBlob: UInt32 = 5
@@ -83,6 +91,10 @@ final class KayaNode: Identifiable {
     /// This container's inter-child gap on its main axis (containers
     /// only; the normalized default is 8). See Prop::Spacing.
     var spacing = 8.0
+    /// This container's cross-axis child placement (containers only;
+    /// wire values of the align spec enum; 0 = start, the normalized
+    /// default). See Prop::Align.
+    var align: Int64 = 0
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -261,6 +273,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propSpacing, valueF64):
                     kayaScene.nodes[id]!.spacing =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propAlign, valueI64):
+                    kayaScene.nodes[id]!.align =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -555,6 +570,59 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("root hugs (\(hug))")
                 }
+            case "expect_aligned":
+                // Classified from recorded geometry (cross rects in the
+                // container's named space; baseline = child top + its
+                // font-metric offset), never from the model's align
+                // field — a backend that ignored the write must fail.
+                let want = kayaQuoted(Array(parts[2...]))
+                let got = DispatchQueue.main.sync { () -> String? in
+                    let isRow = parts[1].hasPrefix("row")
+                    guard
+                        let container = kayaTarget(
+                            parts[1], isRow ? "row" : "column",
+                            isRow ? kayaScene.rows : kayaScene.columns)
+                    else { return nil }
+                    guard let inner = kayaContainerCross[container.id], inner > 0 else {
+                        return "no container layout recorded"
+                    }
+                    var rects: [(Double, Double)] = []
+                    var baselines: [Double] = []
+                    for child in container.children {
+                        guard let r = kayaCrossRects[child.id] else { continue }
+                        rects.append(r)
+                        if isRow, let b = kayaBaselineOffsets[child.id] {
+                            baselines.append(r.0 + b)
+                        }
+                    }
+                    if rects.isEmpty { return "no children" }
+                    // Multi-match is ambiguity, and ambiguity fails
+                    // loudly — a first-match answer lets an
+                    // unseparated scene pass while proving nothing.
+                    var matches: [String] = []
+                    if rects.allSatisfy({ abs($0.1 - inner) <= 2 }) { matches.append("stretch") }
+                    if rects.allSatisfy({ abs($0.0) <= 2 }) { matches.append("start") }
+                    if rects.allSatisfy({ abs((2 * $0.0 + $0.1) - inner) <= 4 }) {
+                        matches.append("center")
+                    }
+                    if rects.allSatisfy({ abs(($0.0 + $0.1) - inner) <= 2 }) { matches.append("end") }
+                    if isRow, baselines.count >= 2,
+                        baselines.allSatisfy({ abs($0 - baselines[0]) <= 2 })
+                    {
+                        matches.append("baseline")
+                    }
+                    if matches.count == 1 { return matches[0] }
+                    if matches.isEmpty { return "mixed (cross rects \(rects) in \(inner)pt)" }
+                    return "ambiguous (\(matches.joined(separator: "|")))"
+                }
+                switch got {
+                case nil:
+                    failures.append("no such target \(parts[1])")
+                case want?:
+                    observed.append("\(parts[1]) aligns \(want)")
+                case let other?:
+                    failures.append("\(parts[1]) aligns \"\(other)\", wanted \"\(want)\"")
+                }
             case "expect_fills":
                 // The container's children span its content box — the
                 // leftover-consumption half of the grow contract, which
@@ -651,6 +719,42 @@ private struct KayaTrackReader: View {
 /// layout pass. Main-actor only.
 var kayaContainerExtents: [UInt64: Double] = [:]
 
+/// Each container's CROSS-axis extent, and each child's cross-axis
+/// (start, extent) in its container's named coordinate space — what
+/// `expect_aligned` classifies from. Baseline offsets are the
+/// distance from a text child's top to its first baseline, recorded
+/// through an identity alignmentGuide hook: that value is a font
+/// metric for single-line text, invariant across speculative layout
+/// passes, so the recording trap does not apply.
+var kayaContainerCross: [UInt64: Double] = [:]
+var kayaCrossRects: [UInt64: (Double, Double)] = [:]
+var kayaBaselineOffsets: [UInt64: Double] = [:]
+
+/// Records one child's cross rect in the enclosing container's named
+/// space (the reader rides the CHILD, inside the track frame, so it
+/// sees the aligned box, not the track).
+private struct KayaCellReader: View {
+    let id: UInt64
+    let parent: UInt64
+    let vertical: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .named("kaya-box-\(parent)"))
+            Color.clear
+                .onAppear { record(frame) }
+                .onChange(of: frame) { _, f in record(f) }
+        }
+    }
+
+    private func record(_ frame: CGRect) {
+        kayaCrossRects[id] =
+            vertical
+            ? (Double(frame.minX), Double(frame.width))
+            : (Double(frame.minY), Double(frame.height))
+    }
+}
+
 /// The container-extent sibling of KayaTrackReader: a background
 /// reader on the container view itself (either branch — flex or
 /// stock stack), recording its rendered main-axis extent.
@@ -668,6 +772,7 @@ private struct KayaBoxReader: View {
 
     private func record(_ size: CGSize) {
         kayaContainerExtents[id] = Double(vertical ? size.height : size.width)
+        kayaContainerCross[id] = Double(vertical ? size.width : size.height)
     }
 }
 
@@ -790,6 +895,42 @@ struct KayaFlex: Layout {
     }
 }
 
+/// The align enum onto SwiftUI's stack alignments. Baseline maps only
+/// on rows (the scene core rejects it on columns); a flex row renders
+/// baseline as firstTextBaseline placement inside each track frame.
+func kayaColumnAlignment(_ mode: Int64) -> HorizontalAlignment {
+    switch mode {
+    case alignCenter: return .center
+    case alignEnd: return .trailing
+    default: return .leading
+    }
+}
+
+func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
+    switch mode {
+    case alignCenter: return .center
+    case alignEnd: return .bottom
+    case alignBaseline: return .firstTextBaseline
+    default: return .top
+    }
+}
+
+func kayaColumnFrameAlignment(_ mode: Int64) -> Alignment {
+    switch mode {
+    case alignCenter: return .top
+    case alignEnd: return .topTrailing
+    default: return .topLeading
+    }
+}
+
+func kayaRowFrameAlignment(_ mode: Int64) -> Alignment {
+    switch mode {
+    case alignCenter: return .leading
+    case alignEnd: return .bottomLeading
+    default: return .topLeading
+    }
+}
+
 struct KayaRender: View {
     let node: KayaNode
     /// The mounted root fills its window; nested containers do not.
@@ -819,27 +960,44 @@ struct KayaRender: View {
                         ForEach(node.children) { child in
                             // The invisible frame accepts the track KayaFlex
                             // proposes; the reader on it records the track's
-                            // geometry (see KayaTrackReader).
+                            // geometry (see KayaTrackReader). Its alignment
+                            // is the container's cross-axis placement.
                             KayaRender(node: child)
+                                .background(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                                )
+                                .frame(
+                                    maxWidth: node.align == alignStretch ? .infinity : nil,
+                                    alignment: kayaColumnFrameAlignment(node.align)
+                                )
                                 .frame(
                                     maxWidth: .infinity, maxHeight: .infinity,
-                                    alignment: .topLeading
+                                    alignment: kayaColumnFrameAlignment(node.align)
                                 )
                                 .background(KayaTrackReader(id: child.id, vertical: true))
                         }
                     }
                 } else {
-                    VStack(alignment: .leading, spacing: node.spacing) {
+                    VStack(alignment: kayaColumnAlignment(node.align), spacing: node.spacing) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
+                                .background(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                                )
+                                .frame(maxWidth: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }
             }
+            .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: true))
         case kindButton:
             Button(node.text) {
                 KayaHost.emit(node.tag)
+            }
+            .alignmentGuide(.top) { d in
+                kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                return d[.top]
             }
         case kindRow:
             // Normalized: 8-unit spacing, top (cross-axis start).
@@ -849,24 +1007,40 @@ struct KayaRender: View {
                     KayaFlex(vertical: false, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
+                                .background(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                                )
+                                .frame(
+                                    maxHeight: node.align == alignStretch ? .infinity : nil,
+                                    alignment: kayaRowFrameAlignment(node.align)
+                                )
                                 .frame(
                                     maxWidth: .infinity, maxHeight: .infinity,
-                                    alignment: .topLeading
+                                    alignment: kayaRowFrameAlignment(node.align)
                                 )
                                 .background(KayaTrackReader(id: child.id, vertical: false))
                         }
                     }
                 } else {
-                    HStack(alignment: .top, spacing: node.spacing) {
+                    HStack(alignment: kayaRowAlignment(node.align), spacing: node.spacing) {
                         ForEach(node.children) { child in
                             KayaRender(node: child)
+                                .background(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                                )
+                                .frame(maxHeight: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }
             }
+            .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: false))
         case kindLabel:
             Text(node.text)
+                .alignmentGuide(.top) { d in
+                    kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                    return d[.top]
+                }
         case kindCheckbox:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (SwiftUI needs the binding), and
@@ -885,6 +1059,10 @@ struct KayaRender: View {
             #if os(macOS)
                 .toggleStyle(.checkbox)
             #endif
+            .alignmentGuide(.top) { d in
+                kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                return d[.top]
+            }
         case kindSlider:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the slider's position (SwiftUI needs the
