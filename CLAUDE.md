@@ -79,8 +79,9 @@ in docs/deferred.md.
    check-targets structurally cannot (gtk-sys needs the distro's
    pkg-config world). Run it after any gtk.rs change — a green
    check-targets does NOT mean every backend compiles.
-3. `tools/validate-mac.sh` — every scene × every language × AppKit and
-   SwiftUI (opens windows briefly; needs a logged-in GUI session).
+3. `tools/validate-mac.sh` — every scene × every language on the
+   SwiftUI interpreter, the one macOS backend (opens windows briefly;
+   needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
    `tools/validate-linux.sh` (docker; GTK on X11+Wayland),
    `tools/ios/run-sim.sh`, `tools/android/run-emulator.sh`,
@@ -90,9 +91,9 @@ in docs/deferred.md.
 
 ## Sequencing pattern for features
 
-Depth then breadth: land the protocol + one backend (AppKit) + one
-binding (Rust) + the scene, get it green on mac, then fan out backends
-and bindings in parallel, then run the full matrix. Between-phase gates
+Depth then breadth: land the protocol + one backend (SwiftUI on mac)
++ one binding (Rust) + the scene, get it green on mac, then fan out
+backends and bindings in parallel, then run the full matrix. Between-phase gates
 keep half-landed states honest — some gates (check-verbs,
 check-sugar-surface) are DESIGNED to stay red mid-milestone, holding the
 remaining work open; that is not a regression.

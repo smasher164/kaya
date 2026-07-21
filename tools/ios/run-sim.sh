@@ -16,7 +16,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build, install, and self-test the milestone scene in the iOS Simulator.
-# Usage: tools/ios/run-sim.sh [rust|swift|rust-swiftui|all]
+# Usage: tools/ios/run-sim.sh [swift|rust-swiftui|all]
 #
 # rust         - the kaya example app (UIKit backend)
 # swift        - Swift over the C ABI function floor (UIKit backend)
@@ -370,19 +370,6 @@ rec_finish() {
     printf '%s\n' "$1" >"$REC_DIR/leg.log"
 }
 
-run_bundle_on() {
-    local udid="$1" slot="$2" app="$3" bundle_id="$4" name="$5" script="${6:-1}"
-    xcrun simctl install "$udid" "$app"
-    rec_start "$name" "$slot"
-    local out
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST="$script" timeout 120 \
-        xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
-    printf '%s\n' "$out"
-    rec_finish "$out"
-    xcrun simctl io "$udid" screenshot "$ROOT/target/ios-shot-$name.png" >/dev/null 2>&1 || true
-    grep -q "KAYA_SELFTEST: OK" <<<"$out"
-}
-
 # Rust entrypoint + SwiftUI backend legs: install the bundle (with the
 # embedded dylib) on the claimed simulator and launch with the scene
 # script from the environment.
@@ -395,7 +382,6 @@ run_swiftui_on() {
     local out
     out=$(SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")" \
-        SIMCTL_CHILD_KAYA_BACKEND=swiftui \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
     printf '%s\n' "$out"
@@ -499,38 +485,32 @@ timing boot
 
 SDKROOT_SIM=$(xcrun -sdk iphonesimulator --show-sdk-path)
 
-if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim \
-        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
-        --example grow --example layout
-    timing build-rust
-    APP=$(make_bundle milestone2 dev.kaya.milestone2 "$TARGET_DIR/examples/milestone2")
-    queue_leg run_bundle_on rust "$APP" dev.kaya.milestone2 rust
-    APP=$(make_bundle entry dev.kaya.entry "$TARGET_DIR/examples/entry")
-    queue_leg run_bundle_on entry-rust "$APP" dev.kaya.entry entry-rust entry
-    APP=$(make_bundle gallery dev.kaya.gallery "$TARGET_DIR/examples/gallery")
-    queue_leg run_bundle_on gallery-rust "$APP" dev.kaya.gallery gallery-rust gallery
-    APP=$(make_bundle todos dev.kaya.todos "$TARGET_DIR/examples/todos")
-    queue_leg run_bundle_on todos-rust "$APP" dev.kaya.todos todos-rust todos
-    APP=$(make_bundle reorder dev.kaya.reorder "$TARGET_DIR/examples/reorder")
-    queue_leg run_bundle_on reorder-rust "$APP" dev.kaya.reorder reorder-rust reorder
-    APP=$(make_bundle feed dev.kaya.feed "$TARGET_DIR/examples/feed")
-    queue_leg run_bundle_on feed-rust "$APP" dev.kaya.feed feed-rust feed
-    # The layout contract on UIKit: grow asserted as shares, plus the
-    # observation scene the recordings are compared from.
-    APP=$(make_bundle grow dev.kaya.grow "$TARGET_DIR/examples/grow")
-    queue_leg run_bundle_on grow-rust "$APP" dev.kaya.grow grow-rust grow
-    APP=$(make_bundle layout dev.kaya.layout "$TARGET_DIR/examples/layout")
-    queue_leg run_bundle_on layout-rust "$APP" dev.kaya.layout layout-rust layout
-    drain
-    timing legs-rust
-fi
+# Clean slate: bundles are derived artifacts with no history worth
+# keeping, and a stale main.swift once put the LAYOUT guest inside the
+# milestone2 bundle (same class as the stale-stills trap; the leg
+# failed only because the scripts happened to differ).
+rm -rf "$BUNDLES"
+
+# The one iOS backend is the SwiftUI interpreter: every bundle embeds
+# its dylib, whatever language the guest is written in. Always built
+# fresh — a stale interpreter under a new guest is the stale-artifact
+# class.
+build_swiftui_dylib() {
+    mkdir -p "$BUNDLES"
+    xcrun -sdk iphonesimulator swiftc \
+        -emit-library \
+        -target "arm64-apple-ios17.0-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \
+        -framework UIKit -framework Foundation \
+        -o "$BUNDLES/libkaya_swiftui_ios.dylib"
+}
 
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --lib
-    mkdir -p "$BUNDLES"
-    # With more than one input file, swiftc only allows top-level code in
-    # a file named main.swift; the example is that file.
+    build_swiftui_dylib
+    # With more than one input file, swiftc only allows top-level code
+    # in a file named main.swift; the example is that file.
     cp guests/swift/milestone2.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
         -target "arm64-apple-ios$IOS_MIN-simulator" \
@@ -541,7 +521,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/milestone2swift-bin"
     APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
-    queue_leg run_bundle_on swift "$APP" dev.kaya.milestone2swift swift
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
 
     cp guests/swift/entry.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -553,7 +534,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/entryswift-bin"
     APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
-    queue_leg run_bundle_on entry-swift "$APP" dev.kaya.entryswift entry-swift entry
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on entry-swift "$APP" dev.kaya.entryswift entry-swift entry entry
 
     cp guests/swift/gallery.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -565,7 +547,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/galleryswift-bin"
     APP=$(make_bundle galleryswift dev.kaya.galleryswift "$BUNDLES/galleryswift-bin")
-    queue_leg run_bundle_on gallery-swift "$APP" dev.kaya.galleryswift gallery-swift gallery
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on gallery-swift "$APP" dev.kaya.galleryswift gallery-swift gallery gallery
 
     cp guests/swift/todos.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -577,7 +560,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/todosswift-bin"
     APP=$(make_bundle todosswift dev.kaya.todosswift "$BUNDLES/todosswift-bin")
-    queue_leg run_bundle_on todos-swift "$APP" dev.kaya.todosswift todos-swift todos
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on todos-swift "$APP" dev.kaya.todosswift todos-swift todos todos
 
     cp guests/swift/reorder.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -589,7 +573,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/reorderswift-bin"
     APP=$(make_bundle reorderswift dev.kaya.reorderswift "$BUNDLES/reorderswift-bin")
-    queue_leg run_bundle_on reorder-swift "$APP" dev.kaya.reorderswift reorder-swift reorder
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on reorder-swift "$APP" dev.kaya.reorderswift reorder-swift reorder reorder
 
     cp guests/swift/feed.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -601,7 +586,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/feedswift-bin"
     APP=$(make_bundle feedswift dev.kaya.feedswift "$BUNDLES/feedswift-bin")
-    queue_leg run_bundle_on feed-swift "$APP" dev.kaya.feedswift feed-swift feed
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on feed-swift "$APP" dev.kaya.feedswift feed-swift feed feed
 
     # The layout contract through the Swift binding: grow asserted as
     # shares and root-fills, layout observed.
@@ -615,7 +601,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/growswift-bin"
     APP=$(make_bundle growswift dev.kaya.growswift "$BUNDLES/growswift-bin")
-    queue_leg run_bundle_on grow-swift "$APP" dev.kaya.growswift grow-swift grow
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on grow-swift "$APP" dev.kaya.growswift grow-swift grow grow
 
     cp guests/swift/layout.swift "$BUNDLES/main.swift"
     xcrun -sdk iphonesimulator swiftc \
@@ -627,24 +614,18 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         -framework CoreGraphics -framework QuartzCore \
         -o "$BUNDLES/layoutswift-bin"
     APP=$(make_bundle layoutswift dev.kaya.layoutswift "$BUNDLES/layoutswift-bin")
-    queue_leg run_bundle_on layout-swift "$APP" dev.kaya.layoutswift layout-swift layout
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on layout-swift "$APP" dev.kaya.layoutswift layout-swift layout layout
     drain
     timing swift-build+legs
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # Rust entrypoint + SwiftUI backend: the bundle executable is the Rust
-    # example's main; KAYA_BACKEND=swiftui makes kaya::run dlopen the
+    # example's main; kaya::run unconditionally dlopens the
     # SwiftUI dylib embedded in the bundle.
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone2
-    mkdir -p "$BUNDLES"
-    xcrun -sdk iphonesimulator swiftc \
-        -emit-library \
-        -target "arm64-apple-ios17.0-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \
-        -framework UIKit -framework Foundation \
-        -o "$BUNDLES/libkaya_swiftui_ios.dylib"
+    build_swiftui_dylib
     APP=$(make_bundle milestone2rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone2")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on rust-swiftui "$APP" dev.kaya.rustswiftui rust-swiftui 1 milestone2

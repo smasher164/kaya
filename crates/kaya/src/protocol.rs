@@ -437,6 +437,13 @@ pub(crate) enum OccSink {
 }
 
 impl OccSink {
+    // The Rust-native backends (GTK, WinUI) push through this; on the
+    // interpreter platforms occurrences enter through the C API's
+    // typed emit entries instead, so the method is dead there.
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "ios", target_os = "android"),
+        allow(dead_code)
+    )]
     pub(crate) fn send(&self, occurrence: Occurrence) {
         match self {
             OccSink::Mpsc(tx) => {

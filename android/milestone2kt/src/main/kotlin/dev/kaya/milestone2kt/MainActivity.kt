@@ -1,11 +1,12 @@
 package dev.kaya.milestone2kt
 
-import android.app.Activity
 import android.os.Bundle
 import android.system.Os
+import androidx.activity.ComponentActivity
+import dev.kaya.KayaCompose
 import dev.kaya.KayaRing
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -26,6 +27,11 @@ class MainActivity : Activity() {
         // scene selector (see the rust example's android shim).
         System.loadLibrary("kaya")
         KayaRing.attach(this)
+        // The JVM guest presents through the same Compose interpreter
+        // as every Android app: attach registered the pump natives and
+        // left the core ends for it; occurrences reach this process
+        // through the ring.
+        KayaCompose.mount(this)
         val scene = when (System.getenv("KAYA_SELFTEST")) {
             "entry" -> Entry::app
             "gallery" -> Gallery::app

@@ -17,7 +17,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 # Build the SwiftUI backend dylib (macOS): the Swift presentation layer
 # plus the kaya_swiftui_run C entry, loadable by any guest-hosted process
-# via KAYA_BACKEND=swiftui. Run inside the dev shell.
+# as the one Apple backend. Run inside the dev shell.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

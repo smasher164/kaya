@@ -7,7 +7,7 @@
 //! the dynamic linker: hosts may carry kaya statically (a Rust
 //! executable) or load it RTLD_LOCAL (ctypes), so symbol-space coupling
 //! is unreliable, and the vtable pins the one live kaya instance by
-//! construction. Selected with KAYA_BACKEND=swiftui; the dylib is found
+//! construction. The one backend on macOS and iOS; the dylib is found
 //! via KAYA_SWIFTUI_LIB or the default dyld search.
 
 use std::ffi::{CString, c_char, c_int, c_void};
@@ -33,6 +33,12 @@ pub struct KayaHostApi {
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
+    /// The protocol fingerprint (capi::kaya_spec_hash). The dylib
+    /// asserts it against its own baked copy before pumping — the
+    /// stale-artifact guard for the presentation side, which check-verbs
+    /// can only hold at SOURCE level (a stale compiled dylib bypasses
+    /// source gates and would decode wire records with old constants).
+    pub spec_hash: extern "C" fn() -> u64,
 }
 
 unsafe extern "C" {
@@ -66,6 +72,7 @@ pub(crate) fn run() -> i32 {
         emit_toggled: kaya_emit_toggled,
         emit_value_changed: kaya_emit_value_changed,
         blob_data: kaya_blob_data,
+        spec_hash: crate::capi::kaya_spec_hash,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

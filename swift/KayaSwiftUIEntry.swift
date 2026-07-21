@@ -34,6 +34,15 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
 @_cdecl("kaya_swiftui_run")
 public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
     KayaHost.api = api.pointee
+    let host = KayaHost.api.spec_hash()
+    if host != kayaSpecHash {
+        fatalError(
+            "kaya: stale SwiftUI interpreter dylib — its spec hash "
+                + String(format: "%016llx", kayaSpecHash)
+                + " does not match the host core's "
+                + String(format: "%016llx", host)
+                + "; rebuild it (tools/swiftui/build-dylib.sh)")
+    }
     KayaApp.main() // takes over the calling (main) thread; does not return
     return 0
 }

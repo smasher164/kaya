@@ -18,6 +18,13 @@ import SwiftUI
 // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants in
 // kaya.h (imported via the bridging header, but spelled here for use in
 // switch patterns).
+/// The protocol fingerprint this interpreter was written against
+/// (KAYA_SPEC_HASH). Asserted against the host's kaya_spec_hash at
+/// entry: check-verbs holds the SOURCE current, but only a runtime
+/// assert catches a stale COMPILED dylib decoding new wire records
+/// with old constants — the stale-artifact class, presentation side.
+let kayaSpecHash: UInt64 = 0x5a48b5ad11a4cb51
+
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
 private let applyAddChild: UInt16 = 3

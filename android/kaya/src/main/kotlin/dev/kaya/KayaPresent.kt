@@ -32,6 +32,9 @@ object KayaPresent {
      * apply-op records (KAYA_APPLY_*), and return the byte length —
      * 0 when the core has shut down. Use a 64 KiB buffer.
      */
+    /** The core's protocol fingerprint, for the stale-APK assert. */
+    @JvmStatic external fun specHash(): Long
+
     @JvmStatic external fun nextCommands(buffer: ByteArray): Int
 
     /**

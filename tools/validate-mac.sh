@@ -360,103 +360,10 @@ done
 CS_GUEST="$CS_GUEST" tools/bench-encode.sh || exit 1
 timing guest-builds+bench
 
-# All guests against the AppKit backend.
-run rust target/debug/examples/milestone2
-run python python3 guests/python/milestone2.py
-run go target/go-guests/milestone2
-run csharp env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run ocaml env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/milestone2.exe
-run haskell "$(hs_bin milestone2)"
-
-# The entry scene (uncontrolled text field; text arrives as occurrences
-# the app folds into its own state), every language against AppKit. The
-# inner env overrides run()'s KAYA_SELFTEST=1 with the entry script.
-run entry-rust env KAYA_SELFTEST=entry target/debug/examples/entry
-run entry-python env KAYA_SELFTEST=entry python3 guests/python/entry.py
-run entry-go env KAYA_SELFTEST=entry target/go-guests/entry
-run entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/entry.exe
-run entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
-
-# The gallery scene (row + checkbox; toggles arrive as occurrences the
-# app answers with the status signal), every language against AppKit.
-run gallery-rust env KAYA_SELFTEST=gallery target/debug/examples/gallery
-run gallery-python env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
-run gallery-go env KAYA_SELFTEST=gallery target/go-guests/gallery
-run gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/gallery.exe
-run gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
-
-# The todos scene (records + field projection), every language against
-# AppKit.
-run todos-rust env KAYA_SELFTEST=todos target/debug/examples/todos
-run todos-python env KAYA_SELFTEST=todos python3 guests/python/todos.py
-run todos-go env KAYA_SELFTEST=todos target/go-guests/todos
-run todos-csharp env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/todos.exe
-run todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
-
-# The reorder scene (order as collection data; expect_order reads the
-# toolkit's child order), every language against AppKit.
-run reorder-rust env KAYA_SELFTEST=reorder target/debug/examples/reorder
-run reorder-python env KAYA_SELFTEST=reorder python3 guests/python/reorder.py
-run reorder-go env KAYA_SELFTEST=reorder target/go-guests/reorder
-run reorder-csharp env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/reorder.exe
-run reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
-
-# The feed scene (sum-typed elements: per-variant templates, promote =
-# variant-change restamp, match-refined witnessed field writes), every
-# language against AppKit.
-run feed-rust env KAYA_SELFTEST=feed target/debug/examples/feed
-run feed-python env KAYA_SELFTEST=feed python3 guests/python/feed.py
-run feed-go env KAYA_SELFTEST=feed target/go-guests/feed
-run feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/feed.exe
-run feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
-
-# The grow scene (the layout contract: both containers hold nothing
-# but growers, splits read back as shares plus root-fills), every
-# language against AppKit — each guest spelled in its own sugar tier.
-run grow-rust env KAYA_SELFTEST=grow target/debug/examples/grow
-run grow-python env KAYA_SELFTEST=grow python3 guests/python/grow.py
-run grow-go env KAYA_SELFTEST=grow target/go-guests/grow
-run grow-csharp env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/grow.exe
-run grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
-# The layout scene: the cross-backend observation vehicle. It asserts
-# only that the tree built (layout itself is checked by the grow scene's
-# shares), but it is the scene the recordings are compared from, so it
-# has to be a recorded leg on every backend and every language.
-run layout-rust env KAYA_SELFTEST=layout target/debug/examples/layout
-run layout-python env KAYA_SELFTEST=layout python3 guests/python/layout.py
-run layout-go env KAYA_SELFTEST=layout target/go-guests/layout
-run layout-csharp env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    dotnet exec "$CS_GUEST"
-run layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
-    _build/default/guests/ocaml/layout.exe
-run layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
-
-drain
-
-# The same guests against the SwiftUI backend, selected at runtime:
-# identical examples, KAYA_BACKEND=swiftui.
+# Every guest against the SwiftUI backend — the one macOS backend
+# (one backend per platform; AppKit was deleted when the roster was
+# ratified). kaya::run hosts the interpreter dylib unconditionally.
 tools/swiftui/build-dylib.sh >/dev/null
-export KAYA_BACKEND=swiftui
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 # The Swift interpreter reads the scene script from the environment
 # (the Rust backends embed theirs at build time). Comments stripped:
@@ -525,7 +432,7 @@ run feed-ocaml-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libka
 run feed-haskell-swiftui env KAYA_SELFTEST=feed "$(hs_bin feed)"
 
 # The layout and grow scenes against the SwiftUI interpreter — the same
-# examples, KAYA_BACKEND=swiftui. Each scene exports its OWN script:
+# examples on the interpreter. Each scene exports its OWN script:
 # the Rust backends embed theirs at build time, but the interpreter
 # reads KAYA_SELFTEST_SCRIPT from the environment, so a leg that does
 # not set it silently runs the previous group's script against this
@@ -551,7 +458,7 @@ run layout-csharp-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/
 run layout-ocaml-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/layout.exe
 run layout-haskell-swiftui env KAYA_SELFTEST=layout "$(hs_bin layout)"
-unset KAYA_BACKEND KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
+unset KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs
 

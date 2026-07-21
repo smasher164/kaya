@@ -238,6 +238,10 @@ impl OccRing {
         }
     }
 
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "ios", target_os = "android"),
+        allow(dead_code)
+    )]
     pub fn set_shutdown(&self) {
         self.shutdown.store(true, Ordering::Release);
         let _guard = self.waiter.lock().unwrap();

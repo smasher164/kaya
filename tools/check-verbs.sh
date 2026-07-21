@@ -77,9 +77,23 @@ for const, value in rows:
     if not re.search(rf"\b{const}\b\s*(?::\s*\w+\s*)?=\s*{value}\b", kotlin):
         fail(f"{const} = {value}: expected `{const} = {value}` in KayaCompose.kt")
 
+# --- The spec hash: the one constant whose staleness a runtime assert
+# --- must also hold (a stale compiled dylib/APK bypasses source gates),
+# --- but the SOURCE copy is pinned here like every other constant.
+wire_h = open("bindings/c/kaya_wire.h").read()
+m = re.search(r"#define KAYA_SPEC_HASH 0x([0-9a-fA-F]+)ULL", wire_h)
+if not m:
+    fail("KAYA_SPEC_HASH not found in bindings/c/kaya_wire.h — the gate itself broke")
+else:
+    h = m.group(1).lower()
+    if not re.search(rf"let kayaSpecHash: UInt64 = 0x{h}\b", swift):
+        fail(f"spec hash 0x{h}: expected `let kayaSpecHash: UInt64 = 0x{h}` in KayaSwiftUI.swift")
+    if not re.search(rf"SPEC_HASH = 0x{h}L\b", kotlin):
+        fail(f"spec hash 0x{h}: expected `SPEC_HASH = 0x{h}L` in KayaCompose.kt")
+
 if failures:
     for f in failures:
         print(f"check-verbs: {f}", file=sys.stderr)
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants against 2 interpreters)")
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + spec hash against 2 interpreters)")
 EOF

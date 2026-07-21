@@ -16,14 +16,14 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build, install, and self-test the milestone scene in the Android emulator.
-# Usage: tools/android/run-emulator.sh [rust|jvm|compose|all]
+# Usage: tools/android/run-emulator.sh [compose|jvm|all]
 #
 # rust    - the milestone-0 app logic as a Rust cdylib behind the JNI
 #           entry (android.widget backend driven over JNI)
 # jvm     - the JVM app itself as the guest: Java app logic over the
 #           direct ring tier (Unsafe fenced access on raw addresses)
-# compose - the rust app with the Compose backend selected at runtime
-#           (same APK, KAYA_BACKEND=compose)
+# compose - the rust app on the Compose interpreter (the one Android
+#           backend)
 #
 # Run inside the dev shell (direnv or `nix develop`); the SDK, emulator,
 # NDK, JDK, and Gradle all come from the flake. stdout is invisible to an
@@ -259,42 +259,11 @@ run_apk_on() {
     [ "$failed" = 0 ]
 }
 
-if [ "$SUITE" = rust ] || [ "$SUITE" = all ]; then
-    JNILIBS="$ROOT/android/milestone2/src/main/jniLibs/arm64-v8a"
-    mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --example milestone2_android
-    cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone2:assembleDebug)
-    timing build-rust
-    run_apk rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity 1
-    run_apk entry-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity entry
-    run_apk gallery-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity gallery
-    run_apk todos-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity todos
-    run_apk reorder-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity reorder
-    run_apk feed-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity feed
-    # The layout contract on the Views backend: grow asserted as shares,
-    # plus the observation scene the recordings are compared from.
-    run_apk grow-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity grow
-    run_apk layout-rust \
-        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
-        dev.kaya.milestone2/.MainActivity layout
-    drain
-    timing legs-rust
-fi
+# The Kotlin interpreter reads the scene script from the environment
+# (via the KAYA_* intent-extra mapping). Intent extras cannot carry
+# newlines through the shell, so comments are stripped and lines fold
+# into `;` — the grammar's newline stand-in.
+scene_script() { grep -v '^#' "$ROOT/tools/scenes/$1.steps" | tr '\n' ';'; }
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # Identical app to the rust suite; the backend is a runtime choice.
@@ -303,50 +272,37 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     cargo ndk -t arm64-v8a build --example milestone2_android
     cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
     (cd android && gradle --console=plain -q :milestone2:assembleDebug)
-    # The Kotlin interpreter reads the scene script from the
-    # environment (via the KAYA_* intent-extra mapping). Intent extras
-    # cannot carry newlines through the shell, so comments are stripped
-    # and lines fold into `;` — the grammar's newline stand-in.
-    scene_script() { grep -v '^#' "$ROOT/tools/scenes/$1.steps" | tr '\n' ';'; }
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity 1 \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
     run_apk entry-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity entry \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script entry)'"
     run_apk gallery-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity gallery \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script gallery)'"
     run_apk todos-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity todos \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
     run_apk reorder-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity reorder \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
     run_apk feed-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity feed \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script feed)'"
     run_apk grow-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity grow \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
     run_apk layout-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity layout \
-        --es KAYA_BACKEND compose \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
     drain
     timing legs-compose
@@ -361,30 +317,38 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     timing build-jvm
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity 1
+        dev.kaya.milestone2kt/.MainActivity 1 \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
     run_apk entry-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity entry
+        dev.kaya.milestone2kt/.MainActivity entry \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script entry)'"
     run_apk gallery-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity gallery
+        dev.kaya.milestone2kt/.MainActivity gallery \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script gallery)'"
     run_apk todos-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity todos
+        dev.kaya.milestone2kt/.MainActivity todos \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
     run_apk reorder-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity reorder
+        dev.kaya.milestone2kt/.MainActivity reorder \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
     run_apk feed-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity feed
+        dev.kaya.milestone2kt/.MainActivity feed \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script feed)'"
     # The layout contract through the JVM binding: grow asserted as
     # shares and root-fills, layout observed.
     run_apk grow-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity grow
+        dev.kaya.milestone2kt/.MainActivity grow \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
     run_apk layout-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
-        dev.kaya.milestone2kt/.MainActivity layout
+        dev.kaya.milestone2kt/.MainActivity layout \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
     drain
     timing legs-jvm
 fi

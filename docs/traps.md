@@ -6,6 +6,11 @@ these the hard way.
 
 ## Platform / toolkit
 
+(Entries about AppKit, UIKit, and Android Views survive their backends
+— the roster is one backend per platform since 2026-07-20 — because
+the same patterns return through interpreter drop-downs
+(NSViewRepresentable/AndroidView) and sibling toolkits.)
+
 - **Layout readback must use the layout rect, never the drawing box.**
   Every toolkit separates the rect it *allocated* to a widget from the
   box it *draws* it in, and only the first is what a layout contract
@@ -334,6 +339,19 @@ these the hard way.
   garbage. Guard: spec hash baked into every wire file, asserted at
   load. Suites rebuild; standalone checks against a stale
   target/debug/libkaya.dylib do not — rebuild first.
+  The PRESENTATION side has the same class and needed its own guard
+  once the interpreters became the only backends on three platforms: a
+  stale compiled libkaya_swiftui.dylib or APK against a new libkaya
+  would decode wire records with old constants, and check-verbs (a
+  SOURCE gate) cannot see compiled staleness. Guard: the host API
+  table carries kaya_spec_hash, both interpreters bake the value
+  (check-verbs pins it against bindings/c/kaya_wire.h) and assert at
+  entry/mount, dying with a "stale interpreter — rebuild" message;
+  proven by poisoned-hash negatives on both platforms. Corollary paid
+  for while proving it: the HOST binary bakes the api table too, so a
+  stale host × new dylib reads garbage where the new table field
+  should be — suites rebuild both together; when testing by hand,
+  rebuild the example before the dylib.
 - **"Apply-op landed everywhere but the observation missed one
   string-matched layer"** hit repeatedly (GTK child_texts, Kotlin
   expect_order). Guards: no-default Stage methods (compile-forced) and

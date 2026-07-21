@@ -273,22 +273,36 @@ fn state() -> &'static CState {
 /// host decides how to terminate its own process.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_run() -> i32 {
-    // Runtime backend selection (interim mechanism: environment). The
-    // SwiftUI backend runs its own presentation pump over this same C
-    // API, so core_ends stays in place for it to take.
-    #[cfg(target_os = "macos")]
-    if std::env::var("KAYA_BACKEND").as_deref() == Ok("swiftui") {
-        return crate::swiftui_host::run();
+    // One backend per platform. On Apple the SwiftUI interpreter runs
+    // its own presentation pump over this same C API, so core_ends
+    // stays in place for it to take.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        crate::swiftui_host::run()
     }
 
-    let (occ_sink, tx_rx) = take_core_ends().expect("kaya_run may only be called once");
-    crate::backend::run_core(occ_sink, tx_rx)
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        let (occ_sink, tx_rx) = take_core_ends().expect("kaya_run may only be called once");
+        crate::backend::run_core(occ_sink, tx_rx)
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        panic!("Android owns the process entry; attach from an Activity instead of kaya_run")
+    }
 }
 
 /// The core's ends of the transport: the ring-backed occurrence sink and
 /// the transaction receiver. Taken once, by whichever entry starts the
 /// core (kaya_run here; KayaRing.attach on Android, where the OS owns
 /// main).
+#[cfg_attr(
+    any(target_os = "macos", target_os = "ios", target_os = "android"),
+    allow(dead_code)
+)] // The interpreter platforms' pump takes core_ends inline in
+// kaya_next_commands; only the Rust-native backends' kaya_run arm
+// takes them here.
 pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Transaction>)> {
     state().core_ends.lock().unwrap().take()
 }

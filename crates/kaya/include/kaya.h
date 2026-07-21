@@ -369,6 +369,14 @@ typedef struct KayaHostApi {
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
+  /**
+   * The protocol fingerprint (capi::kaya_spec_hash). The dylib
+   * asserts it against its own baked copy before pumping — the
+   * stale-artifact guard for the presentation side, which check-verbs
+   * can only hold at SOURCE level (a stale compiled dylib bypasses
+   * source gates and would decode wire records with old constants).
+   */
+  uint64_t (*spec_hash)(void);
 } KayaHostApi;
 
 

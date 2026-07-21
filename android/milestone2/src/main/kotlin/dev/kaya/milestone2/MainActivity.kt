@@ -12,8 +12,8 @@ class MainActivity : ComponentActivity() {
 
         // Map KAYA_* intent extras to environment variables, so the
         // library's env-based switches keep one spelling everywhere:
-        //   am start ... --ez KAYA_SELFTEST true --es KAYA_BACKEND compose
-        // is this platform's KAYA_SELFTEST=1 KAYA_BACKEND=compose ./app.
+        //   am start ... --ez KAYA_SELFTEST true
+        // is this platform's KAYA_SELFTEST=1 ./app.
         intent.extras?.let { extras ->
             for (key in extras.keySet()) {
                 if (key.startsWith("KAYA_")) {
@@ -24,8 +24,9 @@ class MainActivity : ComponentActivity() {
         }
 
         System.loadLibrary("milestone2_android")
-        if (Kaya.attach(this) == Kaya.PRESENT_GUEST) {
-            KayaCompose.mount(this)
-        }
+        // One backend per platform: attach wires the pump and the
+        // Activity mounts the Compose interpreter.
+        Kaya.attach(this)
+        KayaCompose.mount(this)
     }
 }

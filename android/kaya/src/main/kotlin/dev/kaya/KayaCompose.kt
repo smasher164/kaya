@@ -129,6 +129,12 @@ object KayaSceneModel {
 object KayaCompose {
     // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
     // in kaya.h.
+    // The protocol fingerprint this interpreter was written against
+    // (KAYA_SPEC_HASH); asserted against the core at mount. check-verbs
+    // holds the SOURCE current, but only the runtime assert catches a
+    // stale compiled APK against a new libkaya.
+    private const val SPEC_HASH = 0x5a48b5ad11a4cb51L
+
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
     private const val APPLY_ADD_CHILD = 3
@@ -164,6 +170,10 @@ object KayaCompose {
      */
     @JvmStatic
     fun mount(activity: ComponentActivity) {
+        val host = KayaPresent.specHash()
+        check(host == SPEC_HASH) {
+            "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
+        }
         startPump(activity)
         activity.setContent { KayaRoot() }
         if (System.getenv("KAYA_SELFTEST") != null) startSelftest(activity)

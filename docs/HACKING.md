@@ -10,7 +10,7 @@ architecture). This file is the how-to layer: the recipes that repeat.
   codecs), `scene.rs` (the reducer + validation), `capi.rs` (C ABI +
   KAYA_ constants with const-asserts), `app.rs` (the Rust guest API),
   `harness.rs` (the scene-script interpreter + Stage trait), one file
-  per backend (`appkit.rs`, `gtk.rs`, `uikit.rs`, `winui/`,
+  per backend (`gtk.rs`, `winui/`, the SwiftUI/Compose interpreters,
   `android.rs`), `swiftui_host.rs` (the vtable the SwiftUI dylib gets),
   `ring.rs` (the occurrence ring).
 - `swift/KayaSwiftUI.swift`, `android/kaya/.../KayaCompose.kt` — the two
@@ -72,8 +72,9 @@ The slider and image commits are the worked examples. The ~30 touchpoints:
 Interactive widgets additionally follow the occurrence machinery: spec
 `payload:` field, tag bytes at create, per-backend emit through the
 control's own event path (programmatic mutation must re-fire the change
-path on toolkits where it is silent: AppKit, UIKit; it is automatic on
-GTK, WinUI, Android).
+path where the toolkit is silent about it — the SwiftUI/Compose
+interpreters emit from their own bindings; GTK and WinUI fire their
+change paths on programmatic set).
 
 ## The blob channel (bulk payloads)
 
@@ -107,7 +108,7 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
 - Scene selection everywhere: KAYA_SELFTEST=<scene>; backend selection:
-  KAYA_BACKEND=swiftui/compose with the respective dylib env vars — see
+  the SwiftUI/Compose interpreters with their dylib env vars — see
   validate-mac.sh for the exact patterns.
 
 ## Layout forensics (when a share assertion fails)

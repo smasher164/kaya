@@ -149,6 +149,23 @@ Landed history lives in git; this file only carries what is still open.
   analyzers (Roslyn for C# is the plausible one; go/analysis; ErrorProne
   — never load-bearing, the runtime guards are the floor).
 
+- ~~Backend roster: two backends on Apple and Android~~ DONE
+  (2026-07-20, ratified by Akhil): **one backend per platform** —
+  SwiftUI interpreter (macOS + iOS, one file), Compose (Android), GTK4
+  (Linux), WinUI3 (Windows). AppKit, UIKit, and the Android Views
+  backend are deleted (~3,900 lines: appkit.rs, uikit.rs, the Views
+  interpreter in android.rs, five Kotlin listener shims);
+  KAYA_BACKEND is gone — there is nothing to select. The JVM ring
+  guests now present through Compose (KayaRing.attach registers the
+  pump natives and the Activity mounts KayaCompose; transactions flow
+  guest -> kaya_submit -> the same channel the pump drains, and
+  occurrences fall through to the ring when no presentation sink is
+  set). The Rust-side harness is cfg'd to the Rust-native backends
+  (GTK, WinUI) plus tests. Capability-gap policy recorded in DESIGN's
+  roster bullet: interpreter-internal per-widget drop-downs via
+  Representable/AndroidView, intersection-first, each recorded with a
+  conformance scene.
+
 ## Protocol / core
 
 - **A stable identifier prop (`test_id`, doubling as the accessibility
