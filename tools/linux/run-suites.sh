@@ -25,7 +25,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align --example window || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align --example window --example panels || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -266,6 +266,11 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" window-ocaml env KAYA_SELFTEST=window KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/window.exe
     run "$proto" window-haskell env KAYA_SELFTEST=window "$(hs_bin window)"
+    # The panels scene: the auxiliary-window grammar (rust depth; the
+    # language sweep rides the phase's next slice).
+    run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
+    run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
+        python3 guests/python/panels.py
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
     # too — in every language.

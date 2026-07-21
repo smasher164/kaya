@@ -128,6 +128,15 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("title", 1, PropKind::Str),
     ("width", 2, PropKind::F64),
     ("height", 3, PropKind::F64),
+    // Who owns the chrome close. False (the default): native — an aux
+    // window just closes (window_closed reports it), and closing the
+    // primary exits the app. True: the close button EMITS
+    // close_requested and nothing closes until the app answers with
+    // destroy_window — the veto class, armed by opt-in, the way the
+    // platforms themselves gate it (windowShouldClose delegate
+    // presence). Inert on mobile by physics: no chrome close, and
+    // back is not close (DESIGN.md, Presentation contexts).
+    ("veto_close", 4, PropKind::Bool),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -401,6 +410,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — \
                   windows are not collection elements.",
         },
+        Record {
+            kind: 19,
+            name: "create_window",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "Create an auxiliary window (capability-gated: a host \
+                  without KAYA_CAP_AUX_WINDOWS rejects it at the root). \
+                  Materializes hidden; mounting a root presents it. Ids are \
+                  guest-allocated, below the internal bit; 0 is the primary \
+                  and always exists.",
+        },
+        Record {
+            kind: 20,
+            name: "destroy_window",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "Close and forget an auxiliary window: the native window \
+                  and its views are released wholesale, and the scene \
+                  forgets the mounted tree (widget ids are never reused, so \
+                  stale entries are inert). The primary is not destroyable: \
+                  the process owns it.",
+        },
     ],
     apply: &[
         Record {
@@ -488,6 +519,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Set a window property to an already-resolved value.",
         },
+        Record {
+            kind: 9,
+            name: "create_window",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "Create the native window, hidden until a mount presents it.",
+        },
+        Record {
+            kind: 10,
+            name: "destroy_window",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "Close and release the native window.",
+        },
     ],
     occurrence: &[
         Record {
@@ -542,6 +587,25 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   one F64 value. One occurrence per change, the entry's \
                   per-edit granularity; same ownership stance.",
         },
+        Record {
+            kind: 5,
+            name: "close_requested",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "The user asked a veto_close window to close. Nothing has \
+                  closed; the app answers with destroy_window if it agrees. \
+                  No response is required and there are no correlation ids \
+                  — the request/confirm veto class (see DESIGN.md).",
+        },
+        Record {
+            kind: 6,
+            name: "window_closed",
+            fields: &[f("window_id", FieldTy::U64)],
+            payload: None,
+            doc: "A non-veto auxiliary window was closed by its chrome. \
+                  Informational and post-fact: the native window is gone \
+                  and the core has already pruned its tree.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -577,7 +641,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "wprop",
-            variants: &[("title", 1), ("width", 2), ("height", 3)],
+            variants: &[
+                ("title", 1),
+                ("width", 2),
+                ("height", 3),
+                ("veto_close", 4),
+            ],
         },
         EnumSpec {
             name: "align",
@@ -738,6 +807,8 @@ mod tests {
             ("variant_case", wire::TX_VARIANT_CASE),
             ("widget_command", wire::TX_WIDGET_COMMAND),
             ("set_window_prop", wire::TX_SET_WINDOW_PROP),
+            ("create_window", wire::TX_CREATE_WINDOW),
+            ("destroy_window", wire::TX_DESTROY_WINDOW),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -759,11 +830,16 @@ mod tests {
                 ("destroy", wire::APPLY_DESTROY),
                 ("command", wire::APPLY_COMMAND),
                 ("set_window_prop", wire::APPLY_SET_WINDOW_PROP),
+                ("create_window", wire::APPLY_CREATE_WINDOW),
+                ("destroy_window", wire::APPLY_DESTROY_WINDOW),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
         assert_eq!(SPEC.occurrence[1].kind, crate::ring::REC_TEXT_CHANGED);
         assert_eq!(SPEC.occurrence[2].kind, crate::ring::REC_TOGGLED);
+        assert_eq!(SPEC.occurrence[3].kind, crate::ring::REC_VALUE_CHANGED);
+        assert_eq!(SPEC.occurrence[4].kind, crate::ring::REC_CLOSE_REQUESTED);
+        assert_eq!(SPEC.occurrence[5].kind, crate::ring::REC_WINDOW_CLOSED);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -823,6 +899,7 @@ mod tests {
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
+                    ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
                     ("align", "start") => wire::ALIGN_START,
                     ("align", "center") => wire::ALIGN_CENTER,
                     ("align", "end") => wire::ALIGN_END,

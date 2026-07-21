@@ -215,6 +215,18 @@ Landed history lives in git; this file only carries what is still open.
   across legs) — useless as visual evidence and confusing next to
   real stills. Move the capture to before the final step/exit, or
   drop it and keep the recording pipeline as the visual record.
+- Window-event surfaces in the remaining five languages. The FLOOR
+  is generated everywhere (create/destroy_window helpers and
+  window-parameterized prop setters in all eight wire files), and
+  rust + python carry the full grammar (proxy chains; the
+  `app.aux_window` scope + `on_close_requested`). Before go/csharp/
+  java/swift/ocaml/haskell get event sugar, their generated
+  occurrence PARSERS need the window-shape branch python's has
+  (window lifecycle records carry the window id alone — the
+  click-shaped {id, path_len} read would misparse them); their
+  dispatch loops never receive window occurrences today because only
+  scenes that create windows do. Then per-language aux sugar per the
+  Binding conventions, and panels guests + legs.
 - A modern-stamp SwiftUI leg. The nix shell links every leg binary
   against its pinned SDK (audit 2026-07-21: python3/go/dotnet/ocaml/
   rust 14.4, zulu JDK 11.3), so validate-mac exercises SwiftUI 26's

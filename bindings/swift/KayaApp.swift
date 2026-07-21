@@ -1131,15 +1131,15 @@ final class KayaAppTx {
     /// desktops, the switcher label on iOS, the task label on
     /// Android).
     func windowTitle(_ title: String) {
-        tx.setWindowTitle(title)
+        tx.setWindowTitle(0, title)
     }
 
     /// Request the primary surface's content size in DIP — ADVISORY
     /// on every platform: honored where the window manager permits,
     /// recorded only where the system owns geometry.
     func windowSize(_ width: Double, _ height: Double) {
-        tx.setWindowWidth(width)
-        tx.setWindowHeight(height)
+        tx.setWindowWidth(0, width)
+        tx.setWindowHeight(0, height)
     }
 
     func mount(_ root: KayaWidget) {

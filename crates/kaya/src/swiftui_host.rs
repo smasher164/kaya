@@ -39,6 +39,11 @@ pub struct KayaHostApi {
     /// can only hold at SOURCE level (a stale compiled dylib bypasses
     /// source gates and would decode wire records with old constants).
     pub spec_hash: extern "C" fn() -> u64,
+    /// Window lifecycle emits (slice 2): close_requested for a
+    /// veto_close window's chrome close, window_closed after a
+    /// non-veto auxiliary closed natively.
+    pub emit_close_requested: extern "C" fn(u64),
+    pub emit_window_closed: extern "C" fn(u64),
 }
 
 unsafe extern "C" {
@@ -73,6 +78,8 @@ pub(crate) fn run() -> i32 {
         emit_value_changed: kaya_emit_value_changed,
         blob_data: kaya_blob_data,
         spec_hash: crate::capi::kaya_spec_hash,
+        emit_close_requested: crate::capi::kaya_emit_close_requested,
+        emit_window_closed: crate::capi::kaya_emit_window_closed,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

@@ -73,6 +73,7 @@ for arg in "$@"; do
         grow_rust|grow_python|grow_go|grow_csharp) SUITE="$arg" ;;
         align_rust|align_python|align_go|align_csharp) SUITE="$arg" ;;
         window_rust|window_python|window_go|window_csharp) SUITE="$arg" ;;
+        panels_rust|panels_python) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -115,7 +116,7 @@ echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc \
         --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
-        --example grow --example layout --example align --example window)
+        --example grow --example layout --example align --example window --example panels)
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -159,7 +160,7 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im align.exe 2>nul & taskkill /f /im window.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im align.exe 2>nul & taskkill /f /im window.exe 2>nul & taskkill /f /im panels.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -180,6 +181,7 @@ scp -q \
     "$TARGET/examples/grow.exe" \
     "$TARGET/examples/align.exe" \
     "$TARGET/examples/window.exe" \
+    "$TARGET/examples/panels.exe" \
     "$TARGET/examples/layout.exe" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
@@ -189,6 +191,7 @@ scp -q \
     "$ROOT/guests/python/grow.py" \
     "$ROOT/guests/python/align.py" \
     "$ROOT/guests/python/window.py" \
+    "$ROOT/guests/python/panels.py" \
     "$ROOT/guests/python/layout.py" \
     "$ROOT/guests/python/todos.py" \
     "$ROOT/guests/python/reorder.py" \
@@ -553,6 +556,10 @@ case "$SUITE" in
         run_suite window_python
         run_suite window_go
         run_suite window_csharp
+        # The panels scene: the auxiliary-window grammar (rust depth;
+        # the language sweep rides the next slice of the phase).
+        run_suite panels_rust
+        run_suite panels_python
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

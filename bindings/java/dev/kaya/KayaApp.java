@@ -990,7 +990,7 @@ public final class KayaApp {
          * Android).
          */
         public void windowTitle(String title) {
-            records.add(KayaWire.txSetWindowTitle(title));
+            records.add(KayaWire.txSetWindowTitle(0, title));
         }
 
         /**
@@ -1000,8 +1000,8 @@ public final class KayaApp {
          * geometry.
          */
         public void windowSize(double width, double height) {
-            records.add(KayaWire.txSetWindowWidth(width));
-            records.add(KayaWire.txSetWindowHeight(height));
+            records.add(KayaWire.txSetWindowWidth(0, width));
+            records.add(KayaWire.txSetWindowHeight(0, height));
         }
     }
 

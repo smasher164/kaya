@@ -110,6 +110,16 @@ struct CoreState {
     columns: Vec<Grid>,
     rows: Vec<Grid>,
     window: Window,
+    /// Auxiliary surfaces by kaya window id (the primary is
+    /// `window`); created hidden, presented (Activated) at mount.
+    aux_windows: HashMap<u64, Window>,
+    /// veto_close per window id (primary included; default false).
+    window_veto: HashMap<u64, bool>,
+    /// App-initiated teardown bypasses the chrome-close grammar:
+    /// Window.Close() rides WM_CLOSE, and without this a veto window
+    /// would swallow its own confirmed destruction (and a non-veto
+    /// one would report a spurious window_closed).
+    tearing_down: std::collections::HashSet<u64>,
 }
 
 impl Drop for CoreState {
@@ -809,14 +819,42 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
         }
-        ApplyOp::SetWindowProp { window: _, prop, value } => match (prop, &value) {
-            (WindowProp::Title, Value::Str(title)) => {
-                core.window.SetTitle(&HSTRING::from(&**title))?;
+        ApplyOp::SetWindowProp { window, prop, value } => {
+            let target = winui_window(core, window.0)?;
+            match (prop, &value) {
+                (WindowProp::Title, Value::Str(title)) => {
+                    target.SetTitle(&HSTRING::from(&**title))?;
+                }
+                (WindowProp::Width, Value::F64(v)) => {
+                    resize_request(&target, Some(*v), None)?
+                }
+                (WindowProp::Height, Value::F64(v)) => {
+                    resize_request(&target, None, Some(*v))?
+                }
+                (WindowProp::VetoClose, Value::Bool(on)) => {
+                    core.window_veto.insert(window.0, *on);
+                }
+                (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
             }
-            (WindowProp::Width, Value::F64(v)) => resize_request(core, Some(*v), None)?,
-            (WindowProp::Height, Value::F64(v)) => resize_request(core, None, Some(*v))?,
-            (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
-        },
+        }
+        ApplyOp::CreateWindow { window } => {
+            // Materializes hidden (never Activated until a mount
+            // presents it); the close grammar is installed at birth.
+            let aux = Window::new()?;
+            subclass(&aux, window.0)?;
+            core.aux_windows.insert(window.0, aux);
+        }
+        ApplyOp::DestroyWindow { window } => {
+            core.window_veto.remove(&window.0);
+            core.tearing_down.insert(window.0);
+            if let Some(aux) = core.aux_windows.remove(&window.0) {
+                // Close() on an already-chrome-closed window errors;
+                // the grammar makes destroy the reconciliation, so
+                // tolerate it.
+                let _ = aux.Close();
+            }
+            core.tearing_down.remove(&window.0);
+        }
         ApplyOp::SetProp { id, prop, value } => {
             // Grow is handled ahead of the per-kind table: it is the one
             // kind-agnostic prop, and its effect lands on the parent's
@@ -930,7 +968,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // A new child means a new track and a shifted set of indices.
             reindex(core, parent)?;
         }
-        ApplyOp::Mount { window: _, root } => {
+        ApplyOp::Mount { window, root } => {
             match core.widgets.get(&root).expect("scene validated the id") {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => {
                     // The normalized root inset: 16 units INSIDE the
@@ -943,7 +981,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Right: 16.0,
                         Bottom: 16.0,
                     })?;
-                    core.window.SetContent(panel)?;
+                    let target = winui_window(core, window.0)?;
+                    target.SetContent(panel)?;
+                    if window.0 != 0 {
+                        // Mounting presents.
+                        target.Activate()?;
+                    }
                     // Baseline compensation needs REAL text metrics,
                     // and at apply time the grid has never had a true
                     // layout pass (a detached or just-attached measure
@@ -971,7 +1014,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     });
                     panel.Loaded(&loaded)?;
                 }
-                NativeWidget::Button { button, .. } => core.window.SetContent(button)?,
+                NativeWidget::Button { button, .. } => {
+                    let target = winui_window(core, window.0)?;
+                    target.SetContent(button)?;
+                    if window.0 != 0 {
+                        target.Activate()?;
+                    }
+                }
                 NativeWidget::Label(label) => core.window.SetContent(label)?,
                 NativeWidget::Entry(field) => core.window.SetContent(field)?,
                 NativeWidget::Checkbox { check, .. } => core.window.SetContent(check)?,
@@ -1232,6 +1281,81 @@ impl IWindowNative {
     }
 }
 
+const WM_CLOSE: u32 = 0x0010;
+const GWLP_WNDPROC: i32 = -4;
+
+thread_local! {
+    /// hwnd -> (kaya window id, the original WNDPROC). UI thread only,
+    /// like CORE.
+    static KAYA_WNDPROCS: RefCell<HashMap<isize, (u64, isize)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The chrome-close grammar, at the Win32 boundary: WM_CLOSE on a
+/// veto_close window emits close_requested and is swallowed; on a
+/// non-veto auxiliary it reports window_closed and proceeds; the
+/// non-veto primary proceeds into the existing Closed handler (app
+/// exit). Everything else forwards to the original WNDPROC.
+unsafe extern "system" fn kaya_wndproc(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    let entry = KAYA_WNDPROCS.with_borrow(|m| m.get(&hwnd).copied());
+    let Some((id, original)) = entry else {
+        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+    };
+    if msg == WM_CLOSE {
+        let tearing = CORE.with_borrow(|core| {
+            core.as_ref()
+                .map(|c| c.tearing_down.contains(&id))
+                .unwrap_or(false)
+        });
+        if tearing {
+            return unsafe { CallWindowProcW(original, hwnd, msg, wparam, lparam) };
+        }
+        let veto = CORE.with_borrow(|core| {
+            core.as_ref()
+                .map(|c| c.window_veto.get(&id).copied().unwrap_or(false))
+                .unwrap_or(false)
+        });
+        if veto {
+            CORE.with_borrow(|core| {
+                if let Some(c) = core.as_ref() {
+                    c.occurrences.send(crate::protocol::Occurrence::CloseRequested {
+                        window: crate::protocol::WindowId(id),
+                    });
+                }
+            });
+            return 0;
+        }
+        if id != 0 {
+            CORE.with_borrow(|core| {
+                if let Some(c) = core.as_ref() {
+                    c.occurrences.send(crate::protocol::Occurrence::WindowClosed {
+                        window: crate::protocol::WindowId(id),
+                    });
+                }
+            });
+        }
+    }
+    unsafe { CallWindowProcW(original, hwnd, msg, wparam, lparam) }
+}
+
+/// Install the close grammar on a window's HWND.
+fn subclass(window: &Window, id: u64) -> windows_core::Result<()> {
+    let native: IWindowNative = windows_core::Interface::cast(window)?;
+    let hwnd = native.window_handle()?;
+    unsafe {
+        let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, kaya_wndproc as isize);
+        KAYA_WNDPROCS.with_borrow_mut(|m| {
+            m.insert(hwnd, (id, original));
+        });
+    }
+    Ok(())
+}
+
 #[link(name = "user32")]
 unsafe extern "system" {
     fn SetWindowPos(
@@ -1247,6 +1371,16 @@ unsafe extern "system" {
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetDpiForWindow(hwnd: isize) -> u32;
+    fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
+    fn CallWindowProcW(
+        prev: isize,
+        hwnd: isize,
+        msg: u32,
+        wparam: usize,
+        lparam: isize,
+    ) -> isize;
+    fn DefWindowProcW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+    fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
 }
 
 /// Win32's RECT, for the client/outer chrome math below.
@@ -1264,12 +1398,24 @@ struct Rect {
 /// content size) by carrying the current chrome delta onto the outer
 /// frame. A request, never a guarantee — the shell keeps the last
 /// word (DESIGN.md, Presentation contexts).
+fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
+    if id == 0 {
+        Ok(core.window.clone())
+    } else {
+        Ok(core
+            .aux_windows
+            .get(&id)
+            .expect("scene validated the window id")
+            .clone())
+    }
+}
+
 fn resize_request(
-    core: &CoreState,
+    window: &Window,
     width: Option<f64>,
     height: Option<f64>,
 ) -> windows_core::Result<()> {
-    let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+    let native: IWindowNative = windows_core::Interface::cast(window)?;
     let hwnd = native.window_handle()?;
     unsafe {
         let mut outer = Rect::default();
@@ -1331,6 +1477,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         }
     }
 
+    // The close grammar (veto/report) rides a WNDPROC subclass; the
+    // non-veto primary falls through into the Closed handler below.
+    subclass(&window, 0)?;
+
     // Closing the window exits the app, matching the AppKit backend's
     // terminate-after-last-window-closed behavior.
     let closed = bindings::Windows::Foundation::TypedEventHandler::new(|_, _| {
@@ -1365,6 +1515,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             grow: HashMap::new(),
             aligns: HashMap::new(),
             window,
+            aux_windows: HashMap::new(),
+            window_veto: HashMap::new(),
+            tearing_down: std::collections::HashSet::new(),
         });
     });
 
@@ -1703,18 +1856,39 @@ impl crate::harness::Stage for WinUiStage {
         })
     }
 
-    fn window_title(&self) -> String {
-        Self::on_ui(move |core| Ok(core.window.Title()?.to_string()))
+    fn window_title(&self, window: u64) -> String {
+        Self::on_ui(move |core| Ok(winui_window(core, window)?.Title()?.to_string()))
     }
 
-    fn window_content_size(&self) -> (f64, f64) {
+    fn window_content_size(&self, window: u64) -> (f64, f64) {
         Self::on_ui(move |core| {
             // The XamlRoot's size IS the client area in DIP — the
             // same notion root_fills reads.
-            let root: FrameworkElement = core.window.Content()?.cast()?;
+            let target = winui_window(core, window)?;
+            let root: FrameworkElement = target.Content()?.cast()?;
             let area = root.XamlRoot()?.Size()?;
             Ok((f64::from(area.Width), f64::from(area.Height)))
         })
+    }
+
+    fn close_window(&self, window: u64) {
+        Self::on_ui(move |core| {
+            // The REAL chrome path: WM_CLOSE through the subclass, so
+            // the veto grammar fires exactly as a user click would.
+            // Posted, not sent — the WNDPROC re-enters CORE, and a
+            // held borrow here would abort.
+            let target = winui_window(core, window)?;
+            let native: IWindowNative = windows_core::Interface::cast(&target)?;
+            let hwnd = native.window_handle()?;
+            unsafe {
+                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            }
+            Ok(())
+        })
+    }
+
+    fn window_count(&self) -> usize {
+        Self::on_ui(move |core| Ok(1 + core.aux_windows.len()))
     }
 
     fn root_fills(&self) -> String {

@@ -44,7 +44,7 @@ timing() {
 # behind.
 cargo build --lib --example milestone2 --example entry \
     --example gallery --example todos --example reorder --example feed \
-    --example grow --example layout --example align --example window || exit 1
+    --example grow --example layout --example align --example window --example panels || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -463,6 +463,14 @@ run window-csharp-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/
 run window-ocaml-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/window.exe
 run window-haskell-swiftui env KAYA_SELFTEST=window "$(hs_bin window)"
+
+# The panels scene: the auxiliary-window grammar — two surfaces, the
+# veto class fired by the REAL chrome close, destroy as confirmation.
+# Rust depth; the language sweep rides the phase's next slice.
+KAYA_SELFTEST_SCRIPT="$(scene_script panels)"
+export KAYA_SELFTEST_SCRIPT
+run panels-rust-swiftui env KAYA_SELFTEST=panels target/debug/examples/panels
+run panels-python-swiftui env KAYA_SELFTEST=panels python3 guests/python/panels.py
 
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT

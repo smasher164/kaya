@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xcce97c88cc7210aa
+specHash = 0xecc906b893ee37ae
 
 valueBool :: Word32
 valueBool = 1
@@ -76,6 +76,8 @@ wpropWidth :: Word32
 wpropWidth = 2
 wpropHeight :: Word32
 wpropHeight = 3
+wpropVetoClose :: Word32
+wpropVetoClose = 4
 alignStart :: Word32
 alignStart = 0
 alignCenter :: Word32
@@ -142,6 +144,10 @@ txKindWidgetCommand :: Word16
 txKindWidgetCommand = 17
 txKindSetWindowProp :: Word16
 txKindSetWindowProp = 18
+txKindCreateWindow :: Word16
+txKindCreateWindow = 19
+txKindDestroyWindow :: Word16
+txKindDestroyWindow = 20
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -158,6 +164,10 @@ applyKindCommand :: Word16
 applyKindCommand = 7
 applyKindSetWindowProp :: Word16
 applyKindSetWindowProp = 8
+applyKindCreateWindow :: Word16
+applyKindCreateWindow = 9
+applyKindDestroyWindow :: Word16
+applyKindDestroyWindow = 10
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -166,6 +176,10 @@ occKindToggled :: Word16
 occKindToggled = 3
 occKindValueChanged :: Word16
 occKindValueChanged = 4
+occKindCloseRequested :: Word16
+occKindCloseRequested = 5
+occKindWindowClosed :: Word16
+occKindWindowClosed = 6
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -269,6 +283,14 @@ txVariantCase variant = wireRecord txKindVariantCase (word32LE variant <> word32
 -- A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
 txWidgetCommand :: Word64 -> Word32 -> Builder
 txWidgetCommand widgetId command = wireRecord txKindWidgetCommand (word64LE widgetId <> word32LE command <> word32LE 0)
+
+-- Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists.
+txCreateWindow :: Word64 -> Builder
+txCreateWindow windowId = wireRecord txKindCreateWindow (word64LE windowId)
+
+-- Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
+txDestroyWindow :: Word64 -> Builder
+txDestroyWindow windowId = wireRecord txKindDestroyWindow (word64LE windowId)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -442,39 +464,51 @@ txBindAlignElement widgetId level field = wireRecord txKindSetProperty
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).
-txSetWindowTitle :: String -> Builder
-txSetWindowTitle title = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropTitle <> word32LE sourceConst
+txSetWindowTitle :: Word64 -> String -> Builder
+txSetWindowTitle window title = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropTitle <> word32LE sourceConst
     <> encodeValue (VStr title))
 
 -- set_window_prop with a signal-bound title value (window 0, the primary surface).
-txBindWindowTitle :: Word64 -> Builder
-txBindWindowTitle signalId = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropTitle <> word32LE sourceSignal
+txBindWindowTitle :: Word64 -> Word64 -> Builder
+txBindWindowTitle window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropTitle <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_window_prop with a constant width value (window 0, the primary surface).
-txSetWindowWidth :: Double -> Builder
-txSetWindowWidth width = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropWidth <> word32LE sourceConst
+txSetWindowWidth :: Word64 -> Double -> Builder
+txSetWindowWidth window width = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropWidth <> word32LE sourceConst
     <> encodeValue (VF64 width))
 
 -- set_window_prop with a signal-bound width value (window 0, the primary surface).
-txBindWindowWidth :: Word64 -> Builder
-txBindWindowWidth signalId = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropWidth <> word32LE sourceSignal
+txBindWindowWidth :: Word64 -> Word64 -> Builder
+txBindWindowWidth window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropWidth <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_window_prop with a constant height value (window 0, the primary surface).
-txSetWindowHeight :: Double -> Builder
-txSetWindowHeight height = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropHeight <> word32LE sourceConst
+txSetWindowHeight :: Word64 -> Double -> Builder
+txSetWindowHeight window height = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropHeight <> word32LE sourceConst
     <> encodeValue (VF64 height))
 
 -- set_window_prop with a signal-bound height value (window 0, the primary surface).
-txBindWindowHeight :: Word64 -> Builder
-txBindWindowHeight signalId = wireRecord txKindSetWindowProp
-  (word64LE 0 <> word32LE wpropHeight <> word32LE sourceSignal
+txBindWindowHeight :: Word64 -> Word64 -> Builder
+txBindWindowHeight window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropHeight <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant veto_close value (window 0, the primary surface).
+txSetWindowVetoClose :: Word64 -> Bool -> Builder
+txSetWindowVetoClose window vetoClose = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropVetoClose <> word32LE sourceConst
+    <> encodeValue (VBool vetoClose))
+
+-- set_window_prop with a signal-bound veto_close value (window 0, the primary surface).
+txBindWindowVetoClose :: Word64 -> Word64 -> Builder
+txBindWindowVetoClose window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropVetoClose <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- Decode one value at offset `at` from the record base; returns the
@@ -511,7 +545,7 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

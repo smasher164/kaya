@@ -250,23 +250,24 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "double", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "bool", format!("EncodeValue(w, {});", camel(prop))),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line(&format!("    /// set_window_prop with a constant {prop} value (window 0, the primary surface)."));
-        c.line(&format!("    public static byte[] TxSetWindow{pc}({ty} {p})"));
+        c.line(&format!("    public static byte[] TxSetWindow{pc}(ulong window, {ty} {p})"));
         c.line("    {");
         c.line("        var w = Begin(out var stream);");
-        c.line(&format!("        w.Write(0UL); w.Write(Wprop{pc}); w.Write(SourceConst);"));
+        c.line(&format!("        w.Write(window); w.Write(Wprop{pc}); w.Write(SourceConst);"));
         c.line(&format!("        {expr}"));
         c.line("        return Finish(stream, w, TxKindSetWindowProp);");
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
-        c.line(&format!("    public static byte[] TxBindWindow{pc}(ulong signalId)"));
+        c.line(&format!("    public static byte[] TxBindWindow{pc}(ulong window, ulong signalId)"));
         c.line("    {");
         c.line("        var w = Begin(out var stream);");
-        c.line(&format!("        w.Write(0UL); w.Write(Wprop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
+        c.line(&format!("        w.Write(window); w.Write(Wprop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
         c.line("        return Finish(stream, w, TxKindSetWindowProp);");
         c.line("    }");
     }

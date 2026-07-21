@@ -170,7 +170,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xcce97c88cc7210aauL
+    private const val SPEC_HASH: ULong = 0xecc906b893ee37aeuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -180,12 +180,15 @@ object KayaCompose {
     private const val APPLY_MOVE_CHILD = 6
     private const val APPLY_COMMAND = 7
     private const val APPLY_SET_WINDOW_PROP = 8
+    private const val APPLY_CREATE_WINDOW = 9
+    private const val APPLY_DESTROY_WINDOW = 10
 
     // Window properties: their own namespace — windows are not
     // widgets; window 0 is the primary surface.
     private const val WPROP_TITLE = 1
     private const val WPROP_WIDTH = 2
     private const val WPROP_HEIGHT = 3
+    private const val WPROP_VETO_CLOSE = 4
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     const val KIND_COLUMN = 1
@@ -364,9 +367,19 @@ object KayaCompose {
                         }
                         WPROP_WIDTH -> KayaSceneModel.windowWidth = readF64(b)
                         WPROP_HEIGHT -> KayaSceneModel.windowHeight = readF64(b)
+                        // veto_close is inert on Android by physics:
+                        // no chrome close, and back is not close
+                        // (DESIGN.md, Presentation contexts).
+                        WPROP_VETO_CLOSE -> readBool(b)
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
+                // The scene core rejects create_window on this host
+                // (no KAYA_CAP_AUX_WINDOWS) before any apply is
+                // emitted; reaching these arms means the core and
+                // this interpreter disagree — fail loudly.
+                APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
+                APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_ADD_CHILD -> {
                     val parent = b.long
                     val child = b.long
@@ -658,18 +671,38 @@ object KayaCompose {
                             else -> failures.add("${parts[1]} splits \"$got\", wanted \"$want\"")
                         }
                     }
+                    "close_window" -> {
+                        // No chrome close on this host: the system
+                        // owns surfaces, and back is not close
+                        // (DESIGN.md, Presentation contexts).
+                        failures.add("close_window: this host has no chrome close")
+                    }
+                    "expect_windows" -> {
+                        val want = parts[1].toIntOrNull() ?: -1
+                        // The primary is the one surface; the core
+                        // rejects create_window here.
+                        if (want == 1) {
+                            observed.add("windows 1")
+                        } else {
+                            failures.add("windows 1, wanted $want")
+                        }
+                    }
                     "expect_title" -> {
                         // The REAL materialized title (the Activity
                         // label), never only the model's copy — a
                         // backend that ignored the write must fail.
-                        val want = quoted(parts.drop(1))
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val wid = if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1 else 0L
+                        val prefix = if (explicit) "window#$wid " else ""
+                        val want = quoted(parts.drop(if (explicit) 2 else 1))
                         val got = onUi(activity) {
-                            activity.title?.toString() ?: ""
+                            if (wid == 0L) activity.title?.toString() ?: "" else ""
                         }
                         if (got == want) {
-                            observed.add("title \"$want\"")
+                            observed.add("${prefix}title \"$want\"")
                         } else {
-                            failures.add("title \"$got\", wanted \"$want\"")
+                            failures.add("${prefix}title \"$got\", wanted \"$want\"")
                         }
                     }
                     "expect_window_size" -> {

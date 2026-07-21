@@ -179,18 +179,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, expr) = match kind {
             PropKind::Str => ("str", format!("_enc.value({prop})")),
             PropKind::F64 => ("float", format!("_enc.value({prop})")),
+            PropKind::Bool => ("bool", format!("_enc.value({prop})")),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line("");
-        c.line(&format!("def tx_set_window_{prop}({prop}):"));
+        c.line(&format!("def tx_set_window_{prop}(window, {prop}):"));
         c.line(&format!("    \"\"\"set_window_prop with a constant {prop} value ({ty}); window 0, the primary surface.\"\"\""));
-        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QII\", 0, WPROP_{up}, SOURCE_CONST) + {expr})"));
+        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QII\", window, WPROP_{up}, SOURCE_CONST) + {expr})"));
         c.line("");
         c.line("");
-        c.line(&format!("def tx_bind_window_{prop}(signal_id):"));
+        c.line(&format!("def tx_bind_window_{prop}(window, signal_id):"));
         c.line(&format!("    \"\"\"set_window_prop with a signal-bound {prop} value; window 0, the primary surface.\"\"\""));
-        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QIIQ\", 0, WPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QIIQ\", window, WPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
     c.line("");
     c.line("");
@@ -230,7 +231,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(", ");
     c.line(&format!("    if kind not in ({accepted}):"));
     c.line("        return kind, None, [], None");
-    c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
+        c.line("    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):");
+    c.line("        # Window lifecycle records carry the window id alone —");
+    c.line("        # no key path, no payload.");
+    c.line("        (window_id,) = struct.unpack_from(\"<Q\", buf, 8)");
+    c.line("        return kind, window_id, [], None");
+c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
     c.line("    at = 24");
     c.line("    for _ in range(path_len):");

@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xcce97c88cc7210aa
+	SpecHash uint64 = 0xecc906b893ee37ae
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -39,6 +39,7 @@ const (
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
+	WpropVetoClose = 4
 	AlignStart = 0
 	AlignCenter = 1
 	AlignEnd = 2
@@ -72,6 +73,8 @@ const (
 	txVariantCase = 16
 	txWidgetCommand = 17
 	txSetWindowProp = 18
+	txCreateWindow = 19
+	txDestroyWindow = 20
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -80,10 +83,14 @@ const (
 	applyDestroy = 5
 	applyCommand = 7
 	applySetWindowProp = 8
+	applyCreateWindow = 9
+	applyDestroyWindow = 10
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
 	occValueChanged = 4
+	occCloseRequested = 5
+	occWindowClosed = 6
 )
 
 func pad8(b []byte) []byte {
@@ -317,6 +324,20 @@ func TxWidgetCommand(widgetId uint64, command uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint32(b, command)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxCreateWindow: Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists.
+func TxCreateWindow(windowId uint64) []byte {
+	b := beginRecord(txCreateWindow)
+	b = binary.LittleEndian.AppendUint64(b, windowId)
+	return endRecord(b)
+}
+
+// TxDestroyWindow: Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
+func TxDestroyWindow(windowId uint64) []byte {
+	b := beginRecord(txDestroyWindow)
+	b = binary.LittleEndian.AppendUint64(b, windowId)
 	return endRecord(b)
 }
 
@@ -609,9 +630,9 @@ func TxBindAlignElement(widgetID uint64, level uint32, field uint32) []byte {
 }
 
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
-func TxSetWindowTitle(title string) []byte {
+func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropTitle)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, title)
@@ -619,9 +640,9 @@ func TxSetWindowTitle(title string) []byte {
 }
 
 // TxBindWindowTitle: set_window_prop with a signal-bound title value (window 0, the primary surface).
-func TxBindWindowTitle(signalID uint64) []byte {
+func TxBindWindowTitle(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropTitle)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
@@ -629,9 +650,9 @@ func TxBindWindowTitle(signalID uint64) []byte {
 }
 
 // TxSetWindowWidth: set_window_prop with a constant width value (window 0, the primary surface).
-func TxSetWindowWidth(width float64) []byte {
+func TxSetWindowWidth(window uint64, width float64) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropWidth)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, width)
@@ -639,9 +660,9 @@ func TxSetWindowWidth(width float64) []byte {
 }
 
 // TxBindWindowWidth: set_window_prop with a signal-bound width value (window 0, the primary surface).
-func TxBindWindowWidth(signalID uint64) []byte {
+func TxBindWindowWidth(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropWidth)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
@@ -649,9 +670,9 @@ func TxBindWindowWidth(signalID uint64) []byte {
 }
 
 // TxSetWindowHeight: set_window_prop with a constant height value (window 0, the primary surface).
-func TxSetWindowHeight(height float64) []byte {
+func TxSetWindowHeight(window uint64, height float64) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropHeight)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, height)
@@ -659,10 +680,30 @@ func TxSetWindowHeight(height float64) []byte {
 }
 
 // TxBindWindowHeight: set_window_prop with a signal-bound height value (window 0, the primary surface).
-func TxBindWindowHeight(signalID uint64) []byte {
+func TxBindWindowHeight(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
-	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropHeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetWindowVetoClose: set_window_prop with a constant veto_close value (window 0, the primary surface).
+func TxSetWindowVetoClose(window uint64, vetoClose bool) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropVetoClose)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, vetoClose)
+	return endRecord(b)
+}
+
+// TxBindWindowVetoClose: set_window_prop with a signal-bound veto_close value (window 0, the primary surface).
+func TxBindWindowVetoClose(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropVetoClose)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)
@@ -677,7 +718,7 @@ func TxBindWindowHeight(signalID uint64) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

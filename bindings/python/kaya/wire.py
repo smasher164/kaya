@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xcce97c88cc7210aa
+SPEC_HASH = 0xecc906b893ee37ae
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -37,6 +37,7 @@ PROP_ALIGN = 9
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
+WPROP_VETO_CLOSE = 4
 ALIGN_START = 0
 ALIGN_CENTER = 1
 ALIGN_END = 2
@@ -71,6 +72,8 @@ TX_COLLECTION_UPDATE_FIELD = 14
 TX_VARIANT_CASE = 16
 TX_WIDGET_COMMAND = 17
 TX_SET_WINDOW_PROP = 18
+TX_CREATE_WINDOW = 19
+TX_DESTROY_WINDOW = 20
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -79,10 +82,14 @@ APPLY_MOVE_CHILD = 6
 APPLY_DESTROY = 5
 APPLY_COMMAND = 7
 APPLY_SET_WINDOW_PROP = 8
+APPLY_CREATE_WINDOW = 9
+APPLY_DESTROY_WINDOW = 10
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
 OCC_VALUE_CHANGED = 4
+OCC_CLOSE_REQUESTED = 5
+OCC_WINDOW_CLOSED = 6
 
 
 def _pad(b):
@@ -203,6 +210,14 @@ def tx_variant_case(variant):
 def tx_widget_command(widget_id, command):
     """A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy."""
     return record(TX_WIDGET_COMMAND, struct.pack("<Q", widget_id) + struct.pack("<I", command) + struct.pack("<I", 0))
+
+def tx_create_window(window_id):
+    """Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists."""
+    return record(TX_CREATE_WINDOW, struct.pack("<Q", window_id))
+
+def tx_destroy_window(window_id):
+    """Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it."""
+    return record(TX_DESTROY_WINDOW, struct.pack("<Q", window_id))
 
 
 def tx_set_text(widget_id, text):
@@ -340,34 +355,44 @@ def tx_bind_align_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALIGN, SOURCE_ELEMENT, level, field))
 
 
-def tx_set_window_title(title):
+def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
 
 
-def tx_bind_window_title(signal_id):
+def tx_bind_window_title(window, signal_id):
     """set_window_prop with a signal-bound title value; window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_TITLE, SOURCE_SIGNAL, signal_id))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_TITLE, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_width(width):
+def tx_set_window_width(window, width):
     """set_window_prop with a constant width value (float); window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_WIDTH, SOURCE_CONST) + _enc.value(width))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_WIDTH, SOURCE_CONST) + _enc.value(width))
 
 
-def tx_bind_window_width(signal_id):
+def tx_bind_window_width(window, signal_id):
     """set_window_prop with a signal-bound width value; window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_WIDTH, SOURCE_SIGNAL, signal_id))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_WIDTH, SOURCE_SIGNAL, signal_id))
 
 
-def tx_set_window_height(height):
+def tx_set_window_height(window, height):
     """set_window_prop with a constant height value (float); window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_HEIGHT, SOURCE_CONST) + _enc.value(height))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_HEIGHT, SOURCE_CONST) + _enc.value(height))
 
 
-def tx_bind_window_height(signal_id):
+def tx_bind_window_height(window, signal_id):
     """set_window_prop with a signal-bound height value; window 0, the primary surface."""
-    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_HEIGHT, SOURCE_SIGNAL, signal_id))
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_HEIGHT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_veto_close(window, veto_close):
+    """set_window_prop with a constant veto_close value (bool); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_VETO_CLOSE, SOURCE_CONST) + _enc.value(veto_close))
+
+
+def tx_bind_window_veto_close(window, signal_id):
+    """set_window_prop with a signal-bound veto_close value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_VETO_CLOSE, SOURCE_SIGNAL, signal_id))
 
 
 def parse_value(buf, at):
@@ -398,8 +423,13 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):
         return kind, None, [], None
+    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):
+        # Window lifecycle records carry the window id alone —
+        # no key path, no payload.
+        (window_id,) = struct.unpack_from("<Q", buf, 8)
+        return kind, window_id, [], None
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
     at = 24

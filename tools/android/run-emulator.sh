@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# The panels scene is desktop-only BY DESIGN and deliberately not a
+# leg here: create_window is capability-rejected on this host (no
+# KAYA_CAP_AUX_WINDOWS — the system owns surfaces; DESIGN.md,
+# Presentation contexts).
 # Everything runs inside the dev shell: the flake pins every toolchain
 # (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
 # against anything else is an error, not something to paper over — and

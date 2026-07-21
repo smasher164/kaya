@@ -110,6 +110,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
             Occurrence::Toggled { .. } | Occurrence::InstanceToggled { .. } => {}
             Occurrence::ValueChanged { .. } | Occurrence::InstanceValueChanged { .. } => {}
+            Occurrence::CloseRequested { .. } | Occurrence::WindowClosed { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

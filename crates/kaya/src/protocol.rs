@@ -56,6 +56,16 @@ pub enum Occurrence {
     /// The user toggled a checkbox the guest created directly; carries
     /// the new state. Same ownership stance as TextChanged.
     Toggled { id: WidgetId, checked: bool },
+    /// The user asked a veto_close window to close. Nothing has
+    /// closed; the app answers with destroy_window if it agrees (the
+    /// request/confirm veto class — no response required, no
+    /// correlation ids).
+    CloseRequested { window: WindowId },
+    /// A non-veto auxiliary window was closed by its chrome —
+    /// informational and post-fact; destroy_window reconciles the
+    /// scene (idempotent: the backend tolerates the native window
+    /// already being gone).
+    WindowClosed { window: WindowId },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; carries the
@@ -316,6 +326,13 @@ pub enum WindowProp {
     Width,
     /// Requested content height in DIP; see `Width`.
     Height,
+    /// Who owns the chrome close (Bool-valued; default false). False:
+    /// native — an aux window just closes (window_closed reports it)
+    /// and closing the primary exits the app. True: the close button
+    /// emits close_requested and nothing closes until the app answers
+    /// with destroy_window — the veto class, armed by opt-in. Inert
+    /// on mobile: no chrome close, and back is not close.
+    VetoClose,
 }
 
 /// The one-shot command vocabulary: momentary verbs aimed at
@@ -365,6 +382,12 @@ pub enum TxOp {
     /// — windows are not collection elements; constants and signals
     /// both bind (a signal-bound title is the reactive title).
     SetWindowProp { window: WindowId, prop: WindowProp, value: PropValue },
+    /// Create an auxiliary window (capability-gated; materializes
+    /// hidden — mounting a root presents it).
+    CreateWindow { window: WindowId },
+    /// Close and forget an auxiliary window; its mounted tree is
+    /// destroyed children-first. The primary is not destroyable.
+    DestroyWindow { window: WindowId },
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -444,6 +467,8 @@ pub enum ApplyOp {
     Create { id: WidgetId, kind: WidgetKind, tag: Option<Vec<u8>> },
     SetProp { id: WidgetId, prop: Prop, value: Value },
     SetWindowProp { window: WindowId, prop: WindowProp, value: Value },
+    CreateWindow { window: WindowId },
+    DestroyWindow { window: WindowId },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
@@ -521,6 +546,18 @@ impl OccSink {
                     let tag = crate::wire::click_tag(node.0, &path);
                     let body = crate::wire::value_changed_body(&tag, value);
                     ring.push_record(crate::ring::REC_VALUE_CHANGED, &body);
+                }
+                Occurrence::CloseRequested { window } => {
+                    ring.push_record(
+                        crate::ring::REC_CLOSE_REQUESTED,
+                        &window.0.to_le_bytes(),
+                    );
+                }
+                Occurrence::WindowClosed { window } => {
+                    ring.push_record(
+                        crate::ring::REC_WINDOW_CLOSED,
+                        &window.0.to_le_bytes(),
+                    );
                 }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },

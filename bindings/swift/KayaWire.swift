@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xcce97c88cc7210aa
+let kayaSpecHash: UInt64 = 0xecc906b893ee37ae
 
 struct KayaTx {
     var bytes = Data()
@@ -243,6 +243,20 @@ struct KayaTx {
         self.u64(widgetId)
         self.u32(command)
         self.u32(0)
+        self.end(start)
+    }
+
+    /// Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists.
+    mutating func createWindow(_ windowId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_CREATE_WINDOW))
+        self.u64(windowId)
+        self.end(start)
+    }
+
+    /// Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
+    mutating func destroyWindow(_ windowId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_DESTROY_WINDOW))
+        self.u64(windowId)
         self.end(start)
     }
 
@@ -535,9 +549,9 @@ struct KayaTx {
     }
 
     /// set_window_prop with a constant title value (window 0, the primary surface).
-    mutating func setWindowTitle(_ title: String) {
+    mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(title))
@@ -545,9 +559,9 @@ struct KayaTx {
     }
 
     /// set_window_prop with a signal-bound title value (window 0, the primary surface).
-    mutating func bindWindowTitle(_ signalId: UInt64) {
+    mutating func bindWindowTitle(_ window: UInt64, _ signalId: UInt64) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
@@ -555,9 +569,9 @@ struct KayaTx {
     }
 
     /// set_window_prop with a constant width value (window 0, the primary surface).
-    mutating func setWindowWidth(_ width: Double) {
+    mutating func setWindowWidth(_ window: UInt64, _ width: Double) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_WIDTH))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(width))
@@ -565,9 +579,9 @@ struct KayaTx {
     }
 
     /// set_window_prop with a signal-bound width value (window 0, the primary surface).
-    mutating func bindWindowWidth(_ signalId: UInt64) {
+    mutating func bindWindowWidth(_ window: UInt64, _ signalId: UInt64) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_WIDTH))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
@@ -575,9 +589,9 @@ struct KayaTx {
     }
 
     /// set_window_prop with a constant height value (window 0, the primary surface).
-    mutating func setWindowHeight(_ height: Double) {
+    mutating func setWindowHeight(_ window: UInt64, _ height: Double) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_HEIGHT))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(height))
@@ -585,10 +599,30 @@ struct KayaTx {
     }
 
     /// set_window_prop with a signal-bound height value (window 0, the primary surface).
-    mutating func bindWindowHeight(_ signalId: UInt64) {
+    mutating func bindWindowHeight(_ window: UInt64, _ signalId: UInt64) {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
-        self.u64(0)
+        self.u64(window)
         self.u32(UInt32(KAYA_WPROP_HEIGHT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_window_prop with a constant veto_close value (window 0, the primary surface).
+    mutating func setWindowVetoClose(_ window: UInt64, _ vetoClose: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_VETO_CLOSE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(vetoClose))
+        self.end(start)
+    }
+
+    /// set_window_prop with a signal-bound veto_close value (window 0, the primary surface).
+    mutating func bindWindowVetoClose(_ window: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_VETO_CLOSE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(start)
@@ -616,6 +650,8 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)

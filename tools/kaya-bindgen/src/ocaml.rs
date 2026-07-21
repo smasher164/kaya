@@ -164,21 +164,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::F64 => ("F64", *prop),
+            crate::PropKind::Bool => ("Bool", *prop),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line(&format!("(* set_window_prop with a constant {prop} value (window 0, the primary surface). *)"));
-        c.line(&format!("let tx_set_window_{prop} {param} ="));
+        c.line(&format!("let tx_set_window_{prop} window {param} ="));
         c.line("  finish tx_kind_set_window_prop (fun b ->");
-        c.line("      Buffer.add_int64_le b 0L;");
+        c.line("      Buffer.add_int64_le b window;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int wprop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
         c.line(&format!("      encode_value b ({ctor} {param}))"));
         c.line("");
         c.line(&format!("(* set_window_prop with a signal-bound {prop} value (window 0, the primary surface). *)"));
-        c.line(&format!("let tx_bind_window_{prop} signal_id ="));
+        c.line(&format!("let tx_bind_window_{prop} window signal_id ="));
         c.line("  finish tx_kind_set_window_prop (fun b ->");
-        c.line("      Buffer.add_int64_le b 0L;");
+        c.line("      Buffer.add_int64_le b window;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int wprop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
         c.line("      Buffer.add_int64_le b signal_id)");

@@ -553,15 +553,15 @@ count c = length <$> items c
 -- | The primary surface's title: the title bar on the desktops, the
 -- switcher label on iOS, the task label on Android.
 windowTitle :: String -> Build ()
-windowTitle t = emitB (W.txSetWindowTitle t)
+windowTitle t = emitB (W.txSetWindowTitle 0 t)
 
 -- | Request the primary surface's content size in DIP — ADVISORY on
 -- every platform: honored where the window manager permits, recorded
 -- only where the system owns geometry.
 windowSize :: Double -> Double -> Build ()
 windowSize w h = do
-  emitB (W.txSetWindowWidth w)
-  emitB (W.txSetWindowHeight h)
+  emitB (W.txSetWindowWidth 0 w)
+  emitB (W.txSetWindowHeight 0 h)
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)

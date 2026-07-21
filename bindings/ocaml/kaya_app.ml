@@ -696,14 +696,14 @@ let derive rc compute tx =
    window vocabulary. *)
 (* The primary surface's title: the title bar on the desktops, the
    switcher label on iOS, the task label on Android. *)
-let window_title title tx = emit tx (Kaya_wire.tx_set_window_title title)
+let window_title title tx = emit tx (Kaya_wire.tx_set_window_title 0L title)
 
 (* Request the primary surface's content size in DIP — ADVISORY on
    every platform: honored where the window manager permits, recorded
    only where the system owns geometry. *)
 let window_size width height tx =
-  emit tx (Kaya_wire.tx_set_window_width width);
-  emit tx (Kaya_wire.tx_set_window_height height)
+  emit tx (Kaya_wire.tx_set_window_width 0L width);
+  emit tx (Kaya_wire.tx_set_window_height 0L height)
 
 let mount (Widget root) tx = emit tx (Kaya_wire.tx_mount 0L root)
 

@@ -1041,15 +1041,15 @@ sealed class Tx
     /// desktops, the switcher label on iOS, the task label on
     /// Android).
     public void WindowTitle(string title) =>
-        Records.Add(KayaWire.TxSetWindowTitle(title));
+        Records.Add(KayaWire.TxSetWindowTitle(0, title));
 
     /// Request the primary surface's content size in DIP — ADVISORY
     /// on every platform: honored where the window manager permits,
     /// recorded only where the system owns geometry.
     public void WindowSize(double width, double height)
     {
-        Records.Add(KayaWire.TxSetWindowWidth(width));
-        Records.Add(KayaWire.TxSetWindowHeight(height));
+        Records.Add(KayaWire.TxSetWindowWidth(0, width));
+        Records.Add(KayaWire.TxSetWindowHeight(0, height));
     }
 
     public void Mount(Widget root) => Records.Add(KayaWire.TxMount(0, root.Id));

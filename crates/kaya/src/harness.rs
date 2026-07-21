@@ -59,6 +59,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "grow" => Some(include_str!("../../../tools/scenes/grow.steps")),
         "align" => Some(include_str!("../../../tools/scenes/align.steps")),
         "window" => Some(include_str!("../../../tools/scenes/window.steps")),
+        "panels" => Some(include_str!("../../../tools/scenes/panels.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -148,8 +149,16 @@ pub enum Step {
     /// rather than reading the prop back: a backend that ignored the
     /// write while the model still carried it must fail here.
     ExpectAligned(Target, String),
-    ExpectTitle(String),
-    ExpectWindowSize(f64, f64),
+    /// None = the implicit primary (window 0), keeping the
+    /// single-window spelling; Some(n) prefixes the observation with
+    /// `window#n `.
+    ExpectTitle(Option<u64>, String),
+    ExpectWindowSize(Option<u64>, f64, f64),
+    /// Drive the window's REAL chrome close (performClose, WM_CLOSE,
+    /// gtk close) — the veto grammar's trigger.
+    CloseWindow(u64),
+    /// The number of live surfaces (primary included).
+    ExpectWindows(usize),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -228,15 +237,21 @@ pub trait Stage: Send + 'static {
     /// baseline query. The observation expect_aligned verifies. No
     /// default: a backend that forgets it must fail to compile.
     fn cross_mode(&self, target: Target) -> String;
-    /// The primary surface's REAL materialized title (the title bar
-    /// on the desktops, the task label on Android) — never the scene
+    /// A surface's REAL materialized title (the title bar on the
+    /// desktops, the task label on Android) — never the scene
     /// model's copy, so a backend that ignored the write fails. No
     /// default: a backend that forgets it must fail to compile.
-    fn window_title(&self) -> String;
-    /// The primary surface's REAL content extent in device-
-    /// independent units — what expect_window_size compares against
-    /// the advisory request. No default, like window_title.
-    fn window_content_size(&self) -> (f64, f64);
+    fn window_title(&self, window: u64) -> String;
+    /// A surface's REAL content extent in device-independent units —
+    /// what expect_window_size compares against the advisory
+    /// request. No default, like window_title.
+    fn window_content_size(&self, window: u64) -> (f64, f64);
+    /// Drive the surface's REAL chrome close (performClose, WM_CLOSE,
+    /// gtk close) — a veto_close window emits close_requested and
+    /// stays; a non-veto auxiliary closes and reports window_closed.
+    fn close_window(&self, window: u64);
+    /// The number of live surfaces, primary included.
+    fn window_count(&self) -> usize;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -331,8 +346,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::ExpectRootFills
             }
-            "expect_title" => Step::ExpectTitle(parse_string(rest)?),
+            "expect_title" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectTitle(window, parse_string(rest)?)
+            }
             "expect_window_size" => {
+                let (window, rest) = parse_window_target(rest);
                 let (w, h) = rest.split_once('x').ok_or_else(|| {
                     format!("expect_window_size wants WxH: {line:?}")
                 })?;
@@ -342,7 +361,25 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let h = h.trim().parse::<f64>().map_err(|_| {
                     format!("expect_window_size wants numeric WxH: {line:?}")
                 })?;
-                Step::ExpectWindowSize(w, h)
+                Step::ExpectWindowSize(window, w, h)
+            }
+            "close_window" => {
+                let (window, rest) = parse_window_target(rest);
+                if !rest.is_empty() {
+                    return Err(format!(
+                        "close_window takes one window#N target: {line:?}"
+                    ));
+                }
+                let window = window.ok_or_else(|| {
+                    format!("close_window wants an explicit window#N: {line:?}")
+                })?;
+                Step::CloseWindow(window)
+            }
+            "expect_windows" => {
+                let n = rest.trim().parse::<usize>().map_err(|_| {
+                    format!("expect_windows wants a count: {line:?}")
+                })?;
+                Step::ExpectWindows(n)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -350,6 +387,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
         }
     }
     Ok(steps)
+}
+
+/// An optional leading `window#N` token; the remainder is returned
+/// for the verb's own parsing. None keeps the implicit primary.
+fn parse_window_target(rest: &str) -> (Option<u64>, &str) {
+    let trimmed = rest.trim_start();
+    if let Some(tail) = trimmed.strip_prefix("window#") {
+        let digits: &str = tail.split_whitespace().next().unwrap_or("");
+        if let Ok(n) = digits.parse::<u64>() {
+            let after = &tail[digits.len()..];
+            return (Some(n), after.trim_start());
+        }
+    }
+    (None, rest)
 }
 
 fn parse_target(spec: &str) -> Result<Target, String> {
@@ -566,29 +617,53 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("root hugs ({hug})"));
                 }
             }
-            Step::ExpectTitle(want) => {
+            Step::ExpectTitle(window, want) => {
                 // The REAL materialized title (the title bar / task
                 // label), never the scene model's copy — a backend
                 // that ignored the write must fail. The pass
-                // observation is byte-identical on every backend.
-                let got = stage.window_title();
+                // observation is byte-identical on every backend; an
+                // explicit window target prefixes it.
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                let got = stage.window_title(id);
                 if got == *want {
-                    observed.push(format!("title {want:?}"));
+                    observed.push(format!("{prefix}title {want:?}"));
                 } else {
-                    failures.push(format!("title {got:?}, wanted {want:?}"));
+                    failures.push(format!("{prefix}title {got:?}, wanted {want:?}"));
                 }
             }
-            Step::ExpectWindowSize(w, h) => {
+            Step::ExpectWindowSize(window, w, h) => {
                 // The surface's REAL content extent against the
                 // advisory request, within 2 device units.
-                let (gw, gh) = stage.window_content_size();
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                let (gw, gh) = stage.window_content_size(id);
                 if (gw - w).abs() <= 2.0 && (gh - h).abs() <= 2.0 {
-                    observed.push(format!("window {}x{}", *w as i64, *h as i64));
+                    observed.push(format!("{prefix}window {}x{}", *w as i64, *h as i64));
                 } else {
                     failures.push(format!(
-                        "window {}x{}, wanted {}x{}",
+                        "{prefix}window {}x{}, wanted {}x{}",
                         gw as i64, gh as i64, *w as i64, *h as i64
                     ));
+                }
+            }
+            Step::CloseWindow(window) => {
+                // An action, silent like click: the veto grammar's
+                // observable is what the scene does next.
+                stage.close_window(*window);
+            }
+            Step::ExpectWindows(n) => {
+                let got = stage.window_count();
+                if got == *n {
+                    observed.push(format!("windows {n}"));
+                } else {
+                    failures.push(format!("windows {got}, wanted {n}"));
                 }
             }
             Step::ExpectFills(t) => {
@@ -802,11 +877,15 @@ mod tests {
         fn child_shares(&self, _: Target) -> String {
             "25,75".into()
         }
-        fn window_title(&self) -> String {
+        fn window_title(&self, _: u64) -> String {
             "mock".to_owned()
         }
-        fn window_content_size(&self) -> (f64, f64) {
+        fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
+        }
+        fn close_window(&self, _: u64) {}
+        fn window_count(&self) -> usize {
+            1
         }
         fn root_fills(&self) -> String {
             String::new()
@@ -928,11 +1007,15 @@ mod tests {
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }
-            fn window_title(&self) -> String {
+            fn window_title(&self, _: u64) -> String {
             "mock".to_owned()
         }
-        fn window_content_size(&self) -> (f64, f64) {
+        fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
+        }
+        fn close_window(&self, _: u64) {}
+        fn window_count(&self) -> usize {
+            1
         }
         fn root_fills(&self) -> String {
                 "34x27pt inside 390x844pt".into()
@@ -1012,11 +1095,15 @@ mod tests {
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }
-            fn window_title(&self) -> String {
+            fn window_title(&self, _: u64) -> String {
             "mock".to_owned()
         }
-        fn window_content_size(&self) -> (f64, f64) {
+        fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
+        }
+        fn close_window(&self, _: u64) {}
+        fn window_count(&self) -> usize {
+            1
         }
         fn root_fills(&self) -> String {
                 String::new()

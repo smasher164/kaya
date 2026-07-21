@@ -899,11 +899,24 @@ def _widget(kind):
     return handle
 
 
+def create_window(window_id):
+    """Create an auxiliary window (capability-gated: a phone host
+    rejects it at the root). Materializes hidden; mounting presents.
+    The declarative spelling is `with app.aux_window(...)`."""
+    _records().append(wire.tx_create_window(int(window_id)))
+
+
+def destroy_window(window_id):
+    """Close and forget an auxiliary window — also the veto grammar's
+    confirmation after on_close_requested."""
+    _records().append(wire.tx_destroy_window(int(window_id)))
+
+
 def window_title(title):
     """Set the primary surface's title. Uniform semantics with
     per-platform materialization: the title bar on the desktops, the
     app switcher's label on iOS, the task label on Android."""
-    _records().append(wire.tx_set_window_title(str(title)))
+    _records().append(wire.tx_set_window_title(0, str(title)))
 
 
 def window_size(width, height):
@@ -911,8 +924,8 @@ def window_size(width, height):
     every platform: honored where the window manager permits (the
     desktops), recorded only where the system owns geometry (the
     phones) — a request, never a guarantee."""
-    _records().append(wire.tx_set_window_width(float(width)))
-    _records().append(wire.tx_set_window_height(float(height)))
+    _records().append(wire.tx_set_window_width(0, float(width)))
+    _records().append(wire.tx_set_window_height(0, float(height)))
 
 
 def signal(initial):
@@ -1157,12 +1170,16 @@ def when(sig):
 
 
 class _TxScope:
-    def __init__(self, app, mount_on_exit, title=None, width=None, height=None):
+    def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
+                 window=0, create=False, veto_close=None):
         self._app = app
         self._mount = mount_on_exit
         self._title = title
         self._width = width
         self._height = height
+        self._window = int(window)
+        self._create = create
+        self._veto_close = veto_close
 
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
@@ -1172,12 +1189,21 @@ class _TxScope:
         _journal = {}
         _pending_root = None
         _recording = self._mount
+        if self._create:
+            _records().append(wire.tx_create_window(self._window))
         if self._title is not None:
-            window_title(self._title)
+            _records().append(
+                wire.tx_set_window_title(self._window, str(self._title)))
+        if self._veto_close is not None:
+            _records().append(
+                wire.tx_set_window_veto_close(self._window, bool(self._veto_close)))
         if self._width is not None or self._height is not None:
             if self._width is None or self._height is None:
                 raise ValueError("kaya: window width and height travel together")
-            window_size(self._width, self._height)
+            _records().append(
+                wire.tx_set_window_width(self._window, float(self._width)))
+            _records().append(
+                wire.tx_set_window_height(self._window, float(self._height)))
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -1203,7 +1229,7 @@ class _TxScope:
         if self._mount:
             if _pending_root is None:
                 raise RuntimeError("kaya: window() body declared no root container")
-            records.append(wire.tx_mount(0, _pending_root.id))
+            records.append(wire.tx_mount(self._window, _pending_root.id))
         if records:
             runtime.submit(*records)
         return False
@@ -1216,6 +1242,7 @@ class App:
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
+        self._window_handlers = {}
         self._node_handlers = {}
         _app = self
 
@@ -1228,6 +1255,16 @@ class App:
             self._node_handlers[(kind, handle.id)] = fn
         else:
             self._widget_handlers[(kind, handle.id)] = fn
+
+    def aux_window(self, window_id, title=None, width=None, height=None,
+                   veto_close=None):
+        """An auxiliary surface's scene scope: create_window plus its
+        props on entry, and the single top-level container mounts INTO
+        IT on exit. Capability-gated — a phone host rejects at the
+        root (DESIGN.md, Presentation contexts)."""
+        return _TxScope(
+            self, mount_on_exit=True, window=window_id, create=True,
+            title=title, width=width, height=height, veto_close=veto_close)
 
     def window(self, title=None, width=None, height=None):
         """The scene scope: an ambient transaction whose single
@@ -1244,9 +1281,28 @@ class App:
         outside handlers."""
         return _TxScope(self, mount_on_exit=False)
 
+    def on_close_requested(self, fn):
+        """The user asked a veto_close window to close: fn(window_id).
+        Nothing has closed; answer with kaya.destroy_window inside a
+        build to agree (the request/confirm veto class)."""
+        self._window_handlers[wire.OCC_CLOSE_REQUESTED] = fn
+
+    def on_window_closed(self, fn):
+        """A non-veto auxiliary window was chrome-closed: fn(window_id)
+        (informational; destroy_window reconciles)."""
+        self._window_handlers[wire.OCC_WINDOW_CLOSED] = fn
+
     def _dispatch_loop(self):
         while occurrence := runtime.next_occurrence():
             kind, ident, keys, payload = occurrence
+            if kind in (wire.OCC_CLOSE_REQUESTED, wire.OCC_WINDOW_CLOSED):
+                handler = self._window_handlers.get(kind)
+                if handler is not None:
+                    try:
+                        handler(ident)
+                    except Exception:
+                        traceback.print_exc()
+                continue
             if keys:
                 handler = self._node_handlers.get((kind, ident))
             else:

@@ -17,7 +17,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp, WindowId,
 };
 use crate::scene::Scene;
 
@@ -388,6 +388,11 @@ struct CoreState {
     columns: Vec<gtk4::Box>,
     rows: Vec<gtk4::Box>,
     window: gtk4::Window,
+    /// Auxiliary surfaces by kaya window id (the primary is
+    /// `window`); created hidden, presented at mount.
+    aux_windows: HashMap<u64, gtk4::Window>,
+    /// veto_close per window id (primary included; default false).
+    window_veto: std::rc::Rc<RefCell<HashMap<u64, bool>>>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -422,6 +427,45 @@ fn drain_transactions() {
             }
         }
     });
+}
+
+/// The chrome-close grammar: a veto_close window emits
+/// close_requested and stays; a non-veto auxiliary closes and
+/// reports window_closed; the non-veto primary exits with the app
+/// (GTK quits when the application window closes).
+fn wire_close(
+    window: &gtk4::Window,
+    id: u64,
+    veto: std::rc::Rc<RefCell<HashMap<u64, bool>>>,
+    sink: OccSink,
+) {
+    use gtk4::glib;
+    use gtk4::prelude::GtkWindowExt;
+    window.connect_close_request(move |_| {
+        if veto.borrow().get(&id).copied().unwrap_or(false) {
+            sink.send(Occurrence::CloseRequested {
+                window: WindowId(id),
+            });
+            return glib::Propagation::Stop;
+        }
+        if id != 0 {
+            sink.send(Occurrence::WindowClosed {
+                window: WindowId(id),
+            });
+        }
+        glib::Propagation::Proceed
+    });
+}
+
+fn gtk_window(core: &CoreState, id: u64) -> gtk4::Window {
+    if id == 0 {
+        core.window.clone()
+    } else {
+        core.aux_windows
+            .get(&id)
+            .expect("harness targeted an unknown window")
+            .clone()
+    }
 }
 
 fn apply(core: &mut CoreState, op: ApplyOp) {
@@ -569,11 +613,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
             }
         }
-        ApplyOp::SetWindowProp { window: _, prop, value } => {
+        ApplyOp::SetWindowProp { window, prop, value } => {
             use gtk4::prelude::GtkWindowExt;
+            let target = if window.0 == 0 {
+                core.window.clone()
+            } else {
+                core.aux_windows
+                    .get(&window.0)
+                    .expect("scene validated the window id")
+                    .clone()
+            };
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
-                    core.window.set_title(Some(title));
+                    target.set_title(Some(title));
                 }
                 // The advisory size request. GTK4's one public size
                 // verb is set_default_size; under the suites' X11 WM
@@ -582,15 +634,44 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // the request semantics (DESIGN.md, Presentation
                 // contexts).
                 (WindowProp::Width, Value::F64(w)) => {
-                    let (_, h) = core.window.default_size();
-                    core.window.set_default_size(*w as i32, h);
+                    let (_, h) = target.default_size();
+                    target.set_default_size(*w as i32, h);
                 }
                 (WindowProp::Height, Value::F64(h)) => {
-                    let (w, _) = core.window.default_size();
-                    core.window.set_default_size(w, *h as i32);
+                    let (w, _) = target.default_size();
+                    target.set_default_size(w, *h as i32);
+                }
+                (WindowProp::VetoClose, Value::Bool(on)) => {
+                    core.window_veto.borrow_mut().insert(window.0, *on);
                 }
                 (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
             }
+        }
+        ApplyOp::CreateWindow { window } => {
+            // Materializes hidden; mounting a root presents it. The
+            // normalized 540x330 default and the root inset ride the
+            // same paths the primary uses.
+            use gtk4::prelude::GtkWindowExt;
+            let aux = gtk4::Window::builder()
+                .default_width(540)
+                .default_height(330)
+                .build();
+            wire_close(
+                &aux,
+                window.0,
+                core.window_veto.clone(),
+                core.occurrences.clone(),
+            );
+            core.aux_windows.insert(window.0, aux);
+        }
+        ApplyOp::DestroyWindow { window } => {
+            use gtk4::prelude::GtkWindowExt;
+            if let Some(aux) = core.aux_windows.remove(&window.0) {
+                // destroy() skips close_request: no spurious
+                // window_closed for an app-initiated close.
+                aux.destroy();
+            }
+            core.window_veto.borrow_mut().remove(&window.0);
         }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -727,7 +808,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
             reconcile_grow_align(&child_widget);
         }
-        ApplyOp::Mount { window: _, root } => {
+        ApplyOp::Mount { window, root } => {
             let root_widget = core
                 .widgets
                 .get(&root)
@@ -742,7 +823,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             root_widget.set_halign(gtk4::Align::Fill);
             root_widget.set_valign(gtk4::Align::Fill);
             root_widget.add_css_class("kaya-root");
-            core.window.set_child(Some(&root_widget));
+            if window.0 == 0 {
+                core.window.set_child(Some(&root_widget));
+            } else {
+                use gtk4::prelude::GtkWindowExt;
+                let aux = core
+                    .aux_windows
+                    .get(&window.0)
+                    .expect("scene validated the window id");
+                aux.set_child(Some(&root_widget));
+                // Mounting presents.
+                aux.present();
+            }
         }
         ApplyOp::Command { id, command } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -822,7 +914,21 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             *core = Some(CoreState {
                 transactions: tx_rx,
                 scene: Scene::new(),
-                occurrences: occ_tx,
+                occurrences: occ_tx.clone(),
+                aux_windows: HashMap::new(),
+                window_veto: {
+                    let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
+                    {
+                        use gtk4::prelude::Cast;
+                        wire_close(
+                            window.upcast_ref::<gtk4::Window>(),
+                            0,
+                            veto.clone(),
+                            occ_tx.clone(),
+                        );
+                    }
+                    veto
+                },
                 widgets: HashMap::new(),
                 buttons: Vec::new(),
                 checkboxes: Vec::new(),
@@ -1135,22 +1241,38 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn window_title(&self) -> String {
+    fn window_title(&self, window: u64) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::GtkWindowExt;
-            core.window.title().map(String::from).unwrap_or_default()
+            gtk_window(core, window)
+                .title()
+                .map(String::from)
+                .unwrap_or_default()
         })
     }
 
-    fn window_content_size(&self) -> (f64, f64) {
+    fn window_content_size(&self, window: u64) -> (f64, f64) {
         Self::on_main(move |core| {
             use gtk4::prelude::GtkWindowExt;
             // On a mapped toplevel default_size tracks the current
             // content size (X11; a Wayland compositor keeps its own
             // last word, the request semantics).
-            let (w, h) = core.window.default_size();
+            let (w, h) = gtk_window(core, window).default_size();
             (f64::from(w), f64::from(h))
         })
+    }
+
+    fn close_window(&self, window: u64) {
+        Self::on_main(move |core| {
+            use gtk4::prelude::GtkWindowExt;
+            // The REAL chrome path: close() runs close_request, so
+            // the veto grammar fires exactly as a user click would.
+            gtk_window(core, window).close();
+        })
+    }
+
+    fn window_count(&self) -> usize {
+        Self::on_main(move |core| 1 + core.aux_windows.len())
     }
 
     fn root_fills(&self) -> String {

@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xcce97c88cc7210aa
+let kayaSpecHash: UInt64 = 0xecc906b893ee37ae
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -33,12 +33,15 @@ private let applyDestroy: UInt16 = 5
 private let applyMoveChild: UInt16 = 6
 private let applyCommand: UInt16 = 7
 private let applySetWindowProp: UInt16 = 8
+private let applyCreateWindow: UInt16 = 9
+private let applyDestroyWindow: UInt16 = 10
 
 /// Window properties (their own namespace — windows are not widgets;
 /// window 0 is the primary surface).
 private let wpropTitle: UInt32 = 1
 private let wpropWidth: UInt32 = 2
 private let wpropHeight: UInt32 = 3
+private let wpropVetoClose: UInt32 = 4
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -111,9 +114,33 @@ final class KayaNode: Identifiable {
     }
 }
 
+/// One presentation surface: the primary (id 0, always present) or a
+/// created auxiliary. Materializes hidden; mounting a root presents
+/// it (aux ids reach openWindow(value:) at mount).
+@Observable
+final class KayaWindowModel: Identifiable {
+    let id: UInt64
+    var root: KayaNode?
+    var title: String
+    var width: Double?
+    var height: Double?
+    /// Who owns the chrome close — see WindowProp::VetoClose.
+    var vetoClose = false
+
+    init(id: UInt64, title: String = "") {
+        self.id = id
+        self.title = title
+    }
+}
+
 @Observable
 final class KayaSceneModel {
-    var root: KayaNode?
+    /// Live surfaces by id. The primary starts with the process name
+    /// as its title — exactly what an untitled WindowGroup shows.
+    var windows: [UInt64: KayaWindowModel] = [
+        0: KayaWindowModel(id: 0, title: ProcessInfo.processInfo.processName)
+    ]
+
     var nodes: [UInt64: KayaNode] = [:]  // main actor only
     var parents: [UInt64: UInt64] = [:]
     // The focus command's landing spot: the entry view's FocusState
@@ -129,15 +156,121 @@ final class KayaSceneModel {
     var images: [KayaNode] = []
     var columns: [KayaNode] = []
     var rows: [KayaNode] = []
-    // The primary surface's properties. The title starts as the
-    // process name — exactly what an untitled WindowGroup shows — so
-    // an unset prop changes nothing. Width/height record the advisory
-    // size request; macOS materializes it, iOS records it only (the
-    // system owns surface geometry).
-    var windowTitle: String = ProcessInfo.processInfo.processName
-    var windowWidth: Double?
-    var windowHeight: Double?
 }
+
+// The single-window spellings, forwarding to the primary surface.
+// An extension keeps them out of @Observable's macro expansion —
+// observation still tracks through the stored `windows` dictionary.
+extension KayaSceneModel {
+    var root: KayaNode? {
+        get { windows[0]?.root }
+        set { windows[0]?.root = newValue }
+    }
+    var windowTitle: String {
+        get { windows[0]?.title ?? "" }
+        set { windows[0]?.title = newValue }
+    }
+    var windowWidth: Double? {
+        get { windows[0]?.width }
+        set { windows[0]?.width = newValue }
+    }
+    var windowHeight: Double? {
+        get { windows[0]?.height }
+        set { windows[0]?.height = newValue }
+    }
+}
+
+/// Presentation actions and native handles, stashed from the view
+/// side (main actor only). The apply arms drive them imperatively.
+var kayaOpenWindow: ((UInt64) -> Void)?
+var kayaDismissWindow: ((UInt64) -> Void)?
+/// Mounts that arrived before the environment actions were stashed
+/// (a batch can apply before the first view appears): drained by
+/// KayaRoot's onAppear.
+var kayaPendingOpens: [UInt64] = []
+/// App-initiated teardown (destroy_window) bypasses the chrome-close
+/// grammar: dismissWindow re-enters windowShouldClose, and without
+/// this a veto window would emit a second close_requested for its
+/// own confirmed destruction.
+var kayaTearingDown: Set<UInt64> = []
+#if os(macOS)
+    var kayaNSWindows: [UInt64: NSWindow] = [:]
+    var kayaWindowDelegates: [UInt64: KayaWindowDelegate] = [:]
+
+    /// Registers the hosting NSWindow for a surface id and installs
+    /// the close-veto delegate proxy (SwiftUI owns the window's real
+    /// delegate; the proxy answers windowShouldClose and forwards
+    /// everything else).
+    private struct KayaWindowAccessor: NSViewRepresentable {
+        let windowId: UInt64
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            DispatchQueue.main.async { register(view) }
+            return view
+        }
+
+        func updateNSView(_ view: NSView, context: Context) {
+            register(view)
+        }
+
+        private func register(_ view: NSView) {
+            guard let window = view.window else { return }
+            if kayaNSWindows[windowId] !== window {
+                kayaNSWindows[windowId] = window
+                let proxy = KayaWindowDelegate(
+                    windowId: windowId, original: window.delegate)
+                kayaWindowDelegates[windowId] = proxy
+                window.delegate = proxy
+                // The advisory size may predate the native window
+                // (props apply while a surface is still hidden);
+                // honor the pending request now that it exists.
+                kayaApplyWindowSize(windowId)
+            }
+        }
+    }
+
+    final class KayaWindowDelegate: NSObject, NSWindowDelegate {
+        let windowId: UInt64
+        weak var original: (any NSWindowDelegate)?
+
+        init(windowId: UInt64, original: (any NSWindowDelegate)?) {
+            self.windowId = windowId
+            self.original = original
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if kayaTearingDown.contains(windowId) {
+                return true
+            }
+            if kayaScene.windows[windowId]?.vetoClose == true {
+                // The veto class: nothing closes; the app answers
+                // with destroy_window if it agrees.
+                KayaHost.emitCloseRequested(windowId)
+                return false
+            }
+            if windowId == 0 {
+                // The primary is the process's surface: closing it
+                // exits the app, uniformly with the other desktops.
+                DispatchQueue.main.async {
+                    NSApplication.shared.terminate(nil)
+                }
+                return true
+            }
+            KayaHost.emitWindowClosed(windowId)
+            return true
+        }
+
+        override func responds(to sel: Selector!) -> Bool {
+            super.responds(to: sel) || (original?.responds(to: sel) ?? false)
+        }
+
+        override func forwardingTarget(for sel: Selector!) -> Any? {
+            if original?.responds(to: sel) == true { return original }
+            return super.forwardingTarget(for: sel)
+        }
+    }
+#endif
 
 let kayaScene = KayaSceneModel()
 
@@ -152,6 +285,14 @@ enum KayaHost {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_clicked(buffer.baseAddress, UInt(buffer.count))
         }
+    }
+
+    static func emitCloseRequested(_ window: UInt64) {
+        api.emit_close_requested(window)
+    }
+
+    static func emitWindowClosed(_ window: UInt64) {
+        api.emit_window_closed(window)
     }
 
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
@@ -239,13 +380,16 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
 /// window's CONTENT to the requested DIP, keeping the current extent
 /// on any axis the scene has not requested. iOS applies nothing —
 /// the request is recorded and the system owns geometry.
-private func kayaApplyWindowSize() {
+private func kayaApplyWindowSize(_ windowId: UInt64) {
     #if os(macOS)
-        guard let window = NSApp.windows.first else { return }
+        let window = kayaNSWindows[windowId]
+            ?? (windowId == 0 ? NSApp.windows.first : nil)
+        guard let window else { return }
+        let model = kayaScene.windows[windowId]
         let current = window.contentRect(forFrameRect: window.frame).size
         let size = NSSize(
-            width: kayaScene.windowWidth ?? current.width,
-            height: kayaScene.windowHeight ?? current.height)
+            width: model?.width ?? current.width,
+            height: model?.height ?? current.height)
         window.setContentSize(size)
     #endif
 }
@@ -281,32 +425,53 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // pad, value. Size is an advisory request: macOS
                 // resizes, iOS records (see DESIGN.md, Presentation
                 // contexts).
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
                 let wvType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
                 let wvLen = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                let model = kayaScene.windows[wid]
                 switch (prop, wvType) {
                 case (wpropTitle, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + wvLen)]
                     let title = String(decoding: bytes, as: UTF8.self)
-                    kayaScene.windowTitle = title
+                    model?.title = title
                     #if os(iOS)
                         // The switcher/Stage Manager label — iOS's
                         // materialization of a surface title.
-                        for uiScene in UIApplication.shared.connectedScenes {
-                            (uiScene as? UIWindowScene)?.title = title
+                        if wid == 0 {
+                            for uiScene in UIApplication.shared.connectedScenes {
+                                (uiScene as? UIWindowScene)?.title = title
+                            }
                         }
                     #endif
                 case (wpropWidth, valueF64):
-                    kayaScene.windowWidth =
+                    model?.width =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
-                    kayaApplyWindowSize()
+                    kayaApplyWindowSize(wid)
                 case (wpropHeight, valueF64):
-                    kayaScene.windowHeight =
+                    model?.height =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
-                    kayaApplyWindowSize()
+                    kayaApplyWindowSize(wid)
+                case (wpropVetoClose, valueBool):
+                    model?.vetoClose = raw[body + 24] != 0
                 default:
                     fatalError("kaya: bad window prop \(prop) value type \(wvType)")
                 }
+            case applyCreateWindow:
+                // Materializes hidden: the model exists, no scene
+                // instance until a mount presents it.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaScene.windows[wid] = KayaWindowModel(id: wid)
+            case applyDestroyWindow:
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaTearingDown.insert(wid)
+                kayaDismissWindow?(wid)
+                kayaTearingDown.remove(wid)
+                #if os(macOS)
+                    kayaNSWindows.removeValue(forKey: wid)
+                    kayaWindowDelegates.removeValue(forKey: wid)
+                #endif
+                kayaScene.windows.removeValue(forKey: wid)
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 // prop (u32), u32 pad, then the value (type, len, bytes).
@@ -362,9 +527,20 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
                 kayaScene.parents[child] = parent
             case applyMount:
-                // window (u64) is the default until the window vocabulary.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let root = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
-                kayaScene.root = kayaScene.nodes[root]
+                kayaScene.windows[wid]?.root = kayaScene.nodes[root]
+                // Mounting presents: auxiliaries open here (the
+                // primary's window is the WindowGroup's own). A mount
+                // can precede the first view's appearance — park it
+                // for the stash drain.
+                if wid != 0 {
+                    if let open = kayaOpenWindow {
+                        open(wid)
+                    } else {
+                        kayaPendingOpens.append(wid)
+                    }
+                }
             case applyMoveChild:
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
@@ -443,6 +619,27 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
     guard let i = Int(bits[1]), registry.indices.contains(i) else { return nil }
     return registry[i]
 }
+
+/// An optional leading `window#N` token for the window verbs; the
+/// remainder is the verb's own arguments. Implicit = the primary,
+/// keeping the single-window observation spellings.
+func kayaWindowTarget(_ parts: [Substring]) -> (UInt64, Bool, [Substring]) {
+    if let first = parts.first, first.hasPrefix("window#"),
+        let id = UInt64(first.dropFirst("window#".count))
+    {
+        return (id, true, Array(parts.dropFirst()))
+    }
+    return (0, false, parts)
+}
+
+#if os(macOS)
+    /// The registered NSWindow for a surface id (the accessor fills
+    /// the table); the primary falls back to the first app window
+    /// for pre-registration reads.
+    func kayaTitleWindow(_ id: UInt64) -> NSWindow? {
+        kayaNSWindows[id] ?? (id == 0 ? NSApp.windows.first : nil)
+    }
+#endif
 
 private func kayaQuoted(_ rest: [Substring]) -> String {
     let joined = rest.joined(separator: " ")
@@ -611,31 +808,43 @@ private func kayaRunScript(_ script: String) {
             case "expect_title":
                 // The REAL materialized title, never the model's copy
                 // on macOS — a backend that ignored the write must
-                // fail.
-                let want = kayaQuoted(Array(parts[1...]))
+                // fail. An explicit window#N target prefixes the
+                // observation; the implicit form keeps the primary's
+                // single-window spelling.
+                let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                let want = kayaQuoted(rest)
+                let prefix = explicit ? "window#\(wid) " : ""
                 let got = DispatchQueue.main.sync { () -> String in
                     #if os(macOS)
-                        return NSApp.windows.first?.title ?? ""
+                        // The REAL title bar only; the model fallback
+                        // is for the primary's pre-registration reads
+                        // — an aux with no native window must fail.
+                        if let window = kayaTitleWindow(wid) {
+                            return window.title
+                        }
+                        return wid == 0 ? kayaScene.windows[0]?.title ?? "" : ""
                     #else
-                        return kayaScene.windowTitle
+                        return kayaScene.windows[wid]?.title ?? ""
                     #endif
                 }
                 if got == want {
-                    observed.append("title \"\(want)\"")
+                    observed.append("\(prefix)title \"\(want)\"")
                 } else {
-                    failures.append("title \"\(got)\", wanted \"\(want)\"")
+                    failures.append("\(prefix)title \"\(got)\", wanted \"\(want)\"")
                 }
             case "expect_window_size":
                 // The surface's REAL content extent against the
                 // advisory request, within 2pt. Reads the window, not
                 // the offer reader (the offer sits inside the root
                 // inset).
-                let dims = parts[1].split(separator: "x")
+                let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                let prefix = explicit ? "window#\(wid) " : ""
+                let dims = rest[0].split(separator: "x")
                 let wantW = Double(dims[0]) ?? -1
                 let wantH = Double(dims[1]) ?? -1
                 let got = DispatchQueue.main.sync { () -> CGSize in
                     #if os(macOS)
-                        guard let window = NSApp.windows.first else { return .zero }
+                        guard let window = kayaTitleWindow(wid) else { return .zero }
                         return window.contentRect(forFrameRect: window.frame).size
                     #else
                         let scenes = UIApplication.shared.connectedScenes
@@ -644,11 +853,33 @@ private func kayaRunScript(_ script: String) {
                     #endif
                 }
                 if abs(got.width - wantW) <= 2, abs(got.height - wantH) <= 2 {
-                    observed.append("window \(Int(wantW))x\(Int(wantH))")
+                    observed.append("\(prefix)window \(Int(wantW))x\(Int(wantH))")
                 } else {
                     failures.append(
-                        "window \(Int(got.width))x\(Int(got.height)), wanted "
+                        "\(prefix)window \(Int(got.width))x\(Int(got.height)), wanted "
                             + "\(Int(wantW))x\(Int(wantH))")
+                }
+            case "close_window":
+                // The REAL chrome path: performClose runs the delegate
+                // (windowShouldClose), so the veto grammar fires
+                // exactly as a user click would. Silent, like click.
+                let (wid, explicit, _) = kayaWindowTarget(Array(parts[1...]))
+                guard explicit else {
+                    failures.append("close_window wants an explicit window#N")
+                    break
+                }
+                DispatchQueue.main.sync {
+                    #if os(macOS)
+                        kayaNSWindows[wid]?.performClose(nil)
+                    #endif
+                }
+            case "expect_windows":
+                let want = Int(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync { kayaScene.windows.count }
+                if got == want {
+                    observed.append("windows \(want)")
+                } else {
+                    failures.append("windows \(got), wanted \(want)")
                 }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it
@@ -1320,6 +1551,29 @@ struct KayaRender: View {
     }
 #endif
 
+/// An auxiliary surface's content: the mounted root in the same
+/// normalized frame the primary uses (16-unit inset, top-leading,
+/// fill), titled from its model. Presented via openWindow(value:)
+/// when a mount targets it.
+struct KayaAuxRoot: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        Group {
+            if let model = scene.windows[windowId], let root = model.root {
+                KayaRender(node: root, isRoot: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationTitle(scene.windows[windowId]?.title ?? "")
+        #if os(macOS)
+            .background(KayaWindowAccessor(windowId: windowId))
+        #endif
+    }
+}
+
 struct KayaEntry: View {
     let node: KayaNode
     @FocusState private var focused: Bool
@@ -1360,6 +1614,8 @@ struct KayaEntry: View {
 
 struct KayaRoot: View {
     @State private var scene = kayaScene
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         // The outer GeometryReader IS the offer: it fills whatever the
@@ -1397,7 +1653,18 @@ struct KayaRoot: View {
         // titling path on macOS; harmless on iOS, where the switcher
         // label is stamped in the apply arm instead.
         .navigationTitle(scene.windowTitle)
+        #if os(macOS)
+            .background(KayaWindowAccessor(windowId: 0))
+        #endif
         .onAppear {
+            // The presentation actions, stashed for the apply arms
+            // (mount presents an auxiliary; destroy dismisses it).
+            kayaOpenWindow = { openWindow(value: $0) }
+            kayaDismissWindow = { dismissWindow(value: $0) }
+            for id in kayaPendingOpens {
+                openWindow(value: id)
+            }
+            kayaPendingOpens.removeAll()
             kayaPlaceWindow()
             kayaStartCommandPump()
             kayaStartSelftest()

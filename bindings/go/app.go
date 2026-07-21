@@ -849,15 +849,15 @@ func (tx *Tx) Len(c Collection) int {
 // WindowTitle sets the primary surface's title (the title bar on the
 // desktops, the switcher label on iOS, the task label on Android).
 func (tx *Tx) WindowTitle(title string) {
-	tx.records = append(tx.records, TxSetWindowTitle(title))
+	tx.records = append(tx.records, TxSetWindowTitle(0, title))
 }
 
 // WindowSize requests the primary surface's content size in DIP —
 // ADVISORY on every platform: honored where the window manager
 // permits, recorded only where the system owns geometry.
 func (tx *Tx) WindowSize(width, height float64) {
-	tx.records = append(tx.records, TxSetWindowWidth(width))
-	tx.records = append(tx.records, TxSetWindowHeight(height))
+	tx.records = append(tx.records, TxSetWindowWidth(0, width))
+	tx.records = append(tx.records, TxSetWindowHeight(0, height))
 }
 
 func (tx *Tx) Mount(root Widget) {

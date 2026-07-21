@@ -229,14 +229,15 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ty, expr) = match kind {
             crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::F64 => ("float64", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Bool => ("bool", format!("encodeValue(b, {})", param(prop))),
             other => unreachable!("no window prop carries {other:?}"),
         };
         let p = param(prop);
         c.line("");
         c.line(&format!("// TxSetWindow{pc}: set_window_prop with a constant {prop} value (window 0, the primary surface)."));
-        c.line(&format!("func TxSetWindow{pc}({p} {ty}) []byte {{"));
+        c.line(&format!("func TxSetWindow{pc}(window uint64, {p} {ty}) []byte {{"));
         c.line("\tb := beginRecord(txSetWindowProp)");
-        c.line("\tb = binary.LittleEndian.AppendUint64(b, 0)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, window)");
         c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Wprop{pc})"));
         c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
         c.line(&format!("\tb = {expr}"));
@@ -244,9 +245,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
         c.line(&format!("// TxBindWindow{pc}: set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
-        c.line(&format!("func TxBindWindow{pc}(signalID uint64) []byte {{"));
+        c.line(&format!("func TxBindWindow{pc}(window uint64, signalID uint64) []byte {{"));
         c.line("\tb := beginRecord(txSetWindowProp)");
-        c.line("\tb = binary.LittleEndian.AppendUint64(b, 0)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, window)");
         c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Wprop{pc})"));
         c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
         c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");

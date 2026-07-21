@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xcce97c88cc7210aaL
+let spec_hash = 0xecc906b893ee37aeL
 
 let value_bool = 1
 let value_i64 = 2
@@ -42,6 +42,7 @@ let prop_align = 9
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
+let wprop_veto_close = 4
 let align_start = 0
 let align_center = 1
 let align_end = 2
@@ -75,6 +76,8 @@ let tx_kind_collection_update_field = 14
 let tx_kind_variant_case = 16
 let tx_kind_widget_command = 17
 let tx_kind_set_window_prop = 18
+let tx_kind_create_window = 19
+let tx_kind_destroy_window = 20
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -83,10 +86,14 @@ let apply_kind_move_child = 6
 let apply_kind_destroy = 5
 let apply_kind_command = 7
 let apply_kind_set_window_prop = 8
+let apply_kind_create_window = 9
+let apply_kind_destroy_window = 10
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
 let occ_kind_value_changed = 4
+let occ_kind_close_requested = 5
+let occ_kind_window_closed = 6
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -259,6 +266,16 @@ let tx_widget_command widget_id command =
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int command);
       Buffer.add_int32_le b 0l)
+
+(* Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. *)
+let tx_create_window window_id =
+  finish tx_kind_create_window (fun b ->
+      Buffer.add_int64_le b window_id)
+
+(* Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. *)
+let tx_destroy_window window_id =
+  finish tx_kind_destroy_window (fun b ->
+      Buffer.add_int64_le b window_id)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -495,50 +512,66 @@ let tx_bind_align_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int field))
 
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
-let tx_set_window_title title =
+let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_title);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (Str title))
 
 (* set_window_prop with a signal-bound title value (window 0, the primary surface). *)
-let tx_bind_window_title signal_id =
+let tx_bind_window_title window signal_id =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_title);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
 (* set_window_prop with a constant width value (window 0, the primary surface). *)
-let tx_set_window_width width =
+let tx_set_window_width window width =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_width);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (F64 width))
 
 (* set_window_prop with a signal-bound width value (window 0, the primary surface). *)
-let tx_bind_window_width signal_id =
+let tx_bind_window_width window signal_id =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_width);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
 (* set_window_prop with a constant height value (window 0, the primary surface). *)
-let tx_set_window_height height =
+let tx_set_window_height window height =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_height);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (F64 height))
 
 (* set_window_prop with a signal-bound height value (window 0, the primary surface). *)
-let tx_bind_window_height signal_id =
+let tx_bind_window_height window signal_id =
   finish tx_kind_set_window_prop (fun b ->
-      Buffer.add_int64_le b 0L;
+      Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_height);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant veto_close value (window 0, the primary surface). *)
+let tx_set_window_veto_close window veto_close =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_veto_close);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool veto_close))
+
+(* set_window_prop with a signal-bound veto_close value (window 0, the primary surface). *)
+let tx_bind_window_veto_close window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_veto_close);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
@@ -577,7 +610,7 @@ let parse_value byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

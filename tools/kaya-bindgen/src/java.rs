@@ -206,21 +206,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line(&format!("    /** set_window_prop with a constant {prop} value (window 0, the primary surface). */"));
-        c.line(&format!("    public static byte[] txSetWindow{pc}({ty} {p}) {{"));
+        c.line(&format!("    public static byte[] txSetWindow{pc}(long window, {ty} {p}) {{"));
         c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
-        c.line(&format!("        b.putLong(0).putInt(WPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        b.putLong(window).putInt(WPROP_{up}).putInt(SOURCE_CONST);"));
         c.line(&format!("        {expr}"));
         c.line("        return finish(b);");
         c.line("    }");
         c.line("");
         c.line(&format!("    /** set_window_prop with a signal-bound {prop} value (window 0, the primary surface). */"));
-        c.line(&format!("    public static byte[] txBindWindow{pc}(long signalId) {{"));
+        c.line(&format!("    public static byte[] txBindWindow{pc}(long window, long signalId) {{"));
         c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
-        c.line(&format!("        b.putLong(0).putInt(WPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line(&format!("        b.putLong(window).putInt(WPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
     }

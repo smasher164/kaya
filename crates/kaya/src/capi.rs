@@ -47,12 +47,16 @@ pub const KAYA_OCCURRENCE_BUTTON_CLICKED: u16 = 1;
 pub const KAYA_OCCURRENCE_TEXT_CHANGED: u16 = 2;
 pub const KAYA_OCCURRENCE_TOGGLED: u16 = 3;
 pub const KAYA_OCCURRENCE_VALUE_CHANGED: u16 = 4;
+pub const KAYA_OCCURRENCE_CLOSE_REQUESTED: u16 = 5;
+pub const KAYA_OCCURRENCE_WINDOW_CLOSED: u16 = 6;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
         && KAYA_OCCURRENCE_TEXT_CHANGED == ring::REC_TEXT_CHANGED
         && KAYA_OCCURRENCE_TOGGLED == ring::REC_TOGGLED
         && KAYA_OCCURRENCE_VALUE_CHANGED == ring::REC_VALUE_CHANGED
+        && KAYA_OCCURRENCE_CLOSE_REQUESTED == ring::REC_CLOSE_REQUESTED
+        && KAYA_OCCURRENCE_WINDOW_CLOSED == ring::REC_WINDOW_CLOSED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -101,6 +105,8 @@ pub const KAYA_TX_COLLECTION_MOVE: u16 = 15;
 pub const KAYA_TX_VARIANT_CASE: u16 = 16;
 pub const KAYA_TX_WIDGET_COMMAND: u16 = 17;
 pub const KAYA_TX_SET_WINDOW_PROP: u16 = 18;
+pub const KAYA_TX_CREATE_WINDOW: u16 = 19;
+pub const KAYA_TX_DESTROY_WINDOW: u16 = 20;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -111,6 +117,25 @@ pub const KAYA_TX_SET_WINDOW_PROP: u16 = 18;
 pub extern "C" fn kaya_spec_hash() -> u64 {
     crate::spec::hash()
 }
+
+/// Host capability bits, queryable any time (like kaya_spec_hash).
+/// Platform-static per build: the phones' systems own surface
+/// geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
+/// is a deterministic scene error (DESIGN.md, Presentation contexts).
+pub const KAYA_CAP_AUX_WINDOWS: u64 = 1;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_capabilities() -> u64 {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        0
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        KAYA_CAP_AUX_WINDOWS
+    }
+}
+
 const _: () = assert!(
     KAYA_TX_CREATE_SIGNAL == wire::TX_CREATE_SIGNAL
         && KAYA_TX_WRITE_SIGNAL == wire::TX_WRITE_SIGNAL
@@ -130,6 +155,8 @@ const _: () = assert!(
         && KAYA_TX_VARIANT_CASE == wire::TX_VARIANT_CASE
         && KAYA_TX_WIDGET_COMMAND == wire::TX_WIDGET_COMMAND
         && KAYA_TX_SET_WINDOW_PROP == wire::TX_SET_WINDOW_PROP
+        && KAYA_TX_CREATE_WINDOW == wire::TX_CREATE_WINDOW
+        && KAYA_TX_DESTROY_WINDOW == wire::TX_DESTROY_WINDOW
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -162,6 +189,8 @@ pub const KAYA_APPLY_DESTROY: u16 = 5;
 pub const KAYA_APPLY_MOVE_CHILD: u16 = 6;
 pub const KAYA_APPLY_COMMAND: u16 = 7;
 pub const KAYA_APPLY_SET_WINDOW_PROP: u16 = 8;
+pub const KAYA_APPLY_CREATE_WINDOW: u16 = 9;
+pub const KAYA_APPLY_DESTROY_WINDOW: u16 = 10;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -171,6 +200,8 @@ const _: () = assert!(
         && KAYA_APPLY_MOVE_CHILD == wire::APPLY_MOVE_CHILD
         && KAYA_APPLY_COMMAND == wire::APPLY_COMMAND
         && KAYA_APPLY_SET_WINDOW_PROP == wire::APPLY_SET_WINDOW_PROP
+        && KAYA_APPLY_CREATE_WINDOW == wire::APPLY_CREATE_WINDOW
+        && KAYA_APPLY_DESTROY_WINDOW == wire::APPLY_DESTROY_WINDOW
 );
 
 /// One-shot commands (the widget_command tx record / COMMAND apply
@@ -232,6 +263,7 @@ pub const KAYA_PROP_ALIGN: u32 = 9;
 pub const KAYA_WPROP_TITLE: u32 = 1;
 pub const KAYA_WPROP_WIDTH: u32 = 2;
 pub const KAYA_WPROP_HEIGHT: u32 = 3;
+pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -245,6 +277,7 @@ const _: () = assert!(
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
+        && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
 );
 
 /// The align enum's values (spec enum "align"); baseline is rows-only.
@@ -270,7 +303,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 3,
+    crate::spec::WINDOW_PROPS.len() == 4,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -544,6 +577,37 @@ pub(crate) fn presentation_tx_sender() -> mpsc::Sender<Transaction> {
 
 /// Presentation side: emit a click, exactly as a backend's action
 /// handler would — `tag` is the click tag bytes delivered with the
+
+/// Presentation side: the user asked a veto_close window to close.
+/// Nothing has closed; the app answers with destroy_window if it
+/// agrees (the request/confirm veto class).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_close_requested(window: u64) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::CloseRequested {
+            window: crate::protocol::WindowId(window),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_CLOSE_REQUESTED, &window.to_le_bytes());
+}
+
+/// Presentation side: a non-veto auxiliary window was chrome-closed
+/// (informational and post-fact; destroy_window reconciles).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_window_closed(window: u64) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::WindowClosed {
+            window: crate::protocol::WindowId(window),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_WINDOW_CLOSED, &window.to_le_bytes());
+}
 /// widget's CREATE record, handed back verbatim. Do not combine with
 /// kaya_run.
 #[unsafe(no_mangle)]
@@ -729,6 +793,8 @@ mod tests {
             ("variant_case", KAYA_TX_VARIANT_CASE),
             ("widget_command", KAYA_TX_WIDGET_COMMAND),
             ("set_window_prop", KAYA_TX_SET_WINDOW_PROP),
+            ("create_window", KAYA_TX_CREATE_WINDOW),
+            ("destroy_window", KAYA_TX_DESTROY_WINDOW),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -739,6 +805,8 @@ mod tests {
             ("move_child", KAYA_APPLY_MOVE_CHILD),
             ("command", KAYA_APPLY_COMMAND),
             ("set_window_prop", KAYA_APPLY_SET_WINDOW_PROP),
+            ("create_window", KAYA_APPLY_CREATE_WINDOW),
+            ("destroy_window", KAYA_APPLY_DESTROY_WINDOW),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

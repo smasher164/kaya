@@ -170,19 +170,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line(&format!("-- set_window_prop with a constant {prop} value (window 0, the primary surface)."));
-        c.line(&format!("txSetWindow{pc} :: {ty} -> Builder"));
-        c.line(&format!("txSetWindow{pc} {p} = wireRecord txKindSetWindowProp"));
-        c.line(&format!("  (word64LE 0 <> word32LE wprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("txSetWindow{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetWindow{pc} window {p} = wireRecord txKindSetWindowProp"));
+        c.line(&format!("  (word64LE window <> word32LE wprop{pc} <> word32LE sourceConst"));
         c.line(&format!("    <> encodeValue ({ctor} {p}))"));
         c.line("");
         c.line(&format!("-- set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
-        c.line(&format!("txBindWindow{pc} :: Word64 -> Builder"));
-        c.line(&format!("txBindWindow{pc} signalId = wireRecord txKindSetWindowProp"));
-        c.line(&format!("  (word64LE 0 <> word32LE wprop{pc} <> word32LE sourceSignal"));
+        c.line(&format!("txBindWindow{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBindWindow{pc} window signalId = wireRecord txKindSetWindowProp"));
+        c.line(&format!("  (word64LE window <> word32LE wprop{pc} <> word32LE sourceSignal"));
         c.line("    <> word64LE signalId)");
     }
     c.line("");

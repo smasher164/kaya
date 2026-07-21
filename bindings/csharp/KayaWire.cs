@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xcce97c88cc7210aa;
+    public const ulong SpecHash = 0xecc906b893ee37ae;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -39,6 +39,7 @@ static class KayaWire
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
+    public const uint WpropVetoClose = 4;
     public const uint AlignStart = 0;
     public const uint AlignCenter = 1;
     public const uint AlignEnd = 2;
@@ -72,6 +73,8 @@ static class KayaWire
     public const ushort TxKindVariantCase = 16;
     public const ushort TxKindWidgetCommand = 17;
     public const ushort TxKindSetWindowProp = 18;
+    public const ushort TxKindCreateWindow = 19;
+    public const ushort TxKindDestroyWindow = 20;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -80,10 +83,14 @@ static class KayaWire
     public const ushort ApplyKindDestroy = 5;
     public const ushort ApplyKindCommand = 7;
     public const ushort ApplyKindSetWindowProp = 8;
+    public const ushort ApplyKindCreateWindow = 9;
+    public const ushort ApplyKindDestroyWindow = 10;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
     public const ushort OccKindValueChanged = 4;
+    public const ushort OccKindCloseRequested = 5;
+    public const ushort OccKindWindowClosed = 6;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -330,6 +337,22 @@ static class KayaWire
         return Finish(stream, w, TxKindWidgetCommand);
     }
 
+    /// Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists.
+    public static byte[] TxCreateWindow(ulong windowId)
+    {
+        var w = Begin(out var stream);
+        w.Write(windowId);
+        return Finish(stream, w, TxKindCreateWindow);
+    }
+
+    /// Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
+    public static byte[] TxDestroyWindow(ulong windowId)
+    {
+        var w = Begin(out var stream);
+        w.Write(windowId);
+        return Finish(stream, w, TxKindDestroyWindow);
+    }
+
     /// set_property with a constant text value.
     public static byte[] TxSetText(ulong widgetId, string text)
     {
@@ -556,53 +579,70 @@ static class KayaWire
     }
 
     /// set_window_prop with a constant title value (window 0, the primary surface).
-    public static byte[] TxSetWindowTitle(string title)
+    public static byte[] TxSetWindowTitle(ulong window, string title)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropTitle); w.Write(SourceConst);
+        w.Write(window); w.Write(WpropTitle); w.Write(SourceConst);
         EncodeValue(w, title);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// set_window_prop with a signal-bound title value (window 0, the primary surface).
-    public static byte[] TxBindWindowTitle(ulong signalId)
+    public static byte[] TxBindWindowTitle(ulong window, ulong signalId)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        w.Write(window); w.Write(WpropTitle); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// set_window_prop with a constant width value (window 0, the primary surface).
-    public static byte[] TxSetWindowWidth(double width)
+    public static byte[] TxSetWindowWidth(ulong window, double width)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropWidth); w.Write(SourceConst);
+        w.Write(window); w.Write(WpropWidth); w.Write(SourceConst);
         EncodeValue(w, width);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// set_window_prop with a signal-bound width value (window 0, the primary surface).
-    public static byte[] TxBindWindowWidth(ulong signalId)
+    public static byte[] TxBindWindowWidth(ulong window, ulong signalId)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropWidth); w.Write(SourceSignal); w.Write(signalId);
+        w.Write(window); w.Write(WpropWidth); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// set_window_prop with a constant height value (window 0, the primary surface).
-    public static byte[] TxSetWindowHeight(double height)
+    public static byte[] TxSetWindowHeight(ulong window, double height)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropHeight); w.Write(SourceConst);
+        w.Write(window); w.Write(WpropHeight); w.Write(SourceConst);
         EncodeValue(w, height);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// set_window_prop with a signal-bound height value (window 0, the primary surface).
-    public static byte[] TxBindWindowHeight(ulong signalId)
+    public static byte[] TxBindWindowHeight(ulong window, ulong signalId)
     {
         var w = Begin(out var stream);
-        w.Write(0UL); w.Write(WpropHeight); w.Write(SourceSignal); w.Write(signalId);
+        w.Write(window); w.Write(WpropHeight); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant veto_close value (window 0, the primary surface).
+    public static byte[] TxSetWindowVetoClose(ulong window, bool vetoClose)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropVetoClose); w.Write(SourceConst);
+        EncodeValue(w, vetoClose);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound veto_close value (window 0, the primary surface).
+    public static byte[] TxBindWindowVetoClose(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropVetoClose); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
@@ -617,7 +657,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         uint pathLen = BitConverter.ToUInt32(rec, 16);

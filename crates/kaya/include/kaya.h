@@ -18,6 +18,10 @@
 
 #define REC_VALUE_CHANGED 4
 
+#define REC_CLOSE_REQUESTED 5
+
+#define REC_WINDOW_CLOSED 6
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -56,6 +60,10 @@
 
 #define TX_SET_WINDOW_PROP 18
 
+#define TX_CREATE_WINDOW 19
+
+#define TX_DESTROY_WINDOW 20
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -71,6 +79,10 @@
 #define APPLY_COMMAND 7
 
 #define APPLY_SET_WINDOW_PROP 8
+
+#define APPLY_CREATE_WINDOW 9
+
+#define APPLY_DESTROY_WINDOW 10
 
 #define VALUE_BOOL 1
 
@@ -126,6 +138,8 @@
 
 #define WPROP_HEIGHT 3
 
+#define WPROP_VETO_CLOSE 4
+
 /**
  * The align enum's wire values (spec enum "align").
  */
@@ -165,6 +179,10 @@
 #define KAYA_OCCURRENCE_TOGGLED 3
 
 #define KAYA_OCCURRENCE_VALUE_CHANGED 4
+
+#define KAYA_OCCURRENCE_CLOSE_REQUESTED 5
+
+#define KAYA_OCCURRENCE_WINDOW_CLOSED 6
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -232,6 +250,18 @@
 
 #define KAYA_TX_SET_WINDOW_PROP 18
 
+#define KAYA_TX_CREATE_WINDOW 19
+
+#define KAYA_TX_DESTROY_WINDOW 20
+
+/**
+ * Host capability bits, queryable any time (like kaya_spec_hash).
+ * Platform-static per build: the phones' systems own surface
+ * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
+ * is a deterministic scene error (DESIGN.md, Presentation contexts).
+ */
+#define KAYA_CAP_AUX_WINDOWS 1
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
@@ -271,6 +301,10 @@
 #define KAYA_APPLY_COMMAND 7
 
 #define KAYA_APPLY_SET_WINDOW_PROP 8
+
+#define KAYA_APPLY_CREATE_WINDOW 9
+
+#define KAYA_APPLY_DESTROY_WINDOW 10
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -343,6 +377,8 @@
 #define KAYA_WPROP_WIDTH 2
 
 #define KAYA_WPROP_HEIGHT 3
+
+#define KAYA_WPROP_VETO_CLOSE 4
 
 /**
  * The align enum's values (spec enum "align"); baseline is rows-only.
@@ -439,6 +475,13 @@ typedef struct KayaHostApi {
    * source gates and would decode wire records with old constants).
    */
   uint64_t (*spec_hash)(void);
+  /**
+   * Window lifecycle emits (slice 2): close_requested for a
+   * veto_close window's chrome close, window_closed after a
+   * non-veto auxiliary closed natively.
+   */
+  void (*emit_close_requested)(uint64_t);
+  void (*emit_window_closed)(uint64_t);
 } KayaHostApi;
 
 
@@ -459,6 +502,8 @@ extern void *dlsym(void *handle, const char *symbol);
  * other's bytes as garbage.
  */
 uint64_t kaya_spec_hash(void);
+
+uint64_t kaya_capabilities(void);
 
 /**
  * Take over the calling thread, which must be the process main thread,
@@ -520,6 +565,19 @@ bool kaya_wait_occurrences(void);
 /**
  * Presentation side: emit a click, exactly as a backend's action
  * handler would — `tag` is the click tag bytes delivered with the
+ * Presentation side: the user asked a veto_close window to close.
+ * Nothing has closed; the app answers with destroy_window if it
+ * agrees (the request/confirm veto class).
+ */
+void kaya_emit_close_requested(uint64_t window);
+
+/**
+ * Presentation side: a non-veto auxiliary window was chrome-closed
+ * (informational and post-fact; destroy_window reconciles).
+ */
+void kaya_emit_window_closed(uint64_t window);
+
+/**
  * widget's CREATE record, handed back verbatim. Do not combine with
  * kaya_run.
  */

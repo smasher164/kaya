@@ -209,13 +209,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::F64 => (camel(prop), "Double", "f64"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
         c.line(&format!("    /// set_window_prop with a constant {prop} value (window 0, the primary surface)."));
-        c.line(&format!("    mutating func setWindow{pc}(_ {p}: {ty}) {{"));
+        c.line(&format!("    mutating func setWindow{pc}(_ window: UInt64, _ {p}: {ty}) {{"));
         c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
-        c.line("        self.u64(0)");
+        c.line("        self.u64(window)");
         c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value(.{ctor}({p}))"));
@@ -223,9 +224,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
-        c.line(&format!("    mutating func bindWindow{pc}(_ signalId: UInt64) {{"));
+        c.line(&format!("    mutating func bindWindow{pc}(_ window: UInt64, _ signalId: UInt64) {{"));
         c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
-        c.line("        self.u64(0)");
+        c.line("        self.u64(window)");
         c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
         c.line("        self.u64(signalId)");

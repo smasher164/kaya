@@ -42,6 +42,8 @@ pub const TX_COLLECTION_MOVE: u16 = 15;
 pub const TX_VARIANT_CASE: u16 = 16;
 pub const TX_WIDGET_COMMAND: u16 = 17;
 pub const TX_SET_WINDOW_PROP: u16 = 18;
+pub const TX_CREATE_WINDOW: u16 = 19;
+pub const TX_DESTROY_WINDOW: u16 = 20;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -52,6 +54,8 @@ pub const APPLY_DESTROY: u16 = 5;
 pub const APPLY_MOVE_CHILD: u16 = 6;
 pub const APPLY_COMMAND: u16 = 7;
 pub const APPLY_SET_WINDOW_PROP: u16 = 8;
+pub const APPLY_CREATE_WINDOW: u16 = 9;
+pub const APPLY_DESTROY_WINDOW: u16 = 10;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -86,6 +90,7 @@ pub const PROP_ALIGN: u32 = 9;
 pub const WPROP_TITLE: u32 = 1;
 pub const WPROP_WIDTH: u32 = 2;
 pub const WPROP_HEIGHT: u32 = 3;
+pub const WPROP_VETO_CLOSE: u32 = 4;
 
 /// The align enum's wire values (spec enum "align").
 pub const ALIGN_START: u32 = 0;
@@ -270,6 +275,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_TITLE => WindowProp::Title,
         WPROP_WIDTH => WindowProp::Width,
         WPROP_HEIGHT => WindowProp::Height,
+        WPROP_VETO_CLOSE => WindowProp::VetoClose,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -279,6 +285,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Title => WPROP_TITLE,
         WindowProp::Width => WPROP_WIDTH,
         WindowProp::Height => WPROP_HEIGHT,
+        WindowProp::VetoClose => WPROP_VETO_CLOSE,
     }
 }
 
@@ -452,6 +459,12 @@ pub fn decode_transaction_with_blobs(
                     value,
                 }
             }
+            TX_CREATE_WINDOW => TxOp::CreateWindow {
+                window: WindowId(r.u64()),
+            },
+            TX_DESTROY_WINDOW => TxOp::DestroyWindow {
+                window: WindowId(r.u64()),
+            },
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
@@ -635,6 +648,12 @@ impl Writer {
                     write_value(b, value, blobs);
                 })
             }
+            ApplyOp::CreateWindow { window } => self.record(APPLY_CREATE_WINDOW, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
+            ApplyOp::DestroyWindow { window } => self.record(APPLY_DESTROY_WINDOW, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -809,6 +828,12 @@ impl Writer {
                         panic!("kaya: window properties cannot bind element sources")
                     }
                 }
+            }),
+            TxOp::CreateWindow { window } => self.record(TX_CREATE_WINDOW, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
+            TxOp::DestroyWindow { window } => self.record(TX_DESTROY_WINDOW, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
             }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }

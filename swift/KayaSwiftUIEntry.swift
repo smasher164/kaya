@@ -18,6 +18,15 @@ struct KayaApp: App {
         WindowGroup {
             KayaRoot()
         }
+        // Auxiliary surfaces: data-driven windows keyed by the kaya
+        // window id. Never opened by the system — only the mount arm
+        // presents one (openWindow(value:)); phones never get here
+        // (the core rejects create_window without the capability).
+        WindowGroup(for: UInt64.self) { $windowId in
+            if let windowId {
+                KayaAuxRoot(windowId: windowId)
+            }
+        }
     }
 }
 

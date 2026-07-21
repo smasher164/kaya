@@ -20,7 +20,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
     CollectionId, CommandKind, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
-    WindowProp,
+    WindowId, WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -867,6 +867,37 @@ impl<'a> Tx<'a> {
         self.set_window(WindowProp::Title, title);
     }
 
+    /// Create an auxiliary window (capability-gated: a phone host
+    /// rejects it at the root). Materializes hidden; mounting a root
+    /// presents it. Returns a proxy for its props:
+    /// `tx.create_window(WindowId(1)).title("inspector").size(480.0, 320.0)`.
+    pub fn create_window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
+        self.ops.push(TxOp::CreateWindow { window });
+        WindowRef { tx: self, window }
+    }
+
+    /// The prop proxy for an existing window (0 = the primary).
+    pub fn window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
+        WindowRef { tx: self, window }
+    }
+
+    /// Close and forget an auxiliary window. Also the veto grammar's
+    /// confirmation: answer a close_requested with this, and the
+    /// reconciliation after a window_closed.
+    pub fn destroy_window(&mut self, window: WindowId) {
+        self.ops.push(TxOp::DestroyWindow { window });
+    }
+
+    /// Set a property on any window ([`set_window`] targets the
+    /// primary).
+    pub fn set_window_prop(&mut self, window: WindowId, prop: WindowProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetWindowProp {
+            window,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
     /// The primary surface's ADVISORY content-size request, in DIP:
     /// honored where the window manager permits (the desktops,
     /// outside tiling WMs), recorded only where the system owns
@@ -1386,10 +1417,13 @@ impl<'a> Tx<'a> {
     /// Mount into the default window; per-window targets arrive with the
     /// window vocabulary.
     pub fn mount(&mut self, root: WidgetId) {
-        self.ops.push(TxOp::Mount {
-            window: DEFAULT_WINDOW,
-            root,
-        });
+        self.mount_in(DEFAULT_WINDOW, root);
+    }
+
+    /// Mount a root into a specific window — mounting presents an
+    /// auxiliary.
+    pub fn mount_in(&mut self, window: WindowId, root: WidgetId) {
+        self.ops.push(TxOp::Mount { window, root });
     }
 
     /// Send the batch and wake the main loop to apply it. The model
@@ -1519,6 +1553,10 @@ pub struct Messages<M> {
     // spaces, two tables.
     widgets: RefCell<HashMap<u64, Mapper<M>>>,
     nodes: RefCell<HashMap<u64, Mapper<M>>>,
+    // Window lifecycle: one handler each, receiving the window id —
+    // close events are app-global grammar, not per-widget wiring.
+    close_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    window_closed: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -1534,6 +1572,8 @@ impl<M> Messages<M> {
         Messages {
             widgets: RefCell::new(HashMap::new()),
             nodes: RefCell::new(HashMap::new()),
+            close_requested: RefCell::new(None),
+            window_closed: RefCell::new(None),
         }
     }
 
@@ -1631,6 +1671,18 @@ impl<M> Messages<M> {
         );
     }
 
+    /// The user asked a veto_close window to close (the veto class:
+    /// nothing has closed; answer with destroy_window to agree).
+    pub fn on_close_requested(&self, f: impl Fn(WindowId) -> M + 'static) {
+        *self.close_requested.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// A non-veto auxiliary window was chrome-closed (informational;
+    /// destroy_window reconciles the scene).
+    pub fn on_window_closed(&self, f: impl Fn(WindowId) -> M + 'static) {
+        *self.window_closed.borrow_mut() = Some(Box::new(f));
+    }
+
     /// The mapped occurrence stream: blocks for the next occurrence
     /// with a registered meaning. Unmapped occurrences fold into
     /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
@@ -1651,11 +1703,55 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceValueChanged { node, .. } => {
                     self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
                 }
+                Occurrence::CloseRequested { window } => {
+                    self.close_requested.borrow().as_ref().map(|f| f(*window))
+                }
+                Occurrence::WindowClosed { window } => {
+                    self.window_closed.borrow().as_ref().map(|f| f(*window))
+                }
             };
             if let Some(m) = mapped {
                 return Some(m);
             }
         }
+    }
+}
+
+/// The window-prop chain, in the construction-sugar tier: mirrors
+/// the Widget proxy (`Binding conventions`: Rust chains).
+pub struct WindowRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    window: WindowId,
+}
+
+impl WindowRef<'_, '_> {
+    /// The surface's title (title bar / switcher label / task label).
+    pub fn title(self, title: &str) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::Title, title);
+        self
+    }
+
+    /// The ADVISORY content-size request in DIP.
+    pub fn size(self, width: f64, height: f64) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::Width, width);
+        self.tx
+            .set_window_prop(self.window, WindowProp::Height, height);
+        self
+    }
+
+    /// Who owns the chrome close: true arms the veto class (the
+    /// close button emits close_requested and nothing closes until
+    /// destroy_window agrees).
+    pub fn veto_close(self, on: bool) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::VetoClose, on);
+        self
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.window
     }
 }
 
@@ -2193,6 +2289,8 @@ mod tests {
                     | Occurrence::InstanceTextChanged { .. }
                     | Occurrence::Toggled { .. }
                     | Occurrence::InstanceToggled { .. }
+                    | Occurrence::CloseRequested { .. }
+                    | Occurrence::WindowClosed { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. } => {}
                     Occurrence::Shutdown => break,

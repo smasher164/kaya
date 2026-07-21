@@ -183,6 +183,12 @@ pub(crate) struct Scene {
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
     window_bindings: HashMap<SignalId, Vec<(WindowId, WindowProp)>>,
+    /// Live AUXILIARY windows (the primary, window 0, always exists
+    /// and is never in this set). Auxiliaries join at create_window
+    /// and leave at destroy_window; chrome-closed non-veto windows
+    /// stay until the guest's destroy_window reconciles
+    /// (window_closed is informational).
+    windows: std::collections::HashSet<WindowId>,
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
@@ -193,7 +199,7 @@ pub(crate) struct Scene {
     stamps: HashMap<EntryRef, Stamp>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
-    mounted: bool,
+    mounted_windows: std::collections::HashSet<WindowId>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -261,6 +267,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
 fn check_window_prop_value(prop: WindowProp, value: &Value) {
     match (prop, value) {
         (WindowProp::Title, Value::Str(_)) => {}
+        (WindowProp::VetoClose, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,
@@ -463,15 +470,11 @@ impl Scene {
                     prop,
                     value,
                 } => {
-                    // Slice 1 of the presentation-context vocabulary:
-                    // the primary surface only. Auxiliary windows are
-                    // capability-gated and arrive with create_window;
-                    // until then a nonzero id is a scene error, the
-                    // column-baseline precedent.
                     assert!(
-                        window == crate::protocol::DEFAULT_WINDOW,
-                        "kaya: auxiliary windows are not in the vocabulary yet; \
-                         window 0 is the primary surface"
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: window prop on unknown window {window:?} — \
+                         create_window first (0 is the primary)"
                     );
                     match value {
                         PropValue::Const(v) => {
@@ -506,6 +509,46 @@ impl Scene {
                         }
                     }
                 }
+                TxOp::CreateWindow { window } => {
+                    // Capability gate: the phones' systems own surface
+                    // geometry — a host without aux windows rejects at
+                    // the root, the column-baseline precedent
+                    // (DESIGN.md, Presentation contexts).
+                    #[cfg(any(target_os = "ios", target_os = "android"))]
+                    {
+                        let _ = window;
+                        panic!(
+                            "kaya: this host has no auxiliary windows \
+                             (KAYA_CAP_AUX_WINDOWS is unset); the primary \
+                             surface is the one window"
+                        );
+                    }
+                    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+                    {
+                        assert!(
+                            window.0 != 0,
+                            "kaya: window 0 is the primary and always exists"
+                        );
+                        assert!(
+                            window.0 & INTERNAL_BIT == 0,
+                            "kaya: window id {window:?} uses the reserved internal bit"
+                        );
+                        let fresh = self.windows.insert(window);
+                        assert!(fresh, "kaya: window id {window:?} already exists");
+                        out.push(ApplyOp::CreateWindow { window });
+                    }
+                }
+                TxOp::DestroyWindow { window } => {
+                    assert!(
+                        window.0 != 0,
+                        "kaya: the primary window is not destroyable — the \
+                         process owns it"
+                    );
+                    let existed = self.windows.remove(&window);
+                    assert!(existed, "kaya: destroy of unknown window {window:?}");
+                    self.mounted_windows.remove(&window);
+                    out.push(ApplyOp::DestroyWindow { window });
+                }
                 TxOp::AddChild { parent, child } => {
                     assert!(
                         self.widgets.contains_key(&parent),
@@ -519,14 +562,23 @@ impl Scene {
                 }
                 TxOp::Mount { window, root } => {
                     assert!(
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: mount into unknown window {window:?} — \
+                         create_window first (0 is the primary)"
+                    );
+                    assert!(
                         self.widgets.contains_key(&root),
                         "kaya: mount of unknown root {root:?}"
                     );
+                    // The vocabulary landed: one mounted root PER
+                    // WINDOW (a remount into the same window replaces
+                    // its root wholesale on the backends).
+                    let fresh = self.mounted_windows.insert(window);
                     assert!(
-                        !self.mounted,
-                        "kaya: one scene per window until the window vocabulary lands"
+                        fresh,
+                        "kaya: window {window:?} already has a mounted root"
                     );
-                    self.mounted = true;
                     out.push(ApplyOp::Mount { window, root });
                 }
                 TxOp::CreateCollection { id, variants } => {

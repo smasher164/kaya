@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xcce97c88cc7210aaL;
+    public static final long SPEC_HASH = 0xecc906b893ee37aeL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -40,6 +40,7 @@ public final class KayaWire {
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
+    public static final int WPROP_VETO_CLOSE = 4;
     public static final int ALIGN_START = 0;
     public static final int ALIGN_CENTER = 1;
     public static final int ALIGN_END = 2;
@@ -73,6 +74,8 @@ public final class KayaWire {
     public static final short TX_KIND_VARIANT_CASE = 16;
     public static final short TX_KIND_WIDGET_COMMAND = 17;
     public static final short TX_KIND_SET_WINDOW_PROP = 18;
+    public static final short TX_KIND_CREATE_WINDOW = 19;
+    public static final short TX_KIND_DESTROY_WINDOW = 20;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -81,10 +84,14 @@ public final class KayaWire {
     public static final short APPLY_KIND_DESTROY = 5;
     public static final short APPLY_KIND_COMMAND = 7;
     public static final short APPLY_KIND_SET_WINDOW_PROP = 8;
+    public static final short APPLY_KIND_CREATE_WINDOW = 9;
+    public static final short APPLY_KIND_DESTROY_WINDOW = 10;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
     public static final short OCC_KIND_VALUE_CHANGED = 4;
+    public static final short OCC_KIND_CLOSE_REQUESTED = 5;
+    public static final short OCC_KIND_WINDOW_CLOSED = 6;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -292,6 +299,20 @@ public final class KayaWire {
         b.putLong(widgetId);
         b.putInt(command);
         b.putInt(0);
+        return finish(b);
+    }
+
+    /** Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. */
+    public static byte[] txCreateWindow(long windowId) {
+        ByteBuffer b = begin(TX_KIND_CREATE_WINDOW);
+        b.putLong(windowId);
+        return finish(b);
+    }
+
+    /** Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. */
+    public static byte[] txDestroyWindow(long windowId) {
+        ByteBuffer b = begin(TX_KIND_DESTROY_WINDOW);
+        b.putLong(windowId);
         return finish(b);
     }
 
@@ -503,47 +524,62 @@ public final class KayaWire {
     }
 
     /** set_window_prop with a constant title value (window 0, the primary surface). */
-    public static byte[] txSetWindowTitle(String title) {
+    public static byte[] txSetWindowTitle(long window, String title) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_TITLE).putInt(SOURCE_CONST);
+        b.putLong(window).putInt(WPROP_TITLE).putInt(SOURCE_CONST);
         encodeValue(b, title);
         return finish(b);
     }
 
     /** set_window_prop with a signal-bound title value (window 0, the primary surface). */
-    public static byte[] txBindWindowTitle(long signalId) {
+    public static byte[] txBindWindowTitle(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        b.putLong(window).putInt(WPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant width value (window 0, the primary surface). */
-    public static byte[] txSetWindowWidth(double width) {
+    public static byte[] txSetWindowWidth(long window, double width) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_WIDTH).putInt(SOURCE_CONST);
+        b.putLong(window).putInt(WPROP_WIDTH).putInt(SOURCE_CONST);
         encodeValue(b, width);
         return finish(b);
     }
 
     /** set_window_prop with a signal-bound width value (window 0, the primary surface). */
-    public static byte[] txBindWindowWidth(long signalId) {
+    public static byte[] txBindWindowWidth(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_WIDTH).putInt(SOURCE_SIGNAL).putLong(signalId);
+        b.putLong(window).putInt(WPROP_WIDTH).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
     /** set_window_prop with a constant height value (window 0, the primary surface). */
-    public static byte[] txSetWindowHeight(double height) {
+    public static byte[] txSetWindowHeight(long window, double height) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_HEIGHT).putInt(SOURCE_CONST);
+        b.putLong(window).putInt(WPROP_HEIGHT).putInt(SOURCE_CONST);
         encodeValue(b, height);
         return finish(b);
     }
 
     /** set_window_prop with a signal-bound height value (window 0, the primary surface). */
-    public static byte[] txBindWindowHeight(long signalId) {
+    public static byte[] txBindWindowHeight(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
-        b.putLong(0).putInt(WPROP_HEIGHT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        b.putLong(window).putInt(WPROP_HEIGHT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant veto_close value (window 0, the primary surface). */
+    public static byte[] txSetWindowVetoClose(long window, boolean vetoClose) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_VETO_CLOSE).putInt(SOURCE_CONST);
+        encodeValue(b, vetoClose);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound veto_close value (window 0, the primary surface). */
+    public static byte[] txBindWindowVetoClose(long window, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_VETO_CLOSE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
@@ -585,7 +621,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED) {
             return null;
         }
         long id = b.getLong(8);

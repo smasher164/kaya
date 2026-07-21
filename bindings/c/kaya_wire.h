@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xcce97c88cc7210aaULL
+#define KAYA_SPEC_HASH 0xecc906b893ee37aeULL
 
 
 /* Create a signal holding `initial`. */
@@ -293,6 +293,20 @@ static inline void kaya_tx_set_window_prop(KayaTx *tx, uint64_t window, uint32_t
     kaya_wire_u64(tx, window);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, start);
+}
+
+/* Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. */
+static inline void kaya_tx_create_window(KayaTx *tx, uint64_t window_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_WINDOW);
+    kaya_wire_u64(tx, window_id);
+    kaya_wire_end(tx, start);
+}
+
+/* Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. */
+static inline void kaya_tx_destroy_window(KayaTx *tx, uint64_t window_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_DESTROY_WINDOW);
+    kaya_wire_u64(tx, window_id);
     kaya_wire_end(tx, start);
 }
 
