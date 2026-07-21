@@ -29,15 +29,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // column-kind widget: statement-shaped construction is
         // parent-first, expression trees are children-first, and
         // column#0 must name the same widget in every language.
-        let (root, ()) = tx.row(|tx| {
-            let rotate = tx.button("rotate");
+        let root = tx.row(|tx| {
+            let rotate = tx.button("rotate").id();
             msgs.on_click(rotate, Msg::Rotate);
-            let lift = tx.button("lift");
+            let lift = tx.button("lift").id();
             msgs.on_click(lift, Msg::Lift);
             for mut row in items.rows(tx) {
                 row.label(Item::title());
             }
-        });
+        })
+        .id();
         tx.mount(root);
         for key in ["a", "b", "c"] {
             tx.insert(&items, key, Item { title: key.to_string() });

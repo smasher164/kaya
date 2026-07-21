@@ -40,11 +40,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             if n == 1 { "1 item left".to_string() } else { format!("{n} items left") }
         });
 
-        let (root, field) = tx.column(|tx| {
-            let field = tx.entry();
-            msgs.on_change(field, Msg::Draft);
-            let add = tx.button("Add");
-            msgs.on_click(add, Msg::Add);
+        let (root, field) = tx
+            .column(|tx| {
+                let field = tx.entry().id();
+                msgs.on_change(field, Msg::Draft);
+                let add = tx.button("Add").id();
+                msgs.on_click(add, Msg::Add);
             tx.label(items_left);
             // The tracing tier: the for statement IS the For — the
             // body runs once, authoring the blueprint, and the row's
@@ -58,8 +59,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     t.label(Todo::title());
                 });
             }
-            field
-        });
+                field
+            })
+            .into_parts();
         tx.mount(root);
         (todos, field)
     });

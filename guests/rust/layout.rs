@@ -25,7 +25,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let nested = tx.signal("nested");
         let deep = tx.signal("deep");
 
-        let (root, ()) = tx.column(|tx| {
+        let root = tx.column(|tx| {
             tx.label(probe); // label#0
 
             // Main-axis free space: three unequal children with leftover
@@ -46,8 +46,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // grow=1: the slider fills the leftover row width instead
                 // of hugging its intrinsic size — the first explicit
                 // layout prop, exercised.
-                let s = tx.slider(0.0, 1.0, 0.5);
-                tx.grow(s, 1.0);
+                tx.slider(0.0, 1.0, 0.5).grow(1.0);
             });
 
             // Proportional grow: two growers of unequal weight in one
@@ -58,10 +57,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // intrinsic sizes. Sliders because they have an intrinsic
             // width to be overridden.
             tx.row(|tx| {
-                let thin = tx.slider(0.0, 1.0, 0.25);
-                tx.grow(thin, 1.0);
-                let wide = tx.slider(0.0, 1.0, 0.75);
-                tx.grow(wide, 3.0);
+                tx.slider(0.0, 1.0, 0.25).grow(1.0);
+                tx.slider(0.0, 1.0, 0.75).grow(3.0);
             });
 
             // Nesting: a column inside the root column, with a row inside
@@ -73,7 +70,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.button("x");
                 });
             });
-        });
+        })
+        .id();
         tx.mount(root);
     });
 

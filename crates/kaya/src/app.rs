@@ -495,6 +495,54 @@ impl AppCtx {
     }
 }
 
+/// A just-built widget: the chain handle every live-zone constructor
+/// returns. It reborrows the transaction, so it lives at most to the
+/// end of its statement — chain construction props on it
+/// (`tx.row(|tx| ...).grow(2.0).spacing(12.0)`) and end with
+/// [`Widget::id`] where the handle must outlive the chain (the borrow
+/// ends there; the compiler teaches the pattern — where Go and Java
+/// police a chain outside its build with a runtime panic, here it
+/// cannot compile). A container's body result rides along as `out`.
+pub struct Widget<'t, 'b, R = ()> {
+    /// The container body's own result, threaded out unchanged.
+    pub out: R,
+    id: WidgetId,
+    tx: &'t mut Tx<'b>,
+}
+
+impl<'t, 'b, R> Widget<'t, 'b, R> {
+    /// This widget's flex weight — the chained spelling of
+    /// [`Tx::grow`], which remains the dynamic path.
+    pub fn grow(mut self, weight: f64) -> Self {
+        self.tx.grow(self.id, weight);
+        self
+    }
+
+    /// This container's inter-child gap — the chained spelling of
+    /// [`Tx::spacing`], which remains the dynamic path.
+    pub fn spacing(mut self, gap: f64) -> Self {
+        self.tx.spacing(self.id, gap);
+        self
+    }
+
+    /// End the chain: the durable id, releasing the transaction
+    /// borrow.
+    pub fn id(self) -> WidgetId {
+        self.id
+    }
+
+    /// End the chain keeping the container body's result too.
+    pub fn into_parts(self) -> (WidgetId, R) {
+        (self.id, self.out)
+    }
+}
+
+impl<R> From<Widget<'_, '_, R>> for WidgetId {
+    fn from(w: Widget<'_, '_, R>) -> WidgetId {
+        w.id
+    }
+}
+
 /// A transaction under construction. Everything queues locally; commit
 /// sends the batch and rings the doorbell once. Dropping a Tx without
 /// committing abandons its records — and rolls the model back with
@@ -529,7 +577,7 @@ impl Drop for Tx<'_> {
     }
 }
 
-impl Tx<'_> {
+impl<'a> Tx<'a> {
     fn touch(&mut self, collection: CollectionId) {
         if !self.journal.iter().any(|(c, _)| *c == collection) {
             let snapshot = self
@@ -825,15 +873,15 @@ impl Tx<'_> {
     /// (the egui shape — the &mut Tx is passed back in) and parents
     /// everything declared inside it through the ambient stack, so the
     /// build body reads as the tree and a for statement over a row
-    /// trace stands between siblings. The body's result comes back
-    /// beside the container — the way handles reach the occurrence
-    /// loop. Handlers stay in that loop, the Rust idiom; the C guests
-    /// keep the fully explicit floor.
-    pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (WidgetId, R) {
+    /// trace stands between siblings. The body's result rides the
+    /// returned [`Widget`] as `.out` — the way handles reach the
+    /// occurrence loop. Handlers stay in that loop, the Rust idiom;
+    /// the C guests keep the fully explicit floor.
+    pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
         self.container_of(WidgetKind::Column, body)
     }
 
-    pub fn row<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (WidgetId, R) {
+    pub fn row<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
         self.container_of(WidgetKind::Row, body)
     }
 
@@ -841,48 +889,49 @@ impl Tx<'_> {
         &mut self,
         kind: WidgetKind,
         body: impl FnOnce(&mut Self) -> R,
-    ) -> (WidgetId, R) {
+    ) -> Widget<'_, 'a, R> {
         let parent = self.widget(kind);
         self.parents.push(parent.0);
         let out = body(self);
         self.parents.pop();
-        (parent, out)
+        Widget { id: parent, out, tx: self }
     }
 
     /// A button with its caption.
-    pub fn button(&mut self, text: &str) -> WidgetId {
+    pub fn button(&mut self, text: &str) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Button);
         self.set(w, Prop::Text, text);
-        w
+        Widget { id: w, out: (), tx: self }
     }
 
     /// A label bound to a signal.
-    pub fn label(&mut self, signal: SignalId) -> WidgetId {
+    pub fn label(&mut self, signal: SignalId) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Label);
         self.bind(w, Prop::Text, signal);
-        w
+        Widget { id: w, out: (), tx: self }
     }
 
     /// A single-line text field; edits arrive in the occurrence loop.
-    pub fn entry(&mut self) -> WidgetId {
-        self.widget(WidgetKind::Entry)
+    pub fn entry(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Entry);
+        Widget { id: w, out: (), tx: self }
     }
 
     /// A labeled checkbox; toggles arrive in the occurrence loop.
-    pub fn checkbox(&mut self, text: &str) -> WidgetId {
+    pub fn checkbox(&mut self, text: &str) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Checkbox);
         self.set(w, Prop::Text, text);
-        w
+        Widget { id: w, out: (), tx: self }
     }
 
     /// A slider over min..max at value; moves arrive in the
     /// occurrence loop.
-    pub fn slider(&mut self, min: f64, max: f64, value: f64) -> WidgetId {
+    pub fn slider(&mut self, min: f64, max: f64, value: f64) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Slider);
         self.set(w, Prop::Min, min);
         self.set(w, Prop::Max, max);
         self.set(w, Prop::Value, value);
-        w
+        Widget { id: w, out: (), tx: self }
     }
 
     /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
@@ -890,10 +939,10 @@ impl Tx<'_> {
     /// copy in core memory, an 8-byte handle everywhere else — so a
     /// large image costs one registration copy and a decode, never a
     /// per-widget or per-update re-copy. Display-only, like a label.
-    pub fn image(&mut self, bytes: impl Into<crate::protocol::Blob>) -> WidgetId {
+    pub fn image(&mut self, bytes: impl Into<crate::protocol::Blob>) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Image);
         self.set(w, Prop::Source, Value::Blob(bytes.into()));
-        w
+        Widget { id: w, out: (), tx: self }
     }
 
     /// Declare a collection of `T` records: a core-side keyed table a
@@ -2014,12 +2063,14 @@ mod tests {
 
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
-        let (root, ()) = tx.column(|tx| {
-            for mut row in todos.rows(tx) {
-                row.label(Todo::title());
-                break; // the row drops here; Drop closes the template
-            }
-        });
+        let root = tx
+            .column(|tx| {
+                for mut row in todos.rows(tx) {
+                    row.label(Todo::title());
+                    break; // the row drops here; Drop closes the template
+                }
+            })
+            .id();
         tx.mount(root);
         tx.commit();
 

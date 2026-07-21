@@ -147,6 +147,12 @@ Landed history lives in git; this file only carries what is still open.
   joins the command enum here. Unlocks the appendix's
   `app.window(title=...)` as real protocol.
 - **The versioned binding style guide** (DESIGN open question #1):
+  ~~construction-prop spellings~~ RATIFIED 2026-07-20 after the
+  ecosystem survey (chains: Rust/Go/Java; named args:
+  Swift/Python/C#/OCaml; config lists: Haskell — see DESIGN's Binding
+  conventions; Rust's chain rides an ephemeral borrow-checked proxy,
+  OCaml's combinators became ?grow/?spacing labels, Haskell's became
+  _-variants over Cfg/BoxCfg lists). Still open here:
   ratify per-language tiers; ambient-transaction spellings; the
   eq/ne/fmt derived-signal vocabulary beyond Python; blob-signal
   ergonomics parity (Go has typed Signal[[]byte]; others wrap handles

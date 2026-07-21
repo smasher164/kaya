@@ -19,17 +19,12 @@ main = kayaMain $ \app -> do
 
     root <-
       column
-        [ grow 1 (labelBound probe), -- label#0
-          grow 1 (buttonOn "quarter" (return ())),
-          grow
-            2
-            ( spacing
-                12
-                ( row
-                    [ grow 1 (labelBound one), -- label#1
-                      grow 3 (buttonOn "three" (return ()))
-                    ]
-                )
-            )
+        [ labelBound probe [Grow 1], -- label#0
+          buttonOn "quarter" (return ()) [Grow 1],
+          row
+            [Grow 2, Spacing 12]
+            [ labelBound one [Grow 1], -- label#1
+              buttonOn "three" (return ()) [Grow 3]
+            ]
         ]
     mount root

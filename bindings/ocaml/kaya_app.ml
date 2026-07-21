@@ -283,33 +283,15 @@ let set_text (Widget id) text tx = emit tx (Kaya_wire.tx_set_text id text)
 (* Set a widget's flex weight within its row/column: 0 is natural
    size, positive weights divide the container's leftover main-axis
    space in proportion (see Prop::Grow in the core). [set_grow] is the
-   dynamic path; [grow] below is the declarative spelling. *)
+   dynamic path; the declarative spelling is the [~grow] labeled
+   argument every constructor takes. *)
 let set_grow (Widget id) weight tx = emit tx (Kaya_wire.tx_set_grow id weight)
-
-(* [grow w d] declares [d] and weights it — a combinator over any
-   widget decl, containers included, so a weighted tree reads in
-   place:
-
-     column [ grow 1.0 (label ~bind:probe ());
-              grow 2.0 (row [ ... ]) ]
-*)
-let grow weight d tx =
-  let w = d tx in
-  set_grow w weight tx;
-  w
 
 (* A container's inter-child gap (main axis, DIP; the normalized
    default is 8). Containers only — the scene rejects it anywhere
-   else. [set_spacing] is the dynamic path; [spacing] composes over a
-   container decl:
-
-     spacing 12.0 (column [ ... ])
-*)
+   else. [set_spacing] is the dynamic path; the declarative spelling
+   is the [~spacing] labeled argument on the container. *)
 let set_spacing (Widget id) gap tx = emit tx (Kaya_wire.tx_set_spacing id gap)
-let spacing gap d tx =
-  let w = d tx in
-  set_spacing w gap tx;
-  w
 let bind_text (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked tx = emit tx (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) tx = emit tx (Kaya_wire.tx_bind_checked id s)
@@ -364,8 +346,9 @@ let add_child (Widget parent) (Widget child) tx =
    binding interprets later (the design's no-guest-AST rule); the
    explicit floor above stays for whoever wants one call ≈ one record. *)
 
-let button ?text ?on_click () tx =
+let button ?grow ?text ?on_click () tx =
   let w = widget Kaya_wire.kind_button tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   Option.iter (fun t -> set_text w t tx) text;
   (match on_click with
   | Some handler ->
@@ -374,14 +357,16 @@ let button ?text ?on_click () tx =
   | None -> ());
   w
 
-let label ?text ?bind () tx =
+let label ?grow ?text ?bind () tx =
   let w = widget Kaya_wire.kind_label tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   Option.iter (fun t -> set_text w t tx) text;
   Option.iter (fun s -> bind_text w s tx) bind;
   w
 
-let entry ?on_change () tx =
+let entry ?grow ?on_change () tx =
   let w = widget Kaya_wire.kind_entry tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -392,8 +377,9 @@ let entry ?on_change () tx =
 (* A slider over min..max at value. Uncontrolled, like the entry: the
    bar owns its position and reports each change to [on_change] (the
    new value as a float). *)
-let slider ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
+let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
   let w = widget Kaya_wire.kind_slider tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
   emit tx (Kaya_wire.tx_set_max id max);
@@ -403,8 +389,9 @@ let slider ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
   | None -> ());
   w
 
-let checkbox ?text ?checked ?on_toggle () tx =
+let checkbox ?grow ?text ?checked ?on_toggle () tx =
   let w = widget Kaya_wire.kind_checkbox tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   Option.iter (fun t -> set_text w t tx) text;
   Option.iter (fun c -> set_checked w c tx) checked;
   (match on_toggle with
@@ -420,22 +407,31 @@ let checkbox ?text ?checked ?on_toggle () tx =
    into core memory; the handle is consumed by the next submit, and
    the guest's bytes are free to drop the moment the call returns.
    [bind] takes a Blob signal instead. Display-only, like a label. *)
-let image ?source ?bind () tx =
+let image ?grow ?source ?bind () tx =
   let w = widget Kaya_wire.kind_image tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
   Option.iter (fun data -> set_source w data tx) source;
   Option.iter (fun s -> bind_source w s tx) bind;
   w
 
 (* A container from its children: runs each child declaration (their
-   records land first), then creates the container and parents them. *)
-let container kind children tx =
+   records land first), then creates the container and parents them.
+   Construction props are labeled optional arguments, the lablgtk
+   idiom: [~grow] weights the container within ITS parent, [~spacing]
+   sets its own inter-child gap. *)
+let container ?grow ?spacing kind children tx =
   let handles = List.map (fun child -> child tx) children in
   let parent = widget kind tx in
+  Option.iter (fun g -> set_grow parent g tx) grow;
+  Option.iter (fun s -> set_spacing parent s tx) spacing;
   List.iter (fun child -> add_child parent child tx) handles;
   parent
 
-let column children tx = container Kaya_wire.kind_column children tx
-let row children tx = container Kaya_wire.kind_row children tx
+let column ?grow ?spacing children tx =
+  container ?grow ?spacing Kaya_wire.kind_column children tx
+
+let row ?grow ?spacing children tx =
+  container ?grow ?spacing Kaya_wire.kind_row children tx
 
 
 let collection tx =

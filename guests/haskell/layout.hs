@@ -32,13 +32,13 @@ main = kayaMain $ \app -> do
           row
             [ checkboxOn "check" (const (return ())),
               labelBound mixed, -- label#2
-              grow 1 (sliderOn 0 1 0.5 (const (return ())))
+              sliderOn 0 1 0.5 (const (return ())) [Grow 1]
             ],
           -- Proportional grow: two growers of unequal weight in one
           -- row.
           row
-            [ grow 1 (sliderOn 0 1 0.25 (const (return ()))),
-              grow 3 (sliderOn 0 1 0.75 (const (return ())))
+            [ sliderOn 0 1 0.25 (const (return ())) [Grow 1],
+              sliderOn 0 1 0.75 (const (return ())) [Grow 3]
             ],
           -- Nesting: a column inside the root column, a row inside
           -- that.

@@ -22,15 +22,13 @@ let () =
      let* root =
        column
          [
-           grow 1.0 (label ~bind:probe ()) (* label#0 *);
-           grow 1.0 (button ~text:"quarter" ());
-           grow 2.0
-             (spacing 12.0
-                (row
-                   [
-                     grow 1.0 (label ~bind:one ()) (* label#1 *);
-                     grow 3.0 (button ~text:"three" ());
-                   ]));
+           label ~grow:1.0 ~bind:probe () (* label#0 *);
+           button ~grow:1.0 ~text:"quarter" ();
+           row ~grow:2.0 ~spacing:12.0
+             [
+               label ~grow:1.0 ~bind:one () (* label#1 *);
+               button ~grow:3.0 ~text:"three" ();
+             ];
          ]
      in
      mount root);

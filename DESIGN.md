@@ -266,6 +266,34 @@ rules that keep bindings mutually recognizable have to be written down
 somewhere; Wayland ships protocol conventions for the same reason. Settled
 rules so far:
 
+- Construction-prop spellings, ratified per language family after a
+  survey of each ecosystem's dominant GUI idiom (2026-07-20; grow and
+  spacing are the first two props riding them):
+  **chains** where the ecosystem builds by fluent methods — Rust
+  (`tx.row(|tx| ...).grow(2.0).spacing(12.0)`, an ephemeral proxy
+  reborrowing the transaction: where Go and Java police a chain
+  outside its build with a runtime panic, Rust's borrow checker
+  rejects it at compile time, and `.id()` ends the chain when a
+  handle must outlive it), Go (`tx.Column(...).Spacing(12)`), Java
+  (`tx.column(() -> {...}).spacing(12.0)`);
+  **named/labeled arguments** where the language has them — Swift
+  (`row(grow: 2, spacing: 12)`), Python (`row(grow=2, spacing=12)`),
+  C# (`Row(..., spacing: 12)`), OCaml
+  (`row ~grow:2.0 ~spacing:12.0 [ ... ]`, the lablgtk idiom — every
+  constructor takes `?grow`, containers add `?spacing`);
+  **attr lists over a closed GADT** in Haskell
+  (`row [Grow 2, Spacing 12] [ ... ]`, `labelBound probe [Grow 1]` —
+  one name for both arities via lucid's Term idiom:
+  equality-constrained result-directed instances, MPTC +
+  FlexibleInstances + GADTs + DataKinds. `Attr (c :: WClass)` indexes
+  props by widget class, so container-only props on a leaf are type
+  errors before they are scene errors anywhere; the closed GADT means
+  the attr vocabulary IS kaya's (no forged config actions), and
+  applyAttr's total match makes a prop without its interpreter arm a
+  compile failure — the type-level twin of the capi completeness
+  tripwire). Dynamic setters (`set_grow`,
+  `SetSpacing`, ...) remain the uniform second path in all eight.
+  The spelling varies by idiom; the observable semantics never do.
 - A canonical method vocabulary for derived signals: `eq`, `ne`, `lt`,
   `fmt`, and so on, method-shaped in every language (`count.eq(0)`,
   `count.Eq(0)`). Documentation leads with the methods so that tutorials

@@ -41,8 +41,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
         // The root is a row so the For's container stays the scene's only
         // column-kind widget (the reorder scene's lesson).
-        let (root, ()) = tx.row(|tx| {
-            let promote = tx.button("promote");
+        let root = tx.row(|tx| {
+            let promote = tx.button("promote").id();
             msgs.on_click(promote, Msg::Promote);
             tx.label(done_count);
             // The eliminator as a record of arms: one field per
@@ -62,7 +62,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     });
                 },
             });
-        });
+        })
+        .id();
         tx.mount(root);
         tx.insert(&feed, "a", Post::Note { text: "jot one".into() });
         tx.insert(&feed, "b", Post::Todo { title: "buy milk".into(), done: false });

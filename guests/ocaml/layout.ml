@@ -36,14 +36,14 @@ let () =
              [
                checkbox ~text:"check" ();
                label ~bind:mixed () (* label#2 *);
-               grow 1.0 (slider ~min:0.0 ~max:1.0 ~value:0.5 ());
+               slider ~grow:1.0 ~min:0.0 ~max:1.0 ~value:0.5 ();
              ];
            (* Proportional grow: two growers of unequal weight in one
               row. *)
            row
              [
-               grow 1.0 (slider ~min:0.0 ~max:1.0 ~value:0.25 ());
-               grow 3.0 (slider ~min:0.0 ~max:1.0 ~value:0.75 ());
+               slider ~grow:1.0 ~min:0.0 ~max:1.0 ~value:0.25 ();
+               slider ~grow:3.0 ~min:0.0 ~max:1.0 ~value:0.75 ();
              ];
            (* Nesting: a column inside the root column, a row inside
               that. *)

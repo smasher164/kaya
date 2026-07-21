@@ -26,14 +26,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("urgent: false");
         let volume_text = tx.signal("volume: 50%");
 
-        let (root, ()) = tx.column(|tx| {
+        let root = tx.column(|tx| {
             tx.row(|tx| {
-                let urgent = tx.checkbox("urgent");
+                let urgent = tx.checkbox("urgent").id();
                 msgs.on_toggle(urgent, Msg::Urgent);
                 tx.label(status);
             });
             tx.row(|tx| {
-                let volume = tx.slider(0.0, 1.0, 0.5);
+                let volume = tx.slider(0.0, 1.0, 0.5).id();
                 msgs.on_value(volume, Msg::Volume);
                 tx.label(volume_text);
             });
@@ -45,7 +45,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.image(&TEST_PNG[..]);
                 tx.image(&b"not an image"[..]);
             });
-        });
+        })
+        .id();
         tx.mount(root);
         (status, volume_text)
     });

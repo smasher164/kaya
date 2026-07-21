@@ -30,7 +30,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let probe = tx.signal("grow probe");
         let one = tx.signal("one");
 
-        let (root, ()) = tx.column(|tx| {
+        let root = tx.column(|tx| {
             // Column weights 1, 1, 2 — a 25/25/50 split, none of them
             // equal to an even division of three, so an implementation
             // that splits equally (the boolean expand-flag behaviour
@@ -43,29 +43,27 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // the root insets 16, so the column's ~250pt divide
             // ~63/63/125 — the 63pt button track clearing GTK's 34pt
             // minimum button height with room to spare.
-            let label = tx.label(probe); // label#0
-            tx.grow(label, 1.0);
-            let quarter = tx.button("quarter");
-            tx.grow(quarter, 1.0);
+            tx.label(probe).grow(1.0); // label#0
+            tx.button("quarter").grow(1.0);
             // The horizontal contract: one row whose children split
             // its WIDTH 1:3. Its own weight (2) makes it a grower like
             // its siblings, keeping the column pure. Width tracks are
             // roomy — 25/75 of ~496pt (508 minus the 12-unit gap set
             // below) is 124 and 372 — because height was the scarce
             // axis, not width.
-            let (band, ()) = tx.row(|tx| {
-                let tick = tx.label(one); // label#1
-                tx.grow(tick, 1.0);
-                let three = tx.button("three");
-                tx.grow(three, 3.0);
-            });
-            tx.grow(band, 2.0);
-            // The spacing prop's conformance exercise: a non-default
-            // gap on the asserted row, so expect_fills (children +
-            // gaps span the content box) fails on any backend that
-            // ignores the write and keeps its 8-unit default.
-            tx.spacing(band, 12.0);
-        });
+            // The spacing prop's conformance exercise rides the chain:
+            // a non-default gap on the asserted row, so expect_fills
+            // (children + gaps span the content box) fails on any
+            // backend that ignores the write and keeps its 8-unit
+            // default.
+            tx.row(|tx| {
+                tx.label(one).grow(1.0); // label#1
+                tx.button("three").grow(3.0);
+            })
+            .grow(2.0)
+            .spacing(12.0);
+        })
+        .id();
         tx.mount(root);
     });
 

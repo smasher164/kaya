@@ -1,5 +1,8 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -63,8 +66,12 @@ module KayaApp
     bindSource,
     setGrow,
     setSpacing,
-    spacing,
-    grow,
+    Attr (..),
+    WClass (..),
+    RowCol,
+    LeafArgs,
+    row,
+    column,
     bindTextElement,
     KayaFieldType (..),
     KayaRecord (..),
@@ -377,13 +384,6 @@ class Monad m => Declare m where
   -- | A When over a Bool signal: stamps on true, unstamps on false.
   when_ :: Signal -> Tpl a -> m (El m, a)
 
-  -- | Construction sugar: a container from its children, so the
-  -- do-block reads as the tree. Lowers to the same records — children
-  -- first, then the container, then the add_childs.
-  row :: [m (El m)] -> m (El m)
-  row = containerOf W.kindRow
-  column :: [m (El m)] -> m (El m)
-  column = containerOf W.kindColumn
 
 instance Declare Build where
   type El Build = Widget
@@ -578,32 +578,79 @@ bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 setGrow :: Widget -> Double -> Build ()
 setGrow (Widget w) weight = emitB (W.txSetGrow w weight)
 
--- | @grow w act@ declares @act@ and weights it — composes over any
--- widget declaration, containers included, so a weighted tree reads in
--- place:
---
--- > column [ grow 1 (labelBound probe), grow 2 (row [ ... ]) ]
-grow :: Double -> Build Widget -> Build Widget
-grow weight act = do
-  w <- act
-  setGrow w weight
-  return w
-
 -- | A container's inter-child gap (main axis, DIP; the normalized
--- default is 8). Containers only — the scene rejects it anywhere
--- else. 'setSpacing' is the dynamic path.
+-- default is 8). Containers only — held by 'BoxCfg' here and by the
+-- scene core everywhere. 'setSpacing' is the dynamic path.
 setSpacing :: Widget -> Double -> Build ()
 setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 
--- | @spacing g act@ declares @act@ and sets its gap — composes over a
--- container declaration:
---
--- > spacing 12 (column [ ... ])
-spacing :: Double -> Build Widget -> Build Widget
-spacing gap act = do
+-- Construction props are a closed GADT indexed by widget class: the
+-- attr list admits exactly kaya's vocabulary (no forged config
+-- actions — uniform semantics, in types), 'applyAttr' is a total
+-- match (a new prop cannot ship without its arm — the compiler's
+-- version of the capi completeness tripwire), and container-only
+-- props on a leaf are type errors before they are scene errors.
+data WClass = BoxW | LeafW
+
+data Attr (c :: WClass) where
+  -- | This widget's flex weight — any widget class.
+  Grow :: Double -> Attr c
+  -- | This container's inter-child gap (main axis, DIP; the
+  -- normalized default is 8). Containers only, held by the index.
+  Spacing :: Double -> Attr 'BoxW
+
+applyAttr :: Attr c -> Widget -> Build ()
+applyAttr (Grow weight) w = setGrow w weight
+applyAttr (Spacing gap) w = setSpacing w gap
+
+withAttrs :: [Attr c] -> Build Widget -> Build Widget
+withAttrs attrs act = do
   w <- act
-  setSpacing w gap
+  mapM_ (`applyAttr` w) attrs
   return w
+
+-- One name, both arities, both zones — the lucid Term idiom over the
+-- GADT: `row [kids]`, `row [Grow 2, Spacing 12] [kids]`, and the
+-- template zone's `row [nodes]` all dispatch on the RESULT type,
+-- which is always constructor-known (a do-bind pins the zone monad,
+-- application to a second list pins the function shape) even when
+-- its argument is not — a discarded template bind, an empty attr or
+-- children list. The equality-constrained general heads are what
+-- make that selection fire before the element types are known, and
+-- then push them top-down into the lists. An attr list in template
+-- position has no instance: template-zone props do not exist, and
+-- the compiler says so.
+class RowCol a r where
+  rowish :: Word32 -> [a] -> r
+
+instance (a ~ Build Widget, b ~ Widget) => RowCol a (Build b) where
+  rowish = containerOf
+
+instance (a ~ Tpl Node, b ~ Node) => RowCol a (Tpl b) where
+  rowish = containerOf
+
+instance (a ~ Attr 'BoxW, k ~ Build Widget, r ~ Build Widget) => RowCol a ([k] -> r) where
+  rowish kind attrs = withAttrs attrs . containerOf kind
+
+row :: (RowCol a r) => [a] -> r
+row = rowish W.kindRow
+
+column :: (RowCol a r) => [a] -> r
+column = rowish W.kindColumn
+
+-- The leaf half of the same idiom: every leaf constructor's result is
+-- either the widget or a function awaiting its attr list —
+-- `labelBound probe` and `labelBound probe [Grow 1]` under one name.
+-- The equality-constrained head keeps matching eager, so empty attr
+-- lists type without annotation.
+class LeafArgs r where
+  leafish :: Build Widget -> r
+
+instance (b ~ Widget) => LeafArgs (Build b) where
+  leafish = id
+
+instance (a ~ Attr 'LeafW, r ~ Build Widget) => LeafArgs ([a] -> r) where
+  leafish act attrs = withAttrs attrs act
 
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
@@ -624,22 +671,22 @@ containerOf kind children = do
 pendB :: Pending -> Build ()
 pendB pending = Build $ \s -> ((), s {bPending = pending : bPending s})
 
-buttonOn :: String -> IO () -> Build Widget
-buttonOn text handler = do
+buttonOn :: (LeafArgs r) => String -> IO () -> r
+buttonOn text handler = leafish $ do
   w@(Widget n) <- widget W.kindButton
   setText w text
   pendB (PClick n handler)
   return w
 
-entryOn :: (String -> IO ()) -> Build Widget
-entryOn handler = do
+entryOn :: (LeafArgs r) => (String -> IO ()) -> r
+entryOn handler = leafish $ do
   w@(Widget n) <- widget W.kindEntry
   pendB (PChange n handler)
   return w
 
 -- | A labeled checkbox with its toggle handler co-located.
-checkboxOn :: String -> (Bool -> IO ()) -> Build Widget
-checkboxOn text handler = do
+checkboxOn :: (LeafArgs r) => String -> (Bool -> IO ()) -> r
+checkboxOn text handler = leafish $ do
   w@(Widget n) <- widget W.kindCheckbox
   setText w text
   pendB (PToggle n handler)
@@ -647,8 +694,8 @@ checkboxOn text handler = do
 
 -- | A slider over min..max at value, with its change handler
 -- co-located.
-sliderOn :: Double -> Double -> Double -> (Double -> IO ()) -> Build Widget
-sliderOn lo hi value handler = do
+sliderOn :: (LeafArgs r) => Double -> Double -> Double -> (Double -> IO ()) -> r
+sliderOn lo hi value handler = leafish $ do
   w@(Widget n) <- widget W.kindSlider
   emitB (W.txSetMin n lo)
   emitB (W.txSetMax n hi)
@@ -656,14 +703,14 @@ sliderOn lo hi value handler = do
   pendB (PValue n handler)
   return w
 
-labelText :: String -> Build Widget
-labelText text = do
+labelText :: (LeafArgs r) => String -> r
+labelText text = leafish $ do
   w <- widget W.kindLabel
   setText w text
   return w
 
-labelBound :: Signal -> Build Widget
-labelBound sig = do
+labelBound :: (LeafArgs r) => Signal -> r
+labelBound sig = leafish $ do
   w <- widget W.kindLabel
   bindText w sig
   return w
@@ -675,15 +722,15 @@ labelBound sig = do
 -- the handle is consumed by that submit, and the caller's bytes are
 -- free to drop the moment buildTx returns. Text belongs on labels —
 -- image bytes have their own channel.
-imageBytes :: BS.ByteString -> Build Widget
-imageBytes bytes = do
+imageBytes :: (LeafArgs r) => BS.ByteString -> r
+imageBytes bytes = leafish $ do
   w@(Widget n) <- widget W.kindImage
   emitBIO (W.txSetSource n <$> registerBlob bytes)
   return w
 
 -- | An image whose source follows a Blob signal.
-imageBound :: Signal -> Build Widget
-imageBound sig = do
+imageBound :: (LeafArgs r) => Signal -> r
+imageBound sig = leafish $ do
   w <- widget W.kindImage
   bindSource w sig
   return w

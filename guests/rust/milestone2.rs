@@ -29,8 +29,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // template escape as the body's return value — no side-channel
         // slots.
         let groups = tx.collection::<String>();
-        let (root, (step, items, remove_button)) = tx.column(|tx| {
-            let step = tx.button("step");
+        let (root, (step, items, remove_button)) = tx
+            .column(|tx| {
+            let step = tx.button("step").id();
             tx.label(status);
             tx.when(extras, |t| {
                 let label = t.widget(WidgetKind::Label);
@@ -56,8 +57,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
                 out
             });
-            (step, items, remove)
-        });
+                (step, items, remove)
+            })
+            .into_parts();
         tx.mount(root);
         (status, extras, groups, step, items, remove_button)
     });
