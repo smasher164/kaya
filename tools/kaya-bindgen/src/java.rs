@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
@@ -144,7 +144,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    }");
 
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         emit_packer(&mut c, r);
@@ -193,6 +193,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);");
         c.line(&format!("        b.putLong(widgetId).putInt(PROP_{up}).putInt(SOURCE_ELEMENT)"));
         c.line("                .putInt(level).putInt(field);");
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire). Window 0, the primary surface, until aux
+    // windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /** set_window_prop with a constant {prop} value (window 0, the primary surface). */"));
+        c.line(&format!("    public static byte[] txSetWindow{pc}({ty} {p}) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
+        c.line(&format!("        b.putLong(0).putInt(WPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_window_prop with a signal-bound {prop} value (window 0, the primary surface). */"));
+        c.line(&format!("    public static byte[] txBindWindow{pc}(long signalId) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);");
+        c.line(&format!("        b.putLong(0).putInt(WPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
     }

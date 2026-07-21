@@ -3,7 +3,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec};
 
-use crate::{Ctx, PropKind, prop_variants, record_params};
+use crate::{Ctx, PropKind, prop_variants, record_params, window_prop_variants};
 
 /// Names spec identifiers must avoid: this emitter's helpers, plus
 /// Python's keywords and builtins a parameter would shadow.
@@ -109,7 +109,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // One packer per fixed-layout tx record; set_property gets one
     // helper per source arm.
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         let params = record_params(r);
@@ -169,6 +169,28 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("def tx_bind_{prop}_element(widget_id, level=0, field=0):"));
         c.line(&format!("    \"\"\"set_property bound to one field of the element of the enclosing For, `level` Fors up.\"\"\""));
         c.line(&format!("    return record(TX_SET_PROPERTY, struct.pack(\"<QIIII\", widget_id, PROP_{up}, SOURCE_ELEMENT, level, field))"));
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire; windows are not collection elements).
+    // Window 0, the primary surface, until aux windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (ty, expr) = match kind {
+            PropKind::Str => ("str", format!("_enc.value({prop})")),
+            PropKind::F64 => ("float", format!("_enc.value({prop})")),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_window_{prop}({prop}):"));
+        c.line(&format!("    \"\"\"set_window_prop with a constant {prop} value ({ty}); window 0, the primary surface.\"\"\""));
+        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QII\", 0, WPROP_{up}, SOURCE_CONST) + {expr})"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_window_{prop}(signal_id):"));
+        c.line(&format!("    \"\"\"set_window_prop with a signal-bound {prop} value; window 0, the primary surface.\"\"\""));
+        c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QIIQ\", 0, WPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
     c.line("");
     c.line("");

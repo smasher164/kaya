@@ -681,6 +681,126 @@ scenario, run on every backend and compared side by side. Divergences get
 sorted into "semantics: normalize in the backend" or "metrics: document as
 platform flavor". The gallery doubles as the permanent regression suite.
 
+## Presentation contexts
+
+Ratified 2026-07-21, resolving open question #4. A scene root is pure
+content — widgets, ids, props, events, the whole existing grammar —
+and it is deliberately ignorant of what hosts it. The host is one of a
+small taxonomy of PRESENTATION CONTEXTS. This is the position view
+controllers occupy natively (a UIViewController does not know whether
+it is pushed, presented, or a window's root; likewise a fragment or
+composable on Android, an NSViewController on macOS): content that
+containers host. One grammar inside a context — the tree never forks
+by host — and per-context lifecycle grammar outside:
+
+- **Windows** are PARALLEL: top-level surfaces that coexist, with the
+  user switching between them. Their lifecycle verb is CLOSE, and it
+  is app-vetoable (the CloseRequested request/confirm class settled in
+  Case analyses; winit, Tauri, and Electron converged on the shape).
+- **Modal presentations** are TRANSIENT: parent-bound, blocking their
+  parent, producing a result. Their lifecycle verb is DISMISS, and the
+  cancel path is one uniform semantic slot with per-platform spelling:
+  Esc on the desktops, the back gesture on Android, Cancel/swipe on
+  iOS.
+- **Navigation entries** are SERIAL: a stack of roots inside one
+  surface, exactly one visible. Their lifecycle verb is POP, and on
+  the mobile platforms it is user-sovereign (Android's predictive back
+  exists precisely to stop apps stalling it).
+
+The three grammars are never mixed. A window is not a push; a dialog
+is not a window; back never touches windows. Android's own history is
+the strongest witness: classic Android conflated surface with
+navigation frame (multi-screen apps were multi-activity apps riding
+the task back stack), and the platform spent a decade migrating to the
+single-activity architecture — one surface, a NavController stack of
+destinations inside it. The ecosystem un-conflated the concepts; the
+vocabulary starts un-conflated.
+
+### Windows (phase 4)
+
+What "window" means diverges at the root: on the desktops the app
+COMMANDS surfaces (NSWindow, AppWindow, GtkWindow — create, title,
+size, close), while on mobile the app at most REQUESTS them (the
+user-facing unit on iOS is the UIWindowScene, which an app can ask to
+activate but never size or place; Android's analog is the Activity,
+with multi-window entirely system-managed). Even among desktops the
+command model has a hole: a Wayland client cannot position its own
+windows — the compositor owns placement. SwiftUI's scene architecture
+is the prior art for bridging this: WindowGroup is a DECLARATION of
+what may exist, and each platform materializes it (N windows on
+macOS, scenes on iPadOS, exactly one on iPhone). kaya adopts the
+declaration/request principle:
+
+- **The primary surface exists everywhere and already does** — it is
+  what `kaya::run` mounts today; milestone 1 reserved mount target 0
+  for it. Phase 4 makes it explicit and gives it props. `title` is
+  uniform, with materialization documented as platform flavor: the
+  title bar on the desktops, UIScene.title on iOS (the app switcher
+  and Stage Manager show it), the Activity task label on Android.
+  Initial size is an ADVISORY REQUEST on every platform — not a
+  mobile carve-out but the truth everywhere, since a tiling window
+  manager on Linux overrides it too; defining it as a request keeps
+  one semantics instead of "guaranteed on desktop, ignored on
+  mobile". **Position is not in the vocabulary.** Wayland alone
+  kills it, and mobile buries it; a verb that two platforms must
+  silently drop is not a verb.
+- **Auxiliary windows are a capability, not a universal.** Desktop
+  hosts have them; phone hosts do not, and reinterpreting "create
+  window" as a navigation push would silently produce a different
+  application (parallel surfaces became serial screens — the
+  uniform-semantics fork the invariants forbid). The host advertises
+  `aux_windows` in the handshake (the spec-hash pump's table has the
+  slot), and creating an auxiliary window on a non-capable host is a
+  deterministic scene error — the column-baseline precedent: the
+  carve-out itself stated uniformly, failing loudly at the root.
+- **Close** inherits the settled veto class unchanged: the core
+  defaults to staying open, emits CloseRequested, and the app later
+  issues close() if it agrees.
+- **Back never touches windows.** At the primary surface's root the
+  back gesture belongs to the system (leave the app); kaya offers no
+  interception in v1. An app that wants back to mean something must
+  have given the vocabulary something poppable — a dialog now, a
+  navigation entry someday.
+
+### Modal presentations (design recorded; lands after windows)
+
+The modal tier splits in two, because the platforms' own dialogs do:
+
+- **Alerts** are pure vocabulary objects — title, message, buttons in;
+  a result event out; NO scene root inside. This is deliberate
+  dressed-floor discipline: UIAlertController, NSAlert, ContentDialog,
+  AdwMessageDialog, and Compose's AlertDialog are canonically
+  title+message+buttons, and modeling alerts this way means every
+  platform presents its real dialog rather than a styled window.
+  Whether a dialog IS a window is platform-inconsistent trivia
+  (NSAlert and GTK dialogs are windows; ContentDialog is an in-window
+  XAML overlay; UIAlertController is a presented view controller) —
+  which is precisely why the vocabulary models the uniform semantics
+  (modal, parent-bound, result-bearing) and not the windowhood.
+- **Root-hosting modals** (sheets, content dialogs) — a presentation
+  context hosting an arbitrary scene root — come later, reusing the
+  same mount-target machinery windows introduce.
+
+### Navigation (future, unscheduled)
+
+A stack of scene roots inside the primary surface: push/pop as
+vocabulary, the back affordance materialized per platform — system
+gesture on Android, swipe-back on iOS, a toolbar back button on the
+desktops (the System Settings / AdwNavigationView / NavigationView
+pattern). Without it, mobile kaya apps are single-screen, so the gap
+is real; it stays out of phase 4 because it carries its own scene-tree
+questions (widget identity across a pop; whether the stack lives in
+the protocol or the guest) and bolting it onto windows would poison
+both grammars.
+
+### Protocol shape
+
+`mount(root)` today is the degenerate case — mount into the one
+implicit primary window, target 0. Phase 4 generalizes the TARGET of
+mount, not the tree: the spec grows presentation-context objects and
+their lifecycle events, additively. The widget vocabulary, the eight
+bindings' scene construction, and the geometry gates do not move.
+
 ## Threading model and protocol
 
 - The invariant, uniform across platforms: exactly one UI thread runs all
@@ -1574,13 +1694,13 @@ remains is implementation-scale:
    consumer pins one blob, never an epoch.
 3. The Vello scene-encoding subset for v2 display lists (arrives with
    Canvas, after v1).
-4. The window vocabulary, in full: create_window and per-window mount
-   targets, lifecycle (CloseRequested and the veto default, Present,
-   Close), sizing and titles, dialogs and modality, and the per-platform
-   capability story for mobile (where the primary surface is OS-given
-   and extra windows range from real to unsupported). Milestone 1
-   reserves the mount target with 0 as the implicit default window so
-   none of this breaks the wire when it lands.
+4. The window vocabulary: resolved — see "Presentation contexts"
+   (ratified 2026-07-21). Windows, modal presentations, and navigation
+   are three context types with three unmixed lifecycle grammars;
+   phase 4 implements windows (primary props, capability-gated
+   auxiliaries, the close veto class), alerts follow, root-hosting
+   modals and navigation are recorded as future. Milestone 1's
+   reserved mount target 0 remains the implicit primary window.
 
 The v1 widget set and the gallery scene list are covered in "v1 scope and
 delivery process"; the scene list grows per widget admission.

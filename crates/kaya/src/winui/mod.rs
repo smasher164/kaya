@@ -45,7 +45,7 @@ use bindings::Microsoft::UI::Xaml::{
 };
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp,
 };
 use crate::scene::Scene;
 
@@ -809,6 +809,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
         }
+        ApplyOp::SetWindowProp { window: _, prop, value } => match (prop, &value) {
+            (WindowProp::Title, Value::Str(title)) => {
+                core.window.SetTitle(&HSTRING::from(&**title))?;
+            }
+            (WindowProp::Width, Value::F64(v)) => resize_request(core, Some(*v), None)?,
+            (WindowProp::Height, Value::F64(v)) => resize_request(core, None, Some(*v))?,
+            (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
+        },
         ApplyOp::SetProp { id, prop, value } => {
             // Grow is handled ahead of the per-kind table: it is the one
             // kind-agnostic prop, and its effect lands on the parent's
@@ -1235,6 +1243,61 @@ unsafe extern "system" {
         cy: i32,
         flags: u32,
     ) -> i32;
+
+    fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+    fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
+    fn GetDpiForWindow(hwnd: isize) -> u32;
+}
+
+/// Win32's RECT, for the client/outer chrome math below.
+#[repr(C)]
+#[derive(Default)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+/// The advisory size request's Win32 materialization: DIP -> physical
+/// via the window's DPI, applied to the CLIENT area (the request is a
+/// content size) by carrying the current chrome delta onto the outer
+/// frame. A request, never a guarantee — the shell keeps the last
+/// word (DESIGN.md, Presentation contexts).
+fn resize_request(
+    core: &CoreState,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> windows_core::Result<()> {
+    let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+    let hwnd = native.window_handle()?;
+    unsafe {
+        let mut outer = Rect::default();
+        let mut client = Rect::default();
+        if GetWindowRect(hwnd, &mut outer) == 0 || GetClientRect(hwnd, &mut client) == 0 {
+            return Ok(());
+        }
+        let scale = f64::from(GetDpiForWindow(hwnd)) / 96.0;
+        let client_w = f64::from(client.right - client.left);
+        let client_h = f64::from(client.bottom - client.top);
+        let chrome_w = (outer.right - outer.left) - (client.right - client.left);
+        let chrome_h = (outer.bottom - outer.top) - (client.bottom - client.top);
+        let target_w = width.map_or(client_w, |w| w * scale).round() as i32 + chrome_w;
+        let target_h = height.map_or(client_h, |h| h * scale).round() as i32 + chrome_h;
+        const SWP_NOMOVE: u32 = 0x2;
+        const SWP_NOZORDER: u32 = 0x4;
+        const SWP_NOACTIVATE: u32 = 0x10;
+        SetWindowPos(
+            hwnd,
+            0,
+            0,
+            0,
+            target_w,
+            target_h,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+    Ok(())
 }
 
 fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<()> {
@@ -1637,6 +1700,20 @@ impl crate::harness::Stage for WinUiStage {
                 }
                 many => format!("ambiguous ({})", many.join("|")),
             })
+        })
+    }
+
+    fn window_title(&self) -> String {
+        Self::on_ui(move |core| Ok(core.window.Title()?.to_string()))
+    }
+
+    fn window_content_size(&self) -> (f64, f64) {
+        Self::on_ui(move |core| {
+            // The XamlRoot's size IS the client area in DIP — the
+            // same notion root_fills reads.
+            let root: FrameworkElement = core.window.Content()?.cast()?;
+            let area = root.XamlRoot()?.Size()?;
+            Ok((f64::from(area.Width), f64::from(area.Height)))
         })
     }
 

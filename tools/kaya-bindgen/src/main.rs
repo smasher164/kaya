@@ -127,6 +127,16 @@ pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u3
     kaya::spec::PROPS
 }
 
+/// Window properties, driving the typed window setters (title/width/
+/// height; window 0 = the primary surface until aux windows land).
+/// Element sources are rejected by the wire, so the emitters write
+/// const + signal duos, never trios.
+pub(crate) fn window_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::WINDOW_PROPS
+}
+
 /// Occurrence records, split by whether they carry a trailing payload
 /// value after the key path — a spec fact (Record::payload), so the
 /// generated parsers' kind lists derive rather than drift.

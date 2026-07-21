@@ -846,6 +846,20 @@ func (tx *Tx) Len(c Collection) int {
 
 // Mount mounts into the default window; per-window targets arrive with
 // the window vocabulary.
+// WindowTitle sets the primary surface's title (the title bar on the
+// desktops, the switcher label on iOS, the task label on Android).
+func (tx *Tx) WindowTitle(title string) {
+	tx.records = append(tx.records, TxSetWindowTitle(title))
+}
+
+// WindowSize requests the primary surface's content size in DIP —
+// ADVISORY on every platform: honored where the window manager
+// permits, recorded only where the system owns geometry.
+func (tx *Tx) WindowSize(width, height float64) {
+	tx.records = append(tx.records, TxSetWindowWidth(width))
+	tx.records = append(tx.records, TxSetWindowHeight(height))
+}
+
 func (tx *Tx) Mount(root Widget) {
 	tx.records = append(tx.records, TxMount(0, root.id))
 }

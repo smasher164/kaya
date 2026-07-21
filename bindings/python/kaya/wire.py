@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xf1448ef515751f08
+SPEC_HASH = 0xcce97c88cc7210aa
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -34,6 +34,9 @@ PROP_SOURCE = 6
 PROP_GROW = 7
 PROP_SPACING = 8
 PROP_ALIGN = 9
+WPROP_TITLE = 1
+WPROP_WIDTH = 2
+WPROP_HEIGHT = 3
 ALIGN_START = 0
 ALIGN_CENTER = 1
 ALIGN_END = 2
@@ -67,6 +70,7 @@ TX_COLLECTION_MOVE = 15
 TX_COLLECTION_UPDATE_FIELD = 14
 TX_VARIANT_CASE = 16
 TX_WIDGET_COMMAND = 17
+TX_SET_WINDOW_PROP = 18
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -74,6 +78,7 @@ APPLY_MOUNT = 4
 APPLY_MOVE_CHILD = 6
 APPLY_DESTROY = 5
 APPLY_COMMAND = 7
+APPLY_SET_WINDOW_PROP = 8
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -333,6 +338,36 @@ def tx_bind_align(widget_id, signal_id):
 def tx_bind_align_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALIGN, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_window_title(title):
+    """set_window_prop with a constant title value (str); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+
+
+def tx_bind_window_title(signal_id):
+    """set_window_prop with a signal-bound title value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_TITLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_width(width):
+    """set_window_prop with a constant width value (float); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_WIDTH, SOURCE_CONST) + _enc.value(width))
+
+
+def tx_bind_window_width(signal_id):
+    """set_window_prop with a signal-bound width value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_WIDTH, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_height(height):
+    """set_window_prop with a constant height value (float); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", 0, WPROP_HEIGHT, SOURCE_CONST) + _enc.value(height))
+
+
+def tx_bind_window_height(signal_id):
+    """set_window_prop with a signal-bound height value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", 0, WPROP_HEIGHT, SOURCE_SIGNAL, signal_id))
 
 
 def parse_value(buf, at):

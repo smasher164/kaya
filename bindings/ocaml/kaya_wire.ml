@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xf1448ef515751f08L
+let spec_hash = 0xcce97c88cc7210aaL
 
 let value_bool = 1
 let value_i64 = 2
@@ -39,6 +39,9 @@ let prop_source = 6
 let prop_grow = 7
 let prop_spacing = 8
 let prop_align = 9
+let wprop_title = 1
+let wprop_width = 2
+let wprop_height = 3
 let align_start = 0
 let align_center = 1
 let align_end = 2
@@ -71,6 +74,7 @@ let tx_kind_collection_move = 15
 let tx_kind_collection_update_field = 14
 let tx_kind_variant_case = 16
 let tx_kind_widget_command = 17
+let tx_kind_set_window_prop = 18
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -78,6 +82,7 @@ let apply_kind_mount = 4
 let apply_kind_move_child = 6
 let apply_kind_destroy = 5
 let apply_kind_command = 7
+let apply_kind_set_window_prop = 8
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -488,6 +493,54 @@ let tx_bind_align_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_window_prop with a constant title value (window 0, the primary surface). *)
+let tx_set_window_title title =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str title))
+
+(* set_window_prop with a signal-bound title value (window 0, the primary surface). *)
+let tx_bind_window_title signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant width value (window 0, the primary surface). *)
+let tx_set_window_width width =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_width);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 width))
+
+(* set_window_prop with a signal-bound width value (window 0, the primary surface). *)
+let tx_bind_window_width signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_width);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant height value (window 0, the primary surface). *)
+let tx_set_window_height height =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_height);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 height))
+
+(* set_window_prop with a signal-bound height value (window 0, the primary surface). *)
+let tx_bind_window_height signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b 0L;
+      Buffer.add_int32_le b (Int32.of_int wprop_height);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
 
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)

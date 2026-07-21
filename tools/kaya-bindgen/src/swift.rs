@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import",
@@ -146,7 +146,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    }");
 
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         emit_packer(&mut c, r);
@@ -196,6 +196,39 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        self.u32(UInt32(KAYA_SOURCE_ELEMENT))");
         c.line("        self.u32(level)");
         c.line("        self.u32(field)");
+        c.line("        self.end(start)");
+        c.line("    }");
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire). Window 0, the primary surface, until aux
+    // windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::F64 => (camel(prop), "Double", "f64"),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_window_prop with a constant {prop} value (window 0, the primary surface)."));
+        c.line(&format!("    mutating func setWindow{pc}(_ {p}: {ty}) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
+        c.line("        self.u64(0)");
+        c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value(.{ctor}({p}))"));
+        c.line("        self.end(start)");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
+        c.line(&format!("    mutating func bindWindow{pc}(_ signalId: UInt64) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
+        c.line("        self.u64(0)");
+        c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+        c.line("        self.u64(signalId)");
         c.line("        self.end(start)");
         c.line("    }");
     }

@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xf1448ef515751f08
+let kayaSpecHash: UInt64 = 0xcce97c88cc7210aa
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -32,6 +32,13 @@ private let applyMount: UInt16 = 4
 private let applyDestroy: UInt16 = 5
 private let applyMoveChild: UInt16 = 6
 private let applyCommand: UInt16 = 7
+private let applySetWindowProp: UInt16 = 8
+
+/// Window properties (their own namespace — windows are not widgets;
+/// window 0 is the primary surface).
+private let wpropTitle: UInt32 = 1
+private let wpropWidth: UInt32 = 2
+private let wpropHeight: UInt32 = 3
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -122,6 +129,14 @@ final class KayaSceneModel {
     var images: [KayaNode] = []
     var columns: [KayaNode] = []
     var rows: [KayaNode] = []
+    // The primary surface's properties. The title starts as the
+    // process name — exactly what an untitled WindowGroup shows — so
+    // an unset prop changes nothing. Width/height record the advisory
+    // size request; macOS materializes it, iOS records it only (the
+    // system owns surface geometry).
+    var windowTitle: String = ProcessInfo.processInfo.processName
+    var windowWidth: Double?
+    var windowHeight: Double?
 }
 
 let kayaScene = KayaSceneModel()
@@ -220,6 +235,21 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
     return blobs
 }
 
+/// The size request's macOS materialization: resize the primary
+/// window's CONTENT to the requested DIP, keeping the current extent
+/// on any axis the scene has not requested. iOS applies nothing —
+/// the request is recorded and the system owns geometry.
+private func kayaApplyWindowSize() {
+    #if os(macOS)
+        guard let window = NSApp.windows.first else { return }
+        let current = window.contentRect(forFrameRect: window.frame).size
+        let size = NSSize(
+            width: kayaScene.windowWidth ?? current.width,
+            height: kayaScene.windowHeight ?? current.height)
+        window.setContentSize(size)
+    #endif
+}
+
 private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
         var at = 0
@@ -245,6 +275,37 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindColumn: kayaScene.columns.append(node)
                 case kindRow: kayaScene.rows.append(node)
                 default: break
+                }
+            case applySetWindowProp:
+                // window (u64; 0 = the primary surface), prop (u32),
+                // pad, value. Size is an advisory request: macOS
+                // resizes, iOS records (see DESIGN.md, Presentation
+                // contexts).
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let wvType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let wvLen = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                switch (prop, wvType) {
+                case (wpropTitle, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + wvLen)]
+                    let title = String(decoding: bytes, as: UTF8.self)
+                    kayaScene.windowTitle = title
+                    #if os(iOS)
+                        // The switcher/Stage Manager label — iOS's
+                        // materialization of a surface title.
+                        for uiScene in UIApplication.shared.connectedScenes {
+                            (uiScene as? UIWindowScene)?.title = title
+                        }
+                    #endif
+                case (wpropWidth, valueF64):
+                    kayaScene.windowWidth =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    kayaApplyWindowSize()
+                case (wpropHeight, valueF64):
+                    kayaScene.windowHeight =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                    kayaApplyWindowSize()
+                default:
+                    fatalError("kaya: bad window prop \(prop) value type \(wvType)")
                 }
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -546,6 +607,48 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(parts[1]) splits \"\(got)\", wanted \"\(want)\"")
                 } else {
                     failures.append("no such target \(parts[1])")
+                }
+            case "expect_title":
+                // The REAL materialized title, never the model's copy
+                // on macOS — a backend that ignored the write must
+                // fail.
+                let want = kayaQuoted(Array(parts[1...]))
+                let got = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        return NSApp.windows.first?.title ?? ""
+                    #else
+                        return kayaScene.windowTitle
+                    #endif
+                }
+                if got == want {
+                    observed.append("title \"\(want)\"")
+                } else {
+                    failures.append("title \"\(got)\", wanted \"\(want)\"")
+                }
+            case "expect_window_size":
+                // The surface's REAL content extent against the
+                // advisory request, within 2pt. Reads the window, not
+                // the offer reader (the offer sits inside the root
+                // inset).
+                let dims = parts[1].split(separator: "x")
+                let wantW = Double(dims[0]) ?? -1
+                let wantH = Double(dims[1]) ?? -1
+                let got = DispatchQueue.main.sync { () -> CGSize in
+                    #if os(macOS)
+                        guard let window = NSApp.windows.first else { return .zero }
+                        return window.contentRect(forFrameRect: window.frame).size
+                    #else
+                        let scenes = UIApplication.shared.connectedScenes
+                        let ws = scenes.compactMap { $0 as? UIWindowScene }.first
+                        return ws?.windows.first?.bounds.size ?? .zero
+                    #endif
+                }
+                if abs(got.width - wantW) <= 2, abs(got.height - wantH) <= 2 {
+                    observed.append("window \(Int(wantW))x\(Int(wantH))")
+                } else {
+                    failures.append(
+                        "window \(Int(got.width))x\(Int(got.height)), wanted "
+                            + "\(Int(wantW))x\(Int(wantH))")
                 }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it
@@ -1289,6 +1392,11 @@ struct KayaRoot: View {
         // Normalized: pack content to the top-leading corner of the
         // surface rather than letting the window center it.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The primary surface's title (initially the process name, so
+        // an unset prop changes nothing): SwiftUI's blessed window
+        // titling path on macOS; harmless on iOS, where the switcher
+        // label is stamped in the apply arm instead.
+        .navigationTitle(scene.windowTitle)
         .onAppear {
             kayaPlaceWindow()
             kayaStartCommandPump()

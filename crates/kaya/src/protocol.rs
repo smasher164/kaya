@@ -299,6 +299,25 @@ pub enum Prop {
     Grow,
 }
 
+/// Window property keys — the presentation-context twin of [`Prop`],
+/// separate because windows are not widgets (the widget domain checks
+/// stay widget-pure; see DESIGN.md's Presentation contexts). Window 0
+/// is the primary surface and always exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WindowProp {
+    /// The surface's title (Str-valued). Uniform semantics with
+    /// per-platform materialization: the title bar on the desktops,
+    /// UIScene.title on iOS, the Activity task label on Android.
+    Title,
+    /// Requested content width in DIP (F64-valued; finite, positive).
+    /// ADVISORY on every platform: a request the window manager may
+    /// decline — tiling WMs on the desktops, the system on mobile —
+    /// never a guarantee.
+    Width,
+    /// Requested content height in DIP; see `Width`.
+    Height,
+}
+
 /// The one-shot command vocabulary: momentary verbs aimed at
 /// widget-owned state, the third arm of the ownership rule (app-owned
 /// state travels as props and deltas, widget-owned state comes back as
@@ -342,6 +361,10 @@ pub enum TxOp {
     SetProperty { widget: WidgetId, prop: Prop, value: PropValue },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
+    /// Bind a window property. Element sources are rejected at decode
+    /// — windows are not collection elements; constants and signals
+    /// both bind (a signal-bound title is the reactive title).
+    SetWindowProp { window: WindowId, prop: WindowProp, value: PropValue },
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -420,6 +443,7 @@ pub enum ApplyOp {
     /// core concern.
     Create { id: WidgetId, kind: WidgetKind, tag: Option<Vec<u8>> },
     SetProp { id: WidgetId, prop: Prop, value: Value },
+    SetWindowProp { window: WindowId, prop: WindowProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the

@@ -1127,6 +1127,21 @@ final class KayaAppTx {
 
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
+    /// Set the primary surface's title (the title bar on the
+    /// desktops, the switcher label on iOS, the task label on
+    /// Android).
+    func windowTitle(_ title: String) {
+        tx.setWindowTitle(title)
+    }
+
+    /// Request the primary surface's content size in DIP — ADVISORY
+    /// on every platform: honored where the window manager permits,
+    /// recorded only where the system owns geometry.
+    func windowSize(_ width: Double, _ height: Double) {
+        tx.setWindowWidth(width)
+        tx.setWindowHeight(height)
+    }
+
     func mount(_ root: KayaWidget) {
         tx.mount(0, root.id)
     }

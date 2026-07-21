@@ -54,6 +54,8 @@
 
 #define TX_WIDGET_COMMAND 17
 
+#define TX_SET_WINDOW_PROP 18
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -67,6 +69,8 @@
 #define APPLY_MOVE_CHILD 6
 
 #define APPLY_COMMAND 7
+
+#define APPLY_SET_WINDOW_PROP 8
 
 #define VALUE_BOOL 1
 
@@ -111,6 +115,16 @@
 #define PROP_SPACING 8
 
 #define PROP_ALIGN 9
+
+/**
+ * Window property ids (spec::WINDOW_PROPS) — their own namespace;
+ * windows are not widgets.
+ */
+#define WPROP_TITLE 1
+
+#define WPROP_WIDTH 2
+
+#define WPROP_HEIGHT 3
 
 /**
  * The align enum's wire values (spec enum "align").
@@ -216,6 +230,8 @@
 
 #define KAYA_TX_WIDGET_COMMAND 17
 
+#define KAYA_TX_SET_WINDOW_PROP 18
+
 /**
  * Apply record kinds (core -> presentation pump, via kaya_next_commands).
  * Layouts after the header:
@@ -253,6 +269,8 @@
 #define KAYA_APPLY_MOVE_CHILD 6
 
 #define KAYA_APPLY_COMMAND 7
+
+#define KAYA_APPLY_SET_WINDOW_PROP 8
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -315,6 +333,16 @@
 #define KAYA_PROP_SPACING 8
 
 #define KAYA_PROP_ALIGN 9
+
+/**
+ * Window properties (spec::WINDOW_PROPS): their own namespace —
+ * windows are not widgets. Window 0 is the primary surface.
+ */
+#define KAYA_WPROP_TITLE 1
+
+#define KAYA_WPROP_WIDTH 2
+
+#define KAYA_WPROP_HEIGHT 3
 
 /**
  * The align enum's values (spec enum "align"); baseline is rows-only.

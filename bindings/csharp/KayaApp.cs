@@ -1037,6 +1037,21 @@ sealed class Tx
 
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
+    /// Set the primary surface's title (the title bar on the
+    /// desktops, the switcher label on iOS, the task label on
+    /// Android).
+    public void WindowTitle(string title) =>
+        Records.Add(KayaWire.TxSetWindowTitle(title));
+
+    /// Request the primary surface's content size in DIP — ADVISORY
+    /// on every platform: honored where the window manager permits,
+    /// recorded only where the system owns geometry.
+    public void WindowSize(double width, double height)
+    {
+        Records.Add(KayaWire.TxSetWindowWidth(width));
+        Records.Add(KayaWire.TxSetWindowHeight(height));
+    }
+
     public void Mount(Widget root) => Records.Add(KayaWire.TxMount(0, root.Id));
 }
 

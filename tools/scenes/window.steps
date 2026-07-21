@@ -1,0 +1,12 @@
+# The window conformance scene: the primary surface's props as
+# assertions. expect_title reads the REAL materialized title (the
+# title bar / task label), never the scene model's copy — a backend
+# that ignored the write must fail. expect_window_size reads the
+# surface's real content extent against the advisory 640x400 request
+# (off the 540x330 default, so an ignored request cannot pass by
+# luck). Desktop scene: the phones' systems own surface geometry, so
+# desktop runners register it and mobile runners do not.
+settle 1500
+expect label#0 "window probe"
+expect_title "window probe"
+expect_window_size 640x400

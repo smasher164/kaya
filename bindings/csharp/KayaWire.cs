@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xf1448ef515751f08;
+    public const ulong SpecHash = 0xcce97c88cc7210aa;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -36,6 +36,9 @@ static class KayaWire
     public const uint PropGrow = 7;
     public const uint PropSpacing = 8;
     public const uint PropAlign = 9;
+    public const uint WpropTitle = 1;
+    public const uint WpropWidth = 2;
+    public const uint WpropHeight = 3;
     public const uint AlignStart = 0;
     public const uint AlignCenter = 1;
     public const uint AlignEnd = 2;
@@ -68,6 +71,7 @@ static class KayaWire
     public const ushort TxKindCollectionUpdateField = 14;
     public const ushort TxKindVariantCase = 16;
     public const ushort TxKindWidgetCommand = 17;
+    public const ushort TxKindSetWindowProp = 18;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -75,6 +79,7 @@ static class KayaWire
     public const ushort ApplyKindMoveChild = 6;
     public const ushort ApplyKindDestroy = 5;
     public const ushort ApplyKindCommand = 7;
+    public const ushort ApplyKindSetWindowProp = 8;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -548,6 +553,57 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropAlign); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_window_prop with a constant title value (window 0, the primary surface).
+    public static byte[] TxSetWindowTitle(string title)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropTitle); w.Write(SourceConst);
+        EncodeValue(w, title);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound title value (window 0, the primary surface).
+    public static byte[] TxBindWindowTitle(ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant width value (window 0, the primary surface).
+    public static byte[] TxSetWindowWidth(double width)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropWidth); w.Write(SourceConst);
+        EncodeValue(w, width);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound width value (window 0, the primary surface).
+    public static byte[] TxBindWindowWidth(ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropWidth); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant height value (window 0, the primary surface).
+    public static byte[] TxSetWindowHeight(double height)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropHeight); w.Write(SourceConst);
+        EncodeValue(w, height);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound height value (window 0, the primary surface).
+    public static byte[] TxBindWindowHeight(ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(0UL); w.Write(WpropHeight); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
     }
 
     /// Decode one occurrence record (header included). Returns false

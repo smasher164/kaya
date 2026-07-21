@@ -899,6 +899,22 @@ def _widget(kind):
     return handle
 
 
+def window_title(title):
+    """Set the primary surface's title. Uniform semantics with
+    per-platform materialization: the title bar on the desktops, the
+    app switcher's label on iOS, the task label on Android."""
+    _records().append(wire.tx_set_window_title(str(title)))
+
+
+def window_size(width, height):
+    """Request the primary surface's content size (DIP). ADVISORY on
+    every platform: honored where the window manager permits (the
+    desktops), recorded only where the system owns geometry (the
+    phones) — a request, never a guarantee."""
+    _records().append(wire.tx_set_window_width(float(width)))
+    _records().append(wire.tx_set_window_height(float(height)))
+
+
 def signal(initial):
     handle = Signal(_app._next("signal"), initial)
     _records().append(wire.tx_create_signal(handle.id, initial))
@@ -1141,9 +1157,12 @@ def when(sig):
 
 
 class _TxScope:
-    def __init__(self, app, mount_on_exit):
+    def __init__(self, app, mount_on_exit, title=None, width=None, height=None):
         self._app = app
         self._mount = mount_on_exit
+        self._title = title
+        self._width = width
+        self._height = height
 
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
@@ -1153,6 +1172,12 @@ class _TxScope:
         _journal = {}
         _pending_root = None
         _recording = self._mount
+        if self._title is not None:
+            window_title(self._title)
+        if self._width is not None or self._height is not None:
+            if self._width is None or self._height is None:
+                raise ValueError("kaya: window width and height travel together")
+            window_size(self._width, self._height)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -1204,11 +1229,15 @@ class App:
         else:
             self._widget_handlers[(kind, handle.id)] = fn
 
-    def window(self):
+    def window(self, title=None, width=None, height=None):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
-        Per-window targets arrive with the window vocabulary."""
-        return _TxScope(self, mount_on_exit=True)
+        `title` names the primary surface (title bar / switcher label
+        / task label); `width`/`height` request its content size in
+        DIP — advisory on every platform. Per-window targets arrive
+        with the aux-window vocabulary."""
+        return _TxScope(
+            self, mount_on_exit=True, title=title, width=width, height=height)
 
     def build(self):
         """An ambient transaction without the mount — for mutations

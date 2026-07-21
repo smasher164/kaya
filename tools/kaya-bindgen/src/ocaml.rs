@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence",
@@ -111,7 +111,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  Bytes.to_string s");
 
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         emit_packer(&mut c, r);
@@ -155,6 +155,33 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int32_le b (Int32.of_int source_element);");
         c.line("      Buffer.add_int32_le b (Int32.of_int level);");
         c.line("      Buffer.add_int32_le b (Int32.of_int field))");
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire). Window 0, the primary surface, until aux
+    // windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::F64 => ("F64", *prop),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("(* set_window_prop with a constant {prop} value (window 0, the primary surface). *)"));
+        c.line(&format!("let tx_set_window_{prop} {param} ="));
+        c.line("  finish tx_kind_set_window_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b 0L;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int wprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line("");
+        c.line(&format!("(* set_window_prop with a signal-bound {prop} value (window 0, the primary surface). *)"));
+        c.line(&format!("let tx_bind_window_{prop} signal_id ="));
+        c.line("  finish tx_kind_set_window_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b 0L;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int wprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
     }
     c.line("");
     c.line("(* Reads assembled from a byte accessor (absolute offset -> byte);");

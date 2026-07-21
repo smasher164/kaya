@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use crate::protocol::{
     ApplyOp, CollectionId, CommandKind, Key, Prop, PropValue, Record, SignalId, Transaction, TxOp,
-    Value, ValueType, WidgetId, WidgetKind,
+    Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -182,6 +182,7 @@ pub(crate) struct Scene {
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
+    window_bindings: HashMap<SignalId, Vec<(WindowId, WindowProp)>>,
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
@@ -254,6 +255,22 @@ fn prop_value_type(prop: Prop) -> ValueType {
 /// The typed setters the bindings generate enforce prop types at
 /// compile time — but the wire itself is untyped, so an ill-typed
 /// record from a raw guest must die here, not in whichever backend
+/// Window property values: the title takes any string; the size
+/// request takes finite positive DIP. Nonsense dies at the root, the
+/// grow/spacing precedent.
+fn check_window_prop_value(prop: WindowProp, value: &Value) {
+    match (prop, value) {
+        (WindowProp::Title, Value::Str(_)) => {}
+        (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
+            assert!(
+                v.is_finite() && *v > 0.0,
+                "kaya: window size request must be finite and positive, got {v}"
+            );
+        }
+        (p, v) => panic!("kaya: window property {p:?} rejects value {v:?}"),
+    }
+}
+
 /// applies it.
 fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     assert!(
@@ -441,6 +458,54 @@ impl Scene {
                         }
                     }
                 }
+                TxOp::SetWindowProp {
+                    window,
+                    prop,
+                    value,
+                } => {
+                    // Slice 1 of the presentation-context vocabulary:
+                    // the primary surface only. Auxiliary windows are
+                    // capability-gated and arrive with create_window;
+                    // until then a nonzero id is a scene error, the
+                    // column-baseline precedent.
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW,
+                        "kaya: auxiliary windows are not in the vocabulary yet; \
+                         window 0 is the primary surface"
+                    );
+                    match value {
+                        PropValue::Const(v) => {
+                            check_window_prop_value(prop, &v);
+                            out.push(ApplyOp::SetWindowProp {
+                                window,
+                                prop,
+                                value: v,
+                            })
+                        }
+                        PropValue::Signal(id) => {
+                            let current = self
+                                .signals
+                                .get(&id)
+                                .unwrap_or_else(|| {
+                                    panic!("kaya: binding to unknown signal {id:?}")
+                                })
+                                .clone();
+                            check_window_prop_value(prop, &current);
+                            self.window_bindings
+                                .entry(id)
+                                .or_default()
+                                .push((window, prop));
+                            out.push(ApplyOp::SetWindowProp {
+                                window,
+                                prop,
+                                value: current,
+                            });
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: window properties cannot bind element sources")
+                        }
+                    }
+                }
                 TxOp::AddChild { parent, child } => {
                     assert!(
                         self.widgets.contains_key(&parent),
@@ -597,6 +662,15 @@ impl Scene {
                 for (widget, prop) in bound {
                     out.push(ApplyOp::SetProp {
                         id: *widget,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
+            }
+            if let Some(bound) = self.window_bindings.get(&id) {
+                for (window, prop) in bound {
+                    out.push(ApplyOp::SetWindowProp {
+                        window: *window,
                         prop: *prop,
                         value: value.clone(),
                     });

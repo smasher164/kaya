@@ -17,7 +17,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp,
 };
 use crate::scene::Scene;
 
@@ -569,6 +569,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
             }
         }
+        ApplyOp::SetWindowProp { window: _, prop, value } => {
+            use gtk4::prelude::GtkWindowExt;
+            match (prop, &value) {
+                (WindowProp::Title, Value::Str(title)) => {
+                    core.window.set_title(Some(title));
+                }
+                // The advisory size request. GTK4's one public size
+                // verb is set_default_size; under the suites' X11 WM
+                // it resizes a mapped window too, and the WM (or a
+                // Wayland compositor) keeps the last word — exactly
+                // the request semantics (DESIGN.md, Presentation
+                // contexts).
+                (WindowProp::Width, Value::F64(w)) => {
+                    let (_, h) = core.window.default_size();
+                    core.window.set_default_size(*w as i32, h);
+                }
+                (WindowProp::Height, Value::F64(h)) => {
+                    let (w, _) = core.window.default_size();
+                    core.window.set_default_size(w, *h as i32);
+                }
+                (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
+            }
+        }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
@@ -1109,6 +1132,24 @@ impl crate::harness::Stage for GtkStage {
                 }
                 many => format!("ambiguous ({})", many.join("|")),
             }
+        })
+    }
+
+    fn window_title(&self) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::GtkWindowExt;
+            core.window.title().map(String::from).unwrap_or_default()
+        })
+    }
+
+    fn window_content_size(&self) -> (f64, f64) {
+        Self::on_main(move |core| {
+            use gtk4::prelude::GtkWindowExt;
+            // On a mapped toplevel default_size tracks the current
+            // content size (X11; a Wayland compositor keeps its own
+            // last word, the request semantics).
+            let (w, h) = core.window.default_size();
+            (f64::from(w), f64::from(h))
         })
     }
 

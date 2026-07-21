@@ -115,6 +115,21 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("align", 9, PropKind::Enum("align")),
 ];
 
+/// Window properties: the presentation-context twin of PROPS, kept
+/// in its own table because windows are not widgets — the scene
+/// core's widget domain checks stay widget-pure, and the constants
+/// get their own namespace in every binding. `title` is uniform with
+/// per-platform materialization (title bar, UIScene.title, the
+/// Activity task label); `width`/`height` are the ADVISORY initial
+/// content size in DIP — a request on every platform, honored where
+/// the window manager permits (see DESIGN.md, Presentation
+/// contexts). Window 0 is the primary surface and always exists.
+pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("title", 1, PropKind::Str),
+    ("width", 2, PropKind::F64),
+    ("height", 3, PropKind::F64),
+];
+
 /// The variable tail of SET_PROPERTY, after `source`: a value for
 /// SOURCE_CONST, a u64 signal id for SOURCE_SIGNAL, or u32 level + u32
 /// reserved for SOURCE_ELEMENT. The one record whose layout depends on
@@ -164,6 +179,12 @@ pub fn hash() -> u64 {
         }
     }
     for (name, id, kind) in PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"window_props");
+    for (name, id, kind) in WINDOW_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -366,6 +387,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   The command enum is the closed vocabulary; each verb is \
                   admitted by a real artifact, per the escalation policy.",
         },
+        Record {
+            kind: 18,
+            name: "set_window_prop",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a window property (WINDOW_PROPS; window 0 = the \
+                  primary surface). Same tail convention as \
+                  SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — \
+                  windows are not collection elements.",
+        },
     ],
     apply: &[
         Record {
@@ -440,6 +475,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   widget report the result through its normal occurrence \
                   path (a clear arrives back as text_changed with empty \
                   text, through the same delegate a keystroke uses).",
+        },
+        Record {
+            kind: 8,
+            name: "set_window_prop",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a window property to an already-resolved value.",
         },
     ],
     occurrence: &[
@@ -527,6 +574,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("spacing", 8),
                 ("align", 9),
             ],
+        },
+        EnumSpec {
+            name: "wprop",
+            variants: &[("title", 1), ("width", 2), ("height", 3)],
         },
         EnumSpec {
             name: "align",
@@ -686,6 +737,7 @@ mod tests {
             ("collection_move", wire::TX_COLLECTION_MOVE),
             ("variant_case", wire::TX_VARIANT_CASE),
             ("widget_command", wire::TX_WIDGET_COMMAND),
+            ("set_window_prop", wire::TX_SET_WINDOW_PROP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -706,6 +758,7 @@ mod tests {
                 ("move_child", wire::APPLY_MOVE_CHILD),
                 ("destroy", wire::APPLY_DESTROY),
                 ("command", wire::APPLY_COMMAND),
+                ("set_window_prop", wire::APPLY_SET_WINDOW_PROP),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -725,6 +778,16 @@ mod tests {
             .expect("spec has a prop enum");
         assert_eq!(PROPS.len(), prop_enum.variants.len());
         for ((name, id, _), (ename, eid)) in PROPS.iter().zip(prop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
+        let wprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "wprop")
+            .expect("spec has a wprop enum");
+        assert_eq!(WINDOW_PROPS.len(), wprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in WINDOW_PROPS.iter().zip(wprop_enum.variants) {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
@@ -757,6 +820,9 @@ mod tests {
                     ("prop", "grow") => wire::PROP_GROW,
                     ("prop", "spacing") => wire::PROP_SPACING,
                     ("prop", "align") => wire::PROP_ALIGN,
+                    ("wprop", "title") => wire::WPROP_TITLE,
+                    ("wprop", "width") => wire::WPROP_WIDTH,
+                    ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("align", "start") => wire::ALIGN_START,
                     ("align", "center") => wire::ALIGN_CENTER,
                     ("align", "end") => wire::ALIGN_END,

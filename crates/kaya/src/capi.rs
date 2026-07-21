@@ -100,6 +100,7 @@ pub const KAYA_TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const KAYA_TX_COLLECTION_MOVE: u16 = 15;
 pub const KAYA_TX_VARIANT_CASE: u16 = 16;
 pub const KAYA_TX_WIDGET_COMMAND: u16 = 17;
+pub const KAYA_TX_SET_WINDOW_PROP: u16 = 18;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -128,6 +129,7 @@ const _: () = assert!(
         && KAYA_TX_COLLECTION_MOVE == wire::TX_COLLECTION_MOVE
         && KAYA_TX_VARIANT_CASE == wire::TX_VARIANT_CASE
         && KAYA_TX_WIDGET_COMMAND == wire::TX_WIDGET_COMMAND
+        && KAYA_TX_SET_WINDOW_PROP == wire::TX_SET_WINDOW_PROP
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -159,6 +161,7 @@ pub const KAYA_APPLY_MOUNT: u16 = 4;
 pub const KAYA_APPLY_DESTROY: u16 = 5;
 pub const KAYA_APPLY_MOVE_CHILD: u16 = 6;
 pub const KAYA_APPLY_COMMAND: u16 = 7;
+pub const KAYA_APPLY_SET_WINDOW_PROP: u16 = 8;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -167,6 +170,7 @@ const _: () = assert!(
         && KAYA_APPLY_DESTROY == wire::APPLY_DESTROY
         && KAYA_APPLY_MOVE_CHILD == wire::APPLY_MOVE_CHILD
         && KAYA_APPLY_COMMAND == wire::APPLY_COMMAND
+        && KAYA_APPLY_SET_WINDOW_PROP == wire::APPLY_SET_WINDOW_PROP
 );
 
 /// One-shot commands (the widget_command tx record / COMMAND apply
@@ -222,6 +226,12 @@ pub const KAYA_PROP_SOURCE: u32 = 6;
 pub const KAYA_PROP_GROW: u32 = 7;
 pub const KAYA_PROP_SPACING: u32 = 8;
 pub const KAYA_PROP_ALIGN: u32 = 9;
+
+/// Window properties (spec::WINDOW_PROPS): their own namespace —
+/// windows are not widgets. Window 0 is the primary surface.
+pub const KAYA_WPROP_TITLE: u32 = 1;
+pub const KAYA_WPROP_WIDTH: u32 = 2;
+pub const KAYA_WPROP_HEIGHT: u32 = 3;
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -232,6 +242,9 @@ const _: () = assert!(
         && KAYA_PROP_GROW == wire::PROP_GROW
         && KAYA_PROP_SPACING == wire::PROP_SPACING
         && KAYA_PROP_ALIGN == wire::PROP_ALIGN
+        && KAYA_WPROP_TITLE == wire::WPROP_TITLE
+        && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
+        && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
 );
 
 /// The align enum's values (spec enum "align"); baseline is rows-only.
@@ -255,6 +268,11 @@ const _: () = assert!(
 const _: () = assert!(
     crate::spec::PROPS.len() == 9,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
+);
+const _: () = assert!(
+    crate::spec::WINDOW_PROPS.len() == 3,
+    "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
+     this count"
 );
 
 /// set_property sources. SOURCE_ELEMENT is valid only inside a template.
@@ -710,6 +728,7 @@ mod tests {
             ("collection_move", KAYA_TX_COLLECTION_MOVE),
             ("variant_case", KAYA_TX_VARIANT_CASE),
             ("widget_command", KAYA_TX_WIDGET_COMMAND),
+            ("set_window_prop", KAYA_TX_SET_WINDOW_PROP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -719,6 +738,7 @@ mod tests {
             ("destroy", KAYA_APPLY_DESTROY),
             ("move_child", KAYA_APPLY_MOVE_CHILD),
             ("command", KAYA_APPLY_COMMAND),
+            ("set_window_prop", KAYA_APPLY_SET_WINDOW_PROP),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

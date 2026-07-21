@@ -7,7 +7,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "beginRecord", "endRecord", "ParseOccurrence", "BlobHandle",
@@ -160,7 +160,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("}");
 
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         emit_packer(&mut c, r);
@@ -217,6 +217,39 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceElement)");
         c.line("\tb = binary.LittleEndian.AppendUint32(b, level)");
         c.line("\tb = binary.LittleEndian.AppendUint32(b, field)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire). Window 0, the primary surface, until aux
+    // windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let pc = camel(prop);
+        let (ty, expr) = match kind {
+            crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::F64 => ("float64", format!("encodeValue(b, {})", param(prop))),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        let p = param(prop);
+        c.line("");
+        c.line(&format!("// TxSetWindow{pc}: set_window_prop with a constant {prop} value (window 0, the primary surface)."));
+        c.line(&format!("func TxSetWindow{pc}({p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetWindowProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, 0)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Wprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBindWindow{pc}: set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
+        c.line(&format!("func TxBindWindow{pc}(signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetWindowProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, 0)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Wprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
         c.line("\treturn endRecord(b)");
         c.line("}");
     }

@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xf1448ef515751f08ULL
+#define KAYA_SPEC_HASH 0xcce97c88cc7210aaULL
 
 
 /* Create a signal holding `initial`. */
@@ -284,6 +284,15 @@ static inline void kaya_tx_widget_command(KayaTx *tx, uint64_t widget_id, uint32
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, command);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, start);
+}
+
+/* Bind a window property (WINDOW_PROPS; window 0 = the primary surface). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — windows are not collection elements. */
+static inline void kaya_tx_set_window_prop(KayaTx *tx, uint64_t window, uint32_t prop, uint32_t source) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
     kaya_wire_end(tx, start);
 }
 

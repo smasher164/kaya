@@ -6,7 +6,7 @@
 
 use kaya::spec::{FieldTy, ProtocolSpec, Record};
 
-use crate::{Ctx, prop_variants, record_params};
+use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
@@ -122,7 +122,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        <> byteString bytes <> byteString (BS.replicate (padded - size) 0)");
 
     for r in spec.tx {
-        if r.name == "set_property" {
+        if r.name == "set_property" || r.name == "set_window_prop" {
             continue;
         }
         emit_packer(&mut c, r);
@@ -160,6 +160,30 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("txBind{pc}Element widgetId level field = wireRecord txKindSetProperty"));
         c.line(&format!("  (word64LE widgetId <> word32LE prop{pc} <> word32LE sourceElement"));
         c.line("    <> word32LE level <> word32LE field)");
+    }
+
+    // The window-prop duos (const + signal — element sources are
+    // rejected by the wire). Window 0, the primary surface, until aux
+    // windows land.
+    for (prop, _, kind) in window_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
+            other => unreachable!("no window prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("-- set_window_prop with a constant {prop} value (window 0, the primary surface)."));
+        c.line(&format!("txSetWindow{pc} :: {ty} -> Builder"));
+        c.line(&format!("txSetWindow{pc} {p} = wireRecord txKindSetWindowProp"));
+        c.line(&format!("  (word64LE 0 <> word32LE wprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line("");
+        c.line(&format!("-- set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
+        c.line(&format!("txBindWindow{pc} :: Word64 -> Builder"));
+        c.line(&format!("txBindWindow{pc} signalId = wireRecord txKindSetWindowProp"));
+        c.line(&format!("  (word64LE 0 <> word32LE wprop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
     }
     c.line("");
     c.line("-- Decode one value at offset `at` from the record base; returns the");

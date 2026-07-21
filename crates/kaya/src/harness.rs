@@ -58,6 +58,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "layout" => Some(include_str!("../../../tools/scenes/layout.steps")),
         "grow" => Some(include_str!("../../../tools/scenes/grow.steps")),
         "align" => Some(include_str!("../../../tools/scenes/align.steps")),
+        "window" => Some(include_str!("../../../tools/scenes/window.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -147,6 +148,8 @@ pub enum Step {
     /// rather than reading the prop back: a backend that ignored the
     /// write while the model still carried it must fail here.
     ExpectAligned(Target, String),
+    ExpectTitle(String),
+    ExpectWindowSize(f64, f64),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -225,6 +228,15 @@ pub trait Stage: Send + 'static {
     /// baseline query. The observation expect_aligned verifies. No
     /// default: a backend that forgets it must fail to compile.
     fn cross_mode(&self, target: Target) -> String;
+    /// The primary surface's REAL materialized title (the title bar
+    /// on the desktops, the task label on Android) — never the scene
+    /// model's copy, so a backend that ignored the write fails. No
+    /// default: a backend that forgets it must fail to compile.
+    fn window_title(&self) -> String;
+    /// The primary surface's REAL content extent in device-
+    /// independent units — what expect_window_size compares against
+    /// the advisory request. No default, like window_title.
+    fn window_content_size(&self) -> (f64, f64);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -318,6 +330,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::ExpectRootFills
+            }
+            "expect_title" => Step::ExpectTitle(parse_string(rest)?),
+            "expect_window_size" => {
+                let (w, h) = rest.split_once('x').ok_or_else(|| {
+                    format!("expect_window_size wants WxH: {line:?}")
+                })?;
+                let w = w.trim().parse::<f64>().map_err(|_| {
+                    format!("expect_window_size wants numeric WxH: {line:?}")
+                })?;
+                let h = h.trim().parse::<f64>().map_err(|_| {
+                    format!("expect_window_size wants numeric WxH: {line:?}")
+                })?;
+                Step::ExpectWindowSize(w, h)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -541,6 +566,31 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("root hugs ({hug})"));
                 }
             }
+            Step::ExpectTitle(want) => {
+                // The REAL materialized title (the title bar / task
+                // label), never the scene model's copy — a backend
+                // that ignored the write must fail. The pass
+                // observation is byte-identical on every backend.
+                let got = stage.window_title();
+                if got == *want {
+                    observed.push(format!("title {want:?}"));
+                } else {
+                    failures.push(format!("title {got:?}, wanted {want:?}"));
+                }
+            }
+            Step::ExpectWindowSize(w, h) => {
+                // The surface's REAL content extent against the
+                // advisory request, within 2 device units.
+                let (gw, gh) = stage.window_content_size();
+                if (gw - w).abs() <= 2.0 && (gh - h).abs() <= 2.0 {
+                    observed.push(format!("window {}x{}", *w as i64, *h as i64));
+                } else {
+                    failures.push(format!(
+                        "window {}x{}, wanted {}x{}",
+                        gw as i64, gh as i64, *w as i64, *h as i64
+                    ));
+                }
+            }
             Step::ExpectFills(t) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     failures.push(format!("{t:?} is not a container target"));
@@ -752,6 +802,12 @@ mod tests {
         fn child_shares(&self, _: Target) -> String {
             "25,75".into()
         }
+        fn window_title(&self) -> String {
+            "mock".to_owned()
+        }
+        fn window_content_size(&self) -> (f64, f64) {
+            (540.0, 330.0)
+        }
         fn root_fills(&self) -> String {
             String::new()
         }
@@ -872,7 +928,13 @@ mod tests {
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }
-            fn root_fills(&self) -> String {
+            fn window_title(&self) -> String {
+            "mock".to_owned()
+        }
+        fn window_content_size(&self) -> (f64, f64) {
+            (540.0, 330.0)
+        }
+        fn root_fills(&self) -> String {
                 "34x27pt inside 390x844pt".into()
             }
             fn container_fills(&self, _: Target) -> String {
@@ -950,7 +1012,13 @@ mod tests {
             fn child_shares(&self, _: Target) -> String {
                 String::new()
             }
-            fn root_fills(&self) -> String {
+            fn window_title(&self) -> String {
+            "mock".to_owned()
+        }
+        fn window_content_size(&self) -> (f64, f64) {
+            (540.0, 330.0)
+        }
+        fn root_fills(&self) -> String {
                 String::new()
             }
             fn container_fills(&self, _: Target) -> String {

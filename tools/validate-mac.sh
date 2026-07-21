@@ -44,7 +44,7 @@ timing() {
 # behind.
 cargo build --lib --example milestone2 --example entry \
     --example gallery --example todos --example reorder --example feed \
-    --example grow --example layout --example align || exit 1
+    --example grow --example layout --example align --example window || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -351,7 +351,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout align encodebench; do
+for guest in milestone2 entry gallery todos reorder feed grow layout align window encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -450,6 +450,20 @@ run grow-haskell-swiftui env KAYA_SELFTEST=grow "$(hs_bin grow)"
 drain
 # The align scene: the cross-axis contract (center + baseline), every
 # language.
+# The window scene: the primary surface's props — the title
+# materialized in the real title bar, the advisory 640x400 honored.
+# Desktop-only by design (phones reject the size request by physics).
+KAYA_SELFTEST_SCRIPT="$(scene_script window)"
+export KAYA_SELFTEST_SCRIPT
+run window-rust-swiftui env KAYA_SELFTEST=window target/debug/examples/window
+run window-python-swiftui env KAYA_SELFTEST=window python3 guests/python/window.py
+run window-go-swiftui env KAYA_SELFTEST=window target/go-guests/window
+run window-csharp-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet "$CS_GUEST"
+run window-ocaml-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/window.exe
+run window-haskell-swiftui env KAYA_SELFTEST=window "$(hs_bin window)"
+
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT
 run align-rust-swiftui env KAYA_SELFTEST=align target/debug/examples/align

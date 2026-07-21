@@ -25,7 +25,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align || exit 1
+cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align --example window || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -165,7 +165,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout align; do
+for guest in milestone2 entry gallery todos reorder feed grow layout align window; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -254,6 +254,18 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" align-ocaml env KAYA_SELFTEST=align KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/align.exe
     run "$proto" align-haskell env KAYA_SELFTEST=align "$(hs_bin align)"
+    # The window scene: the primary surface's props — the title
+    # materialized in the real title bar, the advisory 640x400
+    # honored (X11; a Wayland compositor keeps the last word, which
+    # is the request semantics).
+    run "$proto" window-rust env KAYA_SELFTEST=window "$CARGO_TARGET_DIR/debug/examples/window"
+    run "$proto" window-python env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
+        python3 guests/python/window.py
+    run "$proto" window-go env KAYA_SELFTEST=window /tmp/go-guests/window
+    run "$proto" window-csharp env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" window-ocaml env KAYA_SELFTEST=window KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/window.exe
+    run "$proto" window-haskell env KAYA_SELFTEST=window "$(hs_bin window)"
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
     # too — in every language.

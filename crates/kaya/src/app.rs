@@ -20,6 +20,7 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
     CollectionId, CommandKind, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
+    WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -846,6 +847,34 @@ impl<'a> Tx<'a> {
             prop,
             value: PropValue::Const(value.into()),
         });
+    }
+
+    /// Set a primary-surface property ([`WindowProp`]; window 0 —
+    /// auxiliary windows are not in the vocabulary yet). The floor
+    /// the sugar below rides.
+    pub fn set_window(&mut self, prop: WindowProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
+    /// The primary surface's title. Uniform semantics, per-platform
+    /// materialization: the title bar on the desktops, the app
+    /// switcher's label on iOS, the task label on Android.
+    pub fn window_title(&mut self, title: &str) {
+        self.set_window(WindowProp::Title, title);
+    }
+
+    /// The primary surface's ADVISORY content-size request, in DIP:
+    /// honored where the window manager permits (the desktops,
+    /// outside tiling WMs), recorded only where the system owns
+    /// geometry (the phones). A request, never a guarantee — see
+    /// DESIGN.md, Presentation contexts.
+    pub fn window_size(&mut self, width: f64, height: f64) {
+        self.set_window(WindowProp::Width, width);
+        self.set_window(WindowProp::Height, height);
     }
 
     pub fn bind(&mut self, widget: WidgetId, prop: Prop, signal: SignalId) {

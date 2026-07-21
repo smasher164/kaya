@@ -21,6 +21,7 @@ static class Program
             case "reorder": ReorderScene.Run(); break;
             case "feed": Feed.FeedScene.Run(); break;
             case "align": AlignScene.Run(); break;
+            case "window": WindowScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;

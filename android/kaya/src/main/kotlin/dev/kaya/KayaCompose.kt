@@ -136,6 +136,13 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
+    // The primary surface's properties. The title materializes as the
+    // Activity task label; width/height record the advisory size
+    // request only — the system owns surface geometry on Android
+    // (DESIGN.md, Presentation contexts).
+    var windowTitle: String = ""
+    var windowWidth: Double? = null
+    var windowHeight: Double? = null
     val nodes = HashMap<Long, KayaNode>() // UI thread only
     val parents = HashMap<Long, Long>()
     // The focus command's landing spot: the entry's FocusRequester
@@ -163,7 +170,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xf1448ef515751f08uL
+    private const val SPEC_HASH: ULong = 0xcce97c88cc7210aauL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -172,6 +179,13 @@ object KayaCompose {
     private const val APPLY_DESTROY = 5
     private const val APPLY_MOVE_CHILD = 6
     private const val APPLY_COMMAND = 7
+    private const val APPLY_SET_WINDOW_PROP = 8
+
+    // Window properties: their own namespace — windows are not
+    // widgets; window 0 is the primary surface.
+    private const val WPROP_TITLE = 1
+    private const val WPROP_WIDTH = 2
+    private const val WPROP_HEIGHT = 3
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     const val KIND_COLUMN = 1
@@ -208,7 +222,11 @@ object KayaCompose {
      * [Kaya.attach] returns [Kaya.PRESENT_GUEST].
      */
     @JvmStatic
+    private var mountedActivity: ComponentActivity? = null
+
     fun mount(activity: ComponentActivity) {
+        mountedActivity = activity
+        KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
         val host = KayaPresent.specHash()
         check(host.toULong() == SPEC_HASH) {
             "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
@@ -330,6 +348,23 @@ object KayaCompose {
                             }
                         }
                         else -> error("kaya: unknown prop $prop")
+                    }
+                }
+                APPLY_SET_WINDOW_PROP -> {
+                    b.long // window: 0 = the primary surface
+                    val prop = b.int
+                    b.int // pad
+                    when (prop) {
+                        WPROP_TITLE -> {
+                            val title = readString(b)
+                            KayaSceneModel.windowTitle = title
+                            // The task-label materialization of a
+                            // surface title.
+                            mountedActivity?.title = title
+                        }
+                        WPROP_WIDTH -> KayaSceneModel.windowWidth = readF64(b)
+                        WPROP_HEIGHT -> KayaSceneModel.windowHeight = readF64(b)
+                        else -> error("kaya: unknown window prop $prop")
                     }
                 }
                 APPLY_ADD_CHILD -> {
@@ -621,6 +656,44 @@ object KayaCompose {
                             got == null -> failures.add("no such target ${parts[1]}")
                             got == want -> observed.add(got)
                             else -> failures.add("${parts[1]} splits \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_title" -> {
+                        // The REAL materialized title (the Activity
+                        // label), never only the model's copy — a
+                        // backend that ignored the write must fail.
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) {
+                            activity.title?.toString() ?: ""
+                        }
+                        if (got == want) {
+                            observed.add("title \"$want\"")
+                        } else {
+                            failures.add("title \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_window_size" -> {
+                        // The surface's REAL extent against the
+                        // advisory request. Android never honors a
+                        // size request (the system owns geometry), so
+                        // on a phone this verb fails honestly with
+                        // the real numbers; the window scene is a
+                        // desktop scene.
+                        val dims = parts[1].split("x")
+                        val wantW = dims[0].toDoubleOrNull() ?: -1.0
+                        val wantH = dims[1].toDoubleOrNull() ?: -1.0
+                        val got = onUi(activity) {
+                            val v = activity.window.decorView
+                            Pair(v.width.toDouble(), v.height.toDouble())
+                        }
+                        if (kotlin.math.abs(got.first - wantW) <= 2 &&
+                            kotlin.math.abs(got.second - wantH) <= 2
+                        ) {
+                            observed.add("window ${wantW.toInt()}x${wantH.toInt()}")
+                        } else {
+                            failures.add(
+                                "window ${got.first.toInt()}x${got.second.toInt()}, " +
+                                    "wanted ${wantW.toInt()}x${wantH.toInt()}")
                         }
                     }
                     "expect_root_fills" -> {

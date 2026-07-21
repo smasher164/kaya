@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use crate::protocol::{
+    WindowProp,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
@@ -40,6 +41,7 @@ pub const TX_COLLECTION_UPDATE_FIELD: u16 = 14;
 pub const TX_COLLECTION_MOVE: u16 = 15;
 pub const TX_VARIANT_CASE: u16 = 16;
 pub const TX_WIDGET_COMMAND: u16 = 17;
+pub const TX_SET_WINDOW_PROP: u16 = 18;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -49,6 +51,7 @@ pub const APPLY_MOUNT: u16 = 4;
 pub const APPLY_DESTROY: u16 = 5;
 pub const APPLY_MOVE_CHILD: u16 = 6;
 pub const APPLY_COMMAND: u16 = 7;
+pub const APPLY_SET_WINDOW_PROP: u16 = 8;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -77,6 +80,12 @@ pub const PROP_SOURCE: u32 = 6;
 pub const PROP_GROW: u32 = 7;
 pub const PROP_SPACING: u32 = 8;
 pub const PROP_ALIGN: u32 = 9;
+
+/// Window property ids (spec::WINDOW_PROPS) — their own namespace;
+/// windows are not widgets.
+pub const WPROP_TITLE: u32 = 1;
+pub const WPROP_WIDTH: u32 = 2;
+pub const WPROP_HEIGHT: u32 = 3;
 
 /// The align enum's wire values (spec enum "align").
 pub const ALIGN_START: u32 = 0;
@@ -256,6 +265,23 @@ fn prop(raw: u32) -> Prop {
     }
 }
 
+fn window_prop(raw: u32) -> WindowProp {
+    match raw {
+        WPROP_TITLE => WindowProp::Title,
+        WPROP_WIDTH => WindowProp::Width,
+        WPROP_HEIGHT => WindowProp::Height,
+        other => panic!("kaya: unknown window property {other}"),
+    }
+}
+
+fn window_prop_raw(p: WindowProp) -> u32 {
+    match p {
+        WindowProp::Title => WPROP_TITLE,
+        WindowProp::Width => WPROP_WIDTH,
+        WindowProp::Height => WPROP_HEIGHT,
+    }
+}
+
 /// Decode a submitted transaction buffer with no blob context: any
 /// blob handle fails loudly. The scalar path for tests and callers
 /// that cannot see the registration table.
@@ -408,6 +434,24 @@ pub fn decode_transaction_with_blobs(
                     command
                 },
             },
+            TX_SET_WINDOW_PROP => {
+                let window = WindowId(r.u64());
+                let p = window_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: window properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetWindowProp {
+                    window,
+                    prop: p,
+                    value,
+                }
+            }
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
@@ -583,6 +627,14 @@ impl Writer {
                 b.extend_from_slice(&0u32.to_le_bytes());
                 write_value(b, value, blobs);
             }),
+            ApplyOp::SetWindowProp { window, prop, value } => {
+                self.record(APPLY_SET_WINDOW_PROP, |b, blobs| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&window_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -736,6 +788,27 @@ impl Writer {
                 b.extend_from_slice(&widget.0.to_le_bytes());
                 b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::SetWindowProp {
+                window,
+                prop,
+                value,
+            } => self.record(TX_SET_WINDOW_PROP, |b, blobs| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&window_prop_raw(*prop).to_le_bytes());
+                match value {
+                    PropValue::Const(v) => {
+                        b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                        write_value(b, v, blobs);
+                    }
+                    PropValue::Signal(id) => {
+                        b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                        b.extend_from_slice(&id.0.to_le_bytes());
+                    }
+                    PropValue::Element { .. } => {
+                        panic!("kaya: window properties cannot bind element sources")
+                    }
+                }
             }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }

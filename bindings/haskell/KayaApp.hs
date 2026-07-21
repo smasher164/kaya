@@ -59,6 +59,8 @@ module KayaApp
     items,
     count,
     mount,
+    windowTitle,
+    windowSize,
     clearWidget,
     focusWidget,
     bindText,
@@ -548,6 +550,19 @@ count c = length <$> items c
 
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.
+-- | The primary surface's title: the title bar on the desktops, the
+-- switcher label on iOS, the task label on Android.
+windowTitle :: String -> Build ()
+windowTitle t = emitB (W.txSetWindowTitle t)
+
+-- | Request the primary surface's content size in DIP — ADVISORY on
+-- every platform: honored where the window manager permits, recorded
+-- only where the system owns geometry.
+windowSize :: Double -> Double -> Build ()
+windowSize w h = do
+  emitB (W.txSetWindowWidth w)
+  emitB (W.txSetWindowHeight h)
+
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
 

@@ -60,6 +60,11 @@ executable align
   main-is: align.hs
   build-depends: kaya-guests
 
+executable window
+  import: shared
+  main-is: window.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xf1448ef515751f08
+specHash = 0xcce97c88cc7210aa
 
 valueBool :: Word32
 valueBool = 1
@@ -70,6 +70,12 @@ propSpacing :: Word32
 propSpacing = 8
 propAlign :: Word32
 propAlign = 9
+wpropTitle :: Word32
+wpropTitle = 1
+wpropWidth :: Word32
+wpropWidth = 2
+wpropHeight :: Word32
+wpropHeight = 3
 alignStart :: Word32
 alignStart = 0
 alignCenter :: Word32
@@ -134,6 +140,8 @@ txKindVariantCase :: Word16
 txKindVariantCase = 16
 txKindWidgetCommand :: Word16
 txKindWidgetCommand = 17
+txKindSetWindowProp :: Word16
+txKindSetWindowProp = 18
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -148,6 +156,8 @@ applyKindDestroy :: Word16
 applyKindDestroy = 5
 applyKindCommand :: Word16
 applyKindCommand = 7
+applyKindSetWindowProp :: Word16
+applyKindSetWindowProp = 8
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -430,6 +440,42 @@ txBindAlignElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindAlignElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAlign <> word32LE sourceElement
     <> word32LE level <> word32LE field)
+
+-- set_window_prop with a constant title value (window 0, the primary surface).
+txSetWindowTitle :: String -> Builder
+txSetWindowTitle title = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropTitle <> word32LE sourceConst
+    <> encodeValue (VStr title))
+
+-- set_window_prop with a signal-bound title value (window 0, the primary surface).
+txBindWindowTitle :: Word64 -> Builder
+txBindWindowTitle signalId = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropTitle <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant width value (window 0, the primary surface).
+txSetWindowWidth :: Double -> Builder
+txSetWindowWidth width = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropWidth <> word32LE sourceConst
+    <> encodeValue (VF64 width))
+
+-- set_window_prop with a signal-bound width value (window 0, the primary surface).
+txBindWindowWidth :: Word64 -> Builder
+txBindWindowWidth signalId = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropWidth <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant height value (window 0, the primary surface).
+txSetWindowHeight :: Double -> Builder
+txSetWindowHeight height = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropHeight <> word32LE sourceConst
+    <> encodeValue (VF64 height))
+
+-- set_window_prop with a signal-bound height value (window 0, the primary surface).
+txBindWindowHeight :: Word64 -> Builder
+txBindWindowHeight signalId = wireRecord txKindSetWindowProp
+  (word64LE 0 <> word32LE wpropHeight <> word32LE sourceSignal
+    <> word64LE signalId)
 
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.

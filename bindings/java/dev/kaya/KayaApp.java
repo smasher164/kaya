@@ -983,6 +983,26 @@ public final class KayaApp {
         public void mount(Widget root) {
             records.add(KayaWire.txMount(0, root.id));
         }
+
+        /**
+         * Set the primary surface's title (the title bar on the
+         * desktops, the switcher label on iOS, the task label on
+         * Android).
+         */
+        public void windowTitle(String title) {
+            records.add(KayaWire.txSetWindowTitle(title));
+        }
+
+        /**
+         * Request the primary surface's content size in DIP —
+         * ADVISORY on every platform: honored where the window
+         * manager permits, recorded only where the system owns
+         * geometry.
+         */
+        public void windowSize(double width, double height) {
+            records.add(KayaWire.txSetWindowWidth(width));
+            records.add(KayaWire.txSetWindowHeight(height));
+        }
     }
 
     /**
