@@ -622,6 +622,25 @@ The known normalization worklist:
   scene's geometry, and end/stretch have live classification arms
   with the recordings as their visual record until a scene earns
   them.
+- A dressed control floor (ratified 2026-07-21). Every control the
+  vocabulary ships renders as a credible native control on every
+  backend with zero styling calls — there is no styling API to call.
+  Dress is backend normalization, exactly like spacing and the root
+  inset: fixes live in the backends, the protocol does not move.
+  Per-platform chrome differences are the Zen Garden point (one scene,
+  five native skins), so "dressed" is judged per platform: a control
+  is dressed when a native user would read it as a real control, not
+  as unstyled text or invisible chrome. The two failures the survey
+  found: iOS's automatic button style (borderless blue text — the
+  bordered style supplies the chrome) and, deeper, macOS buttons
+  truncating their own captions under non-Apple hosts — see "The
+  button that measured borderless" in Case analyses; the fix is an
+  honest AppKit bridge, not styling. Dress must not change layout
+  semantics: the same geometry gates (fills, shares, aligned,
+  root-fills) re-prove after any dress change, and the recordings
+  stay the judge of the chrome itself. A styling API stays out of
+  scope for v1; the binding style guide documents flavor, it does not
+  program it.
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
 - Grow distribution normalized to explicit weights. Settled when `grow`
@@ -986,6 +1005,73 @@ produces silence). Synthesis is served by a declarative node-graph
 vocabulary, which is Web Audio's answer to the same problem, and a native
 DSP module serves as the escape hatch for genuinely low-latency work:
 pushed code rather than pushed state, in the manner of AudioWorklet.
+
+**The button that measured borderless and drew bezeled.** The mac
+align scene shipped a button rendering "t…" for "tick" while its twin
+rendered "mid" in full. Every plausible suspect was A/B-innocent: the
+baseline alignmentGuide hook, live resize (deterministic recompute),
+baseline-vs-center row alignment, the tall no-baseline image. A
+pass-through Layout probe finally showed the mechanism: SwiftUI's own
+Button answered `sizeThatFits(.unspecified)` with its *borderless*
+metrics (38×20 for a 13pt caption) while drawing the *bezeled*
+control (52×32), so every consumer of the measurement — the stock
+HStack's ideal, KayaFlex's tracks — inherited the lie, proposed the
+row its lying ideal back, and the bezel overflowed its slot until the
+caption ellipsized. The trigger is the host process, not the view
+tree: SwiftUI 26 resolves its design generation from the main
+executable's `LC_BUILD_VERSION` — the SDK field specifically, not the
+deployment target (verified: minos 14.0 with sdk 26.5 takes the
+modern, honest path) — and a pre-26 SDK stamp lands in a
+compatibility path whose Button measurement table disagrees with its
+own renderer. A plain cargo build against a current Xcode SDK stamps
+current and never sees this; the affected population is binaries
+LINKED against old SDKs — pinned-SDK environments like our own nix
+shell (everything it links stamps 14.4), and the vendor-prebuilt
+launchers that host guest runtimes in the wild: JDK launcher stubs
+and the jpackage apps that inherit them (zulu stamps 11.3), conda
+pythons, PyInstaller-class bootloaders, .NET apphosts. A standalone
+twenty-line app reproduces it at `-target arm64-apple-macos14.0` and
+is honest built native. The floor
+consequence was worse than one truncation. An audit of every leg's
+host binary showed the nix shell links everything against its pinned
+SDK — python3, go, dotnet, ocaml, rust all stamp 14.4, the zulu JDK
+11.3 — so our own suite hit the lie uniformly (and, silver lining,
+exercises the compatibility generation daily). But the stamp belongs
+to whoever built the host binary, and in the wild that is the runtime
+vendor: on this same machine Apple's /usr/bin/python3 stamps 26.5.
+Before the fix, button geometry would therefore diverge BY HOST
+RUNTIME — same dylib, same machine, two answers depending on which
+language's runtime mounted the scene. The fix follows from the diagnosis: bridge the macOS button
+to `NSButton` via NSViewRepresentable and answer sizing with
+`fittingSize` — an AppKit control cannot disagree with itself, in
+either design generation, under any host stamp — On iOS the story inverted under the probe: SwiftUI's Button is
+honest there at every proposal (.unspecified included, in kaya's own
+26.5 generation), and the naive `.bordered` dress wrapped captions
+because of a kaya-side interaction — the flex cell's alignment frame
+PLACES a child by re-proposing it its own fitted ideal, and under an
+exactly-ideal proposal HStack's fair-share division shortchanges the
+button (the division asks it before the label releases its surplus),
+which conforms by wrapping. That re-proposal was the `KayaCell`
+class — and it had two members: the outer fill-and-align frame AND
+the inner stretch frame (a constraint-less `.frame` places the same
+way), so deleting one just moved the squeeze down a layer. The
+custom cell layout now proposes the full cell at placement, folds
+stretch in, and explicitly queries the child's `.top` guide — the
+alignmentGuide recording closures only run when a guide is queried,
+and the deleted frames had been the accidental querier. iOS keeps
+SwiftUI's Button in the bordered dress. The
+macOS bridge is permanent, and not for lack of looking for a way
+out: in a compat-stamped process every dressed style — automatic,
+bordered, borderedProminent — lays out at the same borderless 38x20
+while the AppKit bridge paints 52x32 over it (kaya-free repro; even
+a GeometryReader reads the 38x20 layout box under the bezel), and in
+the modern generation all three are honest. There is no style,
+control size, or wrapper that escapes the compat table; only the
+control that measures itself does.
+The control assay (probe every vocabulary control both ways) cleared
+the rest: entry, label, image, slider, and checkbox measure what they
+draw; the knob and focus-ring spill are decoration outside the layout
+rect, not lies about it.
 
 ## Rejected alternatives
 

@@ -136,12 +136,105 @@ Landed history lives in git; this file only carries what is still open.
   strict. The desktop default window normalized to 540×330 (SwiftUI's
   existing size) in the same slice, keeping the grow scene's smallest
   track ~63pt, clear of GTK's 34pt control minimum. Related "presentable floor" items for the same
-  milestone: a baseline alignment option for text-bearing rows (a
-  switch, a label and a slider currently scatter on the cross axis),
-  and — separate layer, the Zen Garden one — a way to ask for each
-  platform's DRESSED widget defaults (an unstyled UIButton is bare
-  blue text; every other toolkit's default button has chrome, so the
-  UIKit floor reads broken when it is merely undressed).
+  milestone: ~~a baseline alignment option for text-bearing rows~~
+  LANDED as `align` (baseline mode, rows only), and ~~the dressed
+  widget defaults~~ LANDED as the dressed control floor (ratified
+  2026-07-21): dress is backend normalization with zero styling API —
+  iOS buttons wear SwiftUI's `.bordered` dress (the button measures
+  honestly there; the wrap the naive dress first showed was the flex
+  cell chain's re-proposal squeeze, fixed by KayaCell in the same
+  slice), and the macOS button is permanently bridged to an honest
+  `NSButton` after the
+  align scene caught SwiftUI's own Button measuring borderless while
+  drawing bezeled in pre-26-SDK host processes — the full mechanism
+  is a DESIGN.md case analysis ("The button that measured borderless
+  and drew bezeled") and the host-stamp trap is in docs/traps.md. A
+  styling API remains deliberately out of scope for v1.
+- ~~A KayaCell layout for the SwiftUI flex cells, then un-bridge the
+  iOS button~~ LANDED in the dressed-floor slice (same commit). Probe evidence (2026-07-21, in vivo on the sim): the
+  `.frame(maxWidth:.infinity, alignment:)` cell idiom PLACES a child
+  by re-proposing it its own fitted size; a hugging HStack proposed
+  exactly its ideal runs Apple's fair-share division with zero slack
+  — the image is asked first, the button second, BEFORE the label
+  releases its surplus — so the button is proposed ideal−7.33 and a
+  bordered button conforms by wrapping ("tic/k") while an honest
+  rigid control overflows its slot by the same amount (the ±7 spill
+  visible in the bridged mac dumps: same squeeze, refused). The fix as landed:
+  KayaCell fills the track and aligns the child WITHOUT re-proposing
+  the fitted size (full-cell proposal at placement; cross placement
+  mirrors the old frame-alignment maps). BOTH frames of the old cell
+  chain were re-proposers — deleting only the outer one moved the
+  squeeze down a layer, byte-identical — so the inner stretch frame
+  went too, with stretch folded into KayaCell (containers fill under
+  the full proposal; huggers lead, as the old explicit alignment had
+  it). One dependency surfaced by the deletion: the baseline
+  recording hooks are alignmentGuide closures, which run only when a
+  guide is QUERIED, and the deleted frames were the accidental
+  querier — KayaCell now queries the child's .top explicitly, which
+  cascades through stack-derived guides into the row's text children
+  (offsets=[:] at classify time is the symptom of this class). The iOS button reverted to SwiftUI's Button in the
+  bordered dress (probed honest at every proposal, .unspecified
+  included, in kaya's own 26.5 generation); the macOS NSButton
+  bridge stays — the compat generation lies at every proposal UNDER
+  EVERY STYLE (automatic/bordered/prominent all 38x20-vs-52x32,
+  kaya-free repro), which no cell fix can absorb. The align matrix
+  and ±2 cross-axis tolerances re-proven in the same slice.
+- The stock stacks' nil-frames are re-proposers too, in theory. A
+  constraint-less `.frame` around a stock stack's child still places
+  by re-proposing the child's fitted size; today every stock-branch
+  child is a control (idempotent under its own size) or a container
+  whose squeeze no scene constructs, so nothing observable fails. A
+  KayaStretchCell replacement was attempted in the dressed-floor
+  slice and RETREATED: a custom Layout does not forward alignment
+  guides (baseline rows classified "mixed") and its guide-forwarding
+  overloads SIGTRAPed the gallery leg — a correct replacement must
+  forward guides for real, and per doctrine the failure wants a
+  CONSTRUCTED failing scene (stock column in stock column with a
+  bordered-button row) before the next fix attempt.
+- An `expect_honest` gate: measured-vs-drawn self-agreement per
+  control. The dressed-floor hunts exposed two symptom shapes the
+  geometry gates are structurally blind to — a control whose caption
+  wraps or truncates still classifies and fills correctly (the
+  "tic/k" wrap shipped through two 18/18 iOS runs). Both shapes share
+  one observable: the control's DRAWN box diverges from its honest
+  ideal (wrapped pill 42.67x56.33 vs ideal 51.67x34.33; a compat-mac
+  liar diverges the other way). Design: record each control's
+  answered ideal (sizeThatFits(.unspecified) — stable like a font
+  metric, so the recording trap does not apply) alongside the
+  existing drawn-geometry readers, and a verb compares them under
+  ample space. Interpreters first (the historic miss layer), then the
+  native backends' analogs. Caveat named by the mac experiments: in
+  a compat-stamped process the SwiftUI-side layout box and the AppKit
+  PAINT disagree while both SwiftUI numbers agree — catching that
+  class needs the AppKit frame walked, which the bridge already
+  makes moot for buttons; scope the first cut to SwiftUI-side
+  self-agreement.
+- The suite runners screenshot AFTER teardown. run-emulator's
+  android-shot-*.png and run-sim's leg captures race app exit and
+  mostly record the home screen (207KB of wallpaper, byte-identical
+  across legs) — useless as visual evidence and confusing next to
+  real stills. Move the capture to before the final step/exit, or
+  drop it and keep the recording pipeline as the visual record.
+- A modern-stamp SwiftUI leg. The nix shell links every leg binary
+  against its pinned SDK (audit 2026-07-21: python3/go/dotnet/ocaml/
+  rust 14.4, zulu JDK 11.3), so validate-mac exercises SwiftUI 26's
+  COMPATIBILITY design generation exclusively — by accident of the
+  pin, not by design. The modern generation (what an Apple-python or
+  current-Xcode host gets) has no dedicated leg; it was probed only
+  ad hoc during the dressed-floor work. Wanted: one deliberate
+  modern-generation leg (run one python leg via /usr/bin/python3, or
+  link one example `-mmacosx-version-min=26`) so both generations
+  stay covered on purpose. Do not bump the flake SDK without
+  preserving a compat-generation leg — that is the generation real
+  JVM/.NET-hosted apps will sit in for years, and where the Button
+  measurement bug class lives. Vendor audit (2026-07-21, official
+  binaries, LC_BUILD_VERSION sdk field): .NET host 10.0.10 = 15.5,
+  .NET 11-preview.6 = 15.5, apphost stub = 15.5; zulu jre 21/25 =
+  13.3, Temurin 21 = 14.2, Oracle JDK 25 = 14.5. No vendor ships a
+  ≥26 stamp; nixpkgs' darwin `openjdk17` IS repackaged zulu (no
+  source-built lever). The compat generation is a permanent
+  first-class citizen, and the native-kit button bridges are
+  load-bearing indefinitely, not transitional.
 - ~~A geometry verb for the harness~~ LANDED as `expect_shares` /
   `Stage::child_shares`, with the `grow` scene as its first user.
   Shares, not sizes: a size is a platform metric and could never be

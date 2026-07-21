@@ -1095,7 +1095,18 @@ impl crate::harness::Stage for GtkStage {
             }
             match matches.as_slice() {
                 [one] => (*one).to_owned(),
-                [] => format!("mixed (cross rects {rects:?} in {inner}px)"),
+                // A baseline-looking row reading mixed is usually the
+                // observation, not the geometry — name the allocated
+                // count in the verdict (participation is GTK's
+                // baseline signal).
+                [] => {
+                    let allocated = if vertical {
+                        String::new()
+                    } else {
+                        format!("; {} baselines allocated", baselines.len())
+                    };
+                    format!("mixed (cross rects {rects:?} in {inner}px{allocated})")
+                }
                 many => format!("ambiguous ({})", many.join("|")),
             }
         })

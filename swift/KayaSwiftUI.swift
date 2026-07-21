@@ -612,7 +612,15 @@ private func kayaRunScript(_ script: String) {
                         matches.append("baseline")
                     }
                     if matches.count == 1 { return matches[0] }
-                    if matches.isEmpty { return "mixed (cross rects \(rects) in \(inner)pt)" }
+                    if matches.isEmpty {
+                        // A row that LOOKS baseline-aligned but reads
+                        // mixed is usually the recording, not the
+                        // geometry: the alignmentGuide hooks only run
+                        // when a guide is queried (docs/traps.md), so
+                        // name the recorded count in the verdict.
+                        let recorded = isRow ? "; \(baselines.count) baselines recorded" : ""
+                        return "mixed (cross rects \(rects) in \(inner)pt\(recorded))"
+                    }
                     return "ambiguous (\(matches.joined(separator: "|")))"
                 }
                 switch got {
@@ -798,6 +806,69 @@ var kayaAvailableSize = CGSize.zero
 /// The policy is [`Prop::Grow`]: weight-0 children take their natural
 /// main-axis size, and the growers divide what is left in proportion to
 /// their weights, their own natural sizes not entering the division.
+/// The flex track's cell. It accepts the rect KayaFlex assigns —
+/// fills what it is offered, hugs when measured — and places its
+/// child by proposing the FULL cell, never the child's own fitted
+/// size. It replaces the alignment-frame idiom
+/// (`.frame(maxWidth: .infinity, alignment:)`), whose placement
+/// re-proposes the child its fitted ideal: a hugging stack proposed
+/// exactly its ideal runs the platform stack's fair-share division
+/// with zero slack — the division asks the button before the label
+/// releases its surplus — and a conforming control absorbs the
+/// shortfall (a bordered button wraps mid-word; a rigid bridge
+/// overflows its slot). The in-vivo probe that pinned this is quoted
+/// in docs/deferred.md's KayaCell entry. Cross-axis placement:
+/// start/stretch/baseline lead, center centers, end trails — the
+/// mapping the old frame-alignment tables encoded; the main axis
+/// always starts.
+struct KayaCell: Layout {
+    /// The CONTAINER's axis: true for a column's cells.
+    let vertical: Bool
+    /// The container's cross-axis align mode.
+    let align: Int64
+
+    func sizeThatFits(
+        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGSize {
+        let natural = subviews[0].sizeThatFits(.unspecified)
+        return CGSize(
+            width: proposal.width ?? natural.width,
+            height: proposal.height ?? natural.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) {
+        let full = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let size = subviews[0].sizeThatFits(full)
+        // The baseline-recording hooks are alignmentGuide closures,
+        // and guide closures only run when somebody QUERIES a guide —
+        // the alignment frames this layout replaced used to be that
+        // somebody. Query .top explicitly: a stack derives its guide
+        // from its children, so the query cascades into a row's text
+        // children and their recording closures.
+        _ = subviews[0].dimensions(in: full)[VerticalAlignment.top]
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        if vertical {
+            switch align {
+            case alignCenter: x = (bounds.width - size.width) / 2
+            case alignEnd: x = bounds.width - size.width
+            default: x = 0
+            }
+        } else {
+            switch align {
+            case alignCenter: y = (bounds.height - size.height) / 2
+            case alignEnd: y = bounds.height - size.height
+            default: y = 0
+            }
+        }
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX + x, y: bounds.minY + y),
+            anchor: .topLeading, proposal: full)
+    }
+}
+
 struct KayaFlex: Layout {
     let vertical: Bool
     let spacing: CGFloat
@@ -915,22 +986,6 @@ func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
     }
 }
 
-func kayaColumnFrameAlignment(_ mode: Int64) -> Alignment {
-    switch mode {
-    case alignCenter: return .top
-    case alignEnd: return .topTrailing
-    default: return .topLeading
-    }
-}
-
-func kayaRowFrameAlignment(_ mode: Int64) -> Alignment {
-    switch mode {
-    case alignCenter: return .leading
-    case alignEnd: return .bottomLeading
-    default: return .topLeading
-    }
-}
-
 struct KayaRender: View {
     let node: KayaNode
     /// The mounted root fills its window; nested containers do not.
@@ -958,23 +1013,17 @@ struct KayaRender: View {
                 if isRoot || node.children.contains(where: { $0.grow > 0 }) {
                     KayaFlex(vertical: true, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
-                            // The invisible frame accepts the track KayaFlex
-                            // proposes; the reader on it records the track's
-                            // geometry (see KayaTrackReader). Its alignment
-                            // is the container's cross-axis placement.
-                            KayaRender(node: child)
-                                .background(
-                                    KayaCellReader(id: child.id, parent: node.id, vertical: true)
-                                )
-                                .frame(
-                                    maxWidth: node.align == alignStretch ? .infinity : nil,
-                                    alignment: kayaColumnFrameAlignment(node.align)
-                                )
-                                .frame(
-                                    maxWidth: .infinity, maxHeight: .infinity,
-                                    alignment: kayaColumnFrameAlignment(node.align)
-                                )
-                                .background(KayaTrackReader(id: child.id, vertical: true))
+                            // The cell fills the track KayaFlex proposes; the
+                            // reader on it records the track's geometry (see
+                            // KayaTrackReader). The inner frame is the stretch
+                            // box; every other mode places in KayaCell.
+                            KayaCell(vertical: true, align: node.align) {
+                                KayaRender(node: child)
+                                    .background(
+                                        KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                                    )
+                            }
+                            .background(KayaTrackReader(id: child.id, vertical: true))
                         }
                     }
                 } else {
@@ -992,13 +1041,33 @@ struct KayaRender: View {
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: true))
         case kindButton:
-            Button(node.text) {
-                KayaHost.emit(node.tag)
-            }
-            .alignmentGuide(.top) { d in
-                kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
-                return d[.top]
-            }
+            // The dressed floor. macOS bridges to NSButton: in a
+            // process whose main executable is stamped with a pre-26
+            // SDK, SwiftUI's Button lays out at borderless metrics
+            // while the AppKit bridge paints the bezel over them —
+            // under EVERY style (automatic, bordered, prominent all
+            // probed 38x20-vs-52x32, kaya-free) — and vendor-hosted
+            // runtimes sit on such stamps permanently. iOS keeps
+            // SwiftUI's Button: it measures what it draws (probed at
+            // every proposal, .unspecified included); the bordered
+            // style is the chrome, and KayaCell keeps the proposals
+            // around it honest.
+            #if os(macOS)
+                KayaMacButton(title: node.text, tag: node.tag)
+                    .alignmentGuide(.top) { d in
+                        kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                        return d[.top]
+                    }
+            #else
+                Button(node.text) {
+                    KayaHost.emit(node.tag)
+                }
+                .buttonStyle(.bordered)
+                .alignmentGuide(.top) { d in
+                    kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
+                    return d[.top]
+                }
+            #endif
         case kindRow:
             // Normalized: 8-unit spacing, top (cross-axis start).
             // HStack until a weight appears — see the column arm.
@@ -1006,19 +1075,13 @@ struct KayaRender: View {
                 if isRoot || node.children.contains(where: { $0.grow > 0 }) {
                     KayaFlex(vertical: false, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
-                            KayaRender(node: child)
-                                .background(
-                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
-                                )
-                                .frame(
-                                    maxHeight: node.align == alignStretch ? .infinity : nil,
-                                    alignment: kayaRowFrameAlignment(node.align)
-                                )
-                                .frame(
-                                    maxWidth: .infinity, maxHeight: .infinity,
-                                    alignment: kayaRowFrameAlignment(node.align)
-                                )
-                                .background(KayaTrackReader(id: child.id, vertical: false))
+                            KayaCell(vertical: false, align: node.align) {
+                                KayaRender(node: child)
+                                    .background(
+                                        KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                                    )
+                            }
+                            .background(KayaTrackReader(id: child.id, vertical: false))
                         }
                     }
                 } else {
@@ -1108,6 +1171,52 @@ struct KayaRender: View {
 
 // The entry's own view: it needs a @FocusState, which the recursive
 // KayaRender switch cannot carry per-node.
+#if os(macOS)
+    /// The macOS button, bridged to AppKit directly instead of through
+    /// SwiftUI's Button. In a process whose main executable is stamped
+    /// with a pre-26 SDK — every non-Apple guest runtime: rust, go,
+    /// JVM, .NET hosts — SwiftUI 26's compatibility path measures
+    /// Button at its borderless metrics (38x20 for a 13pt caption)
+    /// while drawing the bezeled control (52x32), and every container
+    /// that consults sizeThatFits inherits the lie: the bezel
+    /// overflows its layout slot and the caption truncates to an
+    /// ellipsis. An AppKit control cannot disagree with itself —
+    /// fittingSize IS the drawn size, in both design generations,
+    /// under every host stamp — so the floor stays uniform across all
+    /// guest languages. No style escapes the compat lie: automatic,
+    /// bordered, and borderedProminent all measure 38x20 there.
+    private struct KayaMacButton: NSViewRepresentable {
+        let title: String
+        let tag: [UInt8]
+
+        final class Coordinator: NSObject {
+            var tag: [UInt8] = []
+            @objc func fire() { KayaHost.emit(tag) }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeNSView(context: Context) -> NSButton {
+            let button = NSButton(
+                title: title, target: context.coordinator,
+                action: #selector(Coordinator.fire))
+            button.bezelStyle = .rounded
+            return button
+        }
+
+        func updateNSView(_ button: NSButton, context: Context) {
+            button.title = title
+            context.coordinator.tag = tag
+        }
+
+        func sizeThatFits(
+            _ proposal: ProposedViewSize, nsView: NSButton, context: Context
+        ) -> CGSize? {
+            nsView.fittingSize
+        }
+    }
+#endif
+
 struct KayaEntry: View {
     let node: KayaNode
     @FocusState private var focused: Bool

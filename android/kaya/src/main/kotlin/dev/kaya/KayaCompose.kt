@@ -696,7 +696,11 @@ object KayaCompose {
                                         }) matches.add("baseline")
                                         when (matches.size) {
                                             1 -> matches[0]
-                                            0 -> "mixed (cross rects " + rects + " in " + inner + "px)"
+                                            // A baseline-looking row reading mixed is
+                                            // usually the recording, not the geometry —
+                                            // name the recorded count in the verdict.
+                                            0 -> "mixed (cross rects " + rects + " in " + inner + "px" +
+                                                (if (isRow) "; " + baselines.size + " baselines recorded" else "") + ")"
                                             else -> "ambiguous (" + matches.joinToString("|") + ")"
                                         }
                                     }

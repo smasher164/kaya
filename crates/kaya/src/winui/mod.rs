@@ -1624,7 +1624,17 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(match matches.as_slice() {
                 [one] => (*one).to_owned(),
-                [] => format!("mixed (cross rects {rects:?} in {inner}dip)"),
+                // A baseline-looking row reading mixed is usually the
+                // recording, not the geometry — name the recorded
+                // count in the verdict.
+                [] => {
+                    let recorded = if vertical {
+                        String::new()
+                    } else {
+                        format!("; {} baselines recorded", baselines.len())
+                    };
+                    format!("mixed (cross rects {rects:?} in {inner}dip{recorded})")
+                }
                 many => format!("ambiguous ({})", many.join("|")),
             })
         })

@@ -442,3 +442,41 @@ the same patterns return through interpreter drop-downs
   finally step. Do NOT tear down the simulator/emulator device pools —
   the runners deliberately keep them warm across runs (re-boot is slow);
   only the app process/window is the leak, not the device.
+- **SwiftUI resolves its design generation from the MAIN EXECUTABLE's
+  SDK stamp (the sdk field, NOT minos — verified: minos 14 + sdk 26.5
+  takes the modern path), and the compat path mis-measures Button.** `otool -l
+  <bin> | rg -A4 LC_BUILD_VERSION`: the stamp belongs to whoever
+  built the host binary (audited here: everything nix-linked 14.4,
+  zulu JDK 11.3, Apple's /usr/bin/python3 26.5) — so the SAME dylib
+  renders different control generations per host runtime. The dev
+  shell is uniformly old-stamped, so validate-mac exercises the
+  compat generation; the modern generation has no dedicated leg yet
+  (ledgered). In the compat generation `Button.sizeThatFits` answers borderless metrics while
+  the renderer draws the bezel (caption truncates to "t…"). Guard:
+  macOS controls that own chrome are bridged to AppKit
+  (NSViewRepresentable + `fittingSize`), which cannot self-disagree
+  under any stamp. When mac-only geometry differs BY GUEST LANGUAGE,
+  check the host binaries' LC_BUILD_VERSION before suspecting kaya.
+- **An alignment frame PLACES its child by re-proposing the child's
+  own fitted size.** `.frame(maxWidth:.infinity, alignment:)` used as
+  a track cell hands a hugging stack a proposal exactly equal to its
+  ideal; the stack's fair-share division then runs with zero slack
+  and shortchanges whichever child it asks before the huggers release
+  their surplus — a conforming control absorbs the deficit silently
+  (a bordered button wraps mid-word; a rigid bridge overflows its
+  slot by the same amount). A CONSTRAINT-LESS `.frame` (all-nil
+  maxes) re-proposes identically — deleting only the outer frame of
+  a two-frame cell moved the squeeze down a layer, byte-identical.
+  Guard: KayaCell — the flex cells propose the FULL cell at
+  placement and align the returned size; never use any frame as a
+  cell.
+- **alignmentGuide recording closures run only when somebody QUERIES
+  the guide.** The baseline recorders (`.alignmentGuide(.top)` hooks)
+  were powered by the flex cells' alignment frames — aligning a child
+  queries its guides, and stack guides derive from children, so the
+  query cascaded into row children. Deleting the frames silently
+  emptied `kayaBaselineOffsets` (baseline rows classify "mixed" with
+  offsets=[:]) while rendering stayed correct. KayaCell queries the
+  child's `.top` explicitly to keep the recorders running; if
+  baseline classification ever reads mixed with correct-looking
+  geometry, print the offsets dict first.
