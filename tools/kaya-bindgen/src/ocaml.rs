@@ -229,6 +229,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  else begin");
     c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
     c.line("    let id = u32_at byte 8 in");
+    c.line("    (* Window lifecycle records carry the window id alone. *)");
+    c.line("    if kind = occ_kind_close_requested || kind = occ_kind_window_closed");
+    c.line("    then Some (kind, Int64.of_int id, [], None)");
+    c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
     c.line("    let keys = ref [] in");
     c.line("    let at = ref 24 in");
@@ -248,6 +252,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("      else None");
     c.line("    in");
     c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload)");
+    c.line("    end");
     c.line("  end");
     c.out
 }

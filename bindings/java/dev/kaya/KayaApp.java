@@ -55,6 +55,9 @@ public final class KayaApp {
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
+    // Window lifecycle: one handler each, receiving the window id.
+    private BiConsumer<Tx, Long> closeRequested;
+    private BiConsumer<Tx, Long> windowClosed;
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
@@ -169,6 +172,41 @@ public final class KayaApp {
      * widget's name, and a Widget stored past its build keeps naming
      * the same widget — only the chain methods die with it.
      */
+    /** The window-prop chain, in the construction-sugar tier. */
+    public static final class WindowRef {
+        private final Tx tx;
+        private final long id;
+
+        WindowRef(Tx tx, long id) {
+            this.tx = tx;
+            this.id = id;
+        }
+
+        /** The surface's title (title bar / switcher / task label). */
+        public WindowRef title(String title) {
+            tx.records.add(KayaWire.txSetWindowTitle(id, title));
+            return this;
+        }
+
+        /** The ADVISORY content-size request in DIP. */
+        public WindowRef size(double width, double height) {
+            tx.records.add(KayaWire.txSetWindowWidth(id, width));
+            tx.records.add(KayaWire.txSetWindowHeight(id, height));
+            return this;
+        }
+
+        /** Arms the veto class for the chrome close. */
+        public WindowRef vetoClose(boolean on) {
+            tx.records.add(KayaWire.txSetWindowVetoClose(id, on));
+            return this;
+        }
+
+        /** The window id, for mountIn. */
+        public long id() {
+            return id;
+        }
+    }
+
     public static final class Widget {
         final long id;
         final Tx tx;
@@ -985,6 +1023,36 @@ public final class KayaApp {
         }
 
         /**
+         * Create an auxiliary window (capability-gated: phone hosts
+         * reject at the root); materializes hidden, mountIn presents.
+         * Chains are the Java spelling:
+         * tx.createWindow(1).title("inspector").size(480, 320).vetoClose(true).
+         */
+        public WindowRef createWindow(long id) {
+            records.add(KayaWire.txCreateWindow(id));
+            return new WindowRef(this, id);
+        }
+
+        /** The prop chain for an existing window (0 = the primary). */
+        public WindowRef window(long id) {
+            return new WindowRef(this, id);
+        }
+
+        /**
+         * Close and forget an auxiliary window — also the veto
+         * grammar's confirmation and the reconciliation after a
+         * chrome close.
+         */
+        public void destroyWindow(long id) {
+            records.add(KayaWire.txDestroyWindow(id));
+        }
+
+        /** Mount a root into a specific window; mounting presents. */
+        public void mountIn(long window, Widget root) {
+            records.add(KayaWire.txMount(window, root.id));
+        }
+
+        /**
          * Set the primary surface's title (the title bar on the
          * desktops, the switcher label on iOS, the task label on
          * Android).
@@ -1349,6 +1417,22 @@ public final class KayaApp {
      * dispatch discipline across every binding. VM-fatal errors still
      * die.
      */
+    /**
+     * The veto class: the user asked a veto_close window to close;
+     * nothing has closed — answer with tx.destroyWindow to agree.
+     */
+    public void onCloseRequested(BiConsumer<Tx, Long> handler) {
+        closeRequested = handler;
+    }
+
+    /**
+     * A non-veto auxiliary's chrome close (informational;
+     * destroyWindow reconciles).
+     */
+    public void onWindowClosed(BiConsumer<Tx, Long> handler) {
+        windowClosed = handler;
+    }
+
     private void dispatch(Consumer<Tx> handler) {
         try {
             build(handler);
@@ -1433,6 +1517,16 @@ public final class KayaApp {
                     dispatch(tx -> {
                         handler.accept(tx, (Double) occ.payload);
                     });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_CLOSE_REQUESTED) {
+                BiConsumer<Tx, Long> handler = closeRequested;
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, occ.id));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_WINDOW_CLOSED) {
+                BiConsumer<Tx, Long> handler = windowClosed;
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, occ.id));
                 }
             }
         }

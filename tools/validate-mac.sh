@@ -42,9 +42,16 @@ timing() {
 # --example alone would leave a stale libkaya.dylib in place. The header
 # check keeps guests from compiling against an ABI the source has left
 # behind.
-cargo build --lib --example milestone2 --example entry \
-    --example gallery --example todos --example reorder --example feed \
-    --example grow --example layout --example align --example window --example panels || exit 1
+# THE scene list: the mechanical per-scene surfaces below (the rust
+# example build and the guest build loop) derive from it — one
+# registration per new scene; the leg blocks stay explicit because
+# they encode per-language coverage decisions (the deploy-win
+# panels_go lesson: a fourth hand-maintained list is a forgotten
+# registration waiting to ship).
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+BUILD_EXAMPLES=()
+for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
+cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -351,7 +358,9 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
 CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p target/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout align window encodebench; do
+# encodebench is guest-only (no rust example), so it rides beside the
+# scene list rather than in it.
+for guest in $SCENES encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
@@ -471,6 +480,12 @@ KAYA_SELFTEST_SCRIPT="$(scene_script panels)"
 export KAYA_SELFTEST_SCRIPT
 run panels-rust-swiftui env KAYA_SELFTEST=panels target/debug/examples/panels
 run panels-python-swiftui env KAYA_SELFTEST=panels python3 guests/python/panels.py
+run panels-go-swiftui env KAYA_SELFTEST=panels target/go-guests/panels
+run panels-csharp-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet "$CS_GUEST"
+run panels-ocaml-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/panels.exe
+run panels-haskell-swiftui env KAYA_SELFTEST=panels "$(hs_bin panels)"
 
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT

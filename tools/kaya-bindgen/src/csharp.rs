@@ -291,6 +291,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("        if ({accepted})"));
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
+    c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)");
+    c.line("            return true;");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
     c.line("        int at = 24;");
     c.line("        for (uint i = 0; i < pathLen; i++)");

@@ -214,6 +214,9 @@ final class KayaApp {
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
+    // Window lifecycle: one handler each, receiving the window id.
+    private var closeRequested: ((KayaAppTx, UInt64) throws -> Void)?
+    private var windowClosed: ((KayaAppTx, UInt64) throws -> Void)?
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
@@ -481,6 +484,18 @@ final class KayaApp {
         }
     }
 
+    /// The veto class: the user asked a veto_close window to close;
+    /// nothing has closed — answer with tx.destroyWindow to agree.
+    func onCloseRequested(_ handler: @escaping (KayaAppTx, UInt64) throws -> Void) {
+        closeRequested = handler
+    }
+
+    /// A non-veto auxiliary's chrome close (informational;
+    /// destroyWindow reconciles).
+    func onWindowClosed(_ handler: @escaping (KayaAppTx, UInt64) throws -> Void) {
+        windowClosed = handler
+    }
+
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
@@ -526,6 +541,14 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), true):
                 if let handler = widgetValues[id] {
                     dispatch { try build { tx in try handler(tx, value) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED), _):
+                if let handler = closeRequested {
+                    dispatch { try build { tx in try handler(tx, id) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED), _):
+                if let handler = windowClosed {
+                    dispatch { try build { tx in try handler(tx, id) } }
                 }
             default:
                 break
@@ -1140,6 +1163,32 @@ final class KayaAppTx {
     func windowSize(_ width: Double, _ height: Double) {
         tx.setWindowWidth(0, width)
         tx.setWindowHeight(0, height)
+    }
+
+    /// Create an auxiliary window (capability-gated: phone hosts
+    /// reject at the root); materializes hidden, mountIn presents.
+    /// Named arguments are the Swift spelling.
+    func createWindow(
+        _ id: UInt64, title: String? = nil, width: Double? = nil,
+        height: Double? = nil, vetoClose: Bool? = nil
+    ) {
+        tx.createWindow(id)
+        if let title { tx.setWindowTitle(id, title) }
+        if let width { tx.setWindowWidth(id, width) }
+        if let height { tx.setWindowHeight(id, height) }
+        if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
+    }
+
+    /// Close and forget an auxiliary window — also the veto grammar's
+    /// confirmation and the reconciliation after a chrome close.
+    func destroyWindow(_ id: UInt64) {
+        tx.destroyWindow(id)
+    }
+
+    /// Mount a root into a specific window; mounting presents an
+    /// auxiliary.
+    func mountIn(_ window: UInt64, _ root: KayaWidget) {
+        tx.mount(window, root.id)
     }
 
     func mount(_ root: KayaWidget) {

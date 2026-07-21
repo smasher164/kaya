@@ -25,7 +25,12 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) that the foreign suites load;
 # --example alone would build only the rlib it depends on.
-cargo build --lib --example milestone2 --example entry --example gallery --example todos --example reorder --example feed --example grow --example layout --example align --example window --example panels || exit 1
+# THE scene list — the mechanical build/guest surfaces derive from it
+# (one registration per new scene; leg blocks stay explicit).
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+BUILD_EXAMPLES=()
+for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
+cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -165,7 +170,7 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 mkdir -p /tmp/go-guests
-for guest in milestone2 entry gallery todos reorder feed grow layout align window; do
+for guest in $SCENES; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
@@ -271,6 +276,11 @@ for proto in x11 wayland; do
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
     run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         python3 guests/python/panels.py
+    run "$proto" panels-go env KAYA_SELFTEST=panels /tmp/go-guests/panels
+    run "$proto" panels-csharp env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" panels-ocaml env KAYA_SELFTEST=panels KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/panels.exe
+    run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
     # too — in every language.

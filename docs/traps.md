@@ -480,3 +480,34 @@ the same patterns return through interpreter drop-downs
   child's `.top` explicitly to keep the recorders running; if
   baseline classification ever reads mixed with correct-looking
   geometry, print the offsets dict first.
+- **@Observable macro-expands IN-CLASS computed properties as stored**
+  ("variable already has a getter/init accessor", duplicate `_name`
+  backing) — the swift-typecheck pass can even stay green while the
+  full dylib emit fails. Guard: single-window forwards and any other
+  computed conveniences live in an `extension` of the @Observable
+  class; extensions are outside the macro's expansion and observation
+  still tracks through the stored properties they read.
+- **A new occurrence record shape must extend EVERY generated
+  parser.** The generated parsers assumed the click shape ({id,
+  path_len, keys...}) until window lifecycle records ({window_id}
+  alone) arrived; six languages silently misparsed them — dormant
+  only because no scene in those languages received one. Guard: the
+  emitters carry an explicit per-shape branch, and the per-language
+  event legs (panels) are the gate — a new occurrence kind is not
+  landed until a scene exercises its parse in every language that
+  can run it.
+- **Every mechanical per-scene surface in a runner derives from that
+  runner's ONE `SCENES` variable** (deploy-win: cross-build, exe/
+  python/go shipping, taskkill; validate-mac and run-suites: build
+  args and guest loops). A new scene is one registration; the leg
+  blocks alone stay explicit, encoding per-language coverage. The
+  class this killed: deploy-win's fourth hand-maintained list
+  (panels_go's sources never shipped) while check-steps' per-runner
+  grep was satisfied by the other three.
+- **A mount can apply before the first view appears** (SwiftUI):
+  environment actions (openWindow/dismissWindow) are stashed in
+  onAppear, but a batch — especially a guest's second transaction —
+  can be applied earlier. Presentation calls park in
+  kayaPendingOpens and the stash drains them; the panels-python leg
+  (two transactions) is the regression gate, and rust's
+  single-transaction pass was timing luck, not proof.

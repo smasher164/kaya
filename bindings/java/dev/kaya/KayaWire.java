@@ -625,6 +625,10 @@ public final class KayaWire {
             return null;
         }
         long id = b.getLong(8);
+        // Window lifecycle records carry the window id alone.
+        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {
+            return new Occ(kind, id, java.util.List.of(), null);
+        }
         int pathLen = b.getInt(16);
         List<Object> keys = new ArrayList<>();
         int at = 24;

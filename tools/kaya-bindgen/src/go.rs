@@ -273,6 +273,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\treturn 0, 0, nil, nil, false");
     c.line("\t}");
     c.line("\tid = binary.LittleEndian.Uint64(rec[8:])");
+    c.line("\tif kind == occCloseRequested || kind == occWindowClosed {");
+    c.line("\t\t// Window lifecycle records carry the window id alone —");
+    c.line("\t\t// no key path, no payload.");
+    c.line("\t\treturn kind, id, nil, nil, true");
+    c.line("\t}");
     c.line("\tpathLen := binary.LittleEndian.Uint32(rec[16:])");
     c.line("\tat := 24");
     c.line("\tfor i := uint32(0); i < pathLen; i++ {");

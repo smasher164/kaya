@@ -654,6 +654,12 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
+        // Window lifecycle records carry the window id alone.
+        if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
+        {
+            return (kind, id, [], nil)
+        }
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []
         var at = 24

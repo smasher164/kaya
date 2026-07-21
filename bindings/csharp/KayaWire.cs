@@ -660,6 +660,9 @@ static class KayaWire
         if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
+        // Window lifecycle records carry the window id alone.
+        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)
+            return true;
         uint pathLen = BitConverter.ToUInt32(rec, 16);
         int at = 24;
         for (uint i = 0; i < pathLen; i++)

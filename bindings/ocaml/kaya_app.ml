@@ -59,6 +59,9 @@ type app = {
   node_changes : (int64, Kaya_wire.value list -> string -> tx -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> tx -> unit) Hashtbl.t;
   widget_values : (int64, float -> tx -> unit) Hashtbl.t;
+  (* Window lifecycle: one handler each, receiving the window id. *)
+  mutable close_requested : (int64 -> tx -> unit) option;
+  mutable window_closed : (int64 -> tx -> unit) option;
   node_toggles : (int64, Kaya_wire.value list -> bool -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
@@ -109,6 +112,8 @@ let create () =
     node_changes = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
+    close_requested = None;
+    window_closed = None;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -705,6 +710,31 @@ let window_size width height tx =
   emit tx (Kaya_wire.tx_set_window_width 0L width);
   emit tx (Kaya_wire.tx_set_window_height 0L height)
 
+(* Create an auxiliary window (capability-gated: phone hosts reject
+   at the root); materializes hidden, [mount_in] presents. Labeled
+   optional arguments are the OCaml spelling. *)
+let create_window ?title ?width ?height ?veto_close id tx =
+  emit tx (Kaya_wire.tx_create_window id);
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
+  Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
+  Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close
+
+(* Close and forget an auxiliary window — also the veto grammar's
+   confirmation and the reconciliation after a chrome close. *)
+let destroy_window id tx = emit tx (Kaya_wire.tx_destroy_window id)
+
+(* Mount a root into a specific window; mounting presents. *)
+let mount_in window (Widget root) tx = emit tx (Kaya_wire.tx_mount window root)
+
+(* The veto class: the user asked a veto_close window to close;
+   nothing has closed — answer with [destroy_window] to agree. *)
+let on_close_requested app handler = app.close_requested <- Some handler
+
+(* A non-veto auxiliary's chrome close (informational;
+   [destroy_window] reconciles). *)
+let on_window_closed app handler = app.window_closed <- Some handler
+
 let mount (Widget root) tx = emit tx (Kaya_wire.tx_mount 0L root)
 
 (* A template body: the same declaration vocabulary with template-node
@@ -1063,6 +1093,14 @@ let dispatch_loop app =
                | Some handler -> dispatch app (handler v)
                | None -> ())
            | _ -> ()
+         else if kind = Kaya_wire.occ_kind_close_requested then
+           (match app.close_requested with
+           | Some handler -> dispatch app (handler id)
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_window_closed then
+           (match app.window_closed with
+           | Some handler -> dispatch app (handler id)
+           | None -> ())
          else
            match keys with
            | [] ->

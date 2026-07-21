@@ -549,16 +549,20 @@ parseOccurrence rec = do
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
-      pathLen <- peekByteOff rec 16 :: IO Word32
-      let go at 0 acc = return (reverse acc, at)
-          go at n acc = do
-            (v, next) <- parseValue rec at
-            go next (n - 1 :: Word32) (v : acc)
-      (keys, at') <- go (24 :: Int) pathLen []
-      payload <-
-        if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged
-          then do
-            (v, _) <- parseValue rec at'
-            return (Just v)
-          else return Nothing
-      return (Just (kind, ident, keys, payload))
+      -- Window lifecycle records carry the window id alone.
+      if kind == occKindCloseRequested || kind == occKindWindowClosed
+        then return (Just (kind, ident, [], Nothing))
+        else do
+          pathLen <- peekByteOff rec 16 :: IO Word32
+          let go at 0 acc = return (reverse acc, at)
+              go at n acc = do
+                (v, next) <- parseValue rec at
+                go next (n - 1 :: Word32) (v : acc)
+          (keys, at') <- go (24 :: Int) pathLen []
+          payload <-
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged
+              then do
+                (v, _) <- parseValue rec at'
+                return (Just v)
+              else return Nothing
+          return (Just (kind, ident, keys, payload))

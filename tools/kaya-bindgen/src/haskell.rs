@@ -230,24 +230,28 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
-    c.line("      pathLen <- peekByteOff rec 16 :: IO Word32");
-    c.line("      let go at 0 acc = return (reverse acc, at)");
-    c.line("          go at n acc = do");
-    c.line("            (v, next) <- parseValue rec at");
-    c.line("            go next (n - 1 :: Word32) (v : acc)");
-    c.line("      (keys, at') <- go (24 :: Int) pathLen []");
-    c.line("      payload <-");
+    c.line("      -- Window lifecycle records carry the window id alone.");
+    c.line("      if kind == occKindCloseRequested || kind == occKindWindowClosed");
+    c.line("        then return (Just (kind, ident, [], Nothing))");
+    c.line("        else do");
+    c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
+    c.line("          let go at 0 acc = return (reverse acc, at)");
+    c.line("              go at n acc = do");
+    c.line("                (v, next) <- parseValue rec at");
+    c.line("                go next (n - 1 :: Word32) (v : acc)");
+    c.line("          (keys, at') <- go (24 :: Int) pathLen []");
+    c.line("          payload <-");
     let with_payload = crate::payload_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))
         .collect::<Vec<_>>()
         .join(" || ");
-    c.line(&format!("        if {with_payload}"));
-    c.line("          then do");
-    c.line("            (v, _) <- parseValue rec at'");
-    c.line("            return (Just v)");
-    c.line("          else return Nothing");
-    c.line("      return (Just (kind, ident, keys, payload))");
+    c.line(&format!("            if {with_payload}"));
+    c.line("              then do");
+    c.line("                (v, _) <- parseValue rec at'");
+    c.line("                return (Just v)");
+    c.line("              else return Nothing");
+    c.line("          return (Just (kind, ident, keys, payload))");
     c.out
 }
 

@@ -107,6 +107,9 @@ type App struct {
 	nodeChanges    map[uint64]func(*Tx, []any, string)
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
+	// Window lifecycle: one handler each, receiving the window id.
+	closeRequested func(*Tx, uint64)
+	windowClosed   func(*Tx, uint64)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
@@ -372,6 +375,19 @@ func (a *App) Build(fn func(*Tx)) {
 // model is restored and the records are dropped, so the loop logs and
 // moves to the next occurrence. Aborts the runtime cannot recover
 // still die — uniformly with every other binding's fatal floor.
+// OnCloseRequested handles the veto class: the user asked a
+// veto_close window to close; nothing has closed — answer with
+// tx.DestroyWindow to agree.
+func (a *App) OnCloseRequested(fn func(*Tx, uint64)) {
+	a.closeRequested = fn
+}
+
+// OnWindowClosed handles a non-veto auxiliary's chrome close
+// (informational; DestroyWindow reconciles).
+func (a *App) OnWindowClosed(fn func(*Tx, uint64)) {
+	a.windowClosed = fn
+}
+
 func (a *App) dispatch(fn func(*Tx)) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -860,6 +876,63 @@ func (tx *Tx) WindowSize(width, height float64) {
 	tx.records = append(tx.records, TxSetWindowHeight(0, height))
 }
 
+// CreateWindow creates an auxiliary window (capability-gated: phone
+// hosts reject at the root); it materializes hidden and a MountIn
+// presents it. Returns the prop chain:
+// tx.CreateWindow(1).Title("inspector").Size(480, 320).VetoClose(true).
+func (tx *Tx) CreateWindow(id uint64) WindowRef {
+	tx.records = append(tx.records, TxCreateWindow(id))
+	return WindowRef{tx: tx, id: id}
+}
+
+// Window is the prop chain for an existing window (0 = the primary).
+func (tx *Tx) Window(id uint64) WindowRef {
+	return WindowRef{tx: tx, id: id}
+}
+
+// DestroyWindow closes and forgets an auxiliary window — also the
+// veto grammar's confirmation and the reconciliation after a chrome
+// close.
+func (tx *Tx) DestroyWindow(id uint64) {
+	tx.records = append(tx.records, TxDestroyWindow(id))
+}
+
+// MountIn mounts a root into a specific window; mounting presents an
+// auxiliary.
+func (tx *Tx) MountIn(window uint64, root Widget) {
+	tx.records = append(tx.records, TxMount(window, root.id))
+}
+
+// WindowRef chains window props, the construction-sugar tier.
+type WindowRef struct {
+	tx *Tx
+	id uint64
+}
+
+func (w WindowRef) Title(title string) WindowRef {
+	w.tx.records = append(w.tx.records, TxSetWindowTitle(w.id, title))
+	return w
+}
+
+// Size requests the content size in DIP — advisory on every platform.
+func (w WindowRef) Size(width, height float64) WindowRef {
+	w.tx.records = append(w.tx.records, TxSetWindowWidth(w.id, width))
+	w.tx.records = append(w.tx.records, TxSetWindowHeight(w.id, height))
+	return w
+}
+
+// VetoClose arms the veto class: the close button emits
+// close_requested and nothing closes until DestroyWindow agrees.
+func (w WindowRef) VetoClose(on bool) WindowRef {
+	w.tx.records = append(w.tx.records, TxSetWindowVetoClose(w.id, on))
+	return w
+}
+
+// Id returns the window id, for MountIn.
+func (w WindowRef) Id() uint64 {
+	return w.id
+}
+
 func (tx *Tx) Mount(root Widget) {
 	tx.records = append(tx.records, TxMount(0, root.id))
 }
@@ -1034,6 +1107,14 @@ func (a *App) Run() int {
 			case kind == occValueChanged && len(keys) == 0:
 				if fn := a.widgetValues[id]; fn != nil {
 					a.dispatch(func(tx *Tx) { fn(tx, value) })
+				}
+			case kind == occCloseRequested:
+				if fn := a.closeRequested; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, id) })
+				}
+			case kind == occWindowClosed:
+				if fn := a.windowClosed; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, id) })
 				}
 			}
 		}

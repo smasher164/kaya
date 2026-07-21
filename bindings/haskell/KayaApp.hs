@@ -59,6 +59,12 @@ module KayaApp
     items,
     count,
     mount,
+    mountIn,
+    createWindow,
+    destroyWindow,
+    WindowAttr (..),
+    onCloseRequested,
+    onWindowClosed,
     windowTitle,
     windowSize,
     clearWidget,
@@ -562,6 +568,47 @@ windowSize :: Double -> Double -> Build ()
 windowSize w h = do
   emitB (W.txSetWindowWidth 0 w)
   emitB (W.txSetWindowHeight 0 h)
+
+-- | Window construction attributes — the config-list spelling.
+data WindowAttr
+  = WTitle String
+  | WSize Double Double
+  | WVetoClose Bool
+
+-- | Create an auxiliary window (capability-gated: phone hosts reject
+-- at the root); materializes hidden, 'mountIn' presents:
+-- @createWindow 1 [WTitle "inspector", WSize 480 320, WVetoClose True]@.
+createWindow :: Word64 -> [WindowAttr] -> Build ()
+createWindow n attrs = do
+  emitB (W.txCreateWindow n)
+  mapM_ apply attrs
+  where
+    apply (WTitle t) = emitB (W.txSetWindowTitle n t)
+    apply (WSize w h) = do
+      emitB (W.txSetWindowWidth n w)
+      emitB (W.txSetWindowHeight n h)
+    apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
+
+-- | Close and forget an auxiliary window — also the veto grammar's
+-- confirmation and the reconciliation after a chrome close.
+destroyWindow :: Word64 -> Build ()
+destroyWindow n = emitB (W.txDestroyWindow n)
+
+-- | Mount a root into a specific window; mounting presents.
+mountIn :: Word64 -> Widget -> Build ()
+mountIn window (Widget n) = emitB (W.txMount window n)
+
+-- | The veto class: the user asked a veto_close window to close;
+-- nothing has closed — answer with 'destroyWindow' to agree.
+onCloseRequested :: App -> (Word64 -> IO ()) -> IO ()
+onCloseRequested app handler =
+  writeIORef (appCloseRequested app) (Just handler)
+
+-- | A non-veto auxiliary's chrome close (informational;
+-- 'destroyWindow' reconciles).
+onWindowClosed :: App -> (Word64 -> IO ()) -> IO ()
+onWindowClosed app handler =
+  writeIORef (appWindowClosed app) (Just handler)
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
@@ -1272,7 +1319,10 @@ data App = App
     appNodeChanges :: IORef (Map.Map Word64 ([W.Value] -> String -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
-    appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ()))
+    appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
+    -- Window lifecycle: one handler each, receiving the window id.
+    appCloseRequested :: IORef (Maybe (Word64 -> IO ())),
+    appWindowClosed :: IORef (Maybe (Word64 -> IO ()))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -1379,6 +1429,8 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
+    <*> newIORef Nothing
+    <*> newIORef Nothing
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -1437,6 +1489,14 @@ dispatchLoop app = do
               handlers <- readIORef (appWidgetValues app)
               dispatch (mapM_ ($ v) (Map.lookup ident handlers))
             _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindCloseRequested -> do
+          handler <- readIORef (appCloseRequested app)
+          dispatch (mapM_ ($ ident) handler)
+          dispatchLoop app
+      | kind == W.occKindWindowClosed -> do
+          handler <- readIORef (appWindowClosed app)
+          dispatch (mapM_ ($ ident) handler)
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)

@@ -722,6 +722,11 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
+	if kind == occCloseRequested || kind == occWindowClosed {
+		// Window lifecycle records carry the window id alone —
+		// no key path, no payload.
+		return kind, id, nil, nil, true
+	}
 	pathLen := binary.LittleEndian.Uint32(rec[16:])
 	at := 24
 	for i := uint32(0); i < pathLen; i++ {

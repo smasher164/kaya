@@ -197,6 +197,9 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
+    // Window lifecycle: one handler each, receiving the window id.
+    Action<Tx, ulong>? closeRequested;
+    Action<Tx, ulong>? windowClosed;
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -390,8 +393,26 @@ sealed class KayaApp
                 if (widgetValues.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
             }
+            else if (kind == KayaWire.OccKindCloseRequested)
+            {
+                if (closeRequested is { } fn)
+                    Dispatch(tx => fn(tx, id));
+            }
+            else if (kind == KayaWire.OccKindWindowClosed)
+            {
+                if (windowClosed is { } fn)
+                    Dispatch(tx => fn(tx, id));
+            }
         }
     }
+
+    /// The veto class: the user asked a veto_close window to close;
+    /// nothing has closed — answer with tx.DestroyWindow to agree.
+    public void OnCloseRequested(Action<Tx, ulong> fn) => closeRequested = fn;
+
+    /// A non-veto auxiliary's chrome close (informational;
+    /// DestroyWindow reconciles).
+    public void OnWindowClosed(Action<Tx, ulong> fn) => windowClosed = fn;
 
     /// Enter the core on the calling thread (must be the process main
     /// thread), dispatching occurrences on the app thread; returns the
@@ -1051,6 +1072,30 @@ sealed class Tx
         Records.Add(KayaWire.TxSetWindowWidth(0, width));
         Records.Add(KayaWire.TxSetWindowHeight(0, height));
     }
+
+    /// Create an auxiliary window (capability-gated: phone hosts
+    /// reject at the root). Materializes hidden; MountIn presents it.
+    /// Named arguments are the C# spelling:
+    /// tx.CreateWindow(1, title: "inspector", width: 480, height: 320, vetoClose: true).
+    public void CreateWindow(
+        ulong id, string? title = null, double? width = null, double? height = null,
+        bool? vetoClose = null)
+    {
+        Records.Add(KayaWire.TxCreateWindow(id));
+        if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
+        if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
+        if (height is { } h) Records.Add(KayaWire.TxSetWindowHeight(id, h));
+        if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
+    }
+
+    /// Close and forget an auxiliary window — also the veto grammar's
+    /// confirmation and the reconciliation after a chrome close.
+    public void DestroyWindow(ulong id) => Records.Add(KayaWire.TxDestroyWindow(id));
+
+    /// Mount a root into a specific window; mounting presents an
+    /// auxiliary.
+    public void MountIn(ulong window, Widget root) =>
+        Records.Add(KayaWire.TxMount(window, root.Id));
 
     public void Mount(Widget root) => Records.Add(KayaWire.TxMount(0, root.Id));
 }

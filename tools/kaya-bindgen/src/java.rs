@@ -273,6 +273,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            return null;");
     c.line("        }");
     c.line("        long id = b.getLong(8);");
+    c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {");
+    c.line("            return new Occ(kind, id, java.util.List.of(), null);");
+    c.line("        }");
     c.line("        int pathLen = b.getInt(16);");
     c.line("        List<Object> keys = new ArrayList<>();");
     c.line("        int at = 24;");

@@ -73,7 +73,7 @@ for arg in "$@"; do
         grow_rust|grow_python|grow_go|grow_csharp) SUITE="$arg" ;;
         align_rust|align_python|align_go|align_csharp) SUITE="$arg" ;;
         window_rust|window_python|window_go|window_csharp) SUITE="$arg" ;;
-        panels_rust|panels_python) SUITE="$arg" ;;
+        panels_rust|panels_python|panels_go|panels_csharp) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -112,11 +112,28 @@ if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; t
 fi
 timing vm-ready
 
+# THE scene list: every mechanical per-scene surface below derives
+# from it (cross-build examples, exe/python/go shipping, taskkill).
+# Adding a scene here is the ONE registration; the suite blocks stay
+# explicit because they encode per-language coverage decisions. The
+# class this kills: four hand-maintained lists in this file, where a
+# forgotten entry shipped every artifact except the one a leg needed
+# (panels_go: sources never reached the VM; check-steps' per-runner
+# grep was satisfied by the other three lists).
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+SCENE_EXES=()
+SCENE_PYS=()
+BUILD_EXAMPLES=()
+for s in $SCENES; do
+    SCENE_EXES+=("$TARGET/examples/$s.exe")
+    SCENE_PYS+=("$ROOT/guests/python/$s.py")
+    BUILD_EXAMPLES+=(--example "$s")
+done
+
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
     && cargo xwin build --release --target aarch64-pc-windows-msvc \
-        --example milestone2 --example entry --example gallery --example todos --example reorder --example feed \
-        --example grow --example layout --example align --example window --example panels)
+        "${BUILD_EXAMPLES[@]}")
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 
@@ -136,7 +153,7 @@ timing build
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
-for guest in milestone2 entry gallery todos reorder feed grow layout align window; do
+for guest in $SCENES; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum
     # surfaces (kaya-gen) carry a checked-in *_kaya.go beside it.
@@ -160,7 +177,8 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    run_ssh 'cmd /c "taskkill /f /im milestone2.exe 2>nul & taskkill /f /im entry.exe 2>nul & taskkill /f /im gallery.exe 2>nul & taskkill /f /im todos.exe 2>nul & taskkill /f /im reorder.exe 2>nul & taskkill /f /im feed.exe 2>nul & taskkill /f /im grow.exe 2>nul & taskkill /f /im align.exe 2>nul & taskkill /f /im window.exe 2>nul & taskkill /f /im panels.exe 2>nul & taskkill /f /im layout.exe 2>nul & taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0"' || true
+    kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & ' "$s"; done)
+    run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -172,30 +190,10 @@ kill_guests
 
 echo "== deploying artifacts =="
 scp -q \
-    "$TARGET/examples/milestone2.exe" \
-    "$TARGET/examples/entry.exe" \
-    "$TARGET/examples/gallery.exe" \
-    "$TARGET/examples/todos.exe" \
-    "$TARGET/examples/reorder.exe" \
-    "$TARGET/examples/feed.exe" \
-    "$TARGET/examples/grow.exe" \
-    "$TARGET/examples/align.exe" \
-    "$TARGET/examples/window.exe" \
-    "$TARGET/examples/panels.exe" \
-    "$TARGET/examples/layout.exe" \
+    "${SCENE_EXES[@]}" \
     "$TARGET/kaya.dll" \
     "$BOOTSTRAP" \
-    "$ROOT/guests/python/milestone2.py" \
-    "$ROOT/guests/python/entry.py" \
-    "$ROOT/guests/python/gallery.py" \
-    "$ROOT/guests/python/grow.py" \
-    "$ROOT/guests/python/align.py" \
-    "$ROOT/guests/python/window.py" \
-    "$ROOT/guests/python/panels.py" \
-    "$ROOT/guests/python/layout.py" \
-    "$ROOT/guests/python/todos.py" \
-    "$ROOT/guests/python/reorder.py" \
-    "$ROOT/guests/python/feed.py" \
+    "${SCENE_PYS[@]}" \
     "$ROOT/go.mod" \
     "$ROOT/crates/kaya/include/kaya.h" \
     "$ROOT"/tools/guest/*.cmd \
@@ -560,6 +558,8 @@ case "$SUITE" in
         # the language sweep rides the next slice of the phase).
         run_suite panels_rust
         run_suite panels_python
+        run_suite panels_go
+        run_suite panels_csharp
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

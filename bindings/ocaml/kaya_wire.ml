@@ -614,6 +614,10 @@ let parse_occurrence byte =
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
+    (* Window lifecycle records carry the window id alone. *)
+    if kind = occ_kind_close_requested || kind = occ_kind_window_closed
+    then Some (kind, Int64.of_int id, [], None)
+    else begin
     let path_len = u32_at byte 16 in
     let keys = ref [] in
     let at = ref 24 in
@@ -628,4 +632,5 @@ let parse_occurrence byte =
       else None
     in
     Some (kind, Int64.of_int id, List.rev !keys, payload)
+    end
   end

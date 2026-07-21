@@ -262,6 +262,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
+    c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)");
+    c.line("            || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)");
+    c.line("        {");
+    c.line("            return (kind, id, [], nil)");
+    c.line("        }");
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
     c.line("        var keys: [KayaValue] = []");
     c.line("        var at = 24");
