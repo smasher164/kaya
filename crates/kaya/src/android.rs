@@ -11,6 +11,10 @@
 //! during onCreate; kaya spawns the app thread and returns the thread
 //! to Android's Looper.
 //!
+//! The KayaRing natives themselves live in jvm.rs — the ring surface
+//! is the JVM tier's transport on EVERY platform with a JVM, and the
+//! desktops register the same methods from their own attach.
+//!
 //! The Kotlin side's native methods are registered here rather than
 //! resolved by name, so a guest cdylib's only name-based export is its
 //! entry.
@@ -92,111 +96,10 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     _activity: JObject,
 ) {
     init_logging();
-    register_ring_natives(&mut env).expect("kaya: registering KayaRing natives failed");
+    crate::jvm::register_ring_natives(&mut env)
+        .expect("kaya: registering KayaRing natives failed");
     register_present_natives(&mut env)
         .expect("kaya: registering KayaPresent natives failed");
-}
-
-// Raw addresses rather than direct ByteBuffers: ART's interpreter path
-// for byte-buffer-view VarHandles truncates a direct buffer's native
-// address to 32 bits (var_handle.cc, `static_cast<uint32_t>` on the
-// address field), so VarHandle-over-NewDirectByteBuffer faults on any
-// real heap address. Unsafe address-based access takes the address as a
-// jlong and is unaffected.
-fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
-    let class = env.find_class("dev/kaya/KayaRing")?;
-    env.register_native_methods(
-        &class,
-        &[
-            NativeMethod {
-                name: "dataAddress".into(),
-                sig: "()J".into(),
-                fn_ptr: ring_data_address as *mut _,
-            },
-            NativeMethod {
-                name: "capacity".into(),
-                sig: "()I".into(),
-                fn_ptr: ring_capacity as *mut _,
-            },
-            NativeMethod {
-                name: "headAddress".into(),
-                sig: "()J".into(),
-                fn_ptr: ring_head_address as *mut _,
-            },
-            NativeMethod {
-                name: "tailAddress".into(),
-                sig: "()J".into(),
-                fn_ptr: ring_tail_address as *mut _,
-            },
-            NativeMethod {
-                name: "waitOccurrences".into(),
-                sig: "()Z".into(),
-                fn_ptr: ring_wait as *mut _,
-            },
-            NativeMethod {
-                name: "blobRegister".into(),
-                sig: "([B)J".into(),
-                fn_ptr: ring_blob_register as *mut _,
-            },
-            NativeMethod {
-                name: "specHash".into(),
-                sig: "()J".into(),
-                fn_ptr: ring_spec_hash as *mut _,
-            },
-            NativeMethod {
-                name: "submit".into(),
-                sig: "([B)V".into(),
-                fn_ptr: ring_submit as *mut _,
-            },
-        ],
-    )
-}
-
-extern "system" fn ring_data_address(_env: JNIEnv, _class: JClass) -> jlong {
-    crate::capi::ring_raw().0 as jlong
-}
-
-extern "system" fn ring_capacity(_env: JNIEnv, _class: JClass) -> jint {
-    crate::capi::ring_raw().1 as jint
-}
-
-extern "system" fn ring_head_address(_env: JNIEnv, _class: JClass) -> jlong {
-    crate::capi::ring_raw().2 as jlong
-}
-
-extern "system" fn ring_tail_address(_env: JNIEnv, _class: JClass) -> jlong {
-    crate::capi::ring_raw().3 as jlong
-}
-
-extern "system" fn ring_wait(_env: JNIEnv, _class: JClass) -> jni::sys::jboolean {
-    crate::capi::kaya_wait_occurrences() as jni::sys::jboolean
-}
-
-/// KayaRing.submit: one transaction as a byte array, kaya_submit's JNI
-/// spelling (JVM guests cannot call C directly).
-extern "system" fn ring_spec_hash(_env: JNIEnv, _class: JClass) -> jni::sys::jlong {
-    crate::spec::hash() as jni::sys::jlong
-}
-
-extern "system" fn ring_submit(env: JNIEnv, _class: JClass, records: JByteArray) {
-    let bytes = env
-        .convert_byte_array(&records)
-        .expect("kaya: reading the submitted transaction failed");
-    unsafe { crate::capi::kaya_submit(bytes.as_ptr(), bytes.len()) };
-}
-
-/// KayaRing.blobRegister: kaya_blob_register's JNI spelling — the JVM
-/// guest's bulk-payload entry (one copy into core memory; the handle
-/// is consumed by the next submit).
-extern "system" fn ring_blob_register(
-    env: JNIEnv,
-    _class: JClass,
-    data: JByteArray,
-) -> jni::sys::jlong {
-    let bytes = env
-        .convert_byte_array(&data)
-        .expect("kaya: reading the blob bytes failed");
-    (unsafe { crate::capi::kaya_blob_register(bytes.as_ptr(), bytes.len()) }) as jni::sys::jlong
 }
 
 // The presentation-side C API over JNI, for guest-language backends
@@ -245,7 +148,7 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
             NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
-                fn_ptr: ring_spec_hash as *mut _,
+                fn_ptr: crate::jvm::ring_spec_hash as *mut _,
             },
         ],
     )

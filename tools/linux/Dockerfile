@@ -44,4 +44,12 @@ ENV PATH=/root/.cargo/bin:/usr/local/dotnet:$PATH
 ENV CC=clang
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 
+# The desktop JVM tier: headless is enough — the JVM speaks only the
+# ring (no AWT; presentation is the native GTK backend in-process).
+# A trailing layer deliberately: appending rebuilds in seconds where
+# touching the first apt list rebuilds the toolchain world.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    default-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work

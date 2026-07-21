@@ -385,9 +385,16 @@ pub(crate) fn take_core_ends() -> Option<(OccSink, Receiver<Transaction>)> {
     state().core_ends.lock().unwrap().take()
 }
 
-/// The occurrence ring's raw layout, for the Android backend to wrap in
-/// direct ByteBuffers (the JVM's window onto foreign memory).
-#[cfg(target_os = "android")]
+/// The occurrence ring's raw layout, for the JVM tier (jvm.rs's
+/// KayaRing natives) to expose as addresses the Java side reads
+/// directly — Android's Compose backend and the desktop JVM guests
+/// consume the same surface.
+#[cfg(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux"
+))]
 pub(crate) fn ring_raw() -> (*mut u8, u32, *mut u32, *mut u32) {
     state().ring.raw()
 }

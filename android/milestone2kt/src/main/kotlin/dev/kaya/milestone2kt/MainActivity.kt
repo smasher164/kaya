@@ -41,6 +41,11 @@ class MainActivity : ComponentActivity() {
             "align" -> Align::app
             "grow" -> Grow::app
             "layout" -> Layout::app
+            // Desktop-only scenes, registered for the honest failure:
+            // selecting one here dies on the capability gate at
+            // create_window, never by silently running milestone2.
+            "window" -> Window::app
+            "panels" -> Panels::app
             else -> Milestone2::app
         }
         Thread(scene, "kaya-app").start()

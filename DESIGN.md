@@ -827,7 +827,19 @@ bindings' scene construction, and the geometry gates do not move.
   return value says whether kaya presented or a guest-side backend like
   Compose should be mounted), or `KayaRing.attach(this)` when the JVM
   app is itself the guest — so every Android app validates the shape by
-  construction. A general-purpose anchorless `kaya_attach` for desktop
+  construction. The desktop JVM guest tier reuses the KayaRing NAME but
+  not the attach SHAPE: `dev.kaya.KayaRing.attach()` on a desktop only
+  registers the natives (the one name-resolved export; jvm.rs), and the
+  loop entry remains `KayaRing.run()` — kaya_run itself, the calling
+  thread becoming the UI loop exactly like every C guest's main. On
+  macOS that thread must be the process's first, so the launcher
+  carries `-XstartOnFirstThread` — the JVM's spelling of the thread-0
+  requirement above. dev.kaya.KayaRing therefore exists twice by
+  design: Kotlin in android/kaya (Activity-anchored attach, no run),
+  Java in bindings/java-desktop (anchorless attach, run) — KayaApp is
+  written against the shared ring statics and never sees which twin
+  loaded; native registration matches name+signature against whichever
+  class is present, so drift dies loudly at attach on that platform. A general-purpose anchorless `kaya_attach` for desktop
   embedders (plugin UIs, tool windows in a host app) was prototyped and
   passed against real foreign hosts — a Swift AppKit app, a Swift UIKit
   app in the Simulator, a C program running a GLib loop — then removed:

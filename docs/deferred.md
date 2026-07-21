@@ -215,28 +215,24 @@ Landed history lives in git; this file only carries what is still open.
   across legs) — useless as visual evidence and confusing next to
   real stills. Move the capture to before the final step/exit, or
   drop it and keep the recording pipeline as the visual record.
-- Window-event surfaces in the remaining five languages. The FLOOR
-  is generated everywhere (create/destroy_window helpers and
-  window-parameterized prop setters in all eight wire files), and
-  rust + python carry the full grammar (proxy chains; the
-  `app.aux_window` scope + `on_close_requested`). Before go/csharp/
-  java/swift/ocaml/haskell get event sugar, their generated
-  occurrence PARSERS need the window-shape branch python's has
-  (window lifecycle records carry the window id alone — the
-  click-shaped {id, path_len} read would misparse them); their
-  dispatch loops never receive window occurrences today because only
-  scenes that create windows do. Then per-language aux sugar per the
-  Binding conventions, and panels guests + legs.
-- A modern-stamp SwiftUI leg. The nix shell links every leg binary
+- ~~Window-event surfaces in the remaining five languages~~ LANDED:
+  windows part 3 shipped the window-shape parser branches + event
+  sugar in every language, and the desktop-legs slice closed the last
+  gap — swift and java now run panels LIVE on mac (swift via the mac
+  guest build, java via the desktop JVM tier), byte-identical with
+  the other six.
+- ~~A modern-stamp SwiftUI leg~~ LANDED, structurally: the Swift mac
+  guests are compiled by the system toolchain against its SDK, so
+  every swift-swiftui leg in validate-mac IS a modern-generation leg
+  — align (button metrics, the stamp-sensitive scene) passes
+  byte-identical beside the compat fleet, proving the NSButton bridge
+  stamp-independent on every suite run. The guidance below remains
+  load-bearing. The nix shell links every other leg binary
   against its pinned SDK (audit 2026-07-21: python3/go/dotnet/ocaml/
-  rust 14.4, zulu JDK 11.3), so validate-mac exercises SwiftUI 26's
-  COMPATIBILITY design generation exclusively — by accident of the
-  pin, not by design. The modern generation (what an Apple-python or
-  current-Xcode host gets) has no dedicated leg; it was probed only
-  ad hoc during the dressed-floor work. Wanted: one deliberate
-  modern-generation leg (run one python leg via /usr/bin/python3, or
-  link one example `-mmacosx-version-min=26`) so both generations
-  stay covered on purpose. Do not bump the flake SDK without
+  rust 14.4, zulu JDK 11.3), so those legs exercise SwiftUI 26's
+  COMPATIBILITY design generation — now the covered-on-purpose
+  counterpart to the swift legs' modern generation.
+  Do not bump the flake SDK without
   preserving a compat-generation leg — that is the generation real
   JVM/.NET-hosted apps will sit in for years, and where the Button
   measurement bug class lives. Vendor audit (2026-07-21, official
@@ -418,6 +414,19 @@ Landed history lives in git; this file only carries what is still open.
   trusted publishing (OIDC) on nuget/PyPI/npm when releases start.
   Android Python/Go guests need binding bootstrap (briefcase/gomobile).
   Swift SPM packaging needs a modulemap target.
+- A java leg on Windows. The dll already exports the KayaRing
+  natives (jvm.rs compiles for the windows target; check-targets
+  proves it), the launcher needs no first-thread flag there, and the
+  Main selector is platform-neutral — the whole gap is a JDK
+  provisioned on the UTM VM (winget/zulu, one-time) plus the
+  deploy-win legs. Mac and Linux already prove the desktop JVM tier
+  live on 24 legs.
+- Swift guests on Linux and Windows. Upstream swift.org toolchains
+  exist for both, but neither pinned world (docker image, VM) carries
+  one, and the swift SURFACE is already fully proven — typecheck on
+  two Apple targets plus 11 live mac legs and the iOS suite. The
+  value would be backend×language matrix breadth, not new surface
+  proof; take it only if a real swift-on-linux/windows user appears.
 - Node.js guest (the roster's first async surface): Node first;
   function-floor tier via N-API (V8 pointer compression forbids
   external ArrayBuffers over native memory — no direct ring);

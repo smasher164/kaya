@@ -174,6 +174,18 @@ for guest in $SCENES; do
     go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
 done
 
+
+# The Java guests: the shared binding + the desktop transport
+# (bindings/java-desktop's KayaRing) + every scene + the Main
+# selector, one javac in-container (classfiles are platform-neutral,
+# but the suite builds what it ships).
+mkdir -p /tmp/java-guests
+javac -d /tmp/java-guests \
+    bindings/java-desktop/dev/kaya/KayaRing.java \
+    bindings/java/dev/kaya/*.java \
+    guests/java/dev/kaya/milestone2kt/*.java \
+    guests/java-desktop/dev/kaya/milestone2kt/Main.java || status=1
+
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
     run "$proto" c /tmp/c-guests/milestone2
@@ -182,6 +194,8 @@ for proto in x11 wayland; do
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
     run "$proto" ocaml env KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/milestone2.exe
     run "$proto" haskell "$(hs_bin milestone2)"
+    run "$proto" java env KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The entry scene: the inner env overrides run()'s KAYA_SELFTEST=1.
     run "$proto" entry-rust env KAYA_SELFTEST=entry "$CARGO_TARGET_DIR/debug/examples/entry"
     run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
@@ -192,6 +206,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/entry.exe
     run "$proto" entry-haskell env KAYA_SELFTEST=entry "$(hs_bin entry)"
+    run "$proto" entry-java env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The gallery scene (row + checkbox): the toggle arrives as an
     # occurrence the app answers with the status signal.
     run "$proto" gallery-rust env KAYA_SELFTEST=gallery "$CARGO_TARGET_DIR/debug/examples/gallery"
@@ -203,6 +219,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/gallery.exe
     run "$proto" gallery-haskell env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
+    run "$proto" gallery-java env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The todos scene (records + field projection): one field's delta
     # travels; the items-left label proves the fold.
     run "$proto" todos-rust env KAYA_SELFTEST=todos "$CARGO_TARGET_DIR/debug/examples/todos"
@@ -214,6 +232,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/todos.exe
     run "$proto" todos-haskell env KAYA_SELFTEST=todos "$(hs_bin todos)"
+    run "$proto" todos-java env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The reorder scene (order as collection data): expect_order reads
     # the toolkit's actual child order back after each keyed move.
     run "$proto" reorder-rust env KAYA_SELFTEST=reorder "$CARGO_TARGET_DIR/debug/examples/reorder"
@@ -225,6 +245,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/reorder.exe
     run "$proto" reorder-haskell env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
+    run "$proto" reorder-java env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The feed scene (sum-typed elements): per-variant templates,
     # promote = variant-change restamp, witnessed field writes.
     run "$proto" feed-rust env KAYA_SELFTEST=feed "$CARGO_TARGET_DIR/debug/examples/feed"
@@ -236,6 +258,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
     run "$proto" feed-haskell env KAYA_SELFTEST=feed "$(hs_bin feed)"
+    run "$proto" feed-java env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The grow scene (the layout contract: both containers hold
     # nothing but growers, splits read back as shares plus root-fills),
     # every sugar-tier language. The C floor stays out on purpose — its
@@ -249,6 +273,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grow.exe
     run "$proto" grow-haskell env KAYA_SELFTEST=grow "$(hs_bin grow)"
+    run "$proto" grow-java env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The align scene: the cross-axis contract (center + baseline),
     # every language.
     run "$proto" align-rust env KAYA_SELFTEST=align "$CARGO_TARGET_DIR/debug/examples/align"
@@ -259,6 +285,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" align-ocaml env KAYA_SELFTEST=align KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/align.exe
     run "$proto" align-haskell env KAYA_SELFTEST=align "$(hs_bin align)"
+    run "$proto" align-java env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The window scene: the primary surface's props — the title
     # materialized in the real title bar, the advisory 640x400
     # honored (X11; a Wayland compositor keeps the last word, which
@@ -271,6 +299,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" window-ocaml env KAYA_SELFTEST=window KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/window.exe
     run "$proto" window-haskell env KAYA_SELFTEST=window "$(hs_bin window)"
+    run "$proto" window-java env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The panels scene: the auxiliary-window grammar (rust depth; the
     # language sweep rides the phase's next slice).
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
@@ -281,6 +311,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" panels-ocaml env KAYA_SELFTEST=panels KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/panels.exe
     run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
+    run "$proto" panels-java env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here
     # too — in every language.
@@ -292,6 +324,8 @@ for proto in x11 wayland; do
         dotnet exec "$CS_GUEST"
     run "$proto" layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/layout.exe
     run "$proto" layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
+    run "$proto" layout-java env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
 done
 drain
 

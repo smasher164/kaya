@@ -364,6 +364,45 @@ for guest in $SCENES encodebench; do
     go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
 done
 
+
+# The Swift guests on the mac target: the same bindings the iOS
+# bundles compile, linked against libkaya.dylib — built with the
+# system toolchain's SDK, so these are the fleet's modern-stamp legs
+# (the dressed floor's button bridge must hold under BOTH stamp
+# generations; the deferred modern-stamp item lands here, live).
+# swiftc allows top-level code only in a file named main.swift.
+mkdir -p target/swift-guests
+for guest in $SCENES; do
+    [ -f "guests/swift/$guest.swift" ] || continue
+    cp "guests/swift/$guest.swift" target/swift-guests/main.swift
+    if [ -f "guests/swift/$guest+Kaya.swift" ]; then
+        set -- "guests/swift/$guest+Kaya.swift"
+    else
+        set --
+    fi
+    kaya_swiftc -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
+        bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
+        "$@" target/swift-guests/main.swift \
+        -L target/debug -lkaya \
+        -Xlinker -rpath -Xlinker "$ROOT/target/debug" \
+        -o "target/swift-guests/$guest" || exit 1
+done
+rm -f target/swift-guests/main.swift
+
+# The Java guests: the shared binding + the desktop transport
+# (bindings/java-desktop's KayaRing, the twin of Android's Kotlin one)
+# + every scene + the Main selector, one javac. The dev shell's zulu
+# launcher is exactly the vendor-stamped population the dressed
+# floor's compat generation serves.
+rm -rf target/java-guests
+mkdir -p target/java-guests
+javac -d target/java-guests \
+    bindings/java-desktop/dev/kaya/KayaRing.java \
+    bindings/java/dev/kaya/*.java \
+    guests/java/dev/kaya/milestone2kt/*.java \
+    guests/java-desktop/dev/kaya/milestone2kt/Main.java || exit 1
+
 # The encode-benchmark leg: the generated encoders must clear their
 # floor rates (structural-regression guard, not a race).
 CS_GUEST="$CS_GUEST" tools/bench-encode.sh || exit 1
@@ -389,6 +428,9 @@ run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
 run ocaml-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/milestone2.exe
 run haskell-swiftui "$(hs_bin milestone2)"
+run swift-swiftui target/swift-guests/milestone2
+run java-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script entry)"
 export KAYA_SELFTEST_SCRIPT
 run entry-rust-swiftui env KAYA_SELFTEST=entry target/debug/examples/entry
@@ -399,6 +441,9 @@ run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/li
 run entry-ocaml-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/entry.exe
 run entry-haskell-swiftui env KAYA_SELFTEST=entry "$(hs_bin entry)"
+run entry-swift-swiftui env KAYA_SELFTEST=entry target/swift-guests/entry
+run entry-java-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script gallery)"
 export KAYA_SELFTEST_SCRIPT
 run gallery-rust-swiftui env KAYA_SELFTEST=gallery target/debug/examples/gallery
@@ -409,6 +454,9 @@ run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debu
 run gallery-ocaml-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/gallery.exe
 run gallery-haskell-swiftui env KAYA_SELFTEST=gallery "$(hs_bin gallery)"
+run gallery-swift-swiftui env KAYA_SELFTEST=gallery target/swift-guests/gallery
+run gallery-java-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script todos)"
 export KAYA_SELFTEST_SCRIPT
 run todos-rust-swiftui env KAYA_SELFTEST=todos target/debug/examples/todos
@@ -419,6 +467,9 @@ run todos-csharp-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/li
 run todos-ocaml-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/todos.exe
 run todos-haskell-swiftui env KAYA_SELFTEST=todos "$(hs_bin todos)"
+run todos-swift-swiftui env KAYA_SELFTEST=todos target/swift-guests/todos
+run todos-java-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script reorder)"
 export KAYA_SELFTEST_SCRIPT
 run reorder-rust-swiftui env KAYA_SELFTEST=reorder target/debug/examples/reorder
@@ -429,6 +480,9 @@ run reorder-csharp-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debu
 run reorder-ocaml-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/reorder.exe
 run reorder-haskell-swiftui env KAYA_SELFTEST=reorder "$(hs_bin reorder)"
+run reorder-swift-swiftui env KAYA_SELFTEST=reorder target/swift-guests/reorder
+run reorder-java-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script feed)"
 export KAYA_SELFTEST_SCRIPT
 run feed-rust-swiftui env KAYA_SELFTEST=feed target/debug/examples/feed
@@ -439,6 +493,9 @@ run feed-csharp-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libk
 run feed-ocaml-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/feed.exe
 run feed-haskell-swiftui env KAYA_SELFTEST=feed "$(hs_bin feed)"
+run feed-swift-swiftui env KAYA_SELFTEST=feed target/swift-guests/feed
+run feed-java-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The layout and grow scenes against the SwiftUI interpreter — the same
 # examples on the interpreter. Each scene exports its OWN script:
@@ -456,6 +513,9 @@ run grow-csharp-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libk
 run grow-ocaml-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/grow.exe
 run grow-haskell-swiftui env KAYA_SELFTEST=grow "$(hs_bin grow)"
+run grow-swift-swiftui env KAYA_SELFTEST=grow target/swift-guests/grow
+run grow-java-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 # The align scene: the cross-axis contract (center + baseline), every
 # language.
@@ -472,6 +532,9 @@ run window-csharp-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/
 run window-ocaml-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/window.exe
 run window-haskell-swiftui env KAYA_SELFTEST=window "$(hs_bin window)"
+run window-swift-swiftui env KAYA_SELFTEST=window target/swift-guests/window
+run window-java-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The panels scene: the auxiliary-window grammar — two surfaces, the
 # veto class fired by the REAL chrome close, destroy as confirmation.
@@ -486,6 +549,9 @@ run panels-csharp-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/
 run panels-ocaml-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/panels.exe
 run panels-haskell-swiftui env KAYA_SELFTEST=panels "$(hs_bin panels)"
+run panels-swift-swiftui env KAYA_SELFTEST=panels target/swift-guests/panels
+run panels-java-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT
@@ -497,6 +563,9 @@ run align-csharp-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/li
 run align-ocaml-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/align.exe
 run align-haskell-swiftui env KAYA_SELFTEST=align "$(hs_bin align)"
+run align-swift-swiftui env KAYA_SELFTEST=align target/swift-guests/align
+run align-java-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 KAYA_SELFTEST_SCRIPT="$(scene_script layout)"
 export KAYA_SELFTEST_SCRIPT
@@ -508,6 +577,9 @@ run layout-csharp-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/
 run layout-ocaml-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/layout.exe
 run layout-haskell-swiftui env KAYA_SELFTEST=layout "$(hs_bin layout)"
+run layout-swift-swiftui env KAYA_SELFTEST=layout target/swift-guests/layout
+run layout-java-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 unset KAYA_SWIFTUI_LIB KAYA_SELFTEST_SCRIPT
 drain
 timing legs

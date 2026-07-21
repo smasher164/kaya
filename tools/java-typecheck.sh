@@ -15,9 +15,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Compile-check the Java binding and example against a KayaRing stub —
-# the fast gate that catches KayaApp.java breakage without Gradle or
-# an emulator. javac comes from the PATH or, failing that, from nix.
+# Compile-check the Java binding and every guest against the REAL
+# desktop KayaRing (bindings/java-desktop: native declarations compile
+# anywhere, no Gradle or emulator needed — the stub this gate once
+# carried is gone). Globbed, not listed: a hand-maintained file list
+# here silently skipped three scenes once (the deploy-win panels_go
+# lesson, java spelling).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,21 +40,10 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if run_javac -d "$TMP" \
-    tools/guest/java-stub/dev/kaya/KayaRing.java \
-    bindings/java/dev/kaya/KayaApp.java \
-    bindings/java/dev/kaya/KayaRecords.java \
-    bindings/java/dev/kaya/KayaSums.java \
-    bindings/java/dev/kaya/KayaWire.java \
-    guests/java/dev/kaya/milestone2kt/Milestone2.java \
-    guests/java/dev/kaya/milestone2kt/Entry.java \
-    guests/java/dev/kaya/milestone2kt/Gallery.java \
-    guests/java/dev/kaya/milestone2kt/Todos.java \
-    guests/java/dev/kaya/milestone2kt/Reorder.java \
-    guests/java/dev/kaya/milestone2kt/Feed.java \
-    guests/java/dev/kaya/milestone2kt/PostKaya.java \
-    guests/java/dev/kaya/milestone2kt/TodoKaya.java \
-    guests/java/dev/kaya/milestone2kt/ItemKaya.java \
-    bindings/java/dev/kaya/KayaGen.java; then
+    bindings/java-desktop/dev/kaya/KayaRing.java \
+    bindings/java/dev/kaya/*.java \
+    guests/java/dev/kaya/milestone2kt/*.java \
+    guests/java-desktop/dev/kaya/milestone2kt/Main.java; then
     echo "java-typecheck: OK"
 else
     echo "java-typecheck: FAIL"

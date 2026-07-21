@@ -52,7 +52,7 @@ done < <(find guests/java -name '*.java' ! -name '*Kaya.java')
 run_javac -proc:only \
     -processorpath "$TMP/japt" -processor dev.kaya.processor.KayaProcessor \
     -Akaya.out=guests/java \
-    tools/guest/java-stub/dev/kaya/KayaRing.java \
+    bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/KayaApp.java \
     bindings/java/dev/kaya/KayaRecords.java \
     bindings/java/dev/kaya/KayaSums.java \

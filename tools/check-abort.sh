@@ -66,7 +66,7 @@ KAYA_CHECK=abort dotnet exec guests/csharp/bin/Debug/net10.0/kaya-guests.dll \
 # Java: pure JVM against the ring stub — no natives, so mutating
 # transactions always abort (the check's header explains the shape).
 rm -rf "$TMP/java"
-javac -d "$TMP/java" tools/guest/java-stub/dev/kaya/KayaRing.java \
+javac -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/*.java tools/checks/java-abort/AbortCheck.java \
     >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java-build; }
 java -cp "$TMP/java" AbortCheck >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java; }

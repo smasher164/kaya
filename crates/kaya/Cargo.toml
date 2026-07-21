@@ -27,17 +27,26 @@ windows-collections = "0.3"
 # TextBox's metadata reaches IAsyncOperation (windows-bindgen emits
 # windows_future paths for it).
 windows-future = "0.3"
+# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
+# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+jni = "0.21"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
+# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
+# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+jni = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # v4_6 gates gdk::Texture::from_bytes (decode-from-encoded-bytes, GDK
 # 4.6+); the validation image ships GTK 4.18.
 gtk4 = { version = "0.11.4", features = ["v4_6"] }
+# The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
+# cdylib and speaks the same KayaRing natives as Android's JVM tier.
+jni = "0.21"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 dispatch2 = "0.3.1"
@@ -55,7 +64,7 @@ log = "0.4"
 android_logger = "0.15"
 log-panics = "2"
 
-# The example scenes live in guests/rust, beside the other languages'
+# The example scenes live inguests/rust, beside the other languages'
 # guests; explicit paths keep `cargo build --example <scene>` and the
 # target/…/examples output layout unchanged.
 [[example]]

@@ -29,6 +29,18 @@ mod gtk;
 #[cfg(target_os = "android")]
 pub mod android;
 
+// The JVM guest tier's transport (the KayaRing natives): Android's
+// attach registers them beside the Compose pump; each desktop's
+// cdylib exports its own attach so a plain JVM process is a guest
+// like any other (bindings/java-desktop is the Java side).
+#[cfg(any(
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux"
+))]
+mod jvm;
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod swiftui_host;
 
