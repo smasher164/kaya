@@ -84,6 +84,7 @@ pub const KIND_SLIDER: u32 = 7;
 pub const KIND_IMAGE: u32 = 8;
 pub const KIND_SCROLL: u32 = 9;
 pub const KIND_PROGRESS: u32 = 10;
+pub const KIND_SELECT: u32 = 11;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -278,6 +279,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_IMAGE => WidgetKind::Image,
         KIND_SCROLL => WidgetKind::Scroll,
         KIND_PROGRESS => WidgetKind::Progress,
+        KIND_SELECT => WidgetKind::Select,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -1068,6 +1070,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Image => KIND_IMAGE,
         WidgetKind::Scroll => KIND_SCROLL,
         WidgetKind::Progress => KIND_PROGRESS,
+        WidgetKind::Select => KIND_SELECT,
     }
 }
 

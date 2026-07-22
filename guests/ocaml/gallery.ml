@@ -27,6 +27,7 @@ let () =
   build app
     (let* status = signal (Str "urgent: false") in
      let* volume = signal (Str "volume: 50%") in
+     let* pos = signal (F64 0.5) in
 
      let on_urgent checked =
        write status (Str (Printf.sprintf "urgent: %b" checked))
@@ -37,6 +38,9 @@ let () =
          (Str (Printf.sprintf "volume: %d%%"
                  (int_of_float (Float.round (v *. 100.)))))
      in
+     (* The programmatic write: fans out to the control and must NOT
+        come back as an on_volume occurrence. *)
+     let on_quarter = write pos (F64 0.25) in
 
      let* root =
        column
@@ -44,8 +48,9 @@ let () =
            row [ checkbox ~text:"urgent" ~on_toggle:on_urgent (); label ~bind:status () ];
            row
              [
-               slider ~min:0.0 ~max:1.0 ~value:0.5 ~on_change:on_volume ();
+               slider ~min:0.0 ~max:1.0 ~bind:pos ~on_change:on_volume ();
                label ~bind:volume ();
+               button ~text:"quarter" ~on_click:on_quarter ();
              ];
            (* The content-buffer row: a valid 2x2 PNG decodes and
               reports its size, and deliberately invalid bytes read

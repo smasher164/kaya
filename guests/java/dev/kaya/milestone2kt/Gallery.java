@@ -19,6 +19,7 @@ final class Gallery {
         app.build(tx -> {
             KayaApp.Signal<String> status = tx.signal("urgent: false");
             KayaApp.Signal<String> volume = tx.signal("volume: 50%");
+            KayaApp.Signal<Double> pos = tx.signal(0.5);
 
             tx.mount(tx.column(() -> {
                 tx.row(() -> {
@@ -29,9 +30,12 @@ final class Gallery {
                 tx.row(() -> {
                     // Integer percent, so every language's formatting
                     // agrees.
-                    tx.slider(0.0, 1.0, 0.5, (t, value) ->
+                    tx.slider(0.0, 1.0, pos, (t, value) ->
                             t.write(volume, "volume: " + Math.round(value * 100) + "%"));
                     tx.label(volume);
+                    // The programmatic write: fans out to the control
+                    // and must NOT come back as a volume occurrence.
+                    tx.button("quarter", t -> t.write(pos, 0.25));
                 });
                 tx.row(() -> {
                     // The content-buffer row: a valid 2x2 PNG decodes

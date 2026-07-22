@@ -22,6 +22,7 @@ static class GalleryScene
         {
             var status = tx.Signal("urgent: false");
             var volume = tx.Signal("volume: 50%");
+            var pos = tx.Signal(0.5);
 
             tx.Mount(tx.Column(() =>
             {
@@ -35,9 +36,12 @@ static class GalleryScene
                 {
                     // Integer percent, so every language's formatting
                     // agrees.
-                    tx.Slider(0.0, 1.0, 0.5, (t, value) =>
+                    tx.Slider(0.0, 1.0, bind: pos, onChange: (t, value) =>
                         t.Write(volume, $"volume: {(int)System.Math.Round(value * 100)}%"));
                     tx.Label(bind: volume);
+                    // The programmatic write: fans out to the control
+                    // and must NOT come back as a volume occurrence.
+                    tx.Button("quarter", onClick: t => t.Write(pos, 0.25));
                 });
                 tx.Row(() =>
                 {

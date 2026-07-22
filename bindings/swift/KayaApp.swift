@@ -903,8 +903,6 @@ final class KayaAppTx {
         return w
     }
 
-    /// A slider over min...max at value, with its change handler
-    /// co-located.
     /// A progress bar: display-only, like label and image. value is
     /// the determinate fraction (0..=1); indeterminate: true switches
     /// to the platform's activity mode.
@@ -918,16 +916,54 @@ final class KayaAppTx {
         return w
     }
 
+    /// A slider over min...max at value, with its change handler
+    /// co-located. `bind` takes a float signal for the position
+    /// instead of a constant — the programmatic write path (write
+    /// fans out to the control; property writes never echo an
+    /// occurrence, so a handler's own writes cannot loop back at
+    /// it).
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
+        bind: KayaSignal? = nil,
         onChange: ((KayaAppTx, Double) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_SLIDER))
         tx.setMin(w.id, min)
         tx.setMax(w.id, max)
-        tx.setValue(w.id, value)
+        if let bind {
+            tx.bindValue(w.id, bind.id)
+        } else {
+            tx.setValue(w.id, value)
+        }
         if let onChange { app.onValueChanged(w, onChange) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A dropdown select over fixed options — each option becomes a
+    /// label child (labels only, scene-checked) — at `selected`, the
+    /// initial 0-based index (domain-checked at the root against the
+    /// option count), with its pick handler co-located: `onSelect`
+    /// receives each USER pick's new 0-based index (programmatic
+    /// writes never echo) — the slider's uncontrolled contract.
+    func select(
+        _ options: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SELECT))
+        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        for option in options {
+            let o = widget(UInt32(KAYA_KIND_LABEL))
+            setText(o, option)
+        }
+        let ids = app.childFrames.removeLast().ids
+        for id in ids { tx.addChild(w.id, id) }
+        tx.setValue(w.id, Double(selected))
+        if let onSelect {
+            app.onValueChanged(w) { tx, v in try onSelect(tx, Int(v)) }
+        }
         if let grow { setGrow(w, grow) }
         return w
     }

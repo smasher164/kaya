@@ -266,6 +266,24 @@ rules that keep bindings mutually recognizable have to be written down
 somewhere; Wayland ships protocol conventions for the same reason. Settled
 rules so far:
 
+- **Only the user's act emits; a property write is configuration.**
+  Interactive widgets are uncontrolled: the widget owns its state and
+  reports each USER change as an occurrence. A programmatic property
+  write (a const set at build, a signal write fanning out later)
+  moves the control but never echoes an occurrence, on every backend
+  — without that rule, a handler that writes back a different value
+  than it received ping-pongs through the native change event
+  forever, and only on the platforms whose toolkits raise the event
+  for programmatic writes (GTK, WinUI — both carry an apply-side
+  quiet guard for exactly this). COMMANDS are the deliberate
+  exception: a command acts like the user (clear empties the field
+  through the entry's own text_changed("") path — the entry scene's
+  second-add round depends on that echo), so it emits on every
+  platform. The harness stage's direct writes are the user path by
+  definition. The gallery scene's quarter button is the standing
+  negative test: a programmatic write with the assertion that the
+  fold did NOT run (ratified 2026-07-22).
+
 - Construction-prop spellings, ratified per language family after a
   survey of each ecosystem's dominant GUI idiom (2026-07-20; grow and
   spacing are the first two props riding them):

@@ -71,6 +71,9 @@ public final class Main {
             case "progress":
                 app = Progress::app;
                 break;
+            case "select":
+                app = Select::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

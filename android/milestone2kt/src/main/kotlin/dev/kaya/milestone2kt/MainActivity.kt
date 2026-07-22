@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
             "nav" -> Nav::app
             "scroll" -> Scroll::app
             "progress" -> Progress::app
+            "select" -> Select::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

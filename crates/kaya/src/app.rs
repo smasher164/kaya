@@ -1104,13 +1104,9 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
-    /// A slider over min..max at value; moves arrive in the
-    /// occurrence loop.
     /// A progress bar: display-only, like label and image. `value`
     /// is the determinate fraction (0..=1, domain-checked at the
-    /// root); chain `.indeterminate(true)`... no — pass
-    /// [`Prop::Indeterminate`] via set for the activity mode, or use
-    /// `progress_indeterminate`.
+    /// root); `progress_indeterminate` is the activity-mode arm.
     pub fn progress(&mut self, value: f64) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Progress);
         self.set(w, Prop::Value, value);
@@ -1124,11 +1120,42 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A slider over min..max at value; moves arrive in the
+    /// occurrence loop.
     pub fn slider(&mut self, min: f64, max: f64, value: f64) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Slider);
         self.set(w, Prop::Min, min);
         self.set(w, Prop::Max, max);
         self.set(w, Prop::Value, value);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A slider whose position binds a float signal — the
+    /// programmatic write path (`tx.write` fans out to the control;
+    /// property writes never echo an occurrence, so a handler's own
+    /// writes cannot loop back at it).
+    pub fn slider_bound(&mut self, min: f64, max: f64, value: SignalId) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Slider);
+        self.set(w, Prop::Min, min);
+        self.set(w, Prop::Max, max);
+        self.bind(w, Prop::Value, value);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A dropdown select over its options — each option becomes a
+    /// label child (labels only, scene-checked), `selected` the
+    /// initial 0-based index (domain-checked at the root against the
+    /// option count). Picks arrive in the occurrence loop as the
+    /// new index ([`Messages::on_select`]).
+    pub fn select(&mut self, options: &[&str], selected: usize) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Select);
+        self.parents.push(w.0);
+        for option in options {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *option);
+        }
+        self.parents.pop();
+        self.set(w, Prop::Value, selected as f64);
         Widget { id: w, out: (), tx: self }
     }
 
@@ -1727,6 +1754,13 @@ impl<M> Messages<M> {
                 _ => None,
             }),
         );
+    }
+
+    /// A select's picks: the new 0-based option index. Rides the
+    /// value_changed record (the index travels as f64), so this is
+    /// on_value with the index reading.
+    pub fn on_select(&self, w: WidgetId, f: impl Fn(usize) -> M + 'static) {
+        self.on_value(w, move |v| f(v as usize));
     }
 
     /// The template flavors: stamped-copy occurrences carry the key

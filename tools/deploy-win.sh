@@ -78,6 +78,7 @@ for arg in "$@"; do
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
+        select_rust|select_python|select_go|select_csharp|select_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -124,7 +125,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -189,8 +190,12 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # guests — so killing by image name is safe. Swept before deploying,
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
-    kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & ' "$s"; done)
-    run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
+    # Two name families beyond <scene>.exe: the go legs build
+    # <scene>_go.exe (the pri-adjacency arrangement), and the C# legs
+    # run the kaya-guests.exe apphost — both held kaya.dll through a
+    # deploy once (2026-07-22).
+    kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
+    run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im kaya-guests.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -509,10 +514,14 @@ run_suite() {
             [ -n "$slot" ] || sleep 0.2
         done
         echo "$slot" >"$LEGS_DIR/$name.slot"
+        # Per-leg wall time rides the verdict (the bottleneck-hunt
+        # instrumentation, uniform across runners).
+        local t0=$SECONDS
         local verdict=FAIL
         if run_one_suite "$name" "$slot"; then
             verdict=PASS
         fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
         rmdir "$LEGS_DIR/.slot-$slot" 2>/dev/null
         echo "$verdict" >"$LEGS_DIR/$name.verdict"
     ) >"$LEGS_DIR/$name.log" 2>&1 &
@@ -533,7 +542,7 @@ drain_suites() {
         echo "== $name =="
         cat "$LEGS_DIR/$name.log" 2>/dev/null
         [ "$verdict" = PASS ] || status=1
-        echo "$name: $verdict"
+        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
     done
     leg_names=()
 }
@@ -640,6 +649,14 @@ case "$SUITE" in
         run_suite progress_go
         run_suite progress_csharp
         run_suite progress_java
+        # The select scene: ComboBox — same XamlControlsResources
+        # dependency as ProgressBar, so the legs reuse the
+        # pri-adjacency arrangement above.
+        run_suite select_rust
+        run_suite select_python
+        run_suite select_go
+        run_suite select_csharp
+        run_suite select_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

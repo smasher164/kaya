@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -271,11 +271,13 @@ run() {
     shift
     if [ -n "${KAYA_RECORD:-}" ]; then
         (
+            local t0=$SECONDS
             if run_recorded "$name" "$@" >"$LEGS_DIR/$name.log" 2>&1; then
                 echo PASS >"$LEGS_DIR/$name.verdict"
             else
                 echo FAIL >"$LEGS_DIR/$name.verdict"
             fi
+            echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
         ) &
         leg_pids+=($!)
         leg_names+=("$name")
@@ -286,20 +288,26 @@ run() {
     fi
     if [ "$JOBS" = 1 ]; then
         echo "== $name =="
+        local t0=$SECONDS
         if KAYA_SELFTEST=1 timeout 120 "$@"; then
-            echo "$name: PASS"
+            echo "$name: PASS ($((SECONDS - t0))s)"
         else
-            echo "$name: FAIL"
+            echo "$name: FAIL ($((SECONDS - t0))s)"
             status=1
         fi
         return
     fi
     (
+        # Per-leg wall time rides the verdict: the matrix's cost
+        # lives in its slowest legs, so every verdict names its
+        # price and a bottleneck hunt greps instead of guessing.
+        local t0=$SECONDS
         if KAYA_SELFTEST=1 timeout 120 "$@" >"$LEGS_DIR/$name.log" 2>&1; then
             echo PASS >"$LEGS_DIR/$name.verdict"
         else
             echo FAIL >"$LEGS_DIR/$name.verdict"
         fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
     ) &
     leg_pids+=($!)
     leg_names+=("$name")
@@ -342,7 +350,7 @@ drain() {
             fi
             status=1
         fi
-        echo "$name: $verdict"
+        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
     done
     leg_names=()
 }
@@ -609,6 +617,24 @@ run progress-ocaml-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/deb
 run progress-haskell-swiftui env KAYA_SELFTEST=progress "$(hs_bin progress)"
 run progress-swift-swiftui env KAYA_SELFTEST=progress target/swift-guests/progress
 run progress-java-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The select scene: the dropdown's contract — the collapsed control
+# shows the selected option's label, choose drives the toolkit's own
+# selection route, the pick reaches the guest as the new index. All
+# eight languages.
+KAYA_SELFTEST_SCRIPT="$(scene_script select)"
+export KAYA_SELFTEST_SCRIPT
+run select-rust-swiftui env KAYA_SELFTEST=select target/debug/examples/select
+run select-python-swiftui env KAYA_SELFTEST=select python3 guests/python/select.py
+run select-go-swiftui env KAYA_SELFTEST=select target/go-guests/select
+run select-csharp-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run select-ocaml-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/select.exe
+run select-haskell-swiftui env KAYA_SELFTEST=select "$(hs_bin select)"
+run select-swift-swiftui env KAYA_SELFTEST=select target/swift-guests/select
+run select-java-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

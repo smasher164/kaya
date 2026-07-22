@@ -610,8 +610,6 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	return w
 }
 
-// Slider creates a slider over min..max at value, with its change
-// handler co-located (nil for none) — the Fyne shape, like Button.
 // Progress is a progress bar: display-only, like Label and Image.
 // value is the determinate fraction (0..=1, domain-checked at the
 // root); chain .Indeterminate() for the platform's activity mode.
@@ -628,6 +626,8 @@ func (w Widget) Indeterminate() Widget {
 	return w
 }
 
+// Slider creates a slider over min..max at value, with its change
+// handler co-located (nil for none) — the Fyne shape, like Button.
 func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
 	tx.records = append(tx.records, TxSetMin(w.id, min))
@@ -635,6 +635,42 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 	tx.records = append(tx.records, TxSetValue(w.id, value))
 	if onChange != nil {
 		tx.app.OnValueChanged(w, onChange)
+	}
+	return w
+}
+
+// SliderBound creates a slider over min..max whose position binds a
+// float signal — the programmatic write path (Tx.Write fans out to
+// the control; property writes never echo an occurrence, so a
+// handler's own writes cannot loop back at it).
+func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func(*Tx, float64)) Widget {
+	w := tx.Widget(KindSlider)
+	tx.records = append(tx.records, TxSetMin(w.id, min))
+	tx.records = append(tx.records, TxSetMax(w.id, max))
+	tx.records = append(tx.records, TxBindValue(w.id, value.id))
+	if onChange != nil {
+		tx.app.OnValueChanged(w, onChange)
+	}
+	return w
+}
+
+// Select creates a dropdown select over fixed options — each option
+// becomes a label child (labels only, scene-checked) — at selected,
+// the initial 0-based index (domain-checked at the root against the
+// option count), with its pick handler co-located (nil for none):
+// onSelect receives each USER pick's new 0-based index (programmatic
+// writes never echo) — the slider's uncontrolled contract.
+func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Widget {
+	w := tx.Widget(KindSelect)
+	tx.app.parents = append(tx.app.parents, w.id)
+	for _, option := range options {
+		o := tx.Widget(KindLabel)
+		tx.SetText(o, option)
+	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+	tx.records = append(tx.records, TxSetValue(w.id, float64(selected)))
+	if onSelect != nil {
+		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
 	}
 	return w
 }
@@ -1247,9 +1283,10 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
-// OnValueChanged registers a handler for a live slider's moves: the
-// bar owns its position and reports each change with the new value —
-// the entry's uncontrolled contract, with a float64.
+// OnValueChanged registers a handler for a live slider's moves (or a
+// select's picks — same record, the index as a float64): the widget
+// owns its position and reports each change with the new value — the
+// entry's uncontrolled contract.
 func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
 	a.widgetValues[w.id] = fn
 }

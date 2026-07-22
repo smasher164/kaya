@@ -136,6 +136,8 @@
 
 #define KIND_PROGRESS 10
 
+#define KIND_SELECT 11
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -445,6 +447,8 @@
 #define KAYA_KIND_SCROLL 9
 
 #define KAYA_KIND_PROGRESS 10
+
+#define KAYA_KIND_SELECT 11
 
 /**
  * Property keys.

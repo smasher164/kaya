@@ -834,12 +834,9 @@ public final class KayaApp {
             return w;
         }
 
-        /** A slider over min..max at value, with its change handler
-         * co-located (null for none). */
         /** A progress bar: display-only, like label and image.
-         * value is the determinate fraction (0..=1); chain
-         * .indeterminate() on the returned widget... the JVM
-         * spelling is the second overload. */
+         * value is the determinate fraction (0..=1);
+         * progressIndeterminate is the activity-mode arm. */
         public Widget progress(double value) {
             Widget w = widget(KayaWire.KIND_PROGRESS);
             records.add(KayaWire.txSetValue(w.id, value));
@@ -853,6 +850,24 @@ public final class KayaApp {
             return w;
         }
 
+        /** A slider whose position binds a float signal — the
+         * programmatic write path (write fans out to the control;
+         * property writes never echo an occurrence, so a handler's
+         * own writes cannot loop back at it). */
+        public Widget slider(double min, double max, Signal<Double> value,
+                BiConsumer<Tx, Double> onChange) {
+            Widget w = widget(KayaWire.KIND_SLIDER);
+            records.add(KayaWire.txSetMin(w.id, min));
+            records.add(KayaWire.txSetMax(w.id, max));
+            records.add(KayaWire.txBindValue(w.id, value.id));
+            if (onChange != null) {
+                KayaApp.this.onValueChanged(w, onChange);
+            }
+            return w;
+        }
+
+        /** A slider over min..max at value, with its change handler
+         * co-located (null for none). */
         public Widget slider(double min, double max, double value,
                 BiConsumer<Tx, Double> onChange) {
             Widget w = widget(KayaWire.KIND_SLIDER);
@@ -861,6 +876,30 @@ public final class KayaApp {
             records.add(KayaWire.txSetValue(w.id, value));
             if (onChange != null) {
                 KayaApp.this.onValueChanged(w, onChange);
+            }
+            return w;
+        }
+
+        /** A dropdown select over fixed options — each option
+         * becomes a label child (labels only, scene-checked) — at
+         * selected, the initial 0-based index (domain-checked at the
+         * root against the option count), with its pick handler
+         * co-located (null for none): onSelect receives each USER
+         * pick's new 0-based index (programmatic writes never echo)
+         * — the slider's uncontrolled contract. */
+        public Widget select(String[] options, int selected,
+                BiConsumer<Tx, Integer> onSelect) {
+            Widget w = widget(KayaWire.KIND_SELECT);
+            parents.add(w.id);
+            for (String option : options) {
+                Widget o = widget(KayaWire.KIND_LABEL);
+                setText(o, option);
+            }
+            parents.remove(parents.size() - 1);
+            records.add(KayaWire.txSetValue(w.id, selected));
+            if (onSelect != null) {
+                KayaApp.this.onValueChanged(w,
+                        (tx, v) -> onSelect.accept(tx, (int) (double) v));
             }
             return w;
         }

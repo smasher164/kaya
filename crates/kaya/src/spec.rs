@@ -702,7 +702,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: Some(PropKind::Str),
             doc: "path_len key values follow, then the entry's new text as \
                   one value. Identity reads as in button_clicked. The widget \
-                  owns its text; the app folds these into its own model.",
+                  owns its text; the app folds these into its own model. \
+                  USER edits and commands (clear acts like the user) emit; \
+                  a property write is configuration and never echoes.",
         },
         Record {
             kind: 3,
@@ -714,8 +716,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
             payload: Some(PropKind::Bool),
             doc: "path_len key values follow, then the checkbox's new state \
-                  as one Bool value. Same shape and ownership stance as \
-                  text_changed.",
+                  as one Bool value. Same shape, ownership, and \
+                  user-only-emits stance as text_changed.",
         },
         Record {
             kind: 4,
@@ -726,9 +728,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("reserved", FieldTy::U32),
             ],
             payload: Some(PropKind::F64),
-            doc: "path_len key values follow, then the slider's new value as \
-                  one F64 value. One occurrence per change, the entry's \
-                  per-edit granularity; same ownership stance.",
+            doc: "path_len key values follow, then the widget's new value as \
+                  one F64 value: the slider's position, or the select's new \
+                  selected index (integral, 0-based). One occurrence per \
+                  USER change (programmatic writes never echo — without \
+                  that, a handler writing back a different value would \
+                  ping-pong forever); same ownership stance.",
         },
         Record {
             kind: 5,
@@ -805,6 +810,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("image", 8),
                 ("scroll", 9),
                 ("progress", 10),
+                ("select", 11),
             ],
         },
         EnumSpec {
@@ -1108,6 +1114,7 @@ mod tests {
                     ("kind", "image") => wire::KIND_IMAGE,
                     ("kind", "scroll") => wire::KIND_SCROLL,
                     ("kind", "progress") => wire::KIND_PROGRESS,
+                    ("kind", "select") => wire::KIND_SELECT,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,

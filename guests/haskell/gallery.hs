@@ -33,6 +33,7 @@ main = kayaMain $ \app -> do
   buildTx app $ do
     status <- signal (VStr "urgent: false")
     volume <- signal (VStr "volume: 50%")
+    pos <- signal (VF64 0.5)
 
     let onUrgent checked =
           submitTx app $
@@ -43,11 +44,21 @@ main = kayaMain $ \app -> do
           submitTx app $
             writeSignal volume
               (VStr ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
+        -- The programmatic write: fans out to the control and must
+        -- NOT come back as an onVolume occurrence.
+        onQuarter = submitTx app $ writeSignal pos (VF64 0.25)
 
     root <-
       column
         [ row [checkboxOn "urgent" onUrgent, labelBound status],
-          row [sliderOn 0 1 0.5 onVolume, labelBound volume],
+          row
+            [ do
+                w <- sliderOn 0 1 0.5 onVolume
+                bindValue w pos
+                return w,
+              labelBound volume,
+              buttonOn "quarter" onQuarter
+            ],
           {- The content-buffer row: a valid 2x2 PNG decodes and
              reports its size, and deliberately invalid bytes read 0x0
              — decode failure is the placeholder class, never a crash,

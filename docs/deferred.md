@@ -408,6 +408,62 @@ Landed history lives in git; this file only carries what is still open.
   crash even with the metadata provider — RESOLVED 2026-07-22: the
   merge landed (tiered, in OnLaunched) and works with the provider;
   the real constraint was pri adjacency (traps.md).
+- Programmatic-echo divergence on slider/checkbox/entry — RESOLVED
+  2026-07-22 same day (Akhil: "we should do it now; it could lead to
+  an infinite loop"): GTK and WinUI now arm an apply_quiet guard
+  around every interactive SetProp, so property writes never echo on
+  any backend; commands (clear) and the stage's direct writes emit
+  like the user ON PURPOSE (the entry scene's second-add round
+  depends on clear's echo). Ratified in DESIGN.md (Binding
+  conventions) and the spec's occurrence docs. The gallery scene's
+  quarter button + signal-bound slider is the standing negative test
+  (a programmatic write, then the assertion that the fold did NOT
+  run); signal-bound slider value sugar now exists in all 8
+  languages (was python-only).
+- Matrix speed: event-driven expects (benchmarked 2026-07-22; the
+  full writeup is the "matrix gets a stopwatch" artifact). Per-leg
+  instrumentation across all five runners showed 70% of the matrix's
+  1,767 leg-seconds are scripted settle floors (settle 1500 openers
+  + 400-700ms post-action settles; scene cost ranks by settle
+  budget). The structural fix: make `expect` a BOUNDED RETRY (poll
+  until match or deadline) and open scenes with a first-render wait,
+  then drop the settles — converts fixed sleeps into actual latency,
+  removes the pacing race class at the root (retiring check-steps'
+  pacing lint), estimated 50-65% leg-time saving. Secondary levers:
+  wider windows/phone pools (their x2.5-3.9 parallelism is
+  device-bound, not leg-bound), skip-unchanged windows deploy (20s),
+  pooled mac guest builds (29s serial), iOS bindings compiled once
+  as a module (~60s of per-scene swiftc).
+- Select follow-ons, each waiting on a REAL need: a template
+  (For-body) select only gets the stateless index checks — the
+  option-count upper bound is live-widget-only (the count map keys
+  on live ids); option disabling; multi-select (a different control
+  on every platform — checkable menu items, list boxes — probably a
+  separate kind); signal-bound OPTION LABELS work today (label text
+  binding fans out to the rows), but signal-bound option LISTS
+  (dynamic add) are append-only via add_child with no remove.
+- Canvas widget (Akhil, 2026-07-22; post-style-guide, before webview):
+  a drawing surface. The viable shape is a DISPLAY LIST — the guest
+  transmits drawing commands (paths, fills, strokes, transforms, text
+  runs) as data; core retains it as a prop; backends replay it into
+  the native surface (SwiftUI Canvas, Compose DrawScope, GTK4
+  DrawingArea/cairo; WinUI needs Win2D CanvasControl — a new NuGet
+  dependency and packaging payload). Callback-per-frame immediate
+  mode is REJECTED (8-language FFI churn, divergent frame timing).
+  The slippery slope is the op vocabulary (gradients, blend modes,
+  images, text shaping) — start with a deliberately minimal op set.
+  Pointer-event occurrences on the canvas are a further deferral
+  inside this one.
+- Webview widget (Akhil, 2026-07-22; deferred furthest — the
+  framework inside it is the entire web platform): minimal uniform
+  surface is load-URL/load-HTML plus a navigation-requested veto
+  (fits the existing veto grammar). The hard parts are the four
+  embedders (WKWebView, WebView2, Android WebView, WebKitGTK) whose
+  JS-bridge/cookie/permission models diverge, and distribution
+  (WebView2 Evergreen runtime, webkit2gtk distro variance) — both
+  land on the packaging milestone. A user-facing native-view escape
+  hatch is NOT the default answer (breaks the cross-platform promise
+  per-widget, forces per-platform guest code).
 - Packaging: at-release items — Hackage/opam publication, Go vanity
   import path (akhil.cc/kaya + go-import meta; dev.kaya is
   unpublishable), Maven publication under cc.akhil, npm kaya-gui after

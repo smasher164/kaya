@@ -32,9 +32,10 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, ColumnDefinition, ContentDialog, ContentDialogButton, ContentDialogResult,
-    Grid, Image, ProgressBar, RowDefinition, ScrollBarVisibility, ScrollMode, ScrollViewer,
-    Slider, TextBlock, TextBox, TextChangedEventHandler,
+    Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
+    ContentDialogButton, ContentDialogResult, Grid, Image, ProgressBar, RowDefinition,
+    ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler, Slider,
+    TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
@@ -63,6 +64,7 @@ enum NativeWidget {
     Image(Image),
     Scroll(ScrollViewer),
     Progress(ProgressBar),
+    Select(ComboBox),
 }
 
 impl NativeWidget {
@@ -79,6 +81,7 @@ impl NativeWidget {
             NativeWidget::Image(image) => image.cast(),
             NativeWidget::Scroll(viewer) => viewer.cast(),
             NativeWidget::Progress(bar) => bar.cast(),
+            NativeWidget::Select(combo) => combo.cast(),
         }
     }
 }
@@ -104,9 +107,11 @@ struct CoreState {
     aligns: HashMap<WidgetId, i64>,
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index. Clicks emit the stored
-    // tag directly; the other controls fire their real events for
-    // programmatic writes (SetIsChecked raises Checked, SetText raises
-    // TextChanged, SetValue raises ValueChanged).
+    // tag directly; the other controls fire their real events for the
+    // stage's direct writes (SetIsChecked raises Checked, SetText
+    // raises TextChanged, SetValue raises ValueChanged) — that is the
+    // stage's user path. The APPLY path arms apply_quiet so property
+    // writes stay silent (see that field).
     buttons: Vec<Vec<u8>>,
     checkboxes: Vec<CheckBox>,
     labels: Vec<TextBlock>,
@@ -115,6 +120,32 @@ struct CoreState {
     images: Vec<Image>,
     scrolls: Vec<ScrollViewer>,
     progresses: Vec<ProgressBar>,
+    selects: Vec<ComboBox>,
+    /// Option-label plumbing: label widget id -> (its select's
+    /// ComboBox, its option row's own TextBlock). A select's label
+    /// children are its OPTIONS — ComboBoxItems in the popup, not
+    /// standalone widgets — so their SetProp text lands on the row
+    /// as STRING content and they leave the harness's label
+    /// registry. Strings, never a TextBlock: a UIElement content is
+    /// STOLEN into the collapsed box's SelectionBoxItem while its
+    /// row is selected (one visual tree), and the row's Content()
+    /// reads back null — caught live 2026-07-22 as a null-interface
+    /// panic that wedged the dispatcher.
+    select_options: HashMap<u64, (ComboBox, ComboBoxItem)>,
+    /// Echo guard for EVERY interactive kind: WinUI's change events
+    /// (TextChanged, Checked/Unchecked, ValueChanged,
+    /// SelectionChanged) cannot tell a user act from a programmatic
+    /// write, and only the USER path may emit an occurrence — a
+    /// property write is state configuration, never an event
+    /// (without this, a handler that writes back a different value
+    /// than it received ping-pongs through the native event
+    /// forever). Armed around every SetProp write to an interactive
+    /// widget. Commands (clear) and the harness stage's direct
+    /// writes stay unguarded ON PURPOSE: a command acts like the
+    /// user, and both must reach the app through the widget's own
+    /// path. Atomic because WinRT event handlers are Send-bound
+    /// (they still fire on this thread).
+    apply_quiet: std::sync::Arc<std::sync::atomic::AtomicBool>,
     columns: Vec<Grid>,
     rows: Vec<Grid>,
     window: Window,
@@ -778,7 +809,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
                     let field_for_handler = field.clone();
+                    let quiet = core.apply_quiet.clone();
                     let handler = TextChangedEventHandler::new(move |_, _| {
+                        if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            return Ok(());
+                        }
                         let text = field_for_handler.Text()?.to_string();
                         sink.send_text_tag(&tag, &text);
                         Ok(())
@@ -819,25 +854,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Checkbox => {
                     // The box owns its checked bit; Checked/Unchecked
                     // report each flip with the box's identity tag.
-                    // (WinUI raises them for programmatic SetIsChecked
-                    // too, which is what lets the selftest click like a
-                    // user.) The caption is the CheckBox's content, the
-                    // same shape as Button.
+                    // WinUI raises them for programmatic SetIsChecked
+                    // too — the USER/programmatic split rides
+                    // apply_quiet (see that field). The caption is the
+                    // CheckBox's content, the same shape as Button.
                     let check = CheckBox::new()?;
                     let caption = TextBlock::new()?;
                     check.SetContent(&caption)?;
                     let tag = tag.expect("checkboxes carry a tag");
                     let on_sink = core.occurrences.clone();
                     let on_tag = tag.clone();
+                    let on_quiet = core.apply_quiet.clone();
                     let checked = RoutedEventHandler::new(move |_, _| {
-                        on_sink.send_toggle_tag(&on_tag, true);
+                        if !on_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            on_sink.send_toggle_tag(&on_tag, true);
+                        }
                         Ok(())
                     });
                     check.Checked(&checked)?;
                     let off_sink = core.occurrences.clone();
                     let off_tag = tag.clone();
+                    let off_quiet = core.apply_quiet.clone();
                     let unchecked = RoutedEventHandler::new(move |_, _| {
-                        off_sink.send_toggle_tag(&off_tag, false);
+                        if !off_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                            off_sink.send_toggle_tag(&off_tag, false);
+                        }
                         Ok(())
                     });
                     check.Unchecked(&unchecked)?;
@@ -857,8 +898,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     slider.SetMinWidth(160.0)?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("sliders carry a tag");
+                    let quiet = core.apply_quiet.clone();
                     let handler = bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventHandler::new(
                         move |_, args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs>| {
+                            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                return Ok(());
+                            }
                             if let Some(args) = args.as_ref() {
                                 sink.send_value_tag(&tag, args.NewValue()?);
                             }
@@ -914,6 +959,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
                 }
+                WidgetKind::Select => {
+                    // The dressed floor: ComboBox — the select's
+                    // label children are its OPTIONS, ComboBoxItems
+                    // in the popup (see AddChild). Uncontrolled like
+                    // the slider for USER picks; programmatic writes
+                    // ride the quiet guard because SelectionChanged
+                    // cannot tell the two apart.
+                    let combo = ComboBox::new()?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("selects carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let handler = SelectionChangedEventHandler::new(
+                        move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
+                            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                return Ok(());
+                            }
+                            if let Some(sender) = sender.as_ref() {
+                                let combo: ComboBox = windows_core::Interface::cast(sender)?;
+                                let index = combo.SelectedIndex()?;
+                                if index >= 0 {
+                                    sink.send_value_tag(&tag, f64::from(index));
+                                }
+                            }
+                            Ok(())
+                        },
+                    );
+                    combo.SelectionChanged(&handler)?;
+                    core.selects.push(combo.clone());
+                    NativeWidget::Select(combo)
+                }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no handler. The
                     // source arrives as a SetProp blob and decodes
@@ -963,6 +1038,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Progress(bar) => {
                         windows_core::Interface::cast(bar).expect("progress is a UIElement")
+                    }
+                    NativeWidget::Select(combo) => {
+                        windows_core::Interface::cast(combo).expect("select is a UIElement")
                     }
                 }
             };
@@ -1230,20 +1308,52 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.SetText(&HSTRING::from(&s))?;
+                    // An option label's text lands on its ComboBox
+                    // row too, as string content (see select_options
+                    // for why never a TextBlock).
+                    if let Some((_, item)) = core.select_options.get(&id.0) {
+                        item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&s))?)?;
+                    }
                 }
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
-                    field.SetText(&HSTRING::from(&s))?;
+                    // Quiet: a property write is configuration, not a
+                    // user edit (see apply_quiet).
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = field.SetText(&HSTRING::from(&s));
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
                 }
                 (NativeWidget::Checkbox { check, .. }, Prop::Checked, Value::Bool(b)) => {
-                    let boxed: IReference<bool> =
-                        PropertyValue::CreateBoolean(b)?.cast()?;
-                    check.SetIsChecked(&boxed)?;
+                    let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = check.SetIsChecked(&boxed);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
-                    slider.SetValue(v)?;
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = slider.SetValue(v);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::Select(combo), Prop::Value, Value::F64(v)) => {
+                    // A programmatic write is quiet (uniform
+                    // semantics: only the user path emits).
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = combo.SetSelectedIndex(v as i32);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
                 }
                 (NativeWidget::Progress(bar), Prop::Value, Value::F64(v)) => {
                     bar.SetValue(v)?;
@@ -1320,6 +1430,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 viewer.SetContent(&element)?;
                 return Ok(());
             }
+            // A select's label children are its OPTIONS: ComboBoxItems
+            // in the popup, never children of a panel. The row gets
+            // its own TextBlock (the label's SetProp text lands on
+            // both), the label's native TextBlock stays unparented,
+            // and the label leaves the harness's label registry —
+            // options are the select's data, so they must not shift
+            // every later label's index.
+            if let NativeWidget::Select(combo) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let combo = combo.clone();
+                let item = ComboBoxItem::new()?;
+                if let NativeWidget::Label(label) =
+                    core.widgets.get(&child).expect("scene validated the id")
+                {
+                    // The row initializes from the label's CURRENT
+                    // text: children-first sugars (OCaml, Haskell)
+                    // set the text BEFORE this AddChild (the GTK
+                    // empty-row lesson); SetProp covers later writes.
+                    item.SetContent(&PropertyValue::CreateString(&label.Text()?)?)?;
+                    let label = label.clone();
+                    core.labels.retain(|x| x != &label);
+                }
+                combo.Items()?.Append(&item)?;
+                core.select_options.insert(child.0, (combo, item));
+                return Ok(());
+            }
             let panel = match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
                 _ => panic!("kaya: add_child parent is not a container"),
@@ -1335,6 +1472,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Image(image) => children.Append(image)?,
                 NativeWidget::Scroll(viewer) => children.Append(viewer)?,
                 NativeWidget::Progress(bar) => children.Append(bar)?,
+                NativeWidget::Select(combo) => children.Append(combo)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -1882,6 +2020,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             images: Vec::new(),
             scrolls: Vec::new(),
             progresses: Vec::new(),
+            selects: Vec::new(),
+            select_options: HashMap::new(),
+            apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             columns: Vec::new(),
             rows: Vec::new(),
             child_order: HashMap::new(),
@@ -2373,6 +2514,37 @@ impl crate::harness::Stage for WinUiStage {
             } else {
                 format!("{}%", (bar.Value()? * 100.0).round() as i64)
             })
+        })
+    }
+
+    fn choose(&self, t: crate::harness::Target, index: usize) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.selects.len());
+            // The REAL selection route: SetSelectedIndex raises
+            // SelectionChanged exactly as a popup pick does (the
+            // quiet guard is off here), the slider's SetValue
+            // stance.
+            core.selects[i].SetSelectedIndex(index as i32)?;
+            Ok(())
+        });
+    }
+
+    fn selected_label(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.selects.len());
+            let combo = &core.selects[i];
+            // The REAL control's state: the selected row's string
+            // content out of the ComboBox's items (see
+            // select_options for why content is a string).
+            let index = combo.SelectedIndex()?;
+            if index < 0 {
+                return Ok(String::new());
+            }
+            let item: ComboBoxItem =
+                windows_core::Interface::cast(&combo.Items()?.GetAt(index as u32)?)?;
+            let value: IReference<HSTRING> =
+                windows_core::Interface::cast(&item.Content()?)?;
+            Ok(value.Value()?.to_string())
         })
     }
 

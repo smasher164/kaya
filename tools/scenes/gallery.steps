@@ -12,3 +12,12 @@ expect label#0 "urgent: true"
 expect label#1 "volume: 75%"
 expect image#0 "2x2"
 expect image#1 "0x0"
+# The echo negative test: "quarter" writes the slider's bound signal
+# to 0.25 — a PROGRAMMATIC write. The slider moves, but no
+# value_changed may fire (property writes are configuration, not user
+# events; only the user path and commands emit), so the volume label
+# must still read the USER's last change. A backend that echoes
+# programmatic writes fails here with "volume: 25%".
+click button#0
+settle 700
+expect label#1 "volume: 75%"

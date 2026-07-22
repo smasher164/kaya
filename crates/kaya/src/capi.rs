@@ -277,6 +277,7 @@ pub const KAYA_KIND_SLIDER: u32 = 7;
 pub const KAYA_KIND_IMAGE: u32 = 8;
 pub const KAYA_KIND_SCROLL: u32 = 9;
 pub const KAYA_KIND_PROGRESS: u32 = 10;
+pub const KAYA_KIND_SELECT: u32 = 11;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -288,6 +289,7 @@ const _: () = assert!(
         && KAYA_KIND_IMAGE == wire::KIND_IMAGE
         && KAYA_KIND_SCROLL == wire::KIND_SCROLL
         && KAYA_KIND_PROGRESS == wire::KIND_PROGRESS
+        && KAYA_KIND_SELECT == wire::KIND_SELECT
 );
 // Completeness, not just agreement (the PROPS count guard's sibling
 // — this exact gap recurred: KIND_PROGRESS shipped to every
@@ -307,7 +309,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 10,
+        kinds == 11,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };

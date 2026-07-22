@@ -38,17 +38,26 @@ def on_volume(value):
     volume.set(f"volume: {round(value * 100)}%")
 
 
+def on_quarter():
+    # The programmatic write: fans out to the control and must NOT
+    # come back as an on_volume occurrence (property writes are
+    # configuration; only the user path and commands emit).
+    pos.set(0.25)
+
+
 with app.window():
     status = kaya.signal("urgent: false")
     volume = kaya.signal("volume: 50%")
+    pos = kaya.signal(0.5)
 
     with kaya.column():
         with kaya.row():
             kaya.checkbox("urgent", on_toggle=on_toggle)
             kaya.label(bind=status)
         with kaya.row():
-            kaya.slider(value=0.5, min=0.0, max=1.0, on_change=on_volume)
+            kaya.slider(value=pos, min=0.0, max=1.0, on_change=on_volume)
             kaya.label(bind=volume)
+            kaya.button("quarter", on_click=on_quarter)
         with kaya.row():
             # The content-buffer row: a valid 2x2 PNG decodes and
             # reports its size, and deliberately invalid bytes read 0x0

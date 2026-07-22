@@ -355,6 +355,7 @@ enum NativeWidget {
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
+    Select(gtk4::DropDown),
 }
 
 impl NativeWidget {
@@ -370,6 +371,7 @@ impl NativeWidget {
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
+            NativeWidget::Select(w) => w.clone().upcast(),
         }
     }
 }
@@ -401,6 +403,30 @@ struct CoreState {
     images: Vec<gtk4::Picture>,
     scrolls: Vec<gtk4::ScrolledWindow>,
     progresses: Vec<gtk4::ProgressBar>,
+    selects: Vec<gtk4::DropDown>,
+    /// Option-label plumbing: label widget id -> (its select's id,
+    /// its option row). A select's label children are its OPTIONS —
+    /// rows of the DropDown's StringList, not standalone widgets —
+    /// so their text lands in the model, and they leave the
+    /// harness's label registry.
+    select_options: HashMap<u64, (u64, u32)>,
+    /// The DropDown's string model per select id (rows appended at
+    /// AddChild; text arrives via the label's SetProp).
+    select_models: HashMap<u64, gtk4::StringList>,
+    /// Echo guard for EVERY interactive kind: GTK's change signals
+    /// (changed, toggled, value-changed, notify::selected) cannot
+    /// tell a user act from a programmatic write, and only the USER
+    /// path may emit an occurrence — a property write is state
+    /// configuration, never an event (without this, a handler that
+    /// writes back a different value than it received ping-pongs
+    /// through the native signal forever). Armed around every
+    /// SetProp write to an interactive widget and the select's
+    /// model appends (GTK auto-selects row 0 when the first item
+    /// lands). Commands (clear) and the harness stage's direct
+    /// writes stay unguarded ON PURPOSE: a command acts like the
+    /// user, and both must reach the app through the widget's own
+    /// path.
+    apply_quiet: std::rc::Rc<std::cell::Cell<bool>>,
     /// Indeterminate bars pulse on a shared ticker (GTK's activity
     /// mode is pulse-driven, not a property); membership here IS the
     /// indeterminate flag the observation reads.
@@ -616,14 +642,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 WidgetKind::Entry => {
                     // Uncontrolled: the widget owns its text; each edit
                     // goes up with the entry's identity tag, and the
-                    // app folds it into its own model. (GTK fires
-                    // `changed` for programmatic set_text too, which is
-                    // what lets the selftest type like a user.)
+                    // app folds it into its own model. GTK fires
+                    // `changed` for programmatic set_text too, so the
+                    // USER/programmatic split rides apply_quiet: the
+                    // stage's direct writes and the clear command
+                    // emit like a user; SetProp stays silent.
                     let entry = gtk4::Entry::new();
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
+                    let quiet = core.apply_quiet.clone();
                     entry.connect_changed(move |e| {
-                        sink.send_text_tag(&tag, e.text().as_str());
+                        if !quiet.get() {
+                            sink.send_text_tag(&tag, e.text().as_str());
+                        }
                     });
                     core.entries.push(entry.clone());
                     NativeWidget::Entry(entry)
@@ -655,14 +686,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 WidgetKind::Checkbox => {
                     // The box owns its checked bit; each flip goes up
-                    // with the box's identity tag. (GTK fires `toggled`
-                    // for programmatic set_active too, which is what
-                    // lets the selftest click like a user.)
+                    // with the box's identity tag. GTK fires `toggled`
+                    // for programmatic set_active too — the
+                    // USER/programmatic split rides apply_quiet (see
+                    // that field).
                     let check = gtk4::CheckButton::new();
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("checkboxes carry a tag");
+                    let quiet = core.apply_quiet.clone();
                     check.connect_toggled(move |c| {
-                        sink.send_toggle_tag(&tag, c.is_active());
+                        if !quiet.get() {
+                            sink.send_toggle_tag(&tag, c.is_active());
+                        }
                     });
                     core.checkboxes.push(check.clone());
                     NativeWidget::Checkbox(check)
@@ -670,16 +705,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 WidgetKind::Slider => {
                     // Uncontrolled, like the entry: the slider owns its
                     // position; each change goes up with its identity
-                    // tag. (GTK fires `value-changed` for programmatic
-                    // set_value too, which is what lets the selftest
-                    // drag like a user.)
+                    // tag. GTK fires `value-changed` for programmatic
+                    // set_value too — the USER/programmatic split
+                    // rides apply_quiet (see that field).
                     let scale =
                         gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 1.0, 0.01);
                     scale.set_size_request(160, -1);
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("sliders carry a tag");
+                    let quiet = core.apply_quiet.clone();
                     scale.connect_value_changed(move |sc| {
-                        sink.send_value_tag(&tag, sc.value());
+                        if !quiet.get() {
+                            sink.send_value_tag(&tag, sc.value());
+                        }
                     });
                     core.sliders.push(scale.clone());
                     NativeWidget::Slider(scale)
@@ -721,6 +759,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let bar = gtk4::ProgressBar::new();
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
+                }
+                WidgetKind::Select => {
+                    // The dressed floor: GtkDropDown over a
+                    // StringList — the select's label children are
+                    // its OPTIONS, rows of this model (see AddChild).
+                    // Uncontrolled like the slider: each USER pick
+                    // goes up with the identity tag; programmatic
+                    // writes ride the quiet guard because
+                    // notify::selected cannot tell the two apart.
+                    let model = gtk4::StringList::new(&[]);
+                    let dropdown =
+                        gtk4::DropDown::new(Some(model.clone()), gtk4::Expression::NONE);
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("selects carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    dropdown.connect_selected_notify(move |dd| {
+                        if !quiet.get() && dd.selected() != gtk4::INVALID_LIST_POSITION {
+                            sink.send_value_tag(&tag, f64::from(dd.selected()));
+                        }
+                    });
+                    core.select_models.insert(id.0, model);
+                    core.selects.push(dropdown.clone());
+                    NativeWidget::Select(dropdown)
                 }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no signal. The
@@ -961,18 +1022,41 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Label(label), Prop::Text, Value::Str(s)) => {
                     label.set_text(&s);
+                    // An option label's text lands in its DropDown
+                    // row (the model is what the popup and the
+                    // collapsed button both render).
+                    if let Some((select, row)) = core.select_options.get(&id.0) {
+                        core.apply_quiet.set(true);
+                        core.select_models[select].splice(*row, 1, &[&s]);
+                        core.apply_quiet.set(false);
+                    }
                 }
                 (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
+                    // Quiet: a property write is configuration, not a
+                    // user edit (see apply_quiet).
+                    core.apply_quiet.set(true);
                     entry.set_text(&s);
+                    core.apply_quiet.set(false);
                 }
                 (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {
                     check.set_label(Some(&s));
                 }
                 (NativeWidget::Checkbox(check), Prop::Checked, Value::Bool(b)) => {
+                    core.apply_quiet.set(true);
                     check.set_active(b);
+                    core.apply_quiet.set(false);
                 }
                 (NativeWidget::Slider(scale), Prop::Value, Value::F64(v)) => {
+                    core.apply_quiet.set(true);
                     scale.set_value(v);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Select(dropdown), Prop::Value, Value::F64(v)) => {
+                    // A programmatic write is quiet (uniform
+                    // semantics: only the user path emits).
+                    core.apply_quiet.set(true);
+                    dropdown.set_selected(v as u32);
+                    core.apply_quiet.set(false);
                 }
                 (NativeWidget::Progress(bar), Prop::Value, Value::F64(v)) => {
                     bar.set_fraction(v);
@@ -1076,6 +1160,38 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
         ApplyOp::AddChild { parent, child } => {
+            // A select's label children are its OPTIONS: rows of the
+            // DropDown's model, never widgets in a container. The
+            // native label stays unparented (its SetProp text lands
+            // in the model row) and leaves the harness's label
+            // registry — options are the select's data, so they must
+            // not shift every later label's index. The append rides
+            // the quiet guard: GTK auto-selects row 0 when the first
+            // item lands, and that notify is not a user pick.
+            if let NativeWidget::Select(_) = core.widgets.get(&parent).expect("scene validated the id")
+            {
+                // The row initializes from the label's CURRENT text:
+                // children-first sugars (OCaml, Haskell) set the text
+                // BEFORE this AddChild, so an empty-row default would
+                // miss it (caught live on linux, 2026-07-22 — every
+                // ocaml/haskell row read ""). The splice in SetProp
+                // covers writes that arrive after.
+                let text = match core.widgets.get(&child).expect("scene validated the id") {
+                    NativeWidget::Label(l) => {
+                        let l = l.clone();
+                        core.labels.retain(|x| x != &l);
+                        l.text().to_string()
+                    }
+                    _ => String::new(),
+                };
+                let model = &core.select_models[&parent.0];
+                let row = model.n_items();
+                core.apply_quiet.set(true);
+                model.append(&text);
+                core.apply_quiet.set(false);
+                core.select_options.insert(child.0, (parent.0, row));
+                return;
+            }
             let child_widget = core
                 .widgets
                 .get(&child)
@@ -1174,10 +1290,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let NativeWidget::Entry(entry) = widget else {
                         panic!("kaya: clear on a non-entry (scene validates kinds)")
                     };
-                    // GTK fires `changed` for programmatic set_text (the
-                    // Create arm's comment), so the empty edit reaches
-                    // the app through the entry's own path — no manual
-                    // emit, unlike AppKit's compensation.
+                    // A command ACTS LIKE THE USER (unlike a property
+                    // write): apply_quiet stays off here on purpose, so
+                    // GTK's `changed` carries the empty edit to the app
+                    // through the entry's own path — the entry scene's
+                    // second-add round depends on exactly this echo.
                     entry.set_text("");
                 }
                 CommandKind::Focus => {
@@ -1291,6 +1408,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 images: Vec::new(),
                 scrolls: Vec::new(),
                 progresses: Vec::new(),
+                selects: Vec::new(),
+                select_options: HashMap::new(),
+                select_models: HashMap::new(),
+                apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 rows: Vec::new(),
@@ -1753,6 +1874,30 @@ impl crate::harness::Stage for GtkStage {
             } else {
                 format!("{}%", (bar.fraction() * 100.0).round() as i64)
             }
+        })
+    }
+
+    fn choose(&self, t: crate::harness::Target, index: usize) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.selects.len());
+            // The REAL selection route: set_selected IS how GTK picks
+            // (row activation in the popup writes it). The quiet
+            // guard is off here, so notify::selected emits exactly as
+            // a user pick does.
+            core.selects[i].set_selected(index as u32);
+        });
+    }
+
+    fn selected_label(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.selects.len());
+            // The REAL control's state: the selected item out of the
+            // DropDown's own model — what the collapsed button shows.
+            core.selects[i]
+                .selected_item()
+                .and_then(|item| item.downcast::<gtk4::StringObject>().ok())
+                .map(|s| s.string().to_string())
+                .unwrap_or_default()
         })
     }
 

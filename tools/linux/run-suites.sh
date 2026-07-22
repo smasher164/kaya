@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -61,20 +61,25 @@ run() {
     shift 2
     if [ "$JOBS" = 1 ]; then
         echo "== $name ($proto) =="
+        local t0=$SECONDS
         if run_one "$proto" "$name" "$@"; then
-            echo "$name ($proto): PASS"
+            echo "$name ($proto): PASS ($((SECONDS - t0))s)"
         else
-            echo "$name ($proto): FAIL"
+            echo "$name ($proto): FAIL ($((SECONDS - t0))s)"
             status=1
         fi
         return
     fi
     (
+        # Per-leg wall time rides the verdict (the bottleneck-hunt
+        # instrumentation, uniform across runners).
+        local t0=$SECONDS
         if run_one "$proto" "$name" "$@" >"$LEGS_DIR/$name-$proto.log" 2>&1; then
             echo PASS >"$LEGS_DIR/$name-$proto.verdict"
         else
             echo FAIL >"$LEGS_DIR/$name-$proto.verdict"
         fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name-$proto.secs"
     ) &
     leg_pids+=($!)
     leg_names+=("$name-$proto")
@@ -142,7 +147,7 @@ drain() {
             fi
             status=1
         fi
-        echo "$name: $verdict"
+        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
     done
     leg_names=()
 }
@@ -362,6 +367,19 @@ for proto in x11 wayland; do
     run "$proto" progress-ocaml env KAYA_SELFTEST=progress KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/progress.exe
     run "$proto" progress-haskell env KAYA_SELFTEST=progress "$(hs_bin progress)"
     run "$proto" progress-java env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The select scene: the dropdown's contract — GtkDropDown's model
+    # holds the options, set_selected is the real pick route, the
+    # quiet guard keeps programmatic writes silent.
+    run "$proto" select-rust env KAYA_SELFTEST=select "$CARGO_TARGET_DIR/debug/examples/select"
+    run "$proto" select-python env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
+        python3 guests/python/select.py
+    run "$proto" select-go env KAYA_SELFTEST=select /tmp/go-guests/select
+    run "$proto" select-csharp env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" select-ocaml env KAYA_SELFTEST=select KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/select.exe
+    run "$proto" select-haskell env KAYA_SELFTEST=select "$(hs_bin select)"
+    run "$proto" select-java env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

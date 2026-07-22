@@ -431,10 +431,14 @@ queue_leg() { # fn name args...
             done
             [ -n "$slot" ] || sleep 0.2
         done
+        # Per-leg wall time rides the verdict (the bottleneck-hunt
+        # instrumentation, uniform across runners).
+        local t0=$SECONDS
         local verdict=FAIL
         if "$fn" "${UDIDS[$slot]}" "$slot" "$@"; then
             verdict=PASS
         fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
         rmdir "$LEGS_DIR/.dev-$slot" 2>/dev/null
         echo "$verdict" >"$LEGS_DIR/$name.verdict"
     ) >"$LEGS_DIR/$name.log" 2>&1 &
@@ -465,7 +469,7 @@ drain() {
         echo "== $name =="
         cat "$LEGS_DIR/$name.log" 2>/dev/null
         [ "$verdict" = PASS ] || status=1
-        echo "$name: $verdict"
+        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
     done
     leg_names=()
 }
@@ -694,6 +698,20 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle progressswift dev.kaya.progressswift "$BUNDLES/progressswift-bin")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on progress-swift "$APP" dev.kaya.progressswift progress-swift progress progress
+
+    # The select scene: Picker's menu presentation is phone-native.
+    cp guests/swift/select.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/selectswift-bin"
+    APP=$(make_bundle selectswift dev.kaya.selectswift "$BUNDLES/selectswift-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on select-swift "$APP" dev.kaya.selectswift select-swift select select
     drain
     timing swift-build+legs
 fi

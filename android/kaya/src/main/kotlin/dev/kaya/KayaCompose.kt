@@ -187,6 +187,7 @@ object KayaSceneModel {
     val rows = ArrayList<KayaNode>()
     val scrolls = ArrayList<KayaNode>()
     val progresses = ArrayList<KayaNode>()
+    val selects = ArrayList<KayaNode>()
 }
 
 /** One navigation entry: a pushed scene root, retained while covered,
@@ -207,7 +208,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xd28e3e58dcd039e6uL
+    private const val SPEC_HASH: ULong = 0x28f68340441927b5uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -251,6 +252,7 @@ object KayaCompose {
     const val KIND_IMAGE = 8
     const val KIND_SCROLL = 9
     const val KIND_PROGRESS = 10
+    const val KIND_SELECT = 11
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -375,6 +377,7 @@ object KayaCompose {
                         KIND_ROW -> KayaSceneModel.rows.add(node)
                         KIND_SCROLL -> KayaSceneModel.scrolls.add(node)
                         KIND_PROGRESS -> KayaSceneModel.progresses.add(node)
+                        KIND_SELECT -> KayaSceneModel.selects.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -512,6 +515,15 @@ object KayaCompose {
                     KayaSceneModel.nodes[parent]!!.children
                         .add(KayaSceneModel.nodes[child]!!)
                     KayaSceneModel.parents[child] = parent
+                    // A select's label children are its OPTIONS — the
+                    // dropdown's rows, not standalone widgets — so
+                    // they leave the harness's label#N registry (their
+                    // create arm appended before this parent was
+                    // known). Without this, every label after a
+                    // select would shift index.
+                    if (KayaSceneModel.nodes[parent]!!.kind == KIND_SELECT) {
+                        KayaSceneModel.labels.removeAll { it.id == child }
+                    }
                 }
                 APPLY_MOUNT -> {
                     // The target is a SURFACE: the primary (0) or a
@@ -703,6 +715,20 @@ object KayaCompose {
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
                     }
+                    "choose" -> {
+                        // The select's real change route in this
+                        // interpreter is the menu item's onClick —
+                        // mirrored here exactly as set_value mirrors
+                        // the slider's binding: write the state the
+                        // field reads, emit with the identity tag.
+                        val ok = onUi(activity) {
+                            target(parts[1], "select", KayaSceneModel.selects)?.also { node ->
+                                node.value = parts[2].toDouble()
+                                KayaPresent.emitValueChanged(node.tag, node.value)
+                            } != null
+                        }
+                        if (!ok) failures.add("no such target ${parts[1]}")
+                    }
                     "set_text" -> {
                         val ok = onUi(activity) {
                             target(parts[1], "entry", KayaSceneModel.entries)?.also { node ->
@@ -728,6 +754,13 @@ object KayaCompose {
                                 target(parts[1], "progress", KayaSceneModel.progresses)?.let {
                                     if (it.indeterminate) "indeterminate"
                                     else "${Math.round(it.value * 100)}%"
+                                }
+                            else if (parts[1].startsWith("select"))
+                                // The selected option's LABEL — what
+                                // the collapsed field shows (child
+                                // order is option order).
+                                target(parts[1], "select", KayaSceneModel.selects)?.let {
+                                    it.children.getOrNull(it.value.toInt())?.text ?: ""
                                 }
                             else target(parts[1], "label", KayaSceneModel.labels)?.text
                         }
@@ -1145,6 +1178,9 @@ object KayaCompose {
 }
 
 /** The interpreter's render: the node tree as Compose declarations. */
+// The exposed-dropdown family (the select's dressed floor) is still
+// behind M3's experimental gate.
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
     // The mounted root fills its window — the same normalization GTK
@@ -1155,6 +1191,41 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
     // everywhere else.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
     when (node.kind) {
+        KayaCompose.KIND_SELECT -> {
+            // The dressed floor: M3's exposed dropdown menu — the
+            // collapsed field shows the selected option's label
+            // (child order is option order); every pick is emitted
+            // with the select's identity tag — the slider's
+            // uncontrolled contract.
+            var expanded by remember { mutableStateOf(false) }
+            val selectedLabel =
+                node.children.getOrNull(node.value.toInt())?.text ?: ""
+            androidx.compose.material3.ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it },
+            ) {
+                TextField(
+                    value = selectedLabel,
+                    onValueChange = {},
+                    readOnly = true,
+                    modifier = Modifier.menuAnchor(),
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                ) {
+                    node.children.forEachIndexed { i, option ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(option.text) },
+                            onClick = {
+                                expanded = false
+                                node.value = i.toDouble()
+                                KayaPresent.emitValueChanged(node.tag, i.toDouble())
+                            })
+                    }
+                }
+            }
+        }
         KayaCompose.KIND_PROGRESS ->
             // The dressed floor: M3's own LinearProgressIndicator —
             // determinate over the 0..=1 fraction, or the activity

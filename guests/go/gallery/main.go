@@ -31,6 +31,7 @@ func main() {
 	app.Build(func(tx *kaya.Tx) {
 		status := tx.Signal("urgent: false")
 		volume := tx.Signal("volume: 50%")
+		pos := tx.Signal(0.5)
 
 		tx.Mount(tx.Column(func() {
 			tx.Row(func() {
@@ -40,12 +41,17 @@ func main() {
 				tx.Label(status)
 			})
 			tx.Row(func() {
-				tx.Slider(0.0, 1.0, 0.5, func(tx *kaya.Tx, value float64) {
+				tx.SliderBound(0.0, 1.0, pos, func(tx *kaya.Tx, value float64) {
 					// Integer percent, so every language's formatting
 					// agrees.
 					tx.Write(volume, fmt.Sprintf("volume: %d%%", int(value*100+0.5)))
 				})
 				tx.Label(volume)
+				tx.Button("quarter", func(tx *kaya.Tx) {
+					// The programmatic write: fans out to the control
+					// and must NOT come back as a volume occurrence.
+					tx.Write(pos, 0.25)
+				})
 			})
 			tx.Row(func() {
 				// The content-buffer row: a valid 2x2 PNG decodes and

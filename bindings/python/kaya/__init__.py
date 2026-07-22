@@ -1135,6 +1135,31 @@ def progress(value=None, indeterminate=None, grow=None):
     return handle
 
 
+def select(options, selected=0, on_select=None, grow=None):
+    """A dropdown select over fixed options. Each option becomes a
+    label child (labels only, scene-checked; append-only — options are
+    the select's data, not harness-addressable labels). `selected` is
+    the initial 0-based index (an int or a Signal; domain-checked at
+    the root against the option count). Uncontrolled, like the slider:
+    the widget owns its selection and reports each USER pick to
+    `on_select` (the new 0-based index as an int; programmatic writes
+    never echo)."""
+    handle = _widget(wire.KIND_SELECT)
+    with _Container(handle):
+        for option in options:
+            label(text=option)
+    if isinstance(selected, Signal):
+        _records().append(wire.tx_bind_value(handle.id, selected.id))
+    else:
+        _records().append(wire.tx_set_value(handle.id, float(selected)))
+    if on_select is not None:
+        _app._register(
+            handle, wire.OCC_VALUE_CHANGED,
+            lambda *args: on_select(*args[:-1], int(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
 def slider(value=None, min=None, max=None, on_change=None, grow=None):
     """A slider over a numeric range. Uncontrolled, like the entry: the
     widget owns its position and reports each change to `on_change`

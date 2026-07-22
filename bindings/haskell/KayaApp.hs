@@ -74,6 +74,7 @@ module KayaApp
     focusWidget,
     bindText,
     bindChecked,
+    bindValue,
     bindSource,
     setGrow,
     setSpacing,
@@ -113,6 +114,7 @@ module KayaApp
     labelBound,
     checkboxOn,
     sliderOn,
+    selectOn,
     imageBytes,
     imageBound,
     TplTextSource (..),
@@ -848,6 +850,13 @@ instance (a ~ Attr 'LeafW, r ~ Build Widget) => LeafArgs ([a] -> r) where
 bindChecked :: Widget -> Signal -> Build ()
 bindChecked (Widget w) (Signal s) = emitB (W.txBindChecked w s)
 
+-- | Bind a slider's position to a float signal — the programmatic
+-- write path (writeSignal fans out to the control; property writes
+-- never echo an occurrence, so a handler's own writes cannot loop
+-- back at it).
+bindValue :: Widget -> Signal -> Build ()
+bindValue (Widget w) (Signal s) = emitB (W.txBindValue w s)
+
 -- | Bind an image's source to a Blob signal.
 bindSource :: Widget -> Signal -> Build ()
 bindSource (Widget w) (Signal s) = emitB (W.txBindSource w s)
@@ -885,8 +894,6 @@ checkboxOn text handler = leafish $ do
   pendB (PToggle n handler)
   return w
 
--- | A slider over min..max at value, with its change handler
--- co-located.
 -- | A progress bar: display-only, like label and image — the
 -- determinate fraction (0..=1).
 progress :: (LeafArgs r) => Double -> r
@@ -904,6 +911,8 @@ progressIndeterminate = leafish $ do
   emitB (W.txSetIndeterminate n True)
   return w
 
+-- | A slider over min..max at value, with its change handler
+-- co-located.
 sliderOn :: (LeafArgs r) => Double -> Double -> Double -> (Double -> IO ()) -> r
 sliderOn lo hi value handler = leafish $ do
   w@(Widget n) <- widget W.kindSlider
@@ -911,6 +920,26 @@ sliderOn lo hi value handler = leafish $ do
   emitB (W.txSetMax n hi)
   emitB (W.txSetValue n value)
   pendB (PValue n handler)
+  return w
+
+-- | A dropdown select over fixed options — each option becomes a
+-- label child (labels only, scene-checked) — at the given initial
+-- 0-based index (domain-checked at the root against the option
+-- count), with its pick handler co-located: the handler receives
+-- each USER pick's new 0-based index (programmatic writes never
+-- echo) — the slider's uncontrolled contract.
+selectOn :: (LeafArgs r) => [String] -> Int -> (Int -> IO ()) -> r
+selectOn options selected handler = leafish $ do
+  w@(Widget n) <- widget W.kindSelect
+  mapM_
+    ( \optionText -> do
+        o <- widget W.kindLabel
+        setText o optionText
+        addChild w o
+    )
+    options
+  emitB (W.txSetValue n (fromIntegral selected))
+  pendB (PValue n (handler . round))
   return w
 
 labelText :: (LeafArgs r) => String -> r

@@ -64,6 +64,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "nav" => Some(include_str!("../../../tools/scenes/nav.steps")),
         "scroll" => Some(include_str!("../../../tools/scenes/scroll.steps")),
         "progress" => Some(include_str!("../../../tools/scenes/progress.steps")),
+        "select" => Some(include_str!("../../../tools/scenes/select.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -98,6 +99,7 @@ pub enum TargetKind {
     /// columns: only index 0, only in a scene that keeps exactly one
     /// scroll (tools/check-steps.sh holds the line).
     Scroll,
+    Select,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +201,12 @@ pub enum Step {
     /// verified by: position actually moved, read back from the
     /// toolkit, never a model copy.
     ExpectAtEnd(Target),
+    /// Drive the select's REAL selection path to the given option
+    /// index — through the toolkit's own change route, so the native
+    /// handler (never a synthetic occurrence) emits value_changed. An
+    /// action, silent like click; `expect select#N "label"` is the
+    /// observable.
+    Choose(Target, usize),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -317,6 +325,16 @@ pub trait Stage: Send + 'static {
     /// construction) or "indeterminate" while activity mode is on.
     /// No default: a backend that forgets it must fail to compile.
     fn progress_state(&self, target: Target) -> String;
+    /// Drive the select's REAL selection path to the given option
+    /// index — the toolkit's own change route, so the native handler
+    /// emits value_changed (never a synthetic occurrence). No
+    /// default: a backend that forgets it must fail to compile.
+    fn choose(&self, target: Target, index: usize);
+    /// The selected option's LABEL, read from the toolkit's own
+    /// selection state — what the collapsed control shows, never a
+    /// model copy. Labels, not indices: byte-compared across every
+    /// language like all expects. No default.
+    fn selected_label(&self, target: Target) -> String;
     /// The scroll viewport's overflow, read from the toolkit after
     /// forcing pending layout: the empty string when the content
     /// exceeds the viewport, otherwise a short platform-flavored
@@ -498,6 +516,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::Back(window)
             }
+            "choose" => {
+                let (target, index) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("choose wants a target and an index: {line:?}"))?;
+                Step::Choose(
+                    parse_target(target)?,
+                    index
+                        .trim()
+                        .parse()
+                        .map_err(|_| format!("choose wants a 0-based index: {line:?}"))?,
+                )
+            }
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
             "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
@@ -538,6 +568,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "image" => TargetKind::Image,
         "scroll" => TargetKind::Scroll,
         "progress" => TargetKind::Progress,
+        "select" => TargetKind::Select,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -686,9 +717,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     TargetKind::Image => stage.image_size(*t),
                     TargetKind::Label => stage.read_label(*t),
                     TargetKind::Progress => stage.progress_state(*t),
+                    TargetKind::Select => stage.selected_label(*t),
                     other => {
                         failures.push(format!(
-                            "expect reads labels, entries, images and progress — not {other:?}"
+                            "expect reads labels, entries, images, progress and selects — not {other:?}"
                         ));
                         continue;
                     }
@@ -862,6 +894,16 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 // observable.
                 stage.scroll_end(*t);
             }
+            Step::Choose(t, index) => {
+                if t.kind != TargetKind::Select {
+                    failures.push(format!("{t:?} is not a select target"));
+                    continue;
+                }
+                // An action, silent like click: `expect select#N` and
+                // the guest's value_changed reaction are the
+                // observables.
+                stage.choose(*t, *index);
+            }
             Step::ExpectAtEnd(t) => {
                 if t.kind != TargetKind::Scroll {
                     failures.push(format!("{t:?} is not a scroll target"));
@@ -937,6 +979,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Image => "image",
         TargetKind::Scroll => "scroll",
         TargetKind::Progress => "progress",
+        TargetKind::Select => "select",
     };
     if t.index < 0 {
         format!("{kind}#last")
@@ -1105,6 +1148,10 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn choose(&self, _: Target, _: usize) {}
+        fn selected_label(&self, _: Target) -> String {
+            String::new()
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -1256,6 +1303,10 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn choose(&self, _: Target, _: usize) {}
+        fn selected_label(&self, _: Target) -> String {
+            String::new()
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -1363,6 +1414,10 @@ mod tests {
         }
         fn scroll_end(&self, _: Target) {}
         fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
+        fn choose(&self, _: Target, _: usize) {}
+        fn selected_label(&self, _: Target) -> String {
             String::new()
         }
         fn progress_state(&self, _: Target) -> String {

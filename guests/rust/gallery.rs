@@ -8,12 +8,17 @@
 //! The backend selftest (KAYA_SELFTEST=gallery) clicks the checkbox,
 //! sets the slider to 0.75 through the control's own event path, and
 //! expects the labels to read exactly "urgent: true" and "volume: 75%".
+//! The quarter button then writes the slider's bound signal — a
+//! PROGRAMMATIC write, which moves the control but must NOT echo an
+//! occurrence (property writes are configuration; only the user path
+//! and commands emit) — so the volume label must keep the user's 75%.
 
-/// The event vocabulary: the two controls' meanings.
+/// The event vocabulary: the controls' meanings.
 #[derive(Clone)]
 enum Msg {
     Urgent(bool),
     Volume(f64),
+    Quarter,
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -22,9 +27,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // beside their widgets; the fold matches on the app's own
     // vocabulary.
     let msgs = kaya::Messages::new();
-    let (status, volume_text) = ctx.apply(|tx| {
+    let (status, volume_text, pos) = ctx.apply(|tx| {
         let status = tx.signal("urgent: false");
         let volume_text = tx.signal("volume: 50%");
+        let pos = tx.signal(0.5);
 
         let root = tx.column(|tx| {
             tx.row(|tx| {
@@ -33,9 +39,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.label(status);
             });
             tx.row(|tx| {
-                let volume = tx.slider(0.0, 1.0, 0.5).id();
+                let volume = tx.slider_bound(0.0, 1.0, pos).id();
                 msgs.on_value(volume, Msg::Volume);
                 tx.label(volume_text);
+                let quarter = tx.button("quarter").id();
+                msgs.on_click(quarter, Msg::Quarter);
             });
             tx.row(|tx| {
                 // The content-buffer row: a valid 2x2 PNG decodes and
@@ -48,7 +56,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         })
         .id();
         tx.mount(root);
-        (status, volume_text)
+        (status, volume_text, pos)
     });
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -66,6 +74,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         volume_text,
                         format!("volume: {}%", (value * 100.0).round() as i64),
                     );
+                });
+            }
+            Msg::Quarter => {
+                // The programmatic write: fans out to the control and
+                // must NOT come back as a Volume occurrence.
+                ctx.apply(|tx| {
+                    tx.write(pos, 0.25);
                 });
             }
         }

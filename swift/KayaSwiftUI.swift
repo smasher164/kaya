@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xd28e3e58dcd039e6
+let kayaSpecHash: UInt64 = 0x28f68340441927b5
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -64,6 +64,7 @@ private let kindSlider: UInt32 = 7
 private let kindImage: UInt32 = 8
 private let kindScroll: UInt32 = 9
 private let kindProgress: UInt32 = 10
+private let kindSelect: UInt32 = 11
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propValue: UInt32 = 3
@@ -210,6 +211,7 @@ final class KayaSceneModel {
     var rows: [KayaNode] = []
     var scrolls: [KayaNode] = []
     var progresses: [KayaNode] = []
+    var selects: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -601,6 +603,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindRow: kayaScene.rows.append(node)
                 case kindScroll: kayaScene.scrolls.append(node)
                 case kindProgress: kayaScene.progresses.append(node)
+                case kindSelect: kayaScene.selects.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -790,6 +793,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
                 kayaScene.parents[child] = parent
+                // A select's label children are its OPTIONS — the
+                // dropdown's rows, not standalone widgets — so they
+                // leave the harness's label#N registry (their create
+                // arm appended before this parent was known). Without
+                // this, every label after a select would shift index.
+                if kayaScene.nodes[parent]!.kind == kindSelect {
+                    kayaScene.labels.removeAll { $0.id == child }
+                }
             case applyMount:
                 // The target is a SURFACE: the primary, an auxiliary
                 // window, or a pushed navigation entry.
@@ -1031,6 +1042,20 @@ private func kayaRunScript(_ script: String) {
                     return true
                 }
                 if !ok { failures.append("no such target \(parts[1])") }
+            case "choose":
+                // The select's real change route in this interpreter
+                // is the Picker's binding set — mirrored here exactly
+                // as set_value mirrors the slider's: write the model
+                // the binding reads, emit with the identity tag.
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let node = kayaTarget(parts[1], "select", kayaScene.selects) else {
+                        return false
+                    }
+                    node.value = Double(parts[2])!
+                    KayaHost.emitValue(node.tag, node.value)
+                    return true
+                }
+                if !ok { failures.append("no such target \(parts[1])") }
             case "set_text":
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     guard let node = kayaTarget(parts[1], "entry", kayaScene.entries) else {
@@ -1058,7 +1083,17 @@ private func kayaRunScript(_ script: String) {
                                         ? "indeterminate"
                                         : "\(Int(($0.value * 100).rounded()))%"
                                 }
-                                : kayaTarget(parts[1], "label", kayaScene.labels)?.text
+                                : parts[1].hasPrefix("select")
+                                    ? kayaTarget(parts[1], "select", kayaScene.selects).map {
+                                        // The selected option's LABEL —
+                                        // what the collapsed control
+                                        // shows (child order is option
+                                        // order).
+                                        let index = Int($0.value)
+                                        return $0.children.indices.contains(index)
+                                            ? $0.children[index].text : ""
+                                    }
+                                    : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
                 if let got, got == want {
                     observed.append(got)
@@ -1976,6 +2011,29 @@ struct KayaRender: View {
             .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindEntry:
             KayaEntry(node: node)
+        case kindSelect:
+            // The dressed floor: SwiftUI's own Picker in its menu
+            // presentation — the platform dropdown. The node's label
+            // children are its options (their text, in child order);
+            // the node mirrors the selected index (SwiftUI needs the
+            // binding), and every pick is emitted with the select's
+            // identity tag — the slider's uncontrolled contract.
+            Picker(
+                "",
+                selection: Binding(
+                    get: { Int(node.value) },
+                    set: { newIndex in
+                        node.value = Double(newIndex)
+                        KayaHost.emitValue(node.tag, Double(newIndex))
+                    })
+            ) {
+                ForEach(Array(node.children.enumerated()), id: \.element.id) { index, option in
+                    Text(option.text).tag(index)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
         case kindProgress:
             // The dressed floor: SwiftUI's own ProgressView — linear
             // determinate over the 0..=1 fraction, or the activity

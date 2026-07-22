@@ -72,6 +72,60 @@ for f in tools/scenes/*.steps; do
     }
 done
 
+# The pacing lint: an expect that immediately follows an action races
+# the guest fold — the occurrence -> guest write -> apply -> render
+# round trip is asynchronous on every backend, and an expect with no
+# settle between only passes where the interpreter happens to be fast
+# (select passed in-process on mac and raced on GTK, 2026-07-22).
+# The gallery convention is a settle after every action, before its
+# observations; this holds the line structurally.
+pacing_lint() {
+    python3 -c '
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+ACTIONS = {"click", "toggle", "set_value", "set_text", "choose",
+           "back", "close_window", "alert_choose", "scroll_end"}
+bad = []
+prev = None
+for lineno, line in enumerate(text.splitlines(), 1):
+    if line.lstrip().startswith("#"):
+        continue
+    for part in line.split(";"):
+        words = part.split()
+        if not words:
+            continue
+        verb = words[0]
+        if verb in ACTIONS:
+            prev = (verb, lineno)
+        elif verb == "settle":
+            prev = None
+        elif verb.startswith("expect") and prev:
+            bad.append(
+                f"{path}:{lineno}: {verb} follows {prev[0]} (line "
+                f"{prev[1]}) with no settle — the fold round trip is "
+                f"asynchronous everywhere")
+            prev = None
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself.
+if printf 'choose select#0 2\nexpect label#0 "x"\n' | pacing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (unpaced expect passed)" >&2
+    exit 1
+fi
+
+for f in tools/scenes/*.steps; do
+    out="$(pacing_lint "$f")" || {
+        echo "check-steps: $f expects immediately after an action (settle first — the fold round trip is asynchronous):" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
 # Every scene script must be reachable by name from harness::script.
 # That match ends in a catch-all returning the milestone2 script, so an
 # unregistered scene does not fail — it silently runs a DIFFERENT

@@ -747,8 +747,6 @@ sealed class Tx
         return w;
     }
 
-    /// A slider over min..max at value, with its change handler
-    /// co-located.
     /// A progress bar: display-only, like Label and Image. value is
     /// the determinate fraction (0..=1); indeterminate: true switches
     /// to the platform's activity mode.
@@ -761,14 +759,45 @@ sealed class Tx
         return w;
     }
 
+    /// A slider over min..max at value, with its change handler
+    /// co-located.
+    /// `bind` takes a float Signal for the position instead of a
+    /// constant — the programmatic write path (Write fans out to the
+    /// control; property writes never echo an occurrence, so a
+    /// handler's own writes cannot loop back at it).
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
-        Action<Tx, double> onChange = null, double? grow = null)
+        Action<Tx, double> onChange = null, double? grow = null, Signal? bind = null)
     {
         var w = Widget(KayaWire.KindSlider);
         Records.Add(KayaWire.TxSetMin(w.Id, min));
         Records.Add(KayaWire.TxSetMax(w.Id, max));
-        Records.Add(KayaWire.TxSetValue(w.Id, value));
+        if (bind is Signal s) Records.Add(KayaWire.TxBindValue(w.Id, s.Id));
+        else Records.Add(KayaWire.TxSetValue(w.Id, value));
         if (onChange != null) App.OnValueChanged(w, onChange);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A dropdown select over fixed options — each option becomes a
+    /// label child (labels only, scene-checked) — at selected, the
+    /// initial 0-based index (domain-checked at the root against the
+    /// option count), with its pick handler co-located: onSelect
+    /// receives each USER pick's new 0-based index (programmatic
+    /// writes never echo) — the slider's uncontrolled contract.
+    public Widget Select(string[] options, int selected = 0,
+        Action<Tx, int> onSelect = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindSelect);
+        App.Parents.Add(w.Id);
+        foreach (var option in options)
+        {
+            var o = Widget(KayaWire.KindLabel);
+            SetText(o, option);
+        }
+        App.Parents.RemoveAt(App.Parents.Count - 1);
+        Records.Add(KayaWire.TxSetValue(w.Id, selected));
+        if (onSelect != null)
+            App.OnValueChanged(w, (tx, v) => onSelect(tx, (int)v));
         if (grow is double g) SetGrow(w, g);
         return w;
     }

@@ -22,6 +22,11 @@ static_vcruntime = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-core = "0.62"
+# Foundation_Collections: IObservableVector + VectorChangedEventHandler,
+# ItemCollection's default interface (ComboBox.Items) — the pinned
+# windows-collections 0.3 ships only the plain vector types, so the
+# bindgen post-fix re-points the observable ones here.
+windows = { version = "0.62", features = ["Foundation_Collections"] }
 windows-numerics = "0.3"
 windows-collections = "0.3"
 # TextBox's metadata reaches IAsyncOperation (windows-bindgen emits
@@ -127,6 +132,10 @@ path = "../../guests/rust/scroll.rs"
 [[example]]
 name = "progress"
 path = "../../guests/rust/progress.rs"
+
+[[example]]
+name = "select"
+path = "../../guests/rust/select.rs"
 
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a

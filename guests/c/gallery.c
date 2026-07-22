@@ -15,6 +15,7 @@
 /* Guest-allocated ids, counted from 1 per space. */
 #define SIG_STATUS 1
 #define SIG_VOLUME 2
+#define SIG_POS 3
 #define W_COLUMN 1
 #define W_ROW 2
 #define W_URGENT 3
@@ -25,6 +26,7 @@
 #define W_IMAGE_ROW 8
 #define W_IMAGE_OK 9
 #define W_IMAGE_BAD 10
+#define W_QUARTER 11
 
 /* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
  * binary asset, embedded as source per the include_str! doctrine —
@@ -43,6 +45,7 @@ static void build_scene(void) {
 
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("urgent: false"));
     kaya_tx_create_signal(&tx, SIG_VOLUME, kaya_str("volume: 50%"));
+    kaya_tx_create_signal(&tx, SIG_POS, kaya_f64(0.5));
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_ROW, KAYA_KIND_ROW);
     kaya_tx_create_widget(&tx, W_URGENT, KAYA_KIND_CHECKBOX);
@@ -53,9 +56,13 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_BAR, KAYA_KIND_SLIDER);
     kaya_tx_set_min(&tx, W_BAR, 0.0);
     kaya_tx_set_max(&tx, W_BAR, 1.0);
-    kaya_tx_set_value(&tx, W_BAR, 0.5);
+    /* The slider's position binds a float signal — the programmatic
+     * write path the quarter button drives below. */
+    kaya_tx_bind_value(&tx, W_BAR, SIG_POS);
     kaya_tx_create_widget(&tx, W_VOLUME, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_VOLUME, SIG_VOLUME);
+    kaya_tx_create_widget(&tx, W_QUARTER, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(&tx, W_QUARTER, "quarter");
 
     /* The content-buffer row: a valid 2x2 PNG decodes and reports its
      * size, and deliberately invalid bytes read 0x0 — decode failure
@@ -79,6 +86,7 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_COLUMN, W_ROW);
     kaya_tx_add_child(&tx, W_VOLUME_ROW, W_BAR);
     kaya_tx_add_child(&tx, W_VOLUME_ROW, W_VOLUME);
+    kaya_tx_add_child(&tx, W_VOLUME_ROW, W_QUARTER);
     kaya_tx_add_child(&tx, W_COLUMN, W_VOLUME_ROW);
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_OK);
     kaya_tx_add_child(&tx, W_IMAGE_ROW, W_IMAGE_BAD);
@@ -119,6 +127,17 @@ static void *app(void *arg) {
                 snprintf(volume, sizeof volume, "volume: %d%%",
                          (int)(value.f * 100.0 + 0.5));
                 kaya_tx_write_signal(&tx, SIG_VOLUME, kaya_str(volume));
+                kaya_submit(tx.buf, tx.len);
+            }
+        } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
+            if (id == W_QUARTER && n_keys == 0) {
+                /* The programmatic write: fans out to the control and
+                 * must NOT come back as a value_changed occurrence
+                 * (property writes are configuration; only the user
+                 * path and commands emit). */
+                uint8_t buf[256];
+                KayaTx tx = {buf, 0};
+                kaya_tx_write_signal(&tx, SIG_POS, kaya_f64(0.25));
                 kaya_submit(tx.buf, tx.len);
             }
         }

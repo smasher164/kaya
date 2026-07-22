@@ -137,7 +137,7 @@ drain() {
         echo "== $name =="
         cat "$LEGS_DIR/$name.log" 2>/dev/null
         [ "$verdict" = PASS ] || status=1
-        echo "$name: $verdict"
+        echo "$name: $verdict ($(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo '?')s)"
     done
     leg_names=()
 }
@@ -170,10 +170,14 @@ run_apk() {
             done
             [ -n "$serial" ] || sleep 0.2
         done
+        # Per-leg wall time rides the verdict (the bottleneck-hunt
+        # instrumentation, uniform across runners).
+        local t0=$SECONDS
         local verdict=FAIL
         if run_apk_on "$serial" "$@"; then
             verdict=PASS
         fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
         rmdir "$LEGS_DIR/.dev-$slot" 2>/dev/null
         echo "$verdict" >"$LEGS_DIR/$name.verdict"
     ) >"$LEGS_DIR/$name.log" 2>&1 &
@@ -340,6 +344,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity progress \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script progress)'"
+    # The select scene: M3's exposed dropdown menu.
+    run_apk select-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity select \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script select)'"
     drain
     timing legs-compose
 fi
@@ -408,6 +417,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity progress \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script progress)'"
+    # The select scene through the JVM binding.
+    run_apk select-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity select \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script select)'"
     drain
     timing legs-jvm
 fi

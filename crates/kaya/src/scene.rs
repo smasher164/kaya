@@ -213,6 +213,10 @@ pub(crate) struct Scene {
     /// takes EXACTLY ONE (the ScrolledWindow shape) and a second
     /// add_child fails loudly here, at the root.
     filled_scrolls: std::collections::HashSet<WidgetId>,
+    /// Per-select option count (options are its label children;
+    /// append-only — the protocol has no remove_child). Feeds the
+    /// selected-index upper-bound check at the live SetProp site.
+    select_options: HashMap<WidgetId, u32>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -226,9 +230,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's
-        // determinate fraction; min/max stay slider-only (progress is
-        // fixed 0..=1).
-        Prop::Value => matches!(kind, WidgetKind::Slider | WidgetKind::Progress),
+        // determinate fraction AND the select's 0-based selected index
+        // (per-kind domains, checked below); min/max stay slider-only
+        // (progress is fixed 0..=1, the select's range is its option
+        // count).
+        Prop::Value => {
+            matches!(kind, WidgetKind::Slider | WidgetKind::Progress | WidgetKind::Select)
+        }
         Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
@@ -358,6 +366,17 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
                 "kaya: a progress fraction lives in 0..=1, got {fraction}"
             );
         }
+        // A select's value is a 0-based option index: integral and
+        // non-negative, or it has no reading. The upper bound (index
+        // < option count) needs scene state, so it lives at the
+        // live SetProp site, not here.
+        if kind == WidgetKind::Select {
+            assert!(
+                fraction.is_finite() && *fraction >= 0.0 && fraction.fract() == 0.0,
+                "kaya: a select's value is a 0-based option index \
+                 (integral, non-negative), got {fraction}"
+            );
+        }
     }
 }
 
@@ -455,7 +474,8 @@ impl Scene {
                         WidgetKind::Button
                         | WidgetKind::Entry
                         | WidgetKind::Checkbox
-                        | WidgetKind::Slider => Self::button_tag(id.0, &vec![]),
+                        | WidgetKind::Slider
+                        | WidgetKind::Select => Self::button_tag(id.0, &vec![]),
                         _ => None,
                     };
                     out.push(ApplyOp::Create { id, kind, tag });
@@ -473,6 +493,23 @@ impl Scene {
                     match value {
                         PropValue::Const(v) => {
                             check_prop_value(kind, prop, &v);
+                            // The select index's upper bound is scene
+                            // state: options added SO FAR in op order
+                            // (append-only), so "add options, then
+                            // select" is the required tx shape and an
+                            // out-of-range index dies at the root.
+                            if kind == WidgetKind::Select && prop == Prop::Value {
+                                if let Value::F64(idx) = &v {
+                                    let count =
+                                        self.select_options.get(&widget).copied().unwrap_or(0);
+                                    assert!(
+                                        (*idx as u32) < count,
+                                        "kaya: select {widget:?} has {count} options; \
+                                         index {idx} is out of range (add options \
+                                         before selecting)"
+                                    );
+                                }
+                            }
                             out.push(ApplyOp::SetProp {
                                 id: widget,
                                 prop,
@@ -491,6 +528,22 @@ impl Scene {
                             // (check_type guards every write), so the
                             // current value speaks for the binding.
                             check_prop_value(kind, prop, &current);
+                            // Same stance for the select index's upper
+                            // bound: checked here against the current
+                            // value; later writes only type-check
+                            // (the progress-fraction policy).
+                            if kind == WidgetKind::Select && prop == Prop::Value {
+                                if let Value::F64(idx) = &current {
+                                    let count =
+                                        self.select_options.get(&widget).copied().unwrap_or(0);
+                                    assert!(
+                                        (*idx as u32) < count,
+                                        "kaya: select {widget:?} has {count} options; \
+                                         index {idx} is out of range (add options \
+                                         before selecting)"
+                                    );
+                                }
+                            }
                             self.bindings.entry(id).or_default().push((widget, prop));
                             out.push(ApplyOp::SetProp {
                                 id: widget,
@@ -719,6 +772,20 @@ impl Scene {
                             fresh,
                             "kaya: scroll {parent:?} already holds its one                              child — a scroll viewport takes exactly one                              (wrap the content in a column)"
                         );
+                    }
+                    // A select's children ARE its options: label
+                    // widgets, one per row of the dropdown. Anything
+                    // else has no dropdown reading, so it dies here
+                    // with one message rather than as four backend
+                    // improvisations.
+                    if self.widgets[&parent] == WidgetKind::Select {
+                        assert!(
+                            self.widgets[&child] == WidgetKind::Label,
+                            "kaya: a select's children are its options — \
+                             labels only, got {:?}",
+                            self.widgets[&child]
+                        );
+                        *self.select_options.entry(parent).or_insert(0) += 1;
                     }
                     out.push(ApplyOp::AddChild { parent, child });
                 }
@@ -3077,5 +3144,132 @@ mod tests {
                 }]
             )
         );
+    }
+
+    /// The happy path of the select grammar: options (label children)
+    /// first, then an in-range selection — and the select carries an
+    /// identity tag like every interactive kind (it emits
+    /// value_changed).
+    #[test]
+    fn select_options_then_selection() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+        ]);
+        let tagged = ops.iter().any(|op| {
+            matches!(op, ApplyOp::Create { id, kind: WidgetKind::Select, tag: Some(_) }
+                     if *id == WidgetId(1))
+        });
+        assert!(tagged, "a select carries its identity tag");
+    }
+
+    /// A select's children are its options: labels only. Anything else
+    /// has no dropdown reading and dies at the root.
+    #[test]
+    #[should_panic(expected = "labels only")]
+    fn select_rejects_non_label_children() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+        ]);
+    }
+
+    /// The index's upper bound is the option count at that point in op
+    /// order: selecting past the end dies at the root.
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn select_index_out_of_range_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+        ]);
+    }
+
+    /// A fractional index has no reading — the select's value is a
+    /// 0-based option index.
+    #[test]
+    #[should_panic(expected = "0-based option index")]
+    fn select_fractional_index_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(0.5)),
+            },
+        ]);
+    }
+
+    /// A signal-bound selection is checked against the signal's
+    /// current value at bind time (the progress-fraction policy).
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn select_signal_bound_index_checked_at_bind() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(2.0) },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+    }
+
+    /// The scroll viewport's one-child contract, as a test (the guard
+    /// predates this negative test — closing the gap).
+    #[test]
+    #[should_panic(expected = "takes exactly one")]
+    fn scroll_rejects_second_child() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Scroll },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+        ]);
+    }
+
+    /// The progress fraction's 0..=1 domain, as a test (same
+    /// gap-closing as scroll_rejects_second_child).
+    #[test]
+    #[should_panic(expected = "lives in 0..=1")]
+    fn progress_fraction_out_of_range_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Progress },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(1.5)),
+            },
+        ]);
     }
 }

@@ -316,6 +316,7 @@ pub enum WidgetKind {
     /// platform's activity mode (pulse/animation) and Value is
     /// ignored while it is on.
     Progress,
+    Select,
     /// A vertical scroll viewport over EXACTLY ONE child (usually a
     /// column) — the ScrolledWindow/SingleChildScrollView shape; the
     /// scene rejects a second child. Vertical-only in v1 (an axis

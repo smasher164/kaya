@@ -24,6 +24,7 @@ let app = KayaApp()
 app.build { tx in
     let status = tx.signal(.str("urgent: false"))
     let volume = tx.signal(.str("volume: 50%"))
+    let pos = tx.signal(.f64(0.5))
 
     let root = tx.column {
         tx.row {
@@ -34,10 +35,15 @@ app.build { tx in
         }
         tx.row {
             // Integer percent, so every language's formatting agrees.
-            tx.slider(min: 0.0, max: 1.0, value: 0.5) { t, value in
+            tx.slider(min: 0.0, max: 1.0, bind: pos) { t, value in
                 t.write(volume, .str("volume: \(Int((value * 100).rounded()))%"))
             }
             tx.label(bind: volume)
+            // The programmatic write: fans out to the control and
+            // must NOT come back as a volume occurrence.
+            tx.button("quarter") { t in
+                t.write(pos, .f64(0.25))
+            }
         }
         tx.row {
             // The content-buffer row: a valid 2x2 PNG decodes and

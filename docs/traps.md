@@ -599,3 +599,31 @@ the same patterns return through interpreter drop-downs
   eaten harmlessly. Guard: write run_ssh commands quote-free (cmd
   needs no quotes for backslash paths; split chains into separate
   run_ssh calls; mkdir creates parents with extensions on).
+
+- **A WinUI ComboBoxItem with UIElement content gets STOLEN by the
+  collapsed box.** While a row is selected and the popup closed, the
+  ComboBox moves the item's UIElement content into its
+  SelectionBoxItem (an element lives in ONE visual tree), so the
+  row's Content() reads back null — the harness's selected-label
+  read panicked on a null-interface cast, and the panic wedged the
+  XAML dispatcher into a hang with no EXIT line (2026-07-22). Guard:
+  option rows carry STRING content (PropertyValue::CreateString),
+  which is templated independently in the popup and the selection
+  box; read it back by casting Content to IReference<HSTRING>.
+- **Sugar construction order differs per language: SetProp can land
+  BEFORE AddChild.** Statement-shaped sugars (Rust, Python, Go, C#,
+  Java, Swift) parent a child at creation, then set its props;
+  expression-shaped sugars (OCaml, Haskell) build children FIRST, so
+  their prop writes precede the AddChild. A backend that materializes
+  a relationship at AddChild (a select's option rows) must therefore
+  initialize from the child's CURRENT state, not from empty — every
+  ocaml/haskell dropdown row read "" on linux until GTK's rows
+  seeded from the label's text (2026-07-22). The matrix's
+  children-first legs are the standing negative test for this class.
+- **A scene script needs a settle between an action and the expects
+  that observe its guest fold.** choose→expect with no settle passed
+  on the in-process mac interpreter and raced on GTK: the fold's
+  round trip (occurrence → guest write → apply → render) is
+  asynchronous everywhere, and 2ms is not a contract. The gallery
+  scene's 400–700ms post-action settles are the convention; select
+  learned it the hard way (2026-07-22).

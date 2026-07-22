@@ -403,9 +403,6 @@ let entry ?grow ?on_change () tx =
   | None -> ());
   w
 
-(* A slider over min..max at value. Uncontrolled, like the entry: the
-   bar owns its position and reports each change to [on_change] (the
-   new value as a float). *)
 (* A progress bar: display-only, like label and image. [~value] is
    the determinate fraction (0..=1); [~indeterminate:true] switches
    to the platform's activity mode. *)
@@ -417,15 +414,47 @@ let progress ?grow ?(value = 0.0) ?indeterminate () tx =
   Option.iter (fun i -> emit tx (Kaya_wire.tx_set_indeterminate id i)) indeterminate;
   w
 
-let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
+(* A slider over min..max at value. Uncontrolled, like the entry: the
+   bar owns its position and reports each change to [on_change] (the
+   new value as a float). [~bind] takes a float signal for the
+   position instead of a constant — the programmatic write path
+   ([write] fans out to the control; property writes never echo an
+   occurrence, so a handler's own writes cannot loop back at it). *)
+let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind ?on_change () tx =
   let w = widget Kaya_wire.kind_slider tx in
   Option.iter (fun g -> set_grow w g tx) grow;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
   emit tx (Kaya_wire.tx_set_max id max);
-  emit tx (Kaya_wire.tx_set_value id value);
+  (match bind with
+  | Some (Signal s) -> emit tx (Kaya_wire.tx_bind_value id s)
+  | None -> emit tx (Kaya_wire.tx_set_value id value));
   (match on_change with
   | Some handler -> Hashtbl.replace tx.app.widget_values id handler
+  | None -> ());
+  w
+
+(* A dropdown select over fixed [options] — each option becomes a
+   label child (labels only, scene-checked) — at [~selected], the
+   initial 0-based index (domain-checked at the root against the
+   option count). Uncontrolled, like the slider: [~on_select]
+   receives each USER pick's new 0-based index (programmatic writes
+   never echo). *)
+let select ?grow ?(selected = 0) ?on_select options () tx =
+  let w = widget Kaya_wire.kind_select tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
+  List.iter
+    (fun option_text ->
+      let o = widget Kaya_wire.kind_label tx in
+      set_text o option_text tx;
+      add_child w o tx)
+    options;
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_value id (float_of_int selected));
+  (match on_select with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_values id
+        (fun v -> handler (int_of_float v))
   | None -> ());
   w
 

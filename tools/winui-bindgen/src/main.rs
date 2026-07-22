@@ -153,6 +153,18 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.ContentDialog".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentDialogResult".to_string(),
         "Microsoft.UI.Xaml.Controls.ContentDialogButton".to_string(),
+        // The select: ComboBox rows are ComboBoxItems (their content
+        // is each option's TextBlock); SelectionChanged reports
+        // picks. The selector base and its event types must be named
+        // or the members vanish (the transitivity trap).
+        "Microsoft.UI.Xaml.Controls.ComboBox".to_string(),
+        "Microsoft.UI.Xaml.Controls.ComboBoxItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.ItemsControl".to_string(),
+        "Microsoft.UI.Xaml.Controls.ItemCollection".to_string(),
+        "Microsoft.UI.Xaml.Controls.Primitives.Selector".to_string(),
+        "Microsoft.UI.Xaml.Controls.Primitives.SelectorItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.SelectionChangedEventHandler".to_string(),
+        "Microsoft.UI.Xaml.Controls.SelectionChangedEventArgs".to_string(),
         // The runner's REAL press: the open dialog lives in the popup
         // layer (GetOpenPopupsForXamlRoot), its template buttons are
         // found by part name, and ButtonAutomationPeer.Invoke runs
@@ -167,6 +179,7 @@ fn main() {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);
     fix_array_proxy_paths();
+    fix_observable_vector_paths();
     println!("generated crates/kaya/src/winui/bindings.rs");
 }
 
@@ -177,6 +190,42 @@ fn main() {
 /// spelling the pinned windows-core actually exports; `&mut proxy`
 /// coerces to `&mut Array<T>` and the proxy's Drop performs the
 /// write-back after the call, same semantics either way.
+/// ItemCollection (ComboBox.Items) has IObservableVector as its
+/// DEFAULT interface, but windows-bindgen's built-in reference maps
+/// all of Windows.Foundation.Collections to the windows-collections
+/// crate — whose pinned 0.3 ships only the plain vector/iterable
+/// types, not the observable ones. The references list is
+/// first-match-wins with the built-ins inserted at the front, so no
+/// --reference override can carve the two observable types out.
+/// Re-point them at the full `windows` crate (Foundation_Collections
+/// feature), which does ship them; the hierarchy macros declare
+/// per-type conversions independently, so mixing the two crates'
+/// collection interfaces in one hierarchy is sound.
+fn fix_observable_vector_paths() {
+    let path = "../../crates/kaya/src/winui/bindings.rs";
+    let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
+    if !src.contains("windows_collections::IObservableVector")
+        && !src.contains("windows_collections::VectorChangedEventHandler")
+    {
+        return;
+    }
+    let fixed = src
+        .replace(
+            "windows_collections::IObservableVector",
+            "windows::Foundation::Collections::IObservableVector",
+        )
+        .replace(
+            "windows_collections::VectorChangedEventHandler",
+            "windows::Foundation::Collections::VectorChangedEventHandler",
+        );
+    assert!(
+        !fixed.contains("windows_collections::IObservableVector")
+            && !fixed.contains("windows_collections::VectorChangedEventHandler"),
+        "observable-vector fixup left references behind; check windows-bindgen output"
+    );
+    std::fs::write(path, fixed).expect("write bindings.rs");
+}
+
 fn fix_array_proxy_paths() {
     let path = "../../crates/kaya/src/winui/bindings.rs";
     let src = std::fs::read_to_string(path).expect("bindings.rs was just generated");
