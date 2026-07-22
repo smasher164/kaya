@@ -520,19 +520,29 @@ the same patterns return through interpreter drop-downs
   parser branch's own comment). Guard: the ocaml emitter defuses
   both delimiters (`*)` → `* )`, `(*` → `( *`) on every doc it
   copies, so no future spec doc can break the generated module.
-- **SwiftUI's openWindow(value:) can be silently dropped under
-  load.** The aux-open request is fire-and-forget: under a loaded
-  8-wide suite the scene request sometimes never presents (no window,
-  no error), and only the slowest-booting guest lands its mount in
-  the window where it happens — panels-java flaked at ~half of loaded
-  runs while every isolated run passed. Guard: kayaEnsureOpen makes
-  the open AT-LEAST-ONCE with bounded backoff — safe because a
-  value-identified WindowGroup is unique per value (a duplicate
-  request focuses the existing window, a dropped first request is
-  repaired by the retry); NSWindow registration is the delivered
-  signal, and the runner's window-targeted verbs additionally await
-  materialization boundedly (kayaAwaitWindow) rather than reading a
-  not-yet-real window.
+- **One-shot registration hooks race window attachment — register on
+  viewDidMoveToWindow, never on a queued closure.** (Corrected
+  diagnosis 2026-07-21; the entry here previously blamed
+  openWindow(value:) drops.) The panels-java aux-open flake's real
+  cause: KayaWindowAccessor registered its NSWindow via a one-shot
+  `DispatchQueue.main.async { register }` from makeNSView; under
+  suite load the window attached AFTER that drain, the
+  `view.window == nil` guard returned silently, and updateNSView
+  never re-fired (the aux surface's state was fully set before
+  mount, so nothing re-evaluated). Instrumented repro proved the
+  window EXISTED — visible, titled, in NSApp.windows — while
+  kayaNSWindows stayed empty, so every window-targeted verb burned
+  its await and close_window no-oped; os_log showed zero SwiftUI
+  scene errors, i.e. the openWindow request was never dropped at
+  all. Java-only was pure timing (slowest-booting guest under
+  contention). Guard: the accessor's view subclass overrides
+  viewDidMoveToWindow — AppKit's attachment event — so registration
+  cannot race; kayaEnsureOpen stays as an idempotent belt whose
+  exhausted case now logs a self-diagnosing state dump (window
+  present-but-unregistered vs truly absent), and kayaAwaitWindow
+  still awaits materialization event-driven. The general rule: a
+  hook that must observe "X became true" must subscribe to X's own
+  event, not sample X once from a queue.
 - **Interior double quotes break run_ssh commands to the Windows
   VM.** Windows sshd wraps the whole received command in its own
   `cmd /c "..."`, so double quotes INSIDE the command re-pair across

@@ -192,23 +192,59 @@ var kayaDismissWindow: ((UInt64) -> Void)?
 /// KayaRoot's onAppear.
 var kayaPendingOpens: [UInt64] = []
 
-/// Present an auxiliary surface AT-LEAST-ONCE: under parallel suite
-/// load openWindow(value:) can be silently dropped (the scene request
-/// never presents — panels-java flaked exactly here, ~half of loaded
-/// runs), and a value-identified WindowGroup is unique per value, so
-/// re-requesting is idempotent: a duplicate focuses the one window, a
-/// dropped first request is repaired by the retry. Bounded backoff;
-/// registration (kayaNSWindows) is the delivered signal.
+/// Flake diagnostics (the panels-java aux-open ledger entry): absolute
+/// timestamps on stderr so a leg log correlates with `log show`.
+func kayaDiag(_ msg: String) {
+    let line = String(format: "KAYA_DIAG %.3f %@\n", Date().timeIntervalSince1970, msg)
+    FileHandle.standardError.write(line.data(using: .utf8)!)
+}
+
+#if os(macOS)
+    /// The app-side state that could explain a dropped scene request.
+    func kayaDiagAppState() -> String {
+        let app = NSApplication.shared
+        let wins = app.windows.map {
+            "num=\($0.windowNumber),t='\($0.title)',vis=\($0.isVisible),cls=\(type(of: $0))"
+        }.joined(separator: " | ")
+        return "active=\(app.isActive) policy=\(app.activationPolicy().rawValue) "
+            + "modal=\(app.modalWindow?.windowNumber ?? -1) "
+            + "registered=\(Array(kayaNSWindows.keys).sorted()) "
+            + "sceneWindows=\(Array(kayaScene.windows.keys).sorted()) "
+            + "appWindows=[\(wins)]"
+    }
+#endif
+
+/// Present an auxiliary surface AT-LEAST-ONCE. Belt, not the fix:
+/// the panels-java flake this was built for turned out to be the
+/// accessor's registration racing window attachment (see
+/// KayaWindowAccessor — the request itself was never observed
+/// dropped). The belt stays because it is free and idempotent: a
+/// value-identified WindowGroup is unique per value, so a duplicate
+/// request focuses the one window. Bounded backoff; registration
+/// (kayaNSWindows) is the delivered signal, and the exhausted case
+/// logs a self-diagnosing state dump instead of going quiet.
 func kayaEnsureOpen(_ wid: UInt64, _ open: @escaping (UInt64) -> Void, attempt: Int = 0) {
+    #if os(macOS)
+        kayaDiag("ensureOpen wid=\(wid) attempt=\(attempt) \(kayaDiagAppState())")
+    #endif
     open(wid)
     #if os(macOS)
-        let delays: [Double] = [0.3, 0.8, 1.5]
+        let delays: [Double] = [0.3, 0.8, 1.5, 2.0]
         guard attempt < delays.count else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt]) {
-            if kayaNSWindows[wid] == nil, kayaScene.windows[wid] != nil,
+            guard kayaNSWindows[wid] == nil, kayaScene.windows[wid] != nil,
                 !kayaTearingDown.contains(wid)
-            {
+            else { return }
+            if attempt + 1 < delays.count {
                 kayaEnsureOpen(wid, open, attempt: attempt + 1)
+            } else {
+                // Terminal, and self-diagnosing: if a matching window
+                // shows in appWindows below, the scene request landed
+                // and the REGISTRATION path failed (the flake class
+                // viewDidMoveToWindow now closes); if it is absent,
+                // the request itself was dropped — a class never yet
+                // observed.
+                kayaDiag("ensureOpen EXHAUSTED wid=\(wid) \(kayaDiagAppState())")
             }
         }
     #endif
@@ -249,22 +285,43 @@ var kayaTearingDown: Set<UInt64> = []
     /// the close-veto delegate proxy (SwiftUI owns the window's real
     /// delegate; the proxy answers windowShouldClose and forwards
     /// everything else).
+    ///
+    /// Registration is EVENT-DRIVEN on window attachment: the view
+    /// subclass overrides viewDidMoveToWindow — AppKit's attachment
+    /// signal — so registration cannot race the window's creation.
+    /// (The one-shot `DispatchQueue.main.async { register }` this
+    /// replaces was exactly such a race: under suite load the aux
+    /// window attached AFTER the async drain, register's window guard
+    /// returned silently, and nothing ever re-fired — the panels-java
+    /// flake. The window existed, visible and titled, the whole time;
+    /// only this registry was empty.)
     private struct KayaWindowAccessor: NSViewRepresentable {
         let windowId: UInt64
 
-        func makeNSView(context: Context) -> NSView {
-            let view = NSView()
-            DispatchQueue.main.async { register(view) }
+        final class AttachView: NSView {
+            var onAttach: () -> Void = {}
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                if window != nil { onAttach() }
+            }
+        }
+
+        func makeNSView(context: Context) -> AttachView {
+            let view = AttachView()
+            view.onAttach = { [weak view] in
+                if let view { register(view) }
+            }
             return view
         }
 
-        func updateNSView(_ view: NSView, context: Context) {
+        func updateNSView(_ view: AttachView, context: Context) {
             register(view)
         }
 
         private func register(_ view: NSView) {
             guard let window = view.window else { return }
             if kayaNSWindows[windowId] !== window {
+                kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
                 kayaNSWindows[windowId] = window
                 // Wake anyone parked on this surface's materialization
                 // (kayaAwaitWindow): the wait is event-driven — this
@@ -675,6 +732,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     if let open = kayaOpenWindow {
                         kayaEnsureOpen(wid, open)
                     } else {
+                        kayaDiag("mount parked wid=\(wid) (no openWindow yet)")
                         kayaPendingOpens.append(wid)
                     }
                 }
@@ -1801,6 +1859,7 @@ struct KayaAuxRoot: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(scene.windows[windowId]?.title ?? "")
+        .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
         #if os(macOS)
             .background(KayaWindowAccessor(windowId: windowId))
         #endif
@@ -1892,6 +1951,9 @@ struct KayaRoot: View {
         .onAppear {
             // The presentation actions, stashed for the apply arms
             // (mount presents an auxiliary; destroy dismisses it).
+            #if os(macOS)
+                kayaDiag("primaryRoot appear pending=\(kayaPendingOpens) \(kayaDiagAppState())")
+            #endif
             kayaOpenWindow = { openWindow(value: $0) }
             kayaDismissWindow = { dismissWindow(value: $0) }
             for id in kayaPendingOpens {

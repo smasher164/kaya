@@ -423,25 +423,22 @@ Landed history lives in git; this file only carries what is still open.
   action (the platform floor is ContentDialog's two-actions-plus-
   close; more means a custom row on WinUI — no longer the dressed
   floor).
-- The panels-java aux-open flake on macOS (pre-existing, surfaced
-  2026-07-21 by suite-cycling volume; NOT an alerts regression —
-  bisect: panels, the java leg, and the aux-open path all predate
-  the slice that exposed it). Signature: under the 8-wide parallel
-  suite, ~half of runs, java only — the MODEL carries both windows
-  at +1.5s (expect_windows 2 passes; the JVM was not slow), the
-  primary renders, yet FIVE openWindow(value:) requests (mount +
-  kayaEnsureOpen's 0.3/0.8/1.5s retries) present nothing over 17s
-  while confirm-java's sheet works moments later in the same suite.
-  Always passes isolated (6/6). Eliminated: pump thread (apply runs
-  on main), mount-before-appear (park-and-drain, and the mount came
-  late anyway), single dropped request (retries fired). Suspects:
-  scene-session/activation state peculiar to the JVM process under
-  contention. Next diagnostic: capture the leg's os_log for the
-  "no matching WindowGroup"-class scene errors and log NSApp
-  activation/scene-session state at retry time. The hardenings that
-  stay regardless: kayaEnsureOpen (at-least-once aux open — safe by
-  value-identified WindowGroup uniqueness) and kayaAwaitWindow (the
-  runner's window-targeted verbs await materialization boundedly).
+- ~~The panels-java aux-open flake on macOS~~ ROOT-CAUSED AND FIXED
+  2026-07-21: the planned diagnostic (state dump at retry time +
+  os_log capture, under a loaded 8-wide repro harness) reproduced it
+  on the first wave and OVERTURNED the working theory — the aux
+  window was PRESENT the whole 17s (visible, titled 'inspector', in
+  NSApp.windows) and os_log carried zero SwiftUI scene errors; no
+  openWindow request was ever dropped. The real bug: the
+  KayaWindowAccessor registration was a one-shot
+  DispatchQueue.main.async from makeNSView that raced window
+  attachment and never re-fired, so kayaNSWindows stayed empty and
+  every window-targeted verb (and close_window) starved against an
+  empty registry. Fix: registration is event-driven — the accessor's
+  NSView subclass overrides viewDidMoveToWindow (AppKit's attachment
+  signal); kayaEnsureOpen kept as an idempotent belt, its exhausted
+  case now a self-diagnosing state dump. See the corrected traps.md
+  entry (one-shot registration hooks).
 - ~~A java leg on Windows~~ LANDED: 12 java legs in deploy-win (60
   checks total) — sources shipped, javac IN PLACE on the VM (the C#
   ship-and-build precedent), quote-free run_ssh lines (the sshd
