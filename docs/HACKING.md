@@ -90,6 +90,10 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 
 ## Suites and platforms
 
+- The whole matrix: `tools/validate-all.sh` — the five lanes run
+  CONCURRENTLY by default (bounded by the slowest lane, ~1 minute
+  warm); `--serial` for single-lane benchmarking, contention-free
+  debugging, or recording mode. Per-lane logs print for any FAIL.
 - macOS: `tools/validate-mac.sh` (KAYA_JOBS=n for pool width, =1 for
   serial; KAYA_RECORD=1 for recording mode). Legs open real windows.
 - Linux: `tools/validate-linux.sh` (docker; X11 + Wayland rings;
