@@ -65,7 +65,7 @@ fi
 # ~2-4s. The snapshot itself can only be written by a read-write
 # instance, so it is created once here. Pool instances stay warm
 # across runs on purpose; nothing kills them at exit.
-POOL="${KAYA_ANDROID_EMUS:-2}"
+POOL="${KAYA_ANDROID_EMUS:-3}"
 boot_wait() { # serial
     local serial="$1" tries=0
     until adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do

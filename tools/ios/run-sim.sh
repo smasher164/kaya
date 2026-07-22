@@ -83,7 +83,7 @@ make_bundle() {
 # newest iPhone device type + iOS runtime, stay booted across runs
 # (second and later boots ride shared caches, ~15s), and never touch
 # the user's own simulators.
-POOL="${KAYA_IOS_SIMS:-2}"
+POOL="${KAYA_IOS_SIMS:-3}"
 UDIDS=()
 boot_pool() {
     local dtype runtime i udid
@@ -517,201 +517,60 @@ build_swiftui_dylib() {
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --lib
     build_swiftui_dylib
-    # With more than one input file, swiftc only allows top-level code
-    # in a file named main.swift; the example is that file.
-    cp guests/swift/milestone2.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/milestone2swift-bin"
-    APP=$(make_bundle milestone2swift dev.kaya.milestone2swift "$BUNDLES/milestone2swift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
-
-    cp guests/swift/entry.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/entryswift-bin"
-    APP=$(make_bundle entryswift dev.kaya.entryswift "$BUNDLES/entryswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on entry-swift "$APP" dev.kaya.entryswift entry-swift entry entry
-
-    cp guests/swift/gallery.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/galleryswift-bin"
-    APP=$(make_bundle galleryswift dev.kaya.galleryswift "$BUNDLES/galleryswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on gallery-swift "$APP" dev.kaya.galleryswift gallery-swift gallery gallery
-
-    cp guests/swift/todos.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/todos+Kaya.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/todosswift-bin"
-    APP=$(make_bundle todosswift dev.kaya.todosswift "$BUNDLES/todosswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on todos-swift "$APP" dev.kaya.todosswift todos-swift todos todos
-
-    cp guests/swift/reorder.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/reorder+Kaya.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/reorderswift-bin"
-    APP=$(make_bundle reorderswift dev.kaya.reorderswift "$BUNDLES/reorderswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on reorder-swift "$APP" dev.kaya.reorderswift reorder-swift reorder reorder
-
-    cp guests/swift/feed.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift guests/swift/feed+Kaya.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/feedswift-bin"
-    APP=$(make_bundle feedswift dev.kaya.feedswift "$BUNDLES/feedswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on feed-swift "$APP" dev.kaya.feedswift feed-swift feed feed
-
-    # The layout contract through the Swift binding: grow asserted as
-    # shares and root-fills, layout observed.
-    cp guests/swift/grow.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/growswift-bin"
-    APP=$(make_bundle growswift dev.kaya.growswift "$BUNDLES/growswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on grow-swift "$APP" dev.kaya.growswift grow-swift grow grow
-
-    # The align scene: the cross-axis contract (center + baseline).
-    cp guests/swift/align.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/alignswift-bin"
-    APP=$(make_bundle alignswift dev.kaya.alignswift "$BUNDLES/alignswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on align-swift "$APP" dev.kaya.alignswift align-swift align align
-
-    cp guests/swift/layout.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/layoutswift-bin"
-    APP=$(make_bundle layoutswift dev.kaya.layoutswift "$BUNDLES/layoutswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on layout-swift "$APP" dev.kaya.layoutswift layout-swift layout layout
-
-    # The confirm scene: alerts are phone-native — UIAlertController
-    # is this host's REAL modal, and its cancel action IS the slot.
-    cp guests/swift/confirm.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/confirmswift-bin"
-    APP=$(make_bundle confirmswift dev.kaya.confirmswift "$BUNDLES/confirmswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on confirm-swift "$APP" dev.kaya.confirmswift confirm-swift confirm confirm
-
-    # The nav scene: the serial navigation grammar — NavigationStack
-    # is this host's REAL stack; the back verb drives the same
-    # path-shortening write swipe-back makes, and intercept_back
-    # answers with popEntry.
-    cp guests/swift/nav.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/navswift-bin"
-    APP=$(make_bundle navswift dev.kaya.navswift "$BUNDLES/navswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on nav-swift "$APP" dev.kaya.navswift nav-swift nav nav
-
-    # The scroll scene: ScrollView is phone-native machinery.
-    cp guests/swift/scroll.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/scrollswift-bin"
-    APP=$(make_bundle scrollswift dev.kaya.scrollswift "$BUNDLES/scrollswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on scroll-swift "$APP" dev.kaya.scrollswift scroll-swift scroll scroll
-
-    # The progress scene: ProgressView is phone-native.
-    cp guests/swift/progress.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/progressswift-bin"
-    APP=$(make_bundle progressswift dev.kaya.progressswift "$BUNDLES/progressswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on progress-swift "$APP" dev.kaya.progressswift progress-swift progress progress
-
-    # The select scene: Picker's menu presentation is phone-native.
-    cp guests/swift/select.swift "$BUNDLES/main.swift"
-    xcrun -sdk iphonesimulator swiftc \
-        -target "arm64-apple-ios$IOS_MIN-simulator" \
-        -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
-        -L "$TARGET_DIR" -lkaya \
-        -framework UIKit -framework Foundation -framework CoreFoundation \
-        -framework CoreGraphics -framework QuartzCore \
-        -o "$BUNDLES/selectswift-bin"
-    APP=$(make_bundle selectswift dev.kaya.selectswift "$BUNDLES/selectswift-bin")
-    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
-    queue_leg run_swiftui_on select-swift "$APP" dev.kaya.selectswift select-swift select select
+    # With more than one input file, swiftc only allows top-level
+    # code in a file named main.swift — each scene stages its own.
+    # The per-scene compiles are INDEPENDENT, so they pool (serial,
+    # each recompiled the four binding files: ~60s of the suite,
+    # measured 2026-07-22); legs queue only after every binary
+    # exists. The list is explicit: window/panels are desktop-only
+    # by design and must not ride $SCENES here.
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select"
+    swift_pids=()
+    swift_names=()
+    for guest in $IOS_SWIFT_SCENES; do
+        (
+            stage="$BUNDLES/.stage-$guest"
+            mkdir -p "$stage"
+            cp "guests/swift/$guest.swift" "$stage/main.swift"
+            companions=()
+            if [ -f "guests/swift/$guest+Kaya.swift" ]; then
+                companions=("guests/swift/$guest+Kaya.swift")
+            fi
+            xcrun -sdk iphonesimulator swiftc \
+                -target "arm64-apple-ios$IOS_MIN-simulator" \
+                -import-objc-header crates/kaya/include/kaya.h \
+                bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
+                bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
+                "${companions[@]}" "$stage/main.swift" \
+                -L "$TARGET_DIR" -lkaya \
+                -framework UIKit -framework Foundation -framework CoreFoundation \
+                -framework CoreGraphics -framework QuartzCore \
+                -o "$BUNDLES/${guest}swift-bin" >"$stage/build.log" 2>&1
+        ) &
+        swift_pids+=($!)
+        swift_names+=("$guest")
+    done
+    swift_status=0
+    i=0
+    for pid in "${swift_pids[@]}"; do
+        if ! wait "$pid"; then
+            echo "swift guest build FAILED: ${swift_names[$i]}" >&2
+            cat "$BUNDLES/.stage-${swift_names[$i]}/build.log" >&2
+            swift_status=1
+        fi
+        i=$((i + 1))
+    done
+    rm -rf "$BUNDLES"/.stage-*
+    [ "$swift_status" = 0 ] || exit 1
+    for guest in $IOS_SWIFT_SCENES; do
+        APP=$(make_bundle "${guest}swift" "dev.kaya.${guest}swift" "$BUNDLES/${guest}swift-bin")
+        cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+        if [ "$guest" = milestone2 ]; then
+            queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
+        else
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
+        fi
+    done
     drain
     timing swift-build+legs
 fi

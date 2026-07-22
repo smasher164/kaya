@@ -355,67 +355,123 @@ drain() {
     leg_names=()
 }
 
-# The OCaml guests: one dune build covers the binding library and all
-# four scenes (dune-project at the repo root scopes to bindings/ and
-# guests/).
-dune build || exit 1
+# The guest builds are per-language INDEPENDENT, so they run as a
+# pool (measured 2026-07-22: 29-38s serial, bounded by the slowest
+# language when pooled). Each job logs to its own file; any failure
+# prints its log and dies — no silent partial builds. The Swift
+# per-scene compiles pool too (each recompiled the four binding
+# files; a shared module is the iOS runner's cleaner fix, but the
+# mac loop is already saturated by the job pool).
+BUILDS_DIR="$(mktemp -d)"
+build_names=()
+build_pids=()
+run_build() {
+    local name="$1"
+    shift
+    ("$@") >"$BUILDS_DIR/$name.log" 2>&1 &
+    build_pids+=($!)
+    build_names+=("$name")
+}
 
-# The Haskell guests: one cabal build for the binding library and all
-# four scenes; list-bin locates the outputs.
-(cd guests/haskell && cabal build all \
-    --extra-lib-dirs="$ROOT/target/debug" \
-    --ghc-options="-optl-Wl,-rpath,$ROOT/target/debug" -v0) || exit 1
-hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
+build_ocaml() {
+    # One dune build covers the binding library and all scenes
+    # (dune-project at the repo root scopes to bindings/ and guests/).
+    dune build
+}
 
-# dotnet run and go run rebuild per invocation; build each guest once
-# and let the legs exec the outputs.
-dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null || exit 1
-CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
-mkdir -p target/go-guests
-# encodebench is guest-only (no rust example), so it rides beside the
-# scene list rather than in it.
-for guest in $SCENES encodebench; do
-    go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || exit 1
-done
+build_haskell() {
+    # One cabal build for the binding library and all scenes.
+    cd guests/haskell && cabal build all \
+        --extra-lib-dirs="$ROOT/target/debug" \
+        --ghc-options="-optl-Wl,-rpath,$ROOT/target/debug" -v0
+}
 
+build_csharp() {
+    # dotnet run rebuilds per invocation; build once, legs exec it.
+    dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >/dev/null
+}
 
-# The Swift guests on the mac target: the same bindings the iOS
-# bundles compile, linked against libkaya.dylib — built with the
-# system toolchain's SDK, so these are the fleet's modern-stamp legs
-# (the dressed floor's button bridge must hold under BOTH stamp
-# generations; the deferred modern-stamp item lands here, live).
-# swiftc allows top-level code only in a file named main.swift.
-mkdir -p target/swift-guests
-for guest in $SCENES; do
-    [ -f "guests/swift/$guest.swift" ] || continue
-    cp "guests/swift/$guest.swift" target/swift-guests/main.swift
-    if [ -f "guests/swift/$guest+Kaya.swift" ]; then
-        set -- "guests/swift/$guest+Kaya.swift"
-    else
-        set --
+build_go() {
+    # encodebench is guest-only (no rust example), so it rides beside
+    # the scene list rather than in it.
+    mkdir -p target/go-guests
+    local guest
+    for guest in $SCENES encodebench; do
+        go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
+    done
+}
+
+build_swift() {
+    # The same bindings the iOS bundles compile, linked against
+    # libkaya.dylib — the fleet's modern-stamp legs. swiftc allows
+    # top-level code only in a file named main.swift, so each scene
+    # gets its own staging dir and the compiles pool.
+    mkdir -p target/swift-guests
+    local guest pids=() names=()
+    for guest in $SCENES; do
+        [ -f "guests/swift/$guest.swift" ] || continue
+        local dir="target/swift-guests/.stage-$guest"
+        rm -rf "$dir"
+        mkdir -p "$dir"
+        cp "guests/swift/$guest.swift" "$dir/main.swift"
+        local companions=()
+        if [ -f "guests/swift/$guest+Kaya.swift" ]; then
+            companions=("guests/swift/$guest+Kaya.swift")
+        fi
+        kaya_swiftc -import-objc-header crates/kaya/include/kaya.h \
+            bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
+            bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
+            "${companions[@]}" "$dir/main.swift" \
+            -L target/debug -lkaya \
+            -Xlinker -rpath -Xlinker "$ROOT/target/debug" \
+            -o "target/swift-guests/$guest" >"$dir/build.log" 2>&1 &
+        pids+=($!)
+        names+=("$guest")
+    done
+    local i=0 status=0
+    for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then
+            cat "target/swift-guests/.stage-${names[$i]}/build.log"
+            status=1
+        fi
+        i=$((i + 1))
+    done
+    rm -rf target/swift-guests/.stage-*
+    return "$status"
+}
+
+build_java() {
+    # The shared binding + the desktop transport + every scene + the
+    # Main selector, one javac.
+    rm -rf target/java-guests
+    mkdir -p target/java-guests
+    javac -d target/java-guests \
+        bindings/java-desktop/dev/kaya/KayaRing.java \
+        bindings/java/dev/kaya/*.java \
+        guests/java/dev/kaya/milestone2kt/*.java \
+        guests/java-desktop/dev/kaya/milestone2kt/Main.java
+}
+
+run_build ocaml build_ocaml
+run_build haskell build_haskell
+run_build csharp build_csharp
+run_build go build_go
+run_build swift build_swift
+run_build java build_java
+build_status=0
+i=0
+for pid in "${build_pids[@]}"; do
+    if ! wait "$pid"; then
+        echo "guest build FAILED: ${build_names[$i]}" >&2
+        cat "$BUILDS_DIR/${build_names[$i]}.log" >&2
+        build_status=1
     fi
-    kaya_swiftc -import-objc-header crates/kaya/include/kaya.h \
-        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
-        bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
-        "$@" target/swift-guests/main.swift \
-        -L target/debug -lkaya \
-        -Xlinker -rpath -Xlinker "$ROOT/target/debug" \
-        -o "target/swift-guests/$guest" || exit 1
+    i=$((i + 1))
 done
-rm -f target/swift-guests/main.swift
-
-# The Java guests: the shared binding + the desktop transport
-# (bindings/java-desktop's KayaRing, the twin of Android's Kotlin one)
-# + every scene + the Main selector, one javac. The dev shell's zulu
-# launcher is exactly the vendor-stamped population the dressed
-# floor's compat generation serves.
-rm -rf target/java-guests
-mkdir -p target/java-guests
-javac -d target/java-guests \
-    bindings/java-desktop/dev/kaya/KayaRing.java \
-    bindings/java/dev/kaya/*.java \
-    guests/java/dev/kaya/milestone2kt/*.java \
-    guests/java-desktop/dev/kaya/milestone2kt/Main.java || exit 1
+rm -rf "$BUILDS_DIR"
+[ "$build_status" = 0 ] || exit 1
+hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
+CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
 # The encode-benchmark leg: the generated encoders must clear their
 # floor rates (structural-regression guard, not a race).

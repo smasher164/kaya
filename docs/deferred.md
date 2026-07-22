@@ -431,8 +431,16 @@ Landed history lives in git; this file only carries what is still open.
   mid-materialization error is a retryable miss, never a panic).
   Measured: leg phases mac 52s->18s, linux 132s->71s, windows
   95s->57s, iOS 83s->51s, android 57s->45s; serial matrix 8m28s ->
-  ~6m03s (remaining wall is builds/gates/deploy — the pool-width,
-  deploy-skip, and iOS-module levers below still stand). The
+  ~6m03s. SECOND PASS landed same day: mac guest builds pooled
+  (38s->12s; per-language jobs + pooled swiftc), windows deploy
+  stamp-skip + batched Get-FileHash + SSH ControlMaster mux (deploy
+  21s->4s, suites 53s->40s — the mux carries every schtasks/poll
+  round trip), iOS per-scene compiles pooled + sims 2->3 (builds
+  32+19 -> 23+15), android emus 2->3 (legs 23+22 -> 18+15). Serial
+  matrix now ~4m20s warm (mac 55s, linux 1m14s, windows 47s, iOS
+  ~48s, android 43s); concurrent bound = linux. Remaining levers:
+  linux container internals (in-container builds dominate its 71s),
+  a real swiftmodule for the iOS/mac bindings, VM with more cores. The
   rollout also flushed out four REAL WinUI bugs the settles had
   preserved (see traps.md).
   The original benchmark record: (benchmarked 2026-07-22; the

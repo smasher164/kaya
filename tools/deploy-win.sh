@@ -91,7 +91,14 @@ TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
 SDK="$ROOT/third_party/winappsdk"
 BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-arm64/native/Microsoft.WindowsAppRuntime.Bootstrap.dll"
 
-run_ssh() { ssh -n -o BatchMode=yes "$HOST" "$@"; }
+# Connection multiplexing: ONE master TCP/auth handshake, every
+# subsequent ssh/scp rides it (~1.4s per round trip before; the
+# suites phase alone makes hundreds of schtasks/type calls). The
+# socket lives in the repo's target/ and persists briefly past the
+# run so back-to-back invocations reuse it.
+SSH_MUX=(-o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
+run_ssh() { ssh -n -o BatchMode=yes "${SSH_MUX[@]}" "$HOST" "$@"; }
+scp() { command scp "${SSH_MUX[@]}" "$@"; }
 
 # The VM must be up before anything else: check reachability, and if the
 # guest is down, boot it through UTM and wait for sshd. The trailing
@@ -205,76 +212,137 @@ cleanup() {
 trap cleanup EXIT
 kill_guests
 
-echo "== deploying artifacts =="
-scp -q \
-    "${SCENE_EXES[@]}" \
-    "$TARGET/kaya.dll" \
-    "$BOOTSTRAP" \
-    "${SCENE_PYS[@]}" \
-    "$ROOT/go.mod" \
-    "$ROOT/crates/kaya/include/kaya.h" \
-    "$ROOT"/tools/guest/*.cmd \
-    "$ROOT"/tools/guest/*.vbs \
-    "$ROOT/tools/guest/minimal-resources.pri" \
-    "$ROOT/tools/guest/shot.ps1" \
-    "$HOST:C:/kaya/"
-# Recreated from scratch every deploy: dotnet run picks up whatever
-# sources and project files are in the directory, so a leftover from a
-# renamed or removed example would poison the build.
-run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
-# Recreated from scratch every deploy: a stale flat-module layout
-# (kaya_app.py) beside the kaya/ package would be a second import
-# mechanism.
-run_ssh 'cmd /c "if exist C:\kaya\bindings\python rmdir /s /q C:\kaya\bindings\python & mkdir C:\kaya\bindings\python"'
-scp -q -r "$ROOT"/bindings/python/kaya "$HOST:C:/kaya/bindings/python/"
-scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
-scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
-    "$ROOT"/bindings/csharp/*.cs \
-    "$HOST:C:/kaya/cs/"
-# The java guests: sources shipped flat (every basename is unique and
-# javac takes explicit files, so package-dir layout is classpath
-# business, not source business) and compiled IN PLACE — the C#
-# precedent: the suite builds what it verifies. Recreated from
-# scratch every deploy; a javac failure fails the deploy loudly.
-# Quote-free on purpose: Windows sshd re-wraps the command in its
-# own cmd /c "...", and interior double quotes re-pair across the
-# line (docs/traps.md). mkdir creates parents with extensions on.
-run_ssh 'cmd /c if exist C:\kaya\java rmdir /s /q C:\kaya\java'
-run_ssh 'cmd /c mkdir C:\kaya\java\src'
-scp -q "$ROOT"/bindings/java/dev/kaya/*.java \
-    "$ROOT/bindings/java-desktop/dev/kaya/KayaRing.java" \
-    "$ROOT"/guests/java/dev/kaya/milestone2kt/*.java \
-    "$ROOT/guests/java-desktop/dev/kaya/milestone2kt/Main.java" \
-    "$HOST:C:/kaya/java/src/"
-run_ssh 'cmd /c javac -d C:\kaya\java\classes C:\kaya\java\src\*.java' || {
-    echo "javac failed on the VM" >&2
-    exit 1
+# Skip-unchanged deploy: the scp+javac block cost ~20s per run and
+# usually ships IDENTICAL bytes (measured 2026-07-22). The stamp is
+# the content hash of everything the deploy ships; the VM holds the
+# stamp of its last successful deploy, and a match skips the whole
+# block. All-or-nothing on purpose: the cs/python/java trees are
+# recreated from scratch on every real deploy, and a per-file diff
+# would reintroduce the stale-mix class those recreations kill. The
+# kaya.dll remote-hash verify below runs EITHER WAY — the stamp
+# optimizes shipping, never the verification (a wiped or hand-edited
+# VM fails the verify, and deleting C:\kaya\deploy.stamp forces a
+# full ship).
+deploy_stamp() {
+    {
+        shasum -a 256 \
+            "${SCENE_EXES[@]}" \
+            "$TARGET/kaya.dll" \
+            "$BOOTSTRAP" \
+            "${SCENE_PYS[@]}" \
+            "$ROOT/go.mod" \
+            "$ROOT/crates/kaya/include/kaya.h" \
+            "$ROOT"/tools/guest/*.cmd \
+            "$ROOT"/tools/guest/*.vbs \
+            "$ROOT/tools/guest/minimal-resources.pri" \
+            "$ROOT/tools/guest/shot.ps1" \
+            "$ROOT"/bindings/go/*.go \
+            "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
+            "$ROOT"/bindings/csharp/*.cs \
+            "$ROOT"/bindings/java/dev/kaya/*.java \
+            "$ROOT/bindings/java-desktop/dev/kaya/KayaRing.java" \
+            "$ROOT"/guests/java/dev/kaya/milestone2kt/*.java \
+            "$ROOT/guests/java-desktop/dev/kaya/milestone2kt/Main.java"
+        find "$ROOT/bindings/python/kaya" -type f -print0 | sort -z | xargs -0 shasum -a 256
+    } | shasum -a 256 | cut -c1-16
 }
+STAMP=$(deploy_stamp)
+REMOTE_STAMP=$(run_ssh 'cmd /c type C:\kaya\deploy.stamp' 2>/dev/null | tr -d '\r\n ' || true)
+if [ "$REMOTE_STAMP" = "$STAMP" ]; then
+    echo "== deploy unchanged (stamp $STAMP) =="
+else
+    echo "== deploying artifacts =="
+    scp -q \
+        "${SCENE_EXES[@]}" \
+        "$TARGET/kaya.dll" \
+        "$BOOTSTRAP" \
+        "${SCENE_PYS[@]}" \
+        "$ROOT/go.mod" \
+        "$ROOT/crates/kaya/include/kaya.h" \
+        "$ROOT"/tools/guest/*.cmd \
+        "$ROOT"/tools/guest/*.vbs \
+        "$ROOT/tools/guest/minimal-resources.pri" \
+        "$ROOT/tools/guest/shot.ps1" \
+        "$HOST:C:/kaya/"
+    # Recreated from scratch every deploy: dotnet run picks up whatever
+    # sources and project files are in the directory, so a leftover from a
+    # renamed or removed example would poison the build.
+    run_ssh 'cmd /c "if exist C:\kaya\cs rmdir /s /q C:\kaya\cs & mkdir C:\kaya\cs"'
+    # Recreated from scratch every deploy: a stale flat-module layout
+    # (kaya_app.py) beside the kaya/ package would be a second import
+    # mechanism.
+    run_ssh 'cmd /c "if exist C:\kaya\bindings\python rmdir /s /q C:\kaya\bindings\python & mkdir C:\kaya\bindings\python"'
+    scp -q -r "$ROOT"/bindings/python/kaya "$HOST:C:/kaya/bindings/python/"
+    scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
+    scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
+        "$ROOT"/bindings/csharp/*.cs \
+        "$HOST:C:/kaya/cs/"
+    # The java guests: sources shipped flat (every basename is unique and
+    # javac takes explicit files, so package-dir layout is classpath
+    # business, not source business) and compiled IN PLACE — the C#
+    # precedent: the suite builds what it verifies. Recreated from
+    # scratch every deploy; a javac failure fails the deploy loudly.
+    # Quote-free on purpose: Windows sshd re-wraps the command in its
+    # own cmd /c "...", and interior double quotes re-pair across the
+    # line (docs/traps.md). mkdir creates parents with extensions on.
+    run_ssh 'cmd /c if exist C:\kaya\java rmdir /s /q C:\kaya\java'
+    run_ssh 'cmd /c mkdir C:\kaya\java\src'
+    scp -q "$ROOT"/bindings/java/dev/kaya/*.java \
+        "$ROOT/bindings/java-desktop/dev/kaya/KayaRing.java" \
+        "$ROOT"/guests/java/dev/kaya/milestone2kt/*.java \
+        "$ROOT/guests/java-desktop/dev/kaya/milestone2kt/Main.java" \
+        "$HOST:C:/kaya/java/src/"
+    run_ssh 'cmd /c javac -d C:\kaya\java\classes C:\kaya\java\src\*.java' || {
+        echo "javac failed on the VM" >&2
+        exit 1
+    }
+    run_ssh "cmd /c echo $STAMP>C:\\kaya\\deploy.stamp"
+fi
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
 # so an overwrite can fail while everything else copies fine, and the
 # suites would then run against the previous deploy.
-verify_remote() {
-    local local_path="$1" remote_path="$2"
-    local want got
-    want=$(shasum -a 256 "$local_path" | awk '{print tolower($1)}')
-    got=$(run_ssh "powershell -Command \"(Get-FileHash $remote_path -Algorithm SHA256).Hash\"" \
+# One Get-FileHash round trip for the whole set (each individual
+# round trip cost ~1.4s; ten of them were most of the deploy phase
+# once shipping went stamp-skipped, 2026-07-22). Order is the
+# contract: the remote list and the local list are compared
+# line-by-line.
+verify_deployed() {
+    local locals=(
+        "$TARGET/kaya.dll"
+        "$TARGET/examples/milestone2.exe"
+        "$TARGET/examples/entry.exe"
+        "$TARGET/examples/gallery.exe"
+        "$TARGET/examples/todos.exe"
+        "$TARGET/examples/reorder.exe"
+        "$TARGET/examples/feed.exe"
+        "$TARGET/examples/grow.exe"
+        "$TARGET/examples/align.exe"
+        "$TARGET/examples/layout.exe"
+    )
+    local remotes='C:\kaya\kaya.dll,C:\kaya\milestone2.exe,C:\kaya\entry.exe,C:\kaya\gallery.exe,C:\kaya\todos.exe,C:\kaya\reorder.exe,C:\kaya\feed.exe,C:\kaya\grow.exe,C:\kaya\align.exe,C:\kaya\layout.exe'
+    local got want i line
+    got=$(run_ssh "powershell -Command \"(Get-FileHash $remotes -Algorithm SHA256).Hash\"" \
         | tr -d '\r' | tr '[:upper:]' '[:lower:]')
-    if [ "$want" != "$got" ]; then
-        echo "$remote_path does not match $local_path after copy" >&2
+    local got_lines=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && got_lines+=("$line")
+    done <<<"$got"
+    if [ "${#got_lines[@]}" != "${#locals[@]}" ]; then
+        echo "remote hash count ${#got_lines[@]} != ${#locals[@]} — deploy verification failed" >&2
         exit 1
     fi
+    i=0
+    for local_path in "${locals[@]}"; do
+        want=$(shasum -a 256 "$local_path" | cut -d' ' -f1 | tr '[:upper:]' '[:lower:]')
+        if [ "${got_lines[$i]}" != "$want" ]; then
+            echo "remote hash mismatch for $local_path after deploy" >&2
+            exit 1
+        fi
+        i=$((i + 1))
+    done
 }
-verify_remote "$TARGET/kaya.dll" 'C:\kaya\kaya.dll'
-verify_remote "$TARGET/examples/milestone2.exe" 'C:\kaya\milestone2.exe'
-verify_remote "$TARGET/examples/entry.exe" 'C:\kaya\entry.exe'
-verify_remote "$TARGET/examples/gallery.exe" 'C:\kaya\gallery.exe'
-verify_remote "$TARGET/examples/todos.exe" 'C:\kaya\todos.exe'
-verify_remote "$TARGET/examples/reorder.exe" 'C:\kaya\reorder.exe'
-verify_remote "$TARGET/examples/feed.exe" 'C:\kaya\feed.exe'
-verify_remote "$TARGET/examples/grow.exe" 'C:\kaya\grow.exe'
-verify_remote "$TARGET/examples/align.exe" 'C:\kaya\align.exe'
-verify_remote "$TARGET/examples/layout.exe" 'C:\kaya\layout.exe'
+verify_deployed
 timing deploy
 
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
