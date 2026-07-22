@@ -70,6 +70,11 @@ executable panels
   main-is: panels.hs
   build-depends: kaya-guests
 
+executable confirm
+  import: shared
+  main-is: confirm.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

@@ -216,6 +216,8 @@ final class KayaApp {
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
     private var closeRequested: ((KayaAppTx, UInt64) throws -> Void)?
+    private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    private var nextAlert: UInt64 = 0
     private var windowClosed: ((KayaAppTx, UInt64) throws -> Void)?
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
 
@@ -490,6 +492,18 @@ final class KayaApp {
         closeRequested = handler
     }
 
+    /// Bind the one-shot result handler to a request (internal: the
+    /// Tx sugar registers at show time; the registration retires
+    /// with the result).
+    func onAlert(_ alert: UInt64, _ handler: @escaping (KayaAppTx, UInt32) throws -> Void) {
+        alerts[alert] = handler
+    }
+
+    func allocAlert() -> UInt64 {
+        nextAlert += 1
+        return nextAlert
+    }
+
     /// A non-veto auxiliary's chrome close (informational;
     /// destroyWindow reconciles).
     func onWindowClosed(_ handler: @escaping (KayaAppTx, UInt64) throws -> Void) {
@@ -507,10 +521,13 @@ final class KayaApp {
             var text: String?
             var checked = false
             var value = 0.0
+            var choice: UInt32 = 0
             switch payload {
             case .str(let s): text = s
             case .bool(let b): checked = b
             case .f64(let x): value = x
+            // The alert parser boxes the u32 choice as .i64.
+            case .i64(let n): choice = UInt32(truncatingIfNeeded: n)
             default: break
             }
             switch (kind, keys.isEmpty) {
@@ -549,6 +566,11 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED), _):
                 if let handler = windowClosed {
                     dispatch { try build { tx in try handler(tx, id) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
+                // One-shot: the registration retires with the result.
+                if let handler = alerts.removeValue(forKey: id) {
+                    dispatch { try build { tx in try handler(tx, choice) } }
                 }
             default:
                 break
@@ -1163,6 +1185,40 @@ final class KayaAppTx {
     func windowSize(_ width: Double, _ height: Double) {
         tx.setWindowWidth(0, width)
         tx.setWindowHeight(0, height)
+    }
+
+    /// Request a modal alert (the request/result grammar), named
+    /// arguments as the Swift spelling:
+    /// `tx.showAlert(title: "delete item?", message: "…",
+    ///     actions: ["Delete", "Archive"], cancel: "Keep") { tx, choice in … }`.
+    /// The result handler rides the REQUEST (the widget-handler
+    /// precedent) and retires with its one answer — choice is an
+    /// action index (0 or 1) or KAYA_ALERT_CHOICE_CANCEL, every
+    /// platform-native dismissal. Ids are binding-allocated; the
+    /// call returns the id for the floor-minded. Up to two actions
+    /// (the platform floor — a third traps at construction, matching
+    /// the scene gate); `cancel` is required by the signature, and
+    /// no binding invents a default label. One alert may be live per
+    /// process; show the next from the handler.
+    @discardableResult
+    func showAlert(
+        title: String = "", message: String = "",
+        actions: [String] = [], cancel: String, window: UInt64 = 0,
+        onResult: ((KayaAppTx, UInt32) throws -> Void)? = nil
+    ) -> UInt64 {
+        precondition(
+            actions.count <= 2,
+            "kaya: an alert carries at most 2 actions (the platform floor)")
+        precondition(
+            !cancel.isEmpty,
+            "kaya: the cancel slot always exists and needs a name")
+        let id = app.allocAlert()
+        if let onResult { app.onAlert(id, onResult) }
+        tx.showAlert(
+            window, id, UInt32(actions.count), .str(title), .str(message),
+            .str(actions.count >= 1 ? actions[0] : ""),
+            .str(actions.count == 2 ? actions[1] : ""), .str(cancel))
+        return id
     }
 
     /// Create an auxiliary window (capability-gated: phone hosts

@@ -200,6 +200,8 @@ sealed class KayaApp
     // Window lifecycle: one handler each, receiving the window id.
     Action<Tx, ulong>? closeRequested;
     Action<Tx, ulong>? windowClosed;
+    internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
+    internal ulong nextAlert;
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -402,6 +404,13 @@ sealed class KayaApp
             {
                 if (windowClosed is { } fn)
                     Dispatch(tx => fn(tx, id));
+            }
+            else if (kind == KayaWire.OccKindAlertResult)
+            {
+                // One-shot: the registration retires with the result;
+                // payload is the parsed u32 choice.
+                if (alerts.Remove(id, out var fn))
+                    Dispatch(tx => fn(tx, payload is uint c ? c : 0));
             }
         }
     }
@@ -1086,6 +1095,41 @@ sealed class Tx
         if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
         if (height is { } h) Records.Add(KayaWire.TxSetWindowHeight(id, h));
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
+    }
+
+    /// Request a modal alert (the request/result grammar), named
+    /// arguments as the C# spelling:
+    /// tx.ShowAlert(title: "delete item?", message: "…",
+    ///     action0: "Delete", action1: "Archive", cancel: "Keep",
+    ///     onResult: (tx, choice) => { … }).
+    /// The result handler rides the REQUEST (the widget-handler
+    /// precedent) and retires with its one answer — choice is an
+    /// action index (0 or 1) or KayaWire.AlertChoiceCancel, every
+    /// platform-native dismissal. Ids are binding-allocated; the
+    /// call returns the id for the floor-minded. Up to two actions
+    /// (the platform floor); the cancel label is required (no
+    /// binding invents a default). One alert may be live per
+    /// process; show the next from the handler.
+    public ulong ShowAlert(
+        string title = "", string message = "",
+        string? action0 = null, string? action1 = null,
+        string? cancel = null, Action<Tx, uint>? onResult = null,
+        ulong window = 0)
+    {
+        if (action1 != null && action0 == null)
+            throw new ArgumentException(
+                "kaya: action1 without action0 — actions fill in order");
+        if (string.IsNullOrEmpty(cancel))
+            throw new ArgumentException(
+                "kaya: the cancel slot always exists and needs a name — pass cancel:");
+        uint actions = action0 == null ? 0u : (action1 == null ? 1u : 2u);
+        ulong id = ++App.nextAlert;
+        if (onResult != null)
+            App.alerts[id] = onResult;
+        Records.Add(KayaWire.TxShowAlert(
+            window, id, actions, title, message,
+            action0 ?? "", action1 ?? "", cancel));
+        return id;
     }
 
     /// Close and forget an auxiliary window — also the veto grammar's

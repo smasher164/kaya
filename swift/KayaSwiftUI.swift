@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xecc906b893ee37ae
+let kayaSpecHash: UInt64 = 0x4da364d017f52b15
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -35,6 +35,9 @@ private let applyCommand: UInt16 = 7
 private let applySetWindowProp: UInt16 = 8
 private let applyCreateWindow: UInt16 = 9
 private let applyDestroyWindow: UInt16 = 10
+private let applyPresentAlert: UInt16 = 11
+/// The alert_choice cancel sentinel (deliberately not an index).
+private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
 /// Window properties (their own namespace — windows are not widgets;
 /// window 0 is the primary surface).
@@ -188,13 +191,58 @@ var kayaDismissWindow: ((UInt64) -> Void)?
 /// (a batch can apply before the first view appears): drained by
 /// KayaRoot's onAppear.
 var kayaPendingOpens: [UInt64] = []
+
+/// Present an auxiliary surface AT-LEAST-ONCE: under parallel suite
+/// load openWindow(value:) can be silently dropped (the scene request
+/// never presents — panels-java flaked exactly here, ~half of loaded
+/// runs), and a value-identified WindowGroup is unique per value, so
+/// re-requesting is idempotent: a duplicate focuses the one window, a
+/// dropped first request is repaired by the retry. Bounded backoff;
+/// registration (kayaNSWindows) is the delivered signal.
+func kayaEnsureOpen(_ wid: UInt64, _ open: @escaping (UInt64) -> Void, attempt: Int = 0) {
+    open(wid)
+    #if os(macOS)
+        let delays: [Double] = [0.3, 0.8, 1.5]
+        guard attempt < delays.count else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt]) {
+            if kayaNSWindows[wid] == nil, kayaScene.windows[wid] != nil,
+                !kayaTearingDown.contains(wid)
+            {
+                kayaEnsureOpen(wid, open, attempt: attempt + 1)
+            }
+        }
+    #endif
+}
+
+/// The live modal alert (one per process): the request's identity for
+/// the runner's reads and the emit; the platform dialog rides beside
+/// it per-OS. Cleared when the one result fires.
+struct KayaLiveAlert {
+    let id: UInt64
+    let window: UInt64
+    let actions: Int
+}
+var kayaLiveAlert: KayaLiveAlert?
+#if !os(macOS)
+    var kayaLiveAlertController: UIAlertController?
+    /// UIKit exposes no public button-press for UIAlertController, so
+    /// alert_choose drives the REAL dismissal and then the SAME
+    /// closure the pressed action would run (stored here at build).
+    var kayaAlertAnswers: [String: () -> Void] = [:]
+#endif
 /// App-initiated teardown (destroy_window) bypasses the chrome-close
 /// grammar: dismissWindow re-enters windowShouldClose, and without
 /// this a veto window would emit a second close_requested for its
 /// own confirmed destruction.
 var kayaTearingDown: Set<UInt64> = []
 #if os(macOS)
+    var kayaLiveNSAlert: NSAlert?
     var kayaNSWindows: [UInt64: NSWindow] = [:]
+    /// Parked waiters for window materialization, keyed by surface id
+    /// (main-thread state like the registry): registration signals
+    /// them, so an awaiting runner wakes ON the event rather than
+    /// polling — the deadline below is only the failure bound.
+    var kayaWindowWaiters: [UInt64: [DispatchSemaphore]] = [:]
     var kayaWindowDelegates: [UInt64: KayaWindowDelegate] = [:]
 
     /// Registers the hosting NSWindow for a surface id and installs
@@ -218,6 +266,12 @@ var kayaTearingDown: Set<UInt64> = []
             guard let window = view.window else { return }
             if kayaNSWindows[windowId] !== window {
                 kayaNSWindows[windowId] = window
+                // Wake anyone parked on this surface's materialization
+                // (kayaAwaitWindow): the wait is event-driven — this
+                // signal IS the event.
+                for waiter in kayaWindowWaiters.removeValue(forKey: windowId) ?? [] {
+                    waiter.signal()
+                }
                 let proxy = KayaWindowDelegate(
                     windowId: windowId, original: window.delegate)
                 kayaWindowDelegates[windowId] = proxy
@@ -293,6 +347,10 @@ enum KayaHost {
 
     static func emitWindowClosed(_ window: UInt64) {
         api.emit_window_closed(window)
+    }
+
+    static func emitAlertResult(_ alert: UInt64, _ choice: UInt32) {
+        api.emit_alert_result(alert, choice)
     }
 
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
@@ -472,6 +530,85 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaWindowDelegates.removeValue(forKey: wid)
                 #endif
                 kayaScene.windows.removeValue(forKey: wid)
+            case applyPresentAlert:
+                // The platform's REAL modal dialog (NSAlert sheet /
+                // UIAlertController), answered exactly once through
+                // kaya_emit_alert_result — an action index or the
+                // cancel sentinel (every native dismissal path).
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let aid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let actions = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self))
+                var at = body + 24
+                func nextStr() -> String {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                    let bytes = raw[(at + 8)..<(at + 8 + len)]
+                    at += 8 + len
+                    if at % 8 != 0 { at += 8 - at % 8 }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                let title = nextStr()
+                let message = nextStr()
+                let action0 = nextStr()
+                let action1 = nextStr()
+                let cancel = nextStr()
+                kayaLiveAlert = KayaLiveAlert(id: aid, window: wid, actions: actions)
+                #if os(macOS)
+                    let alert = NSAlert()
+                    alert.messageText = title
+                    alert.informativeText = message
+                    if actions >= 1 { alert.addButton(withTitle: action0) }
+                    if actions == 2 { alert.addButton(withTitle: action1) }
+                    // The cancel slot is always last and owns Esc —
+                    // NSAlert keys Esc off the TITLE "Cancel" only,
+                    // and the label is the guest's to choose.
+                    let cancelButton = alert.addButton(withTitle: cancel)
+                    cancelButton.keyEquivalent = "\u{1b}"
+                    kayaLiveNSAlert = alert
+                    guard let host = kayaNSWindows[wid] else {
+                        fatalError(
+                            "kaya: present_alert over window \(wid) before its NSWindow materialized")
+                    }
+                    alert.beginSheetModal(for: host) { response in
+                        let first = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+                        let index = response.rawValue - first
+                        let choice =
+                            index >= 0 && index < actions
+                            ? UInt32(index) : kayaAlertChoiceCancel
+                        kayaLiveAlert = nil
+                        kayaLiveNSAlert = nil
+                        KayaHost.emitAlertResult(aid, choice)
+                    }
+                #else
+                    let alert = UIAlertController(
+                        title: title, message: message, preferredStyle: .alert)
+                    func answer(_ choice: UInt32) {
+                        kayaLiveAlert = nil
+                        kayaLiveAlertController = nil
+                        kayaAlertAnswers = [:]
+                        KayaHost.emitAlertResult(aid, choice)
+                    }
+                    kayaAlertAnswers = [:]
+                    if actions >= 1 {
+                        alert.addAction(
+                            UIAlertAction(title: action0, style: .default) { _ in answer(0) })
+                        kayaAlertAnswers["0"] = { answer(0) }
+                    }
+                    if actions == 2 {
+                        alert.addAction(
+                            UIAlertAction(title: action1, style: .default) { _ in answer(1) })
+                        kayaAlertAnswers["1"] = { answer(1) }
+                    }
+                    alert.addAction(
+                        UIAlertAction(title: cancel, style: .cancel) { _ in
+                            answer(kayaAlertChoiceCancel)
+                        })
+                    kayaAlertAnswers["cancel"] = { answer(kayaAlertChoiceCancel) }
+                    kayaLiveAlertController = alert
+                    let scenes = UIApplication.shared.connectedScenes
+                    let ws = scenes.compactMap { $0 as? UIWindowScene }.first
+                    ws?.windows.first?.rootViewController?
+                        .present(alert, animated: false)
+                #endif
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 // prop (u32), u32 pad, then the value (type, len, bytes).
@@ -536,7 +673,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // for the stash drain.
                 if wid != 0 {
                     if let open = kayaOpenWindow {
-                        open(wid)
+                        kayaEnsureOpen(wid, open)
                     } else {
                         kayaPendingOpens.append(wid)
                     }
@@ -636,6 +773,27 @@ func kayaWindowTarget(_ parts: [Substring]) -> (UInt64, Bool, [Substring]) {
     /// The registered NSWindow for a surface id (the accessor fills
     /// the table); the primary falls back to the first app window
     /// for pre-registration reads.
+    /// Await a surface's REAL NSWindow: materialization is async (the
+    /// aux WindowGroup presents on SwiftUI's schedule, and under
+    /// 8-wide suite load a slow-booting guest's aux window can lag
+    /// the script by seconds — panels-java flaked exactly here). The
+    /// wait is EVENT-DRIVEN, never a poll: the runner parks on a
+    /// semaphore that window registration signals, so the wake is
+    /// guaranteed to occur the moment the window exists; the deadline
+    /// is only the failure bound (a window that never materializes
+    /// must fail the leg, not hang it).
+    func kayaAwaitWindow(_ id: UInt64, timeoutMs: Int = 5000) -> NSWindow? {
+        let waiter = DispatchSemaphore(value: 0)
+        let immediate = DispatchQueue.main.sync { () -> NSWindow? in
+            if let window = kayaNSWindows[id] { return window }
+            kayaWindowWaiters[id, default: []].append(waiter)
+            return nil
+        }
+        if let immediate { return immediate }
+        _ = waiter.wait(timeout: .now() + .milliseconds(timeoutMs))
+        return DispatchQueue.main.sync { kayaNSWindows[id] }
+    }
+
     func kayaTitleWindow(_ id: UInt64) -> NSWindow? {
         kayaNSWindows[id] ?? (id == 0 ? NSApp.windows.first : nil)
     }
@@ -814,11 +972,15 @@ private func kayaRunScript(_ script: String) {
                 let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
                 let want = kayaQuoted(rest)
                 let prefix = explicit ? "window#\(wid) " : ""
+                #if os(macOS)
+                    // Await the REAL window first (materialization is
+                    // async; see kayaAwaitWindow) — then read its
+                    // title bar only; the model fallback is for the
+                    // primary's pre-registration reads.
+                    if explicit { _ = kayaAwaitWindow(wid) }
+                #endif
                 let got = DispatchQueue.main.sync { () -> String in
                     #if os(macOS)
-                        // The REAL title bar only; the model fallback
-                        // is for the primary's pre-registration reads
-                        // — an aux with no native window must fail.
                         if let window = kayaTitleWindow(wid) {
                             return window.title
                         }
@@ -842,6 +1004,9 @@ private func kayaRunScript(_ script: String) {
                 let dims = rest[0].split(separator: "x")
                 let wantW = Double(dims[0]) ?? -1
                 let wantH = Double(dims[1]) ?? -1
+                #if os(macOS)
+                    if explicit { _ = kayaAwaitWindow(wid) }
+                #endif
                 let got = DispatchQueue.main.sync { () -> CGSize in
                     #if os(macOS)
                         guard let window = kayaTitleWindow(wid) else { return .zero }
@@ -868,11 +1033,12 @@ private func kayaRunScript(_ script: String) {
                     failures.append("close_window wants an explicit window#N")
                     break
                 }
-                DispatchQueue.main.sync {
-                    #if os(macOS)
-                        kayaNSWindows[wid]?.performClose(nil)
-                    #endif
-                }
+                #if os(macOS)
+                    let target = kayaAwaitWindow(wid)
+                    DispatchQueue.main.sync {
+                        target?.performClose(nil)
+                    }
+                #endif
             case "expect_windows":
                 let want = Int(parts[1]) ?? -1
                 let got = DispatchQueue.main.sync { kayaScene.windows.count }
@@ -880,6 +1046,73 @@ private func kayaRunScript(_ script: String) {
                     observed.append("windows \(want)")
                 } else {
                     failures.append("windows \(got), wanted \(want)")
+                }
+            case "expect_alert":
+                // The REAL presented dialog's title (NSAlert's
+                // messageText / the UIAlertController's title), never
+                // the request's copy — a backend that materialized
+                // nothing must fail here.
+                let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                let want = kayaQuoted(rest)
+                let prefix = explicit ? "window#\(wid) " : ""
+                let got = DispatchQueue.main.sync { () -> String? in
+                    guard let live = kayaLiveAlert, live.window == wid else { return nil }
+                    #if os(macOS)
+                        return kayaLiveNSAlert?.messageText
+                    #else
+                        return kayaLiveAlertController?.title ?? ""
+                    #endif
+                }
+                if let got, got == want {
+                    observed.append("\(prefix)alert \"\(want)\"")
+                } else if let got {
+                    failures.append("\(prefix)alert \"\(got)\", wanted \"\(want)\"")
+                } else {
+                    failures.append("\(prefix)no alert live, wanted \"\(want)\"")
+                }
+            case "alert_choose":
+                // Drive the REAL answer path: on macOS press the
+                // native button (performClick — Esc and click share
+                // it); on iOS the real dismissal plus the SAME
+                // closure the pressed action runs (UIKit exposes no
+                // public press). Silent, like click.
+                let arg = parts.count > 1 ? String(parts[1]) : ""
+                DispatchQueue.main.sync {
+                    guard let live = kayaLiveAlert else { return }
+                    #if os(macOS)
+                        guard let alert = kayaLiveNSAlert else { return }
+                        let buttons = alert.buttons
+                        var index = -1
+                        if arg == "0", live.actions >= 1 { index = 0 }
+                        if arg == "1", live.actions >= 2 { index = 1 }
+                        if arg == "cancel" { index = buttons.count - 1 }
+                        if index >= 0, index < buttons.count {
+                            buttons[index].performClick(nil)
+                        }
+                    #else
+                        if let alert = kayaLiveAlertController,
+                            let answer = kayaAlertAnswers[arg]
+                        {
+                            alert.dismiss(animated: false, completion: answer)
+                        }
+                    #endif
+                }
+            case "expect_alerts":
+                // The REAL screen truth on macOS: an attached sheet
+                // counts even if bookkeeping already cleared.
+                let want = Int(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync { () -> Int in
+                    #if os(macOS)
+                        let sheets = kayaNSWindows.values.filter { $0.attachedSheet != nil }
+                        return max(kayaLiveAlert == nil ? 0 : 1, sheets.count)
+                    #else
+                        return kayaLiveAlert == nil ? 0 : 1
+                    #endif
+                }
+                if got == want {
+                    observed.append("alerts \(want)")
+                } else {
+                    failures.append("alerts \(got), wanted \(want)")
                 }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it
@@ -1662,7 +1895,7 @@ struct KayaRoot: View {
             kayaOpenWindow = { openWindow(value: $0) }
             kayaDismissWindow = { dismissWindow(value: $0) }
             for id in kayaPendingOpens {
-                openWindow(value: id)
+                kayaEnsureOpen(id) { openWindow(value: $0) }
             }
             kayaPendingOpens.removeAll()
             kayaPlaceWindow()

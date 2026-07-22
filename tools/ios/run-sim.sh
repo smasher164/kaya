@@ -634,6 +634,21 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle layoutswift dev.kaya.layoutswift "$BUNDLES/layoutswift-bin")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on layout-swift "$APP" dev.kaya.layoutswift layout-swift layout layout
+
+    # The confirm scene: alerts are phone-native — UIAlertController
+    # is this host's REAL modal, and its cancel action IS the slot.
+    cp guests/swift/confirm.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/confirmswift-bin"
+    APP=$(make_bundle confirmswift dev.kaya.confirmswift "$BUNDLES/confirmswift-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on confirm-swift "$APP" dev.kaya.confirmswift confirm-swift confirm confirm
     drain
     timing swift-build+legs
 fi
@@ -695,6 +710,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle layoutrs-swiftui dev.kaya.layoutswiftui "$TARGET_DIR/examples/layout")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on layout-swiftui "$APP" dev.kaya.layoutswiftui layout-swiftui layout layout
+
+    # The confirm scene: alerts are phone-native (see the swift leg).
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example confirm
+    APP=$(make_bundle confirmrs-swiftui dev.kaya.confirmswiftui "$TARGET_DIR/examples/confirm")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on confirm-swiftui "$APP" dev.kaya.confirmswiftui confirm-swiftui confirm confirm
     drain
     timing swiftui-build+legs
 fi

@@ -59,6 +59,9 @@ public final class Main {
             case "panels":
                 app = Panels::app;
                 break;
+            case "confirm":
+                app = Confirm::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

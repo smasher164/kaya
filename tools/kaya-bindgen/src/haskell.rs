@@ -69,7 +69,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {
-            let ident = format!("{}{}", e.name, pascal(name));
+            // camel the enum name too: a two-word enum (alert_choice)
+            // must not leak a snake half into the identifier.
+            let ident = format!("{}{}", camel(e.name), pascal(name));
             c.line(&format!("{ident} :: Word32"));
             c.line(&format!("{ident} = {value}"));
         }
@@ -231,9 +233,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
     c.line("      -- Window lifecycle records carry the window id alone.");
-    c.line("      if kind == occKindCloseRequested || kind == occKindWindowClosed");
-    c.line("        then return (Just (kind, ident, [], Nothing))");
-    c.line("        else do");
+    c.line("      if kind == occKindAlertResult");
+    c.line("        then do");
+    c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
+    c.line("          choice <- peekByteOff rec 16 :: IO Word32");
+    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))");
+    c.line("        else if kind == occKindCloseRequested || kind == occKindWindowClosed");
+    c.line("          then return (Just (kind, ident, [], Nothing))");
+    c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
     c.line("          let go at 0 acc = return (reverse acc, at)");
     c.line("              go at n acc = do");

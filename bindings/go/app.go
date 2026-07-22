@@ -79,7 +79,7 @@ func assertRoot(c Collection) {
 }
 
 type counters struct {
-	signal, widget, collection, node uint64
+	signal, widget, collection, node, alert uint64
 }
 
 // Entry is one key/value pair of a collection instance, in insertion
@@ -110,6 +110,7 @@ type App struct {
 	// Window lifecycle: one handler each, receiving the window id.
 	closeRequested func(*Tx, uint64)
 	windowClosed   func(*Tx, uint64)
+	alerts         map[uint64]func(*Tx, uint32)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
@@ -143,6 +144,7 @@ func NewApp() *App {
 	Init()
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
+		alerts:         make(map[uint64]func(*Tx, uint32)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
@@ -387,6 +389,8 @@ func (a *App) OnCloseRequested(fn func(*Tx, uint64)) {
 func (a *App) OnWindowClosed(fn func(*Tx, uint64)) {
 	a.windowClosed = fn
 }
+
+
 
 func (a *App) dispatch(fn func(*Tx)) {
 	defer func() {
@@ -903,6 +907,98 @@ func (tx *Tx) MountIn(window uint64, root Widget) {
 	tx.records = append(tx.records, TxMount(window, root.id))
 }
 
+// ShowAlert requests a modal alert (the request/result grammar): a
+// chain that ends in Show, which sends the one atomic record —
+// tx.ShowAlert().Title("delete item?").Message("…").Action("Delete").
+// Action("Archive").Cancel("Keep").OnResult(func(tx *Tx, choice
+// uint32) { … }).Show(). The result handler rides the REQUEST (the
+// widget-handler precedent) and retires with its one answer; ids are
+// binding-allocated, like widget ids. Up to two actions (the
+// platform floor); the cancel label is required and explicit (no
+// binding invents a default). One alert may be live per process;
+// show the next from the handler.
+func (tx *Tx) ShowAlert() AlertRef {
+	tx.app.c.alert++
+	return AlertRef{tx: tx, id: tx.app.c.alert}
+}
+
+// AlertRef accumulates the one atomic SHOW_ALERT record; nothing is
+// sent until Show (a request has a send moment, unlike a window
+// declaration).
+type AlertRef struct {
+	tx       *Tx
+	id       uint64
+	window   uint64
+	title    string
+	message  string
+	actions  []string
+	cancel   string
+	onResult func(*Tx, uint32)
+}
+
+// InWindow presents over this window instead of the primary.
+func (r AlertRef) InWindow(window uint64) AlertRef {
+	r.window = window
+	return r
+}
+
+func (r AlertRef) Title(title string) AlertRef {
+	r.title = title
+	return r
+}
+
+func (r AlertRef) Message(message string) AlertRef {
+	r.message = message
+	return r
+}
+
+// Action adds an action button (at most two — the platform floor;
+// the third panics at construction, matching the scene gate).
+func (r AlertRef) Action(label string) AlertRef {
+	if len(r.actions) >= 2 {
+		panic("kaya: an alert carries at most 2 actions (the platform floor)")
+	}
+	r.actions = append(r.actions, label)
+	return r
+}
+
+// Cancel names the always-present cancel slot. Required.
+func (r AlertRef) Cancel(label string) AlertRef {
+	r.cancel = label
+	return r
+}
+
+// OnResult binds the one-shot result handler to THIS request: choice
+// is an action index (0 or 1) or AlertChoiceCancel — every
+// platform-native dismissal. The registration retires with the
+// result.
+func (r AlertRef) OnResult(fn func(*Tx, uint32)) AlertRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id; the one answer arrives
+// at the OnResult handler.
+func (r AlertRef) Show() uint64 {
+	if r.cancel == "" {
+		panic("kaya: the cancel slot always exists and needs a name — call Cancel(label) before Show()")
+	}
+	if r.onResult != nil {
+		r.tx.app.alerts[r.id] = r.onResult
+	}
+	action0, action1 := "", ""
+	if len(r.actions) >= 1 {
+		action0 = r.actions[0]
+	}
+	if len(r.actions) == 2 {
+		action1 = r.actions[1]
+	}
+	r.tx.records = append(r.tx.records, TxShowAlert(
+		r.window, r.id, uint32(len(r.actions)),
+		r.title, r.message, action0, action1, r.cancel))
+	return r.id
+}
+
 // WindowRef chains window props, the construction-sugar tier.
 type WindowRef struct {
 	tx *Tx
@@ -1079,6 +1175,7 @@ func (a *App) Run() int {
 			text, _ := payload.(string)
 			checked, _ := payload.(bool)
 			value, _ := payload.(float64)
+			choice, _ := payload.(uint32)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -1115,6 +1212,12 @@ func (a *App) Run() int {
 			case kind == occWindowClosed:
 				if fn := a.windowClosed; fn != nil {
 					a.dispatch(func(tx *Tx) { fn(tx, id) })
+				}
+			case kind == occAlertResult:
+				// One-shot: the registration retires with the result.
+				if fn := a.alerts[id]; fn != nil {
+					delete(a.alerts, id)
+					a.dispatch(func(tx *Tx) { fn(tx, choice) })
 				}
 			}
 		}

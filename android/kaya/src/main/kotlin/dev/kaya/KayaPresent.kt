@@ -27,6 +27,11 @@ object KayaPresent {
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
+    /** The alert's one answer: an action index, or the cancel
+     * sentinel (Int -1 — the wire u32's java-int spelling) for every
+     * native dismissal. kaya_emit_alert_result's JNI spelling. */
+    @JvmStatic external fun emitAlertResult(alert: Long, choice: Int)
+
     /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —

@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -551,6 +551,25 @@ run panels-ocaml-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/l
 run panels-haskell-swiftui env KAYA_SELFTEST=panels "$(hs_bin panels)"
 run panels-swift-swiftui env KAYA_SELFTEST=panels target/swift-guests/panels
 run panels-java-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The confirm scene: the modal-alert grammar — the REAL platform
+# dialog materialized, all three answer paths (action 0, action 1,
+# the cancel slot) driven through the native press, the id retired
+# between rounds. Desktop AND phone: alerts are the first
+# presentation context every host has natively.
+KAYA_SELFTEST_SCRIPT="$(scene_script confirm)"
+export KAYA_SELFTEST_SCRIPT
+run confirm-rust-swiftui env KAYA_SELFTEST=confirm target/debug/examples/confirm
+run confirm-python-swiftui env KAYA_SELFTEST=confirm python3 guests/python/confirm.py
+run confirm-go-swiftui env KAYA_SELFTEST=confirm target/go-guests/confirm
+run confirm-csharp-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run confirm-ocaml-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/confirm.exe
+run confirm-haskell-swiftui env KAYA_SELFTEST=confirm "$(hs_bin confirm)"
+run confirm-swift-swiftui env KAYA_SELFTEST=confirm target/swift-guests/confirm
+run confirm-java-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xecc906b893ee37ae;
+    public const ulong SpecHash = 0x4da364d017f52b15;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -40,6 +40,9 @@ static class KayaWire
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
     public const uint WpropVetoClose = 4;
+    public const uint AlertChoiceAction0 = 0;
+    public const uint AlertChoiceAction1 = 1;
+    public const uint AlertChoiceCancel = 4294967295;
     public const uint AlignStart = 0;
     public const uint AlignCenter = 1;
     public const uint AlignEnd = 2;
@@ -75,6 +78,7 @@ static class KayaWire
     public const ushort TxKindSetWindowProp = 18;
     public const ushort TxKindCreateWindow = 19;
     public const ushort TxKindDestroyWindow = 20;
+    public const ushort TxKindShowAlert = 21;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -85,12 +89,14 @@ static class KayaWire
     public const ushort ApplyKindSetWindowProp = 8;
     public const ushort ApplyKindCreateWindow = 9;
     public const ushort ApplyKindDestroyWindow = 10;
+    public const ushort ApplyKindPresentAlert = 11;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
     public const ushort OccKindValueChanged = 4;
     public const ushort OccKindCloseRequested = 5;
     public const ushort OccKindWindowClosed = 6;
+    public const ushort OccKindAlertResult = 7;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -351,6 +357,22 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(windowId);
         return Finish(stream, w, TxKindDestroyWindow);
+    }
+
+    /// Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
+    public static byte[] TxShowAlert(ulong window, ulong alert, uint actions, object title, object message, object action0, object action1, object cancel)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(alert);
+        w.Write(actions);
+        w.Write(0u);
+        EncodeValue(w, title);
+        EncodeValue(w, message);
+        EncodeValue(w, action0);
+        EncodeValue(w, action1);
+        EncodeValue(w, cancel);
+        return Finish(stream, w, TxKindShowAlert);
     }
 
     /// set_property with a constant text value.
@@ -657,10 +679,16 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         // Window lifecycle records carry the window id alone.
+        if (kind == OccKindAlertResult)
+        {
+            // The alert's one answer: id + u32 choice (AlertChoice*).
+            payload = BitConverter.ToUInt32(rec, 16);
+            return true;
+        }
         if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)
             return true;
         uint pathLen = BitConverter.ToUInt32(rec, 16);

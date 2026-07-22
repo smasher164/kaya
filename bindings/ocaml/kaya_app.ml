@@ -61,6 +61,8 @@ type app = {
   widget_values : (int64, float -> tx -> unit) Hashtbl.t;
   (* Window lifecycle: one handler each, receiving the window id. *)
   mutable close_requested : (int64 -> tx -> unit) option;
+  alert_handlers : (int64, int -> tx -> unit) Hashtbl.t;
+  mutable next_alert : int64;
   mutable window_closed : (int64 -> tx -> unit) option;
   node_toggles : (int64, Kaya_wire.value list -> bool -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
@@ -113,6 +115,8 @@ let create () =
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
     close_requested = None;
+    alert_handlers = Hashtbl.create 8;
+    next_alert = 0L;
     window_closed = None;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
@@ -727,6 +731,41 @@ let destroy_window id tx = emit tx (Kaya_wire.tx_destroy_window id)
 (* Mount a root into a specific window; mounting presents. *)
 let mount_in window (Widget root) tx = emit tx (Kaya_wire.tx_mount window root)
 
+(* Request a modal alert (the request/result grammar); labeled
+   arguments are the OCaml spelling:
+   [show_alert ~title ~message ~actions:["Delete"; "Archive"]
+      ~cancel:"Keep" ~on_result:(fun choice tx -> ...) tx]. The
+   result handler rides the REQUEST (the widget-handler precedent)
+   and retires with its one answer — choice is an action index (0 or
+   1) or [alert_cancel], every platform-native dismissal. Ids are
+   binding-allocated; the call returns the id for the floor-minded.
+   At most two actions (the platform floor); [~cancel] is required
+   by the signature — the slot every platform-native dismissal (Esc,
+   back, outside tap) resolves to, and no binding invents a default
+   label. One alert may be live per process; show the next from the
+   handler. *)
+let show_alert ?(window = 0L) ?(title = "") ?(message = "")
+    ?(actions = []) ~cancel ?on_result tx =
+  if List.length actions > 2 then
+    invalid_arg "kaya: an alert carries at most 2 actions (the platform floor)";
+  if cancel = "" then
+    invalid_arg "kaya: the cancel slot always exists and needs a name";
+  let app = tx.app in
+  app.next_alert <- Int64.add app.next_alert 1L;
+  let id = app.next_alert in
+  Option.iter (fun f -> Hashtbl.replace app.alert_handlers id f) on_result;
+  let nth i = match List.nth_opt actions i with Some a -> a | None -> "" in
+  emit tx
+    (Kaya_wire.tx_show_alert window id (List.length actions)
+       (Kaya_wire.Str title) (Kaya_wire.Str message)
+       (Kaya_wire.Str (nth 0)) (Kaya_wire.Str (nth 1))
+       (Kaya_wire.Str cancel));
+  id
+
+(* The alert_choice cancel sentinel, for handlers: the wire u32
+   0xFFFFFFFF as an OCaml int32 (-1l). Deliberately not an index. *)
+let alert_cancel = Kaya_wire.alert_choice_cancel
+
 (* The veto class: the user asked a veto_close window to close;
    nothing has closed — answer with [destroy_window] to agree. *)
 let on_close_requested app handler = app.close_requested <- Some handler
@@ -1101,6 +1140,13 @@ let dispatch_loop app =
            (match app.window_closed with
            | Some handler -> dispatch app (handler id)
            | None -> ())
+         else if kind = Kaya_wire.occ_kind_alert_result then
+           (* One-shot: the registration retires with the result. *)
+           (match (Hashtbl.find_opt app.alert_handlers id, payload) with
+           | Some handler, Some (Kaya_wire.I64 c) ->
+               Hashtbl.remove app.alert_handlers id;
+               dispatch app (handler (Int64.to_int c))
+           | _ -> ())
          else
            match keys with
            | [] ->

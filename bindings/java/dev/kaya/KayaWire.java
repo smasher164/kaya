@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xecc906b893ee37aeL;
+    public static final long SPEC_HASH = 0x4da364d017f52b15L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -41,6 +41,9 @@ public final class KayaWire {
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
     public static final int WPROP_VETO_CLOSE = 4;
+    public static final int ALERT_CHOICE_ACTION0 = 0;
+    public static final int ALERT_CHOICE_ACTION1 = 1;
+    public static final int ALERT_CHOICE_CANCEL = -1;
     public static final int ALIGN_START = 0;
     public static final int ALIGN_CENTER = 1;
     public static final int ALIGN_END = 2;
@@ -76,6 +79,7 @@ public final class KayaWire {
     public static final short TX_KIND_SET_WINDOW_PROP = 18;
     public static final short TX_KIND_CREATE_WINDOW = 19;
     public static final short TX_KIND_DESTROY_WINDOW = 20;
+    public static final short TX_KIND_SHOW_ALERT = 21;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -86,12 +90,14 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_WINDOW_PROP = 8;
     public static final short APPLY_KIND_CREATE_WINDOW = 9;
     public static final short APPLY_KIND_DESTROY_WINDOW = 10;
+    public static final short APPLY_KIND_PRESENT_ALERT = 11;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
     public static final short OCC_KIND_VALUE_CHANGED = 4;
     public static final short OCC_KIND_CLOSE_REQUESTED = 5;
     public static final short OCC_KIND_WINDOW_CLOSED = 6;
+    public static final short OCC_KIND_ALERT_RESULT = 7;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -313,6 +319,21 @@ public final class KayaWire {
     public static byte[] txDestroyWindow(long windowId) {
         ByteBuffer b = begin(TX_KIND_DESTROY_WINDOW);
         b.putLong(windowId);
+        return finish(b);
+    }
+
+    /** Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. */
+    public static byte[] txShowAlert(long window, long alert, int actions, Object title, Object message, Object action0, Object action1, Object cancel) {
+        ByteBuffer b = begin(TX_KIND_SHOW_ALERT);
+        b.putLong(window);
+        b.putLong(alert);
+        b.putInt(actions);
+        b.putInt(0);
+        encodeValue(b, title);
+        encodeValue(b, message);
+        encodeValue(b, action0);
+        encodeValue(b, action1);
+        encodeValue(b, cancel);
         return finish(b);
     }
 
@@ -621,11 +642,16 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT) {
             return null;
         }
         long id = b.getLong(8);
         // Window lifecycle records carry the window id alone.
+        if (kind == OCC_KIND_ALERT_RESULT) {
+            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*,
+            // the cancel sentinel being -1 in java-int terms).
+            return new Occ(kind, id, java.util.List.of(), b.getInt(16));
+        }
         if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {
             return new Occ(kind, id, java.util.List.of(), null);
         }

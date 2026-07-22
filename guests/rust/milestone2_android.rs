@@ -39,6 +39,8 @@ mod layout;
 mod align;
 #[path = "grow.rs"]
 mod grow;
+#[path = "confirm.rs"]
+mod confirm;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -54,6 +56,8 @@ fn app(ctx: kaya::AppCtx) {
         Ok("layout") => layout::app(ctx),
         Ok("align") => align::app(ctx),
         Ok("grow") => grow::app(ctx),
+        // Alerts are phone-native; confirm runs here for real.
+        Ok("confirm") => confirm::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

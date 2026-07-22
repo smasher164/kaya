@@ -60,6 +60,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "align" => Some(include_str!("../../../tools/scenes/align.steps")),
         "window" => Some(include_str!("../../../tools/scenes/window.steps")),
         "panels" => Some(include_str!("../../../tools/scenes/panels.steps")),
+        "confirm" => Some(include_str!("../../../tools/scenes/confirm.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -159,6 +160,16 @@ pub enum Step {
     CloseWindow(u64),
     /// The number of live surfaces (primary included).
     ExpectWindows(usize),
+    /// Expect a live modal alert (over the target window; None = the
+    /// primary) whose REAL presented title matches — read from the
+    /// platform dialog, never the request's copy.
+    ExpectAlert(Option<u64>, String),
+    /// Drive the live alert's REAL answer path: press the action
+    /// button (0 or 1) or fire the platform's dismissal (the cancel
+    /// slot). An action, silent like click and close_window.
+    AlertChoose(u32),
+    /// The number of live alerts (0 or 1 — one per process).
+    ExpectAlerts(usize),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -252,6 +263,18 @@ pub trait Stage: Send + 'static {
     fn close_window(&self, window: u64);
     /// The number of live surfaces, primary included.
     fn window_count(&self) -> usize;
+    /// The REAL presented title of the live alert over the window, or
+    /// None when no alert is live there — read from the platform
+    /// dialog (NSAlert's messageText, ContentDialog's Title, ...),
+    /// never the request's copy. No default: a backend that forgets
+    /// it must fail to compile.
+    fn alert_title(&self, window: u64) -> Option<String>;
+    /// Drive the live alert's REAL answer path: activate the action
+    /// button (choice 0 or 1) or the cancel slot (the sentinel) the
+    /// way the platform's own dismissal would. No default.
+    fn choose_alert(&self, choice: u32);
+    /// The number of live alerts (0 or 1). No default.
+    fn alert_count(&self) -> usize;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -380,6 +403,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_windows wants a count: {line:?}")
                 })?;
                 Step::ExpectWindows(n)
+            }
+            "expect_alert" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectAlert(window, parse_string(rest)?)
+            }
+            "alert_choose" => {
+                let choice = match rest.trim() {
+                    "0" => 0,
+                    "1" => 1,
+                    "cancel" => u32::MAX,
+                    other => {
+                        return Err(format!(
+                            "alert_choose wants 0, 1, or cancel, got {other:?}: {line:?}"
+                        ))
+                    }
+                };
+                Step::AlertChoose(choice)
+            }
+            "expect_alerts" => {
+                let n = rest.trim().parse::<usize>().map_err(|_| {
+                    format!("expect_alerts wants a count: {line:?}")
+                })?;
+                Step::ExpectAlerts(n)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -666,6 +712,39 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("windows {got}, wanted {n}"));
                 }
             }
+            Step::ExpectAlert(window, want) => {
+                // The REAL presented title, never the request's copy —
+                // a backend that materialized nothing must fail here.
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                match stage.alert_title(id) {
+                    Some(got) if got == *want => {
+                        observed.push(format!("{prefix}alert {want:?}"));
+                    }
+                    Some(got) => {
+                        failures.push(format!("{prefix}alert {got:?}, wanted {want:?}"));
+                    }
+                    None => {
+                        failures.push(format!("{prefix}no alert live, wanted {want:?}"));
+                    }
+                }
+            }
+            Step::AlertChoose(choice) => {
+                // An action, silent like click: the observable is the
+                // guest's reaction to the result.
+                stage.choose_alert(*choice);
+            }
+            Step::ExpectAlerts(n) => {
+                let got = stage.alert_count();
+                if got == *n {
+                    observed.push(format!("alerts {n}"));
+                } else {
+                    failures.push(format!("alerts {got}, wanted {n}"));
+                }
+            }
             Step::ExpectFills(t) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     failures.push(format!("{t:?} is not a container target"));
@@ -887,6 +966,13 @@ mod tests {
         fn window_count(&self) -> usize {
             1
         }
+        fn alert_title(&self, _window: u64) -> Option<String> {
+            None
+        }
+        fn choose_alert(&self, _choice: u32) {}
+        fn alert_count(&self) -> usize {
+            0
+        }
         fn root_fills(&self) -> String {
             String::new()
         }
@@ -1026,7 +1112,14 @@ mod tests {
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
-            fn finish(&self, code: i32, verdict: &str) {
+            fn alert_title(&self, _window: u64) -> Option<String> {
+            None
+        }
+        fn choose_alert(&self, _choice: u32) {}
+        fn alert_count(&self) -> usize {
+            0
+        }
+        fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
         }
@@ -1114,7 +1207,14 @@ mod tests {
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
-            fn finish(&self, code: i32, verdict: &str) {
+            fn alert_title(&self, _window: u64) -> Option<String> {
+            None
+        }
+        fn choose_alert(&self, _choice: u32) {}
+        fn alert_count(&self) -> usize {
+            0
+        }
+        fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
         }

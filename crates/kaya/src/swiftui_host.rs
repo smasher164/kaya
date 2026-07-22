@@ -44,6 +44,9 @@ pub struct KayaHostApi {
     /// non-veto auxiliary closed natively.
     pub emit_close_requested: extern "C" fn(u64),
     pub emit_window_closed: extern "C" fn(u64),
+    /// The alert's one answer (an ALERT_CHOICE value: an action index
+    /// or the cancel sentinel). Retires the live alert id.
+    pub emit_alert_result: extern "C" fn(u64, u32),
 }
 
 unsafe extern "C" {
@@ -80,6 +83,7 @@ pub(crate) fn run() -> i32 {
         spec_hash: crate::capi::kaya_spec_hash,
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,
+        emit_alert_result: crate::capi::kaya_emit_alert_result,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

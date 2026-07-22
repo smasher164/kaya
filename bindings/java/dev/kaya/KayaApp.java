@@ -57,6 +57,9 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
     private BiConsumer<Tx, Long> closeRequested;
+    private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
+            new java.util.HashMap<>();
+    private long nextAlert;
     private BiConsumer<Tx, Long> windowClosed;
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
@@ -173,6 +176,85 @@ public final class KayaApp {
      * the same widget — only the chain methods die with it.
      */
     /** The window-prop chain, in the construction-sugar tier. */
+    /** The alert chain: accumulates the one atomic SHOW_ALERT record
+     * and sends it at show() — a request has a send moment, unlike a
+     * window declaration. A chain that never calls show() sends
+     * nothing. */
+    public static final class AlertRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private long window;
+        private String title = "";
+        private String message = "";
+        private final java.util.ArrayList<String> actions = new java.util.ArrayList<>();
+        private String cancel = "";
+        private BiConsumer<Tx, Integer> onResult;
+
+        AlertRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** Present over this window instead of the primary. */
+        public AlertRef inWindow(long window) {
+            this.window = window;
+            return this;
+        }
+
+        public AlertRef title(String title) {
+            this.title = title;
+            return this;
+        }
+
+        public AlertRef message(String message) {
+            this.message = message;
+            return this;
+        }
+
+        /** Add an action button (at most two — the platform floor). */
+        public AlertRef action(String label) {
+            if (actions.size() >= 2) {
+                throw new IllegalStateException(
+                        "kaya: an alert carries at most 2 actions (the platform floor)");
+            }
+            actions.add(label);
+            return this;
+        }
+
+        /** Name the always-present cancel slot. Required. */
+        public AlertRef cancel(String label) {
+            this.cancel = label;
+            return this;
+        }
+
+        /** Bind the one-shot result handler to THIS request. */
+        public AlertRef onResult(BiConsumer<Tx, Integer> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        /** Send the request, returning its id; the one answer arrives
+         * at the onResult handler. */
+        public long show() {
+            if (cancel.isEmpty()) {
+                throw new IllegalStateException(
+                        "kaya: the cancel slot always exists and needs a name — "
+                                + "call cancel(label) before show()");
+            }
+            String action0 = actions.size() >= 1 ? actions.get(0) : "";
+            String action1 = actions.size() == 2 ? actions.get(1) : "";
+            if (onResult != null) {
+                app.alerts.put(id, onResult);
+            }
+            tx.records.add(KayaWire.txShowAlert(
+                    window, id, actions.size(), title, message,
+                    action0, action1, cancel));
+            return id;
+        }
+    }
+
     public static final class WindowRef {
         private final Tx tx;
         private final long id;
@@ -1028,6 +1110,25 @@ public final class KayaApp {
          * Chains are the Java spelling:
          * tx.createWindow(1).title("inspector").size(480, 320).vetoClose(true).
          */
+        /**
+         * Request a modal alert (the request/result grammar), the
+         * chain spelling:
+         * tx.showAlert().title("delete item?").message("…")
+         *     .action("Delete").action("Archive").cancel("Keep")
+         *     .onResult((tx, choice) -> …).show().
+         * The result handler rides the REQUEST (the widget-handler
+         * precedent) and retires with its one answer — choice is an
+         * action index (0 or 1) or KayaWire.ALERT_CHOICE_CANCEL (-1
+         * in java-int terms), every platform-native dismissal. Ids
+         * are binding-allocated; show() returns the id. Up to two
+         * actions (the platform floor); the cancel label is required.
+         * One alert may be live per process; show the next from the
+         * handler.
+         */
+        public AlertRef showAlert() {
+            return new AlertRef(this, KayaApp.this, ++nextAlert);
+        }
+
         public WindowRef createWindow(long id) {
             records.add(KayaWire.txCreateWindow(id));
             return new WindowRef(this, id);
@@ -1527,6 +1628,13 @@ public final class KayaApp {
                 BiConsumer<Tx, Long> handler = windowClosed;
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, occ.id));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_ALERT_RESULT) {
+                // One-shot: the registration retires with the result;
+                // payload is the parsed choice (Integer).
+                BiConsumer<Tx, Integer> handler = alerts.remove(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
                 }
             }
         }

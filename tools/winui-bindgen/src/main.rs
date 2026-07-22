@@ -127,6 +127,24 @@ fn main() {
         "Windows.ApplicationModel.Core.UnhandledError".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueue".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueueHandler".to_string(),
+        // The alert vocabulary: ContentDialog's three slots ARE the
+        // shape (two actions + close). The result/button enums must
+        // be named or the properties vanish (the transitivity trap);
+        // ShowAsync's IAsyncOperation rides windows-future paths like
+        // TextBox's.
+        "Microsoft.UI.Xaml.Controls.ContentDialog".to_string(),
+        "Microsoft.UI.Xaml.Controls.ContentDialogResult".to_string(),
+        "Microsoft.UI.Xaml.Controls.ContentDialogButton".to_string(),
+        // The runner's REAL press: the open dialog lives in the popup
+        // layer (GetOpenPopupsForXamlRoot), its template buttons are
+        // found by part name, and ButtonAutomationPeer.Invoke runs
+        // the same click pipeline a user's press does.
+        "Microsoft.UI.Xaml.Media.VisualTreeHelper".to_string(),
+        "Microsoft.UI.Xaml.Controls.Primitives.Popup".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.AutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.ButtonBaseAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

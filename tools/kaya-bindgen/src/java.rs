@@ -59,11 +59,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {
+            // Java has no unsigned int: a wire u32 above i32::MAX is
+            // spelled as its two's-complement value, which is exactly
+            // what reading the wire's u32 into a java int yields — so
+            // == against the constant stays correct (the alert_choice
+            // cancel sentinel is the first such value).
             c.line(&format!(
                 "    public static final int {}_{} = {};",
                 e.name.to_uppercase(),
                 name.to_uppercase(),
-                value
+                *value as i32
             ));
         }
     }
@@ -274,6 +279,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("        long id = b.getLong(8);");
     c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if (kind == OCC_KIND_ALERT_RESULT) {");
+    c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*,");
+    c.line("            // the cancel sentinel being -1 in java-int terms).");
+    c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
+    c.line("        }");
     c.line("        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {");
     c.line("            return new Occ(kind, id, java.util.List.of(), null);");
     c.line("        }");

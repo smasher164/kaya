@@ -32,8 +32,8 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, ColumnDefinition, Grid, Image, RowDefinition, Slider, TextBlock, TextBox,
-    TextChangedEventHandler,
+    Button, CheckBox, ColumnDefinition, ContentDialog, ContentDialogButton, ContentDialogResult,
+    Grid, Image, RowDefinition, Slider, TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
@@ -120,6 +120,17 @@ struct CoreState {
     /// would swallow its own confirmed destruction (and a non-veto
     /// one would report a spurious window_closed).
     tearing_down: std::collections::HashSet<u64>,
+    /// The live modal alert (one per process): the request's identity
+    /// plus the REAL ContentDialog for the runner's reads and press.
+    /// Cleared by the ShowAsync completion — the one emit site.
+    live_alert: Option<WinLiveAlert>,
+}
+
+/// The live alert's identity and its REAL dialog object.
+struct WinLiveAlert {
+    window: u64,
+    actions: usize,
+    dialog: ContentDialog,
 }
 
 impl Drop for CoreState {
@@ -855,6 +866,90 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             core.tearing_down.remove(&window.0);
         }
+        ApplyOp::PresentAlert(spec) => {
+            // The platform's REAL modal dialog: ContentDialog's three
+            // slots ARE the vocabulary (two actions + close). The
+            // ShowAsync completion is the ONE emit site — Primary/
+            // Secondary map to action indices, everything else
+            // (Esc, the close button, Hide) completes as None = the
+            // cancel slot — routed through capi::alert_resolved, the
+            // shared retire path.
+            let host = if spec.window.0 == 0 {
+                core.window.clone()
+            } else {
+                core.aux_windows
+                    .get(&spec.window.0)
+                    .expect("scene validated the alert's window")
+                    .clone()
+            };
+            let dialog = ContentDialog::new().expect("ContentDialog::new");
+            let title = PropertyValue::CreateString(&HSTRING::from(spec.title.as_str()))
+                .expect("title box");
+            dialog.SetTitle(&title).expect("SetTitle");
+            let message = PropertyValue::CreateString(&HSTRING::from(spec.message.as_str()))
+                .expect("message box");
+            dialog.SetContent(&message).expect("SetContent");
+            if let Some(a0) = spec.actions.first() {
+                dialog
+                    .SetPrimaryButtonText(&HSTRING::from(a0.as_str()))
+                    .expect("SetPrimaryButtonText");
+            }
+            if let Some(a1) = spec.actions.get(1) {
+                dialog
+                    .SetSecondaryButtonText(&HSTRING::from(a1.as_str()))
+                    .expect("SetSecondaryButtonText");
+            }
+            dialog
+                .SetCloseButtonText(&HSTRING::from(spec.cancel.as_str()))
+                .expect("SetCloseButtonText");
+            dialog
+                .SetDefaultButton(if spec.actions.is_empty() {
+                    ContentDialogButton::Close
+                } else {
+                    ContentDialogButton::Primary
+                })
+                .expect("SetDefaultButton");
+            let xaml_root = host
+                .Content()
+                .expect("host content")
+                .XamlRoot()
+                .expect("host XamlRoot");
+            dialog.SetXamlRoot(&xaml_root).expect("SetXamlRoot");
+            let alert_id = spec.alert.0;
+            core.live_alert = Some(WinLiveAlert {
+                window: spec.window.0,
+                actions: spec.actions.len(),
+                dialog: dialog.clone(),
+            });
+            let op = dialog.ShowAsync().expect("ShowAsync");
+            op.SetCompleted(&windows_future::AsyncOperationCompletedHandler::new(
+                move |op: windows_core::Ref<'_, windows_future::IAsyncOperation<ContentDialogResult>>,
+                      _status| {
+                    let result = op.ok()?.GetResults()?;
+                    let choice = match result {
+                        ContentDialogResult::Primary => crate::protocol::AlertChoice::Action(0),
+                        ContentDialogResult::Secondary => crate::protocol::AlertChoice::Action(1),
+                        _ => crate::protocol::AlertChoice::Cancel,
+                    };
+                    // The result must ride THIS backend's sink (the
+                    // guest listens there); capi::alert_retire is
+                    // only the liveness gate.
+                    let sink = CORE.with(|core| {
+                        let mut core = core.borrow_mut();
+                        let core = core.as_mut().expect("core lives while a dialog shows");
+                        core.live_alert = None;
+                        core.occurrences.clone()
+                    });
+                    crate::capi::alert_retire(alert_id);
+                    sink.send(Occurrence::AlertResult {
+                        alert: crate::protocol::AlertId(alert_id),
+                        choice,
+                    });
+                    Ok(())
+                },
+            ))
+            .expect("SetCompleted");
+        }
         ApplyOp::SetProp { id, prop, value } => {
             // Grow is handled ahead of the per-kind table: it is the one
             // kind-agnostic prop, and its effect lands on the parent's
@@ -1518,6 +1613,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             aux_windows: HashMap::new(),
             window_veto: HashMap::new(),
             tearing_down: std::collections::HashSet::new(),
+            live_alert: None,
         });
     });
 
@@ -1891,6 +1987,69 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(1 + core.aux_windows.len()))
     }
 
+    fn alert_title(&self, window: u64) -> Option<String> {
+        Self::on_ui(move |core| {
+            let Some(live) = core.live_alert.as_ref() else {
+                return Ok(None);
+            };
+            if live.window != window {
+                return Ok(None);
+            }
+            // The REAL dialog object's Title, never the request's
+            // copy (boxed at present time; unbox through
+            // IPropertyValue).
+            let title: IReference<HSTRING> = live.dialog.Title()?.cast()?;
+            Ok(Some(title.Value()?.to_string()))
+        })
+    }
+
+    fn choose_alert(&self, choice: u32) {
+        use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+            ButtonAutomationPeer, FrameworkElementAutomationPeer,
+        };
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        Self::on_ui(move |core| {
+            let Some(live) = core.live_alert.as_ref() else {
+                return Ok(());
+            };
+            if choice == crate::wire::ALERT_CHOICE_CANCEL {
+                // The REAL dismissal path: Hide() completes ShowAsync
+                // with None exactly as Esc or the close button does.
+                live.dialog.Hide()?;
+                return Ok(());
+            }
+            if choice as usize >= live.actions {
+                return Ok(());
+            }
+            // The REAL press: the open dialog lives in the popup
+            // layer; find its template button by part name and drive
+            // its automation peer's Invoke — the click pipeline a
+            // user's press runs (WinUI exposes no direct press).
+            let part = if choice == 0 {
+                "PrimaryButton"
+            } else {
+                "SecondaryButton"
+            };
+            let xaml_root = live.dialog.XamlRoot()?;
+            let popups = VisualTreeHelper::GetOpenPopupsForXamlRoot(&xaml_root)?;
+            for i in 0..popups.Size()? {
+                let popup = popups.GetAt(i)?;
+                let child: UIElement = popup.Child()?;
+                if let Some(button) = find_template_button(&child, part)? {
+                    let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&button)?;
+                    let peer: ButtonAutomationPeer = peer.cast()?;
+                    peer.Invoke()?;
+                    return Ok(());
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn alert_count(&self) -> usize {
+        Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))
+    }
+
     fn root_fills(&self) -> String {
         Self::on_ui(move |core| {
             // The mounted root is the window's Content; the content
@@ -1928,4 +2087,32 @@ impl crate::harness::Stage for WinUiStage {
             Ok(())
         });
     }
+}
+
+
+/// Depth-first search for the ContentDialog template button with the
+/// given part name (PrimaryButton/SecondaryButton) under an element —
+/// how the runner presses the REAL button (see choose_alert).
+fn find_template_button(
+    element: &UIElement,
+    part: &str,
+) -> windows_core::Result<Option<Button>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    if let Ok(button) = element.cast::<Button>() {
+        if let Ok(fe) = element.cast::<FrameworkElement>() {
+            if fe.Name()?.to_string() == part {
+                return Ok(Some(button));
+            }
+        }
+    }
+    let count = VisualTreeHelper::GetChildrenCount(element)?;
+    for i in 0..count {
+        let child = VisualTreeHelper::GetChild(element, i)?;
+        if let Ok(child) = child.cast::<UIElement>() {
+            if let Some(found) = find_template_button(&child, part)? {
+                return Ok(Some(found));
+            }
+        }
+    }
+    Ok(None)
 }

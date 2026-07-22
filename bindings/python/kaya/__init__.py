@@ -912,6 +912,42 @@ def destroy_window(window_id):
     _records().append(wire.tx_destroy_window(int(window_id)))
 
 
+# The alert_choice cancel sentinel, spelled for handlers:
+# `if choice == kaya.CANCEL`. Deliberately not an index.
+CANCEL = wire.ALERT_CHOICE_CANCEL
+
+
+def show_alert(title="", message="", actions=(), cancel=None,
+               on_result=None, window=0):
+    """Request a modal alert (the request/result grammar): up to two
+    action labels (the platform floor) plus the REQUIRED cancel label
+    — the slot every platform-native dismissal (Esc, back, outside
+    tap) resolves to; no binding invents a default label. The result
+    handler rides the REQUEST (the widget-handler precedent):
+    on_result(choice) fires exactly once — choice is 0 or 1 for
+    actions, kaya.CANCEL for every native dismissal — and the
+    registration retires with it. Ids are binding-allocated; the call
+    returns the id for the floor-minded. One alert may be live per
+    process — show the next from the handler."""
+    actions = list(actions)
+    if len(actions) > 2:
+        raise ValueError(
+            "an alert carries at most 2 actions (the platform floor)")
+    if not cancel:
+        raise ValueError(
+            "the cancel slot always exists and needs a name — pass cancel=")
+    action0 = actions[0] if len(actions) >= 1 else ""
+    action1 = actions[1] if len(actions) == 2 else ""
+    app = _app
+    alert_id = app._next("alert")
+    if on_result is not None:
+        app._alert_handlers[alert_id] = on_result
+    _records().append(wire.tx_show_alert(
+        int(window), alert_id, len(actions), title, message,
+        action0, action1, cancel))
+    return alert_id
+
+
 def window_title(title):
     """Set the primary surface's title. Uniform semantics with
     per-platform materialization: the title bar on the desktops, the
@@ -1238,11 +1274,13 @@ class _TxScope:
 class App:
     def __init__(self):
         global _app
-        self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0}
+        self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0,
+                          "alert": 0}
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
         self._window_handlers = {}
+        self._alert_handlers = {}
         self._node_handlers = {}
         _app = self
 
@@ -1300,6 +1338,16 @@ class App:
                 if handler is not None:
                     try:
                         handler(ident)
+                    except Exception:
+                        traceback.print_exc()
+                continue
+            if kind == wire.OCC_ALERT_RESULT:
+                # One-shot: the registration retires with the result.
+                handler = self._alert_handlers.pop(ident, None)
+                if handler is not None:
+                    try:
+                        # payload is the parsed u32 choice.
+                        handler(payload)
                     except Exception:
                         traceback.print_exc()
                 continue

@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xecc906b893ee37ae
+	SpecHash uint64 = 0x4da364d017f52b15
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -40,6 +40,9 @@ const (
 	WpropWidth = 2
 	WpropHeight = 3
 	WpropVetoClose = 4
+	AlertChoiceAction0 = 0
+	AlertChoiceAction1 = 1
+	AlertChoiceCancel = 4294967295
 	AlignStart = 0
 	AlignCenter = 1
 	AlignEnd = 2
@@ -75,6 +78,7 @@ const (
 	txSetWindowProp = 18
 	txCreateWindow = 19
 	txDestroyWindow = 20
+	txShowAlert = 21
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -85,12 +89,14 @@ const (
 	applySetWindowProp = 8
 	applyCreateWindow = 9
 	applyDestroyWindow = 10
+	applyPresentAlert = 11
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
 	occValueChanged = 4
 	occCloseRequested = 5
 	occWindowClosed = 6
+	occAlertResult = 7
 )
 
 func pad8(b []byte) []byte {
@@ -338,6 +344,21 @@ func TxCreateWindow(windowId uint64) []byte {
 func TxDestroyWindow(windowId uint64) []byte {
 	b := beginRecord(txDestroyWindow)
 	b = binary.LittleEndian.AppendUint64(b, windowId)
+	return endRecord(b)
+}
+
+// TxShowAlert: Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
+func TxShowAlert(window uint64, alert uint64, actions uint32, title any, message any, action0 any, action1 any, cancel any) []byte {
+	b := beginRecord(txShowAlert)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, alert)
+	b = binary.LittleEndian.AppendUint32(b, actions)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, title)
+	b = encodeValue(b, message)
+	b = encodeValue(b, action0)
+	b = encodeValue(b, action1)
+	b = encodeValue(b, cancel)
 	return endRecord(b)
 }
 
@@ -718,10 +739,14 @@ func TxBindWindowVetoClose(window uint64, signalID uint64) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
+	if kind == occAlertResult {
+		// The alert's one answer: id + u32 choice (AlertChoice*).
+		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
+	}
 	if kind == occCloseRequested || kind == occWindowClosed {
 		// Window lifecycle records carry the window id alone —
 		// no key path, no payload.

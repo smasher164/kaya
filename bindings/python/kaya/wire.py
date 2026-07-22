@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xecc906b893ee37ae
+SPEC_HASH = 0x4da364d017f52b15
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -38,6 +38,9 @@ WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
 WPROP_VETO_CLOSE = 4
+ALERT_CHOICE_ACTION0 = 0
+ALERT_CHOICE_ACTION1 = 1
+ALERT_CHOICE_CANCEL = 4294967295
 ALIGN_START = 0
 ALIGN_CENTER = 1
 ALIGN_END = 2
@@ -74,6 +77,7 @@ TX_WIDGET_COMMAND = 17
 TX_SET_WINDOW_PROP = 18
 TX_CREATE_WINDOW = 19
 TX_DESTROY_WINDOW = 20
+TX_SHOW_ALERT = 21
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -84,12 +88,14 @@ APPLY_COMMAND = 7
 APPLY_SET_WINDOW_PROP = 8
 APPLY_CREATE_WINDOW = 9
 APPLY_DESTROY_WINDOW = 10
+APPLY_PRESENT_ALERT = 11
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
 OCC_VALUE_CHANGED = 4
 OCC_CLOSE_REQUESTED = 5
 OCC_WINDOW_CLOSED = 6
+OCC_ALERT_RESULT = 7
 
 
 def _pad(b):
@@ -218,6 +224,10 @@ def tx_create_window(window_id):
 def tx_destroy_window(window_id):
     """Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it."""
     return record(TX_DESTROY_WINDOW, struct.pack("<Q", window_id))
+
+def tx_show_alert(window, alert, actions, title, message, action0, action1, cancel):
+    """Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires."""
+    return record(TX_SHOW_ALERT, struct.pack("<Q", window) + struct.pack("<Q", alert) + struct.pack("<I", actions) + struct.pack("<I", 0) + _enc.value(title) + _enc.value(message) + _enc.value(action0) + _enc.value(action1) + _enc.value(cancel))
 
 
 def tx_set_text(widget_id, text):
@@ -423,8 +433,12 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT):
         return kind, None, [], None
+    if kind == OCC_ALERT_RESULT:
+        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
+        alert, choice = struct.unpack_from("<QI", buf, 8)
+        return kind, alert, [], choice
     if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):
         # Window lifecycle records carry the window id alone —
         # no key path, no payload.

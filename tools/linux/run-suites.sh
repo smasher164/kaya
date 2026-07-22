@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -312,6 +312,18 @@ for proto in x11 wayland; do
     run "$proto" panels-ocaml env KAYA_SELFTEST=panels KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/panels.exe
     run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
     run "$proto" panels-java env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
+    # all three answer paths through the REAL dialog button.
+    run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
+    run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
+        python3 guests/python/confirm.py
+    run "$proto" confirm-go env KAYA_SELFTEST=confirm /tmp/go-guests/confirm
+    run "$proto" confirm-csharp env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" confirm-ocaml env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/confirm.exe
+    run "$proto" confirm-haskell env KAYA_SELFTEST=confirm "$(hs_bin confirm)"
+    run "$proto" confirm-java env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xecc906b893ee37aeULL
+#define KAYA_SPEC_HASH 0x4da364d017f52b15ULL
 
 
 /* Create a signal holding `initial`. */
@@ -307,6 +307,21 @@ static inline void kaya_tx_create_window(KayaTx *tx, uint64_t window_id) {
 static inline void kaya_tx_destroy_window(KayaTx *tx, uint64_t window_id) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_DESTROY_WINDOW);
     kaya_wire_u64(tx, window_id);
+    kaya_wire_end(tx, start);
+}
+
+/* Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. */
+static inline void kaya_tx_show_alert(KayaTx *tx, uint64_t window, uint64_t alert, uint32_t actions, KayaVal title, KayaVal message, KayaVal action0, KayaVal action1, KayaVal cancel) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SHOW_ALERT);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, alert);
+    kaya_wire_u32(tx, actions);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, title);
+    kaya_wire_value(tx, message);
+    kaya_wire_value(tx, action0);
+    kaya_wire_value(tx, action1);
+    kaya_wire_value(tx, cancel);
     kaya_wire_end(tx, start);
 }
 

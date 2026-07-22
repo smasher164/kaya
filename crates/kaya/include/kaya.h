@@ -22,6 +22,8 @@
 
 #define REC_WINDOW_CLOSED 6
 
+#define REC_ALERT_RESULT 7
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -64,6 +66,8 @@
 
 #define TX_DESTROY_WINDOW 20
 
+#define TX_SHOW_ALERT 21
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -83,6 +87,8 @@
 #define APPLY_CREATE_WINDOW 9
 
 #define APPLY_DESTROY_WINDOW 10
+
+#define APPLY_PRESENT_ALERT 11
 
 #define VALUE_BOOL 1
 
@@ -141,6 +147,17 @@
 #define WPROP_VETO_CLOSE 4
 
 /**
+ * The alert_choice enum's wire values (spec enum "alert_choice"):
+ * action indices, and the deliberately-not-an-index cancel sentinel
+ * every platform-native dismissal resolves to.
+ */
+#define ALERT_CHOICE_ACTION0 0
+
+#define ALERT_CHOICE_ACTION1 1
+
+#define ALERT_CHOICE_CANCEL UINT32_MAX
+
+/**
  * The align enum's wire values (spec enum "align").
  */
 #define ALIGN_START 0
@@ -183,6 +200,8 @@
 #define KAYA_OCCURRENCE_CLOSE_REQUESTED 5
 
 #define KAYA_OCCURRENCE_WINDOW_CLOSED 6
+
+#define KAYA_OCCURRENCE_ALERT_RESULT 7
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -255,6 +274,14 @@
 #define KAYA_TX_DESTROY_WINDOW 20
 
 /**
+ * SHOW_ALERT: u64 window, u64 alert, u32 actions (0..=2), u32 pad,
+ * then five Str values in order: title, message, action0, action1,
+ * cancel (slots beyond `actions` ride empty). One alert may be live
+ * per process; the result retires the id.
+ */
+#define KAYA_TX_SHOW_ALERT 21
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -305,6 +332,13 @@
 #define KAYA_APPLY_CREATE_WINDOW 9
 
 #define KAYA_APPLY_DESTROY_WINDOW 10
+
+/**
+ * PRESENT_ALERT: the same layout as SHOW_ALERT (already validated).
+ * Present the platform's real modal dialog and answer exactly once
+ * via kaya_emit_alert_result.
+ */
+#define KAYA_APPLY_PRESENT_ALERT 11
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -379,6 +413,17 @@
 #define KAYA_WPROP_HEIGHT 3
 
 #define KAYA_WPROP_VETO_CLOSE 4
+
+/**
+ * Alert choices (the alert_result occurrence's `choice`): action
+ * indices, or the deliberately-not-an-index cancel sentinel every
+ * platform-native dismissal (Esc, back, outside tap) resolves to.
+ */
+#define KAYA_ALERT_CHOICE_ACTION0 0
+
+#define KAYA_ALERT_CHOICE_ACTION1 1
+
+#define KAYA_ALERT_CHOICE_CANCEL UINT32_MAX
 
 /**
  * The align enum's values (spec enum "align"); baseline is rows-only.
@@ -482,6 +527,11 @@ typedef struct KayaHostApi {
    */
   void (*emit_close_requested)(uint64_t);
   void (*emit_window_closed)(uint64_t);
+  /**
+   * The alert's one answer (an ALERT_CHOICE value: an action index
+   * or the cancel sentinel). Retires the live alert id.
+   */
+  void (*emit_alert_result)(uint64_t, uint32_t);
 } KayaHostApi;
 
 
@@ -576,6 +626,19 @@ void kaya_emit_close_requested(uint64_t window);
  * (informational and post-fact; destroy_window reconciles).
  */
 void kaya_emit_window_closed(uint64_t window);
+
+/**
+ * Presentation side: the alert's one answer — an ALERT_CHOICE value
+ * (an action index, or the cancel sentinel for every platform-native
+ * dismissal). The alert id retires here. Exported on every platform
+ * (one C header, one export surface — deploy-win's header/dll gate
+ * holds that line), but ANSWERABLE only where a guest-language
+ * presentation layer exists: the rust-native backends emit on their
+ * own core sink (alert_resolved is cfg'd out of existence there),
+ * so on GTK/WinUI hosts this entry has no caller by construction
+ * and panics loudly if one appears.
+ */
+void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
 
 /**
  * widget's CREATE record, handed back verbatim. Do not combine with

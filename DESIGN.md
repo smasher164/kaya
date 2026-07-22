@@ -762,11 +762,11 @@ declaration/request principle:
   have given the vocabulary something poppable — a dialog now, a
   navigation entry someday.
 
-### Modal presentations (design recorded; lands after windows)
+### Modal presentations — alerts (landed) and root-hosting modals (later)
 
 The modal tier splits in two, because the platforms' own dialogs do:
 
-- **Alerts** are pure vocabulary objects — title, message, buttons in;
+- **Alerts** (LANDED) are pure vocabulary objects — title, message, buttons in;
   a result event out; NO scene root inside. This is deliberate
   dressed-floor discipline: UIAlertController, NSAlert, ContentDialog,
   AdwMessageDialog, and Compose's AlertDialog are canonically
@@ -777,6 +777,42 @@ The modal tier splits in two, because the platforms' own dialogs do:
   XAML overlay; UIAlertController is a presented view controller) —
   which is precisely why the vocabulary models the uniform semantics
   (modal, parent-bound, result-bearing) and not the windowhood.
+
+  The landed shape. One atomic SHOW_ALERT request, window-scoped
+  (0 = the primary; NSAlert presents as that window's sheet,
+  ContentDialog on its XamlRoot, gtk::AlertDialog transient for it,
+  the phones over their one surface — alerts are the first context
+  every host has natively, so there is no capability gate). It
+  carries title, message, 0..=2 action labels — the platform floor:
+  ContentDialog's three slots are two actions plus close, and the
+  strictest platform sets the floor — plus a REQUIRED cancel label:
+  the cancel slot always exists because every platform has a native
+  dismissal (Esc, back, outside tap, the cancel button itself) and
+  ALL of them resolve to it; no binding invents a default label (no
+  hidden English in the floor). The one answer is ALERT_RESULT
+  {alert, choice}: an action index, or the deliberately-not-an-index
+  cancel sentinel (u32::MAX; -1 in the JVM's int spelling). The
+  result handler binds to the REQUEST, never to the app — the
+  widget-handler precedent (a click handler attaches at its button):
+  closure languages take on_result at the show call, Rust registers
+  per-id (msgs.on_alert on the id show() returns), the registration
+  retires with its one answer, and ids are binding-allocated like
+  widget ids — so guests carry no correlation plumbing, and the
+  ledgered multi-alert relaxation needs no API change. The confirm
+  scene makes the association VISIBLE: two different dialogs from
+  two buttons (delete, two actions; eject, one — which also keeps
+  the single-action wire arm live), each bound to its own handler,
+  so the eject statuses can only come from the eject registration —
+  no switch, no id inspection, in any language. One
+  alert may be live per process — ContentDialog throws on a second
+  per root — and a second show while one lives is a loud guest
+  error; the id retires when the result fires, and the liveness slot
+  lives in capi's process singleton because show is applied
+  scene-side while the result arrives presentation-side (the one
+  state both ends share). The request/result grammar has no
+  programmatic dismiss in v1; that, per-window alert concurrency,
+  and >2 actions are ledgered relaxations, each waiting on a real
+  need.
 - **Root-hosting modals** (sheets, content dialogs) — a presentation
   context hosting an arbitrary scene root — come later, reusing the
   same mount-target machinery windows introduce.

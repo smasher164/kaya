@@ -414,6 +414,34 @@ Landed history lives in git; this file only carries what is still open.
   trusted publishing (OIDC) on nuget/PyPI/npm when releases start.
   Android Python/Go guests need binding bootstrap (briefcase/gomobile).
   Swift SPM packaging needs a modulemap target.
+- Alert relaxations, each waiting on a REAL need, none speculative:
+  programmatic dismissal (a guest-side cancel verb — rare; adds a
+  second retire path to a grammar whose whole point is ONE),
+  per-window alert concurrency (the process-wide one-live-alert
+  floor is ContentDialog's per-root rule spelled strictly; relaxing
+  means per-window slots and a WinUI carve-out), and a third-plus
+  action (the platform floor is ContentDialog's two-actions-plus-
+  close; more means a custom row on WinUI — no longer the dressed
+  floor).
+- The panels-java aux-open flake on macOS (pre-existing, surfaced
+  2026-07-21 by suite-cycling volume; NOT an alerts regression —
+  bisect: panels, the java leg, and the aux-open path all predate
+  the slice that exposed it). Signature: under the 8-wide parallel
+  suite, ~half of runs, java only — the MODEL carries both windows
+  at +1.5s (expect_windows 2 passes; the JVM was not slow), the
+  primary renders, yet FIVE openWindow(value:) requests (mount +
+  kayaEnsureOpen's 0.3/0.8/1.5s retries) present nothing over 17s
+  while confirm-java's sheet works moments later in the same suite.
+  Always passes isolated (6/6). Eliminated: pump thread (apply runs
+  on main), mount-before-appear (park-and-drain, and the mount came
+  late anyway), single dropped request (retries fired). Suspects:
+  scene-session/activation state peculiar to the JVM process under
+  contention. Next diagnostic: capture the leg's os_log for the
+  "no matching WindowGroup"-class scene errors and log NSApp
+  activation/scene-session state at retry time. The hardenings that
+  stay regardless: kayaEnsureOpen (at-least-once aux open — safe by
+  value-identified WindowGroup uniqueness) and kayaAwaitWindow (the
+  runner's window-targeted verbs await materialization boundedly).
 - A java leg on Windows. The dll already exports the KayaRing
   natives (jvm.rs compiles for the windows target; check-targets
   proves it), the launcher needs no first-thread flag there, and the

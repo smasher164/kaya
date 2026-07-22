@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xecc906b893ee37aeL
+let spec_hash = 0x4da364d017f52b15L
 
 let value_bool = 1
 let value_i64 = 2
@@ -43,6 +43,9 @@ let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
 let wprop_veto_close = 4
+let alert_choice_action0 = 0
+let alert_choice_action1 = 1
+let alert_choice_cancel = 4294967295
 let align_start = 0
 let align_center = 1
 let align_end = 2
@@ -78,6 +81,7 @@ let tx_kind_widget_command = 17
 let tx_kind_set_window_prop = 18
 let tx_kind_create_window = 19
 let tx_kind_destroy_window = 20
+let tx_kind_show_alert = 21
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -88,12 +92,14 @@ let apply_kind_command = 7
 let apply_kind_set_window_prop = 8
 let apply_kind_create_window = 9
 let apply_kind_destroy_window = 10
+let apply_kind_present_alert = 11
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
 let occ_kind_value_changed = 4
 let occ_kind_close_requested = 5
 let occ_kind_window_closed = 6
+let occ_kind_alert_result = 7
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -276,6 +282,19 @@ let tx_create_window window_id =
 let tx_destroy_window window_id =
   finish tx_kind_destroy_window (fun b ->
       Buffer.add_int64_le b window_id)
+
+(* Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. *)
+let tx_show_alert window alert actions title message action0 action1 cancel =
+  finish tx_kind_show_alert (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b alert;
+      Buffer.add_int32_le b (Int32.of_int actions);
+      Buffer.add_int32_le b 0l;
+      encode_value b title;
+      encode_value b message;
+      encode_value b action0;
+      encode_value b action1;
+      encode_value b cancel)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -610,12 +629,16 @@ let parse_value byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
     (* Window lifecycle records carry the window id alone. *)
-    if kind = occ_kind_close_requested || kind = occ_kind_window_closed
+    if kind = occ_kind_alert_result
+    then
+      (* The alert's one answer: id + u32 choice (the alert_choice values). *)
+      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))
+    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed
     then Some (kind, Int64.of_int id, [], None)
     else begin
     let path_len = u32_at byte 16 in

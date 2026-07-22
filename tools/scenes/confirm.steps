@@ -1,0 +1,45 @@
+# The confirm scene: the modal-alert grammar as assertions. TWO
+# different dialogs from two buttons — delete (two actions) and
+# eject (one action) — each bound to its OWN handler at show time,
+# so the dialog-to-callback association is visible: the eject
+# rounds' statuses can only come from the eject handler. The five
+# rounds take every answer path — action0, action1, and the
+# platform's own dismissal (the cancel slot) on the delete dialog;
+# action0 and cancel on the single-action eject dialog — proving
+# the request/result grammar end to end: the REAL dialog
+# materialized (expect_alert reads the platform dialog's title,
+# never the request's copy), the REAL answer path driven
+# (alert_choose presses the native button / fires the native
+# dismissal), each id retired (a fresh show succeeds each round),
+# and the dialog gone (expect_alerts 0).
+settle 1500
+expect label#0 "no decision"
+click button#0
+settle 500
+expect_alert "delete item?"
+alert_choose 0
+settle 500
+expect label#0 "deleted"
+click button#0
+settle 500
+alert_choose 1
+settle 500
+expect label#0 "archived"
+click button#0
+settle 500
+expect_alert "delete item?"
+alert_choose cancel
+settle 500
+expect label#0 "kept"
+click button#1
+settle 500
+expect_alert "eject disk?"
+alert_choose 0
+settle 500
+expect label#0 "ejected"
+click button#1
+settle 500
+alert_choose cancel
+settle 500
+expect label#0 "held"
+expect_alerts 0

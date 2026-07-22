@@ -18,6 +18,39 @@ pub struct SignalId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(pub u64);
 
+/// A live alert request's id: guest-chosen, single-use — it retires
+/// when its one AlertResult fires (reuse after retirement is legal;
+/// reuse while live is a guest error).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AlertId(pub u64);
+
+/// An alert's one answer. The wire carries a u32: action indices, or
+/// the deliberately-not-an-index cancel sentinel (ALERT_CHOICE_CANCEL)
+/// that every platform-native dismissal — Esc, back, outside tap, the
+/// cancel button itself — resolves to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertChoice {
+    /// The action at this index (0 or 1) was chosen.
+    Action(u32),
+    /// The uniform dismissal slot fired.
+    Cancel,
+}
+
+/// One modal alert request, atomic on the wire (SHOW_ALERT /
+/// PRESENT_ALERT carry the same shape): the request/result grammar's
+/// first client. `actions` holds 0..=2 labels — the platform floor
+/// (ContentDialog's three slots are two actions plus close); `cancel`
+/// is the always-present dismissal slot's label.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlertSpec {
+    pub window: WindowId,
+    pub alert: AlertId,
+    pub title: String,
+    pub message: String,
+    pub actions: Vec<String>,
+    pub cancel: String,
+}
+
 /// A collection: a core-side ordered key→value table, the sibling of a
 /// signal, changed with delta records and rendered by a For.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,6 +99,9 @@ pub enum Occurrence {
     /// scene (idempotent: the backend tolerates the native window
     /// already being gone).
     WindowClosed { window: WindowId },
+    /// The alert's one answer; the dialog is already gone when this
+    /// fires, and the alert id retired with it.
+    AlertResult { alert: AlertId, choice: AlertChoice },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; carries the
@@ -388,6 +424,10 @@ pub enum TxOp {
     /// Close and forget an auxiliary window; its mounted tree is
     /// destroyed children-first. The primary is not destroyable.
     DestroyWindow { window: WindowId },
+    /// Request a modal alert over a live window: one atomic record,
+    /// answered by exactly one AlertResult (the request/result
+    /// grammar). One alert may be live per process.
+    ShowAlert(AlertSpec),
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -469,6 +509,10 @@ pub enum ApplyOp {
     SetWindowProp { window: WindowId, prop: WindowProp, value: Value },
     CreateWindow { window: WindowId },
     DestroyWindow { window: WindowId },
+    /// Present the platform's real modal dialog (the core already
+    /// validated the spec); answer exactly once with an AlertResult
+    /// emission — an action index or the cancel sentinel.
+    PresentAlert(AlertSpec),
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
@@ -557,6 +601,12 @@ impl OccSink {
                     ring.push_record(
                         crate::ring::REC_WINDOW_CLOSED,
                         &window.0.to_le_bytes(),
+                    );
+                }
+                Occurrence::AlertResult { alert, choice } => {
+                    ring.push_record(
+                        crate::ring::REC_ALERT_RESULT,
+                        &crate::wire::alert_result_body(alert, choice),
                     );
                 }
                 Occurrence::Shutdown => ring.set_shutdown(),

@@ -49,6 +49,7 @@ pub const KAYA_OCCURRENCE_TOGGLED: u16 = 3;
 pub const KAYA_OCCURRENCE_VALUE_CHANGED: u16 = 4;
 pub const KAYA_OCCURRENCE_CLOSE_REQUESTED: u16 = 5;
 pub const KAYA_OCCURRENCE_WINDOW_CLOSED: u16 = 6;
+pub const KAYA_OCCURRENCE_ALERT_RESULT: u16 = 7;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -57,6 +58,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_VALUE_CHANGED == ring::REC_VALUE_CHANGED
         && KAYA_OCCURRENCE_CLOSE_REQUESTED == ring::REC_CLOSE_REQUESTED
         && KAYA_OCCURRENCE_WINDOW_CLOSED == ring::REC_WINDOW_CLOSED
+        && KAYA_OCCURRENCE_ALERT_RESULT == ring::REC_ALERT_RESULT
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -107,6 +109,11 @@ pub const KAYA_TX_WIDGET_COMMAND: u16 = 17;
 pub const KAYA_TX_SET_WINDOW_PROP: u16 = 18;
 pub const KAYA_TX_CREATE_WINDOW: u16 = 19;
 pub const KAYA_TX_DESTROY_WINDOW: u16 = 20;
+/// SHOW_ALERT: u64 window, u64 alert, u32 actions (0..=2), u32 pad,
+/// then five Str values in order: title, message, action0, action1,
+/// cancel (slots beyond `actions` ride empty). One alert may be live
+/// per process; the result retires the id.
+pub const KAYA_TX_SHOW_ALERT: u16 = 21;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -157,6 +164,7 @@ const _: () = assert!(
         && KAYA_TX_SET_WINDOW_PROP == wire::TX_SET_WINDOW_PROP
         && KAYA_TX_CREATE_WINDOW == wire::TX_CREATE_WINDOW
         && KAYA_TX_DESTROY_WINDOW == wire::TX_DESTROY_WINDOW
+        && KAYA_TX_SHOW_ALERT == wire::TX_SHOW_ALERT
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -191,6 +199,10 @@ pub const KAYA_APPLY_COMMAND: u16 = 7;
 pub const KAYA_APPLY_SET_WINDOW_PROP: u16 = 8;
 pub const KAYA_APPLY_CREATE_WINDOW: u16 = 9;
 pub const KAYA_APPLY_DESTROY_WINDOW: u16 = 10;
+/// PRESENT_ALERT: the same layout as SHOW_ALERT (already validated).
+/// Present the platform's real modal dialog and answer exactly once
+/// via kaya_emit_alert_result.
+pub const KAYA_APPLY_PRESENT_ALERT: u16 = 11;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -202,6 +214,7 @@ const _: () = assert!(
         && KAYA_APPLY_SET_WINDOW_PROP == wire::APPLY_SET_WINDOW_PROP
         && KAYA_APPLY_CREATE_WINDOW == wire::APPLY_CREATE_WINDOW
         && KAYA_APPLY_DESTROY_WINDOW == wire::APPLY_DESTROY_WINDOW
+        && KAYA_APPLY_PRESENT_ALERT == wire::APPLY_PRESENT_ALERT
 );
 
 /// One-shot commands (the widget_command tx record / COMMAND apply
@@ -264,6 +277,18 @@ pub const KAYA_WPROP_TITLE: u32 = 1;
 pub const KAYA_WPROP_WIDTH: u32 = 2;
 pub const KAYA_WPROP_HEIGHT: u32 = 3;
 pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
+
+/// Alert choices (the alert_result occurrence's `choice`): action
+/// indices, or the deliberately-not-an-index cancel sentinel every
+/// platform-native dismissal (Esc, back, outside tap) resolves to.
+pub const KAYA_ALERT_CHOICE_ACTION0: u32 = 0;
+pub const KAYA_ALERT_CHOICE_ACTION1: u32 = 1;
+pub const KAYA_ALERT_CHOICE_CANCEL: u32 = u32::MAX;
+const _: () = assert!(
+    KAYA_ALERT_CHOICE_ACTION0 == wire::ALERT_CHOICE_ACTION0
+        && KAYA_ALERT_CHOICE_ACTION1 == wire::ALERT_CHOICE_ACTION1
+        && KAYA_ALERT_CHOICE_CANCEL == wire::ALERT_CHOICE_CANCEL
+);
 const _: () = assert!(
     KAYA_PROP_TEXT == wire::PROP_TEXT
         && KAYA_PROP_CHECKED == wire::PROP_CHECKED
@@ -615,6 +640,91 @@ pub extern "C" fn kaya_emit_window_closed(window: u64) {
         .ring
         .push_record(ring::REC_WINDOW_CLOSED, &window.to_le_bytes());
 }
+
+// The live alert slot: ONE alert per process (the platform floor —
+// ContentDialog throws on a second per root). Process-global on
+// purpose: the scene sets it at show (apply side) and the result that
+// frees it arrives on the presentation side — this singleton is the
+// one state both ends share.
+static ALERT_LIVE: Mutex<Option<u64>> = Mutex::new(None);
+
+/// Scene side: a show_alert was applied. Panics if one is already
+/// live — a guest error (show the next alert from the first's result
+/// handler).
+pub(crate) fn alert_shown(alert: crate::protocol::AlertId) {
+    let mut live = ALERT_LIVE.lock().unwrap();
+    if let Some(id) = *live {
+        panic!(
+            "kaya: alert {id} is already live — one alert per process; \
+             show the next from the first's result handler"
+        );
+    }
+    *live = Some(alert.0);
+}
+
+/// Validate the alert id against the live slot and free it — the one
+/// retire gate for every backend. EMISSION is the caller's: the
+/// C entry below rides the presentation sink / ring, and the
+/// Rust-native backends send on their own core OccSink (a ring push
+/// there would strand the result — their guests listen on the Mpsc;
+/// the linux confirm-rust legs caught exactly that).
+pub(crate) fn alert_retire(alert: u64) {
+    let mut live = ALERT_LIVE.lock().unwrap();
+    match *live {
+        Some(id) if id == alert => *live = None,
+        Some(id) => panic!(
+            "kaya: alert result for {alert} but alert {id} is the live one"
+        ),
+        None => panic!("kaya: alert result for {alert} but no alert is live"),
+    }
+}
+
+/// Presentation side (interpreter platforms ONLY): retire, then emit
+/// on the presentation sink (the ring for foreign guests, the AppCtx
+/// mpsc for the Rust API's runtime-selected modes). cfg'd OUT on the
+/// rust-native backend platforms on purpose: their guests listen on
+/// the backend's own OccSink, so a call from gtk.rs/winui would
+/// strand results on the ring (the linux confirm-rust legs caught
+/// exactly that) — this way the call cannot compile there at all.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+pub(crate) fn alert_resolved(alert: u64, choice: crate::protocol::AlertChoice) {
+    alert_retire(alert);
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::AlertResult {
+            alert: crate::protocol::AlertId(alert),
+            choice,
+        });
+        return;
+    }
+    state().ring.push_record(
+        ring::REC_ALERT_RESULT,
+        &crate::wire::alert_result_body(crate::protocol::AlertId(alert), choice),
+    );
+}
+
+/// Presentation side: the alert's one answer — an ALERT_CHOICE value
+/// (an action index, or the cancel sentinel for every platform-native
+/// dismissal). The alert id retires here. Exported on every platform
+/// (one C header, one export surface — deploy-win's header/dll gate
+/// holds that line), but ANSWERABLE only where a guest-language
+/// presentation layer exists: the rust-native backends emit on their
+/// own core sink (alert_resolved is cfg'd out of existence there),
+/// so on GTK/WinUI hosts this entry has no caller by construction
+/// and panics loudly if one appears.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_alert_result(alert: u64, choice: u32) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        alert_resolved(alert, crate::wire::alert_choice(choice));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (alert, choice);
+        panic!(
+            "kaya: kaya_emit_alert_result is the interpreter platforms' entry —              this host's backend answers alerts on its own sink"
+        );
+    }
+}
 /// widget's CREATE record, handed back verbatim. Do not combine with
 /// kaya_run.
 #[unsafe(no_mangle)]
@@ -802,6 +912,7 @@ mod tests {
             ("set_window_prop", KAYA_TX_SET_WINDOW_PROP),
             ("create_window", KAYA_TX_CREATE_WINDOW),
             ("destroy_window", KAYA_TX_DESTROY_WINDOW),
+            ("show_alert", KAYA_TX_SHOW_ALERT),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -814,6 +925,7 @@ mod tests {
             ("set_window_prop", KAYA_APPLY_SET_WINDOW_PROP),
             ("create_window", KAYA_APPLY_CREATE_WINDOW),
             ("destroy_window", KAYA_APPLY_DESTROY_WINDOW),
+            ("present_alert", KAYA_APPLY_PRESENT_ALERT),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

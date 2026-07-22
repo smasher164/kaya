@@ -263,6 +263,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
     c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
+    c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
+    c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
+    c.line("            return (kind, id, [], .i64(Int64(choice)))");
+    c.line("        }");
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)");
     c.line("            || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)");
     c.line("        {");

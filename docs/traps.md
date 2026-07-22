@@ -511,3 +511,25 @@ the same patterns return through interpreter drop-downs
   kayaPendingOpens and the stash drains them; the panels-python leg
   (two transactions) is the regression gate, and rust's
   single-transaction pass was timing luck, not proof.
+- **Generated-comment text is code in OCaml: `*)` terminates the
+  comment.** The emitters copy spec Record docs (and their own
+  branch notes) into generated comments verbatim; an OCaml comment
+  containing `*)` — even inside a word like `alert_choice_*)` —
+  closes early and the remainder is a syntax error in the GENERATED
+  file, far from the sentence that caused it (first hit: the alert
+  parser branch's own comment). Guard: the ocaml emitter defuses
+  both delimiters (`*)` → `* )`, `(*` → `( *`) on every doc it
+  copies, so no future spec doc can break the generated module.
+- **SwiftUI's openWindow(value:) can be silently dropped under
+  load.** The aux-open request is fire-and-forget: under a loaded
+  8-wide suite the scene request sometimes never presents (no window,
+  no error), and only the slowest-booting guest lands its mount in
+  the window where it happens — panels-java flaked at ~half of loaded
+  runs while every isolated run passed. Guard: kayaEnsureOpen makes
+  the open AT-LEAST-ONCE with bounded backoff — safe because a
+  value-identified WindowGroup is unique per value (a duplicate
+  request focuses the existing window, a dropped first request is
+  repaired by the retry); NSWindow registration is the delivered
+  signal, and the runner's window-targeted verbs additionally await
+  materialization boundedly (kayaAwaitWindow) rather than reading a
+  not-yet-real window.

@@ -230,7 +230,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
     c.line("    let id = u32_at byte 8 in");
     c.line("    (* Window lifecycle records carry the window id alone. *)");
-    c.line("    if kind = occ_kind_close_requested || kind = occ_kind_window_closed");
+    c.line("    if kind = occ_kind_alert_result");
+    c.line("    then");
+    c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
+    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))");
+    c.line("    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed");
     c.line("    then Some (kind, Int64.of_int id, [], None)");
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
@@ -266,7 +270,13 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
         args.join(" ")
     };
     c.line("");
-    c.line(&format!("(* {} *)", r.doc.replace('\n', " ")));
+    // OCaml comments nest and `*)` TERMINATES one: a spec doc that
+    // ever contains `*)` (or opens `(*`) would break the generated
+    // file at a distance — defuse both delimiters structurally.
+    c.line(&format!(
+        "(* {} *)",
+        r.doc.replace('\n', " ").replace("*)", "* )").replace("(*", "( *")
+    ));
     c.line(&format!("let tx_{} {} =", r.name, args));
     c.line(&format!("  finish tx_kind_{} (fun b ->", r.name));
     let mut lines: Vec<String> = Vec::new();

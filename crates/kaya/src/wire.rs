@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use crate::protocol::{
     WindowProp,
+    AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
@@ -44,6 +45,7 @@ pub const TX_WIDGET_COMMAND: u16 = 17;
 pub const TX_SET_WINDOW_PROP: u16 = 18;
 pub const TX_CREATE_WINDOW: u16 = 19;
 pub const TX_DESTROY_WINDOW: u16 = 20;
+pub const TX_SHOW_ALERT: u16 = 21;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -56,6 +58,7 @@ pub const APPLY_COMMAND: u16 = 7;
 pub const APPLY_SET_WINDOW_PROP: u16 = 8;
 pub const APPLY_CREATE_WINDOW: u16 = 9;
 pub const APPLY_DESTROY_WINDOW: u16 = 10;
+pub const APPLY_PRESENT_ALERT: u16 = 11;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -91,6 +94,13 @@ pub const WPROP_TITLE: u32 = 1;
 pub const WPROP_WIDTH: u32 = 2;
 pub const WPROP_HEIGHT: u32 = 3;
 pub const WPROP_VETO_CLOSE: u32 = 4;
+
+/// The alert_choice enum's wire values (spec enum "alert_choice"):
+/// action indices, and the deliberately-not-an-index cancel sentinel
+/// every platform-native dismissal resolves to.
+pub const ALERT_CHOICE_ACTION0: u32 = 0;
+pub const ALERT_CHOICE_ACTION1: u32 = 1;
+pub const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
 
 /// The align enum's wire values (spec enum "align").
 pub const ALIGN_START: u32 = 0;
@@ -465,11 +475,81 @@ pub fn decode_transaction_with_blobs(
             TX_DESTROY_WINDOW => TxOp::DestroyWindow {
                 window: WindowId(r.u64()),
             },
+            TX_SHOW_ALERT => {
+                let window = WindowId(r.u64());
+                let alert = AlertId(r.u64());
+                let actions_n = r.u32();
+                let _reserved = r.u32();
+                let title = alert_str(r.value(), "title");
+                let message = alert_str(r.value(), "message");
+                let action0 = alert_str(r.value(), "action0");
+                let action1 = alert_str(r.value(), "action1");
+                let cancel = alert_str(r.value(), "cancel");
+                if actions_n > 2 {
+                    panic!("kaya: show_alert carries {actions_n} actions (the cap is 2)");
+                }
+                // Slots beyond the count ride empty and are dropped
+                // here; the spec is authoritative that they carry
+                // nothing.
+                let mut actions = Vec::with_capacity(actions_n as usize);
+                if actions_n >= 1 {
+                    actions.push(action0);
+                }
+                if actions_n == 2 {
+                    actions.push(action1);
+                }
+                TxOp::ShowAlert(AlertSpec { window, alert, title, message, actions, cancel })
+            }
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
     }
     ops
+}
+
+// --- Alerts ----------------------------------------------------------------
+
+/// The five Str slots of an alert record, in wire order — action
+/// slots beyond the count ride empty (the count is authoritative).
+fn alert_value_slots(spec: &AlertSpec) -> [String; 5] {
+    [
+        spec.title.clone(),
+        spec.message.clone(),
+        spec.actions.first().cloned().unwrap_or_default(),
+        spec.actions.get(1).cloned().unwrap_or_default(),
+        spec.cancel.clone(),
+    ]
+}
+
+fn alert_str(v: Value, field: &str) -> String {
+    match v {
+        Value::Str(s) => s,
+        other => panic!("kaya: show_alert {field} must be a Str value, got {other:?}"),
+    }
+}
+
+/// The alert_result occurrence body: { u64 alert; u32 choice; u32
+/// reserved }.
+pub(crate) fn alert_result_body(alert: AlertId, choice: AlertChoice) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&alert.0.to_le_bytes());
+    b[8..12].copy_from_slice(&alert_choice_raw(choice).to_le_bytes());
+    b
+}
+
+pub(crate) fn alert_choice_raw(choice: AlertChoice) -> u32 {
+    match choice {
+        AlertChoice::Action(i) => i,
+        AlertChoice::Cancel => ALERT_CHOICE_CANCEL,
+    }
+}
+
+pub(crate) fn alert_choice(raw: u32) -> AlertChoice {
+    match raw {
+        ALERT_CHOICE_CANCEL => AlertChoice::Cancel,
+        i if i <= 1 => AlertChoice::Action(i),
+        other => panic!("kaya: unknown alert choice {other}"),
+    }
 }
 
 // --- Click tags ------------------------------------------------------------
@@ -654,6 +734,15 @@ impl Writer {
             ApplyOp::DestroyWindow { window } => self.record(APPLY_DESTROY_WINDOW, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
             }),
+            ApplyOp::PresentAlert(spec) => self.record(APPLY_PRESENT_ALERT, |b, blobs| {
+                b.extend_from_slice(&spec.window.0.to_le_bytes());
+                b.extend_from_slice(&spec.alert.0.to_le_bytes());
+                b.extend_from_slice(&(spec.actions.len() as u32).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                for s in alert_value_slots(spec) {
+                    write_value(b, &Value::Str(s), blobs);
+                }
+            }),
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -834,6 +923,15 @@ impl Writer {
             }),
             TxOp::DestroyWindow { window } => self.record(TX_DESTROY_WINDOW, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
+            }),
+            TxOp::ShowAlert(spec) => self.record(TX_SHOW_ALERT, |b, blobs| {
+                b.extend_from_slice(&spec.window.0.to_le_bytes());
+                b.extend_from_slice(&spec.alert.0.to_le_bytes());
+                b.extend_from_slice(&(spec.actions.len() as u32).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                for s in alert_value_slots(spec) {
+                    write_value(b, &Value::Str(s), blobs);
+                }
             }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }

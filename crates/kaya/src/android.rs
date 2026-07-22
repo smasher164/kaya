@@ -131,6 +131,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_value_changed as *mut _,
             },
             NativeMethod {
+                name: "emitAlertResult".into(),
+                sig: "(JI)V".into(),
+                fn_ptr: present_emit_alert_result as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -194,6 +199,18 @@ extern "system" fn present_emit_value_changed(
         .convert_byte_array(&tag)
         .expect("kaya: reading the slider tag failed");
     unsafe { crate::capi::kaya_emit_value_changed(bytes.as_ptr(), bytes.len(), value) };
+}
+
+/// KayaPresent.emitAlertResult: kaya_emit_alert_result's JNI
+/// spelling — the jint choice reinterprets as the wire u32 (the
+/// cancel sentinel is -1 in java-int terms).
+extern "system" fn present_emit_alert_result(
+    _env: JNIEnv,
+    _class: JClass,
+    alert: jlong,
+    choice: jint,
+) {
+    crate::capi::kaya_emit_alert_result(alert as u64, choice as u32);
 }
 
 extern "system" fn present_emit_toggled(

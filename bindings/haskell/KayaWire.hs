@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xecc906b893ee37ae
+specHash = 0x4da364d017f52b15
 
 valueBool :: Word32
 valueBool = 1
@@ -78,6 +78,12 @@ wpropHeight :: Word32
 wpropHeight = 3
 wpropVetoClose :: Word32
 wpropVetoClose = 4
+alertChoiceAction0 :: Word32
+alertChoiceAction0 = 0
+alertChoiceAction1 :: Word32
+alertChoiceAction1 = 1
+alertChoiceCancel :: Word32
+alertChoiceCancel = 4294967295
 alignStart :: Word32
 alignStart = 0
 alignCenter :: Word32
@@ -148,6 +154,8 @@ txKindCreateWindow :: Word16
 txKindCreateWindow = 19
 txKindDestroyWindow :: Word16
 txKindDestroyWindow = 20
+txKindShowAlert :: Word16
+txKindShowAlert = 21
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -168,6 +176,8 @@ applyKindCreateWindow :: Word16
 applyKindCreateWindow = 9
 applyKindDestroyWindow :: Word16
 applyKindDestroyWindow = 10
+applyKindPresentAlert :: Word16
+applyKindPresentAlert = 11
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -180,6 +190,8 @@ occKindCloseRequested :: Word16
 occKindCloseRequested = 5
 occKindWindowClosed :: Word16
 occKindWindowClosed = 6
+occKindAlertResult :: Word16
+occKindAlertResult = 7
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -291,6 +303,10 @@ txCreateWindow windowId = wireRecord txKindCreateWindow (word64LE windowId)
 -- Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
 txDestroyWindow :: Word64 -> Builder
 txDestroyWindow windowId = wireRecord txKindDestroyWindow (word64LE windowId)
+
+-- Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
+txShowAlert :: Word64 -> Word64 -> Word32 -> Value -> Value -> Value -> Value -> Value -> Builder
+txShowAlert window alert actions title message action0 action1 cancel = wireRecord txKindShowAlert (word64LE window <> word64LE alert <> word32LE actions <> word32LE 0 <> encodeValue title <> encodeValue message <> encodeValue action0 <> encodeValue action1 <> encodeValue cancel)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -545,14 +561,19 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
       -- Window lifecycle records carry the window id alone.
-      if kind == occKindCloseRequested || kind == occKindWindowClosed
-        then return (Just (kind, ident, [], Nothing))
-        else do
+      if kind == occKindAlertResult
+        then do
+          -- The alert's one answer: id + u32 choice (alertChoice*).
+          choice <- peekByteOff rec 16 :: IO Word32
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))
+        else if kind == occKindCloseRequested || kind == occKindWindowClosed
+          then return (Just (kind, ident, [], Nothing))
+          else do
           pathLen <- peekByteOff rec 16 :: IO Word32
           let go at 0 acc = return (reverse acc, at)
               go at n acc = do

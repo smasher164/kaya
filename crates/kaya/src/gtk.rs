@@ -393,6 +393,10 @@ struct CoreState {
     aux_windows: HashMap<u64, gtk4::Window>,
     /// veto_close per window id (primary included; default false).
     window_veto: std::rc::Rc<RefCell<HashMap<u64, bool>>>,
+    /// The live modal alert (one per process): the request's identity
+    /// plus the REAL dialog object for the runner's reads. Shared with
+    /// the choose callback, which clears it when the one result fires.
+    live_alert: std::rc::Rc<RefCell<Option<GtkLiveAlert>>>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -433,6 +437,39 @@ fn drain_transactions() {
 /// close_requested and stays; a non-veto auxiliary closes and
 /// reports window_closed; the non-veto primary exits with the app
 /// (GTK quits when the application window closes).
+/// The live alert's identity and its REAL dialog: title reads come
+/// from the AlertDialog object, and choose_alert finds the presented
+/// dialog window's actual button to activate.
+struct GtkLiveAlert {
+    id: u64,
+    window: u64,
+    actions: usize,
+    /// Button labels in presentation order (actions first, cancel
+    /// last) — how choose_alert names the button to press.
+    labels: Vec<String>,
+    dialog: gtk4::AlertDialog,
+}
+
+/// Depth-first search for a button with the given label under a
+/// widget — how the runner presses the REAL button inside the
+/// presented alert window (gtk::AlertDialog exposes no press API).
+fn find_button(widget: &gtk4::Widget, label: &str) -> Option<gtk4::Button> {
+    use gtk4::prelude::{ButtonExt, Cast, WidgetExt};
+    if let Ok(button) = widget.clone().downcast::<gtk4::Button>() {
+        if button.label().as_deref() == Some(label) {
+            return Some(button);
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_button(&c, label) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
 fn wire_close(
     window: &gtk4::Window,
     id: u64,
@@ -672,6 +709,58 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 aux.destroy();
             }
             core.window_veto.borrow_mut().remove(&window.0);
+        }
+        ApplyOp::PresentAlert(spec) => {
+            // The platform's REAL modal dialog: gtk::AlertDialog maps
+            // the vocabulary 1:1 (buttons in order, cancel-button
+            // index, async choose -> index). Answered exactly once
+            // through capi::alert_resolved — the shared retire path.
+            let parent = gtk_window(core, spec.window.0);
+            let mut labels: Vec<String> = spec.actions.clone();
+            labels.push(spec.cancel.clone());
+            let actions_n = spec.actions.len();
+            let dialog = gtk4::AlertDialog::builder()
+                .message(&spec.title)
+                .detail(&spec.message)
+                .buttons(labels.iter().map(String::as_str).collect::<Vec<_>>())
+                .cancel_button(actions_n as i32)
+                .default_button(0)
+                .modal(true)
+                .build();
+            let alert_id = spec.alert.0;
+            *core.live_alert.borrow_mut() = Some(GtkLiveAlert {
+                id: alert_id,
+                window: spec.window.0,
+                actions: actions_n,
+                labels,
+                dialog: dialog.clone(),
+            });
+            let live = core.live_alert.clone();
+            // The result must ride THIS backend's sink (the guest
+            // listens there — Mpsc for a Rust guest, the ring for a
+            // C one); capi::alert_retire is only the liveness gate.
+            let sink = core.occurrences.clone();
+            dialog.choose(
+                Some(&parent),
+                None::<&gtk4::gio::Cancellable>,
+                move |result| {
+                    // Esc/close resolve to the cancel index; any
+                    // index at or past the action count IS the
+                    // cancel slot.
+                    let index = result.unwrap_or(actions_n as i32);
+                    let choice = if (index as usize) < actions_n {
+                        crate::protocol::AlertChoice::Action(index as u32)
+                    } else {
+                        crate::protocol::AlertChoice::Cancel
+                    };
+                    *live.borrow_mut() = None;
+                    crate::capi::alert_retire(alert_id);
+                    sink.send(Occurrence::AlertResult {
+                        alert: crate::protocol::AlertId(alert_id),
+                        choice,
+                    });
+                },
+            );
         }
         ApplyOp::SetProp { id, prop, value } => {
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -916,6 +1005,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 scene: Scene::new(),
                 occurrences: occ_tx.clone(),
                 aux_windows: HashMap::new(),
+                live_alert: std::rc::Rc::new(RefCell::new(None)),
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
                     {
@@ -1273,6 +1363,57 @@ impl crate::harness::Stage for GtkStage {
 
     fn window_count(&self) -> usize {
         Self::on_main(move |core| 1 + core.aux_windows.len())
+    }
+
+    fn alert_title(&self, window: u64) -> Option<String> {
+        Self::on_main(move |core| {
+            let live = core.live_alert.borrow();
+            live.as_ref()
+                .filter(|a| a.window == window)
+                // The REAL dialog object's message, never the
+                // request's copy.
+                .map(|a| a.dialog.message().to_string())
+        })
+    }
+
+    fn choose_alert(&self, choice: u32) {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+            let live = core.live_alert.borrow();
+            let Some(alert) = live.as_ref() else { return };
+            let label = if choice == crate::wire::ALERT_CHOICE_CANCEL {
+                alert.labels.last().cloned()
+            } else {
+                alert
+                    .labels
+                    .get(choice as usize)
+                    .filter(|_| (choice as usize) < alert.actions)
+                    .cloned()
+            };
+            let Some(label) = label else { return };
+            // The REAL button inside the presented dialog window:
+            // find the alert's own toplevel (transient-for our
+            // window, not one of ours) and activate its button —
+            // the same signal path a user's click runs.
+            let parent = gtk_window(core, alert.window);
+            for toplevel in gtk4::Window::list_toplevels() {
+                let Ok(window) = toplevel.downcast::<gtk4::Window>() else {
+                    continue;
+                };
+                if window.transient_for().as_ref() != Some(&parent) {
+                    continue;
+                }
+                if let Some(button) = find_button(window.upcast_ref(), &label) {
+                    use gtk4::prelude::WidgetExt as _;
+                    let _ = button.activate();
+                    return;
+                }
+            }
+        })
+    }
+
+    fn alert_count(&self) -> usize {
+        Self::on_main(move |core| usize::from(core.live_alert.borrow().is_some()))
     }
 
     fn root_fills(&self) -> String {

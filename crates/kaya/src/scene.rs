@@ -549,6 +549,39 @@ impl Scene {
                     self.mounted_windows.remove(&window);
                     out.push(ApplyOp::DestroyWindow { window });
                 }
+                TxOp::ShowAlert(spec) => {
+                    assert!(
+                        spec.window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&spec.window),
+                        "kaya: show_alert over unknown window {:?} — \
+                         create_window first (0 is the primary)",
+                        spec.window
+                    );
+                    assert!(
+                        spec.actions.len() <= 2,
+                        "kaya: show_alert carries {} actions (the cap is 2 — \
+                         the platform floor)",
+                        spec.actions.len()
+                    );
+                    for (i, label) in spec.actions.iter().enumerate() {
+                        assert!(
+                            !label.is_empty(),
+                            "kaya: show_alert action{i} has an empty label"
+                        );
+                    }
+                    assert!(
+                        !spec.cancel.is_empty(),
+                        "kaya: show_alert cancel label is empty — the cancel \
+                         slot always exists and needs a name"
+                    );
+                    // Liveness is process-global (the platform floor:
+                    // ContentDialog throws on a second per root), and
+                    // the result that frees the slot arrives on the
+                    // presentation side — so the slot lives in capi's
+                    // singleton, the one state both ends share.
+                    crate::capi::alert_shown(spec.alert);
+                    out.push(ApplyOp::PresentAlert(spec));
+                }
                 TxOp::AddChild { parent, child } => {
                     assert!(
                         self.widgets.contains_key(&parent),

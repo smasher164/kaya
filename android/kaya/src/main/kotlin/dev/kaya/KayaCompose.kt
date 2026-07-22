@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -149,6 +151,14 @@ object KayaSceneModel {
     // walks it into the platform focus system, and expect_focused
     // reads it back.
     var focusedId by mutableStateOf<Long?>(null)
+    // The live modal alert (one per process): identity + spec for the
+    // M3 dialog and the runner's reads; null = none. The fields
+    // change together with alertId, which is the recomposition key.
+    var alertId by mutableStateOf<Long?>(null)
+    var alertTitle: String = ""
+    var alertMessage: String = ""
+    var alertActions: List<String> = emptyList()
+    var alertCancel: String = ""
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -170,7 +180,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xecc906b893ee37aeuL
+    private const val SPEC_HASH: ULong = 0x4da364d017f52b15uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -182,6 +192,12 @@ object KayaCompose {
     private const val APPLY_SET_WINDOW_PROP = 8
     private const val APPLY_CREATE_WINDOW = 9
     private const val APPLY_DESTROY_WINDOW = 10
+    private const val APPLY_PRESENT_ALERT = 11
+
+    /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
+    /// Kotlin's Int -1 (two's complement — the java-int spelling the
+    /// generated bindings share).
+    internal const val ALERT_CHOICE_CANCEL = -1
 
     // Window properties: their own namespace — windows are not
     // widgets; window 0 is the primary surface.
@@ -380,6 +396,29 @@ object KayaCompose {
                 // this interpreter disagree — fail loudly.
                 APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
+                APPLY_PRESENT_ALERT -> {
+                    // The platform's REAL modal dialog (M3
+                    // AlertDialog, rendered by KayaRoot off alertId);
+                    // phones have alerts natively — no capability
+                    // carve-out here.
+                    b.long // window: 0, the one surface on this host
+                    val alert = b.long
+                    val actions = b.int
+                    b.int // pad
+                    val title = readString(b)
+                    val message = readString(b)
+                    val action0 = readString(b)
+                    val action1 = readString(b)
+                    val cancel = readString(b)
+                    KayaSceneModel.alertTitle = title
+                    KayaSceneModel.alertMessage = message
+                    KayaSceneModel.alertActions = buildList {
+                        if (actions >= 1) add(action0)
+                        if (actions == 2) add(action1)
+                    }
+                    KayaSceneModel.alertCancel = cancel
+                    KayaSceneModel.alertId = alert
+                }
                 APPLY_ADD_CHILD -> {
                     val parent = b.long
                     val child = b.long
@@ -442,6 +481,11 @@ object KayaCompose {
         val bytes = ByteArray(len)
         b.get(bytes)
         check(type == VALUE_STR) { "kaya: expected a string value, got type $type" }
+        // Values self-pad to 8; consume it HERE so sequential values
+        // parse (a reader that stops at the payload's end misparses
+        // the next value as type 0 — the confirm-compose leg caught
+        // it when the alert record brought the first 5-value body).
+        while (b.position() % 8 != 0) b.get()
         return String(bytes, Charsets.UTF_8)
     }
 
@@ -685,6 +729,60 @@ object KayaCompose {
                             observed.add("windows 1")
                         } else {
                             failures.add("windows 1, wanted $want")
+                        }
+                    }
+                    "expect_alert" -> {
+                        // The presented dialog's title off the model
+                        // that renders it (alertId is the M3 dialog's
+                        // existence), window#0 = the one surface.
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val wid =
+                            if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1
+                            else 0L
+                        val prefix = if (explicit) "window#$wid " else ""
+                        val want = quoted(parts.drop(if (explicit) 2 else 1))
+                        val got = onUi(activity) {
+                            if (wid == 0L && KayaSceneModel.alertId != null)
+                                KayaSceneModel.alertTitle
+                            else null
+                        }
+                        if (got == want) {
+                            observed.add("${prefix}alert \"$want\"")
+                        } else if (got != null) {
+                            failures.add("${prefix}alert \"$got\", wanted \"$want\"")
+                        } else {
+                            failures.add("${prefix}no alert live, wanted \"$want\"")
+                        }
+                    }
+                    "alert_choose" -> {
+                        // Drive the SAME answer path the dialog's
+                        // buttons run — the runner drives the model
+                        // exactly as click does here. Silent.
+                        val arg = parts.getOrNull(1) ?: ""
+                        onUi(activity) {
+                            val alert = KayaSceneModel.alertId
+                            if (alert != null) {
+                                when (arg) {
+                                    "0" ->
+                                        if (KayaSceneModel.alertActions.isNotEmpty())
+                                            kayaAnswerAlert(alert, 0)
+                                    "1" ->
+                                        if (KayaSceneModel.alertActions.size >= 2)
+                                            kayaAnswerAlert(alert, 1)
+                                    "cancel" -> kayaAnswerAlert(alert, ALERT_CHOICE_CANCEL)
+                                }
+                            }
+                        }
+                    }
+                    "expect_alerts" -> {
+                        val want = parts[1].toIntOrNull() ?: -1
+                        val got =
+                            onUi(activity) { if (KayaSceneModel.alertId != null) 1 else 0 }
+                        if (got == want) {
+                            observed.add("alerts $want")
+                        } else {
+                            failures.add("alerts $got, wanted $want")
                         }
                     }
                     "expect_title" -> {
@@ -1074,4 +1172,37 @@ fun KayaRoot() {
             }
         }
     }
+
+    KayaSceneModel.alertId?.let { alert ->
+        // The platform's REAL modal dialog: M3 AlertDialog. Every
+        // native dismissal (back, outside tap) IS the cancel slot;
+        // the action row and the cancel button run the same answer
+        // path the runner's alert_choose drives.
+        AlertDialog(
+            onDismissRequest = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) },
+            title = { Text(KayaSceneModel.alertTitle) },
+            text = { Text(KayaSceneModel.alertMessage) },
+            confirmButton = {
+                Row {
+                    KayaSceneModel.alertActions.forEachIndexed { index, label ->
+                        TextButton(onClick = { kayaAnswerAlert(alert, index) }) {
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) }) {
+                    Text(KayaSceneModel.alertCancel)
+                }
+            },
+        )
+    }
+}
+
+/// The one answer path: clear the model (the dialog leaves the tree)
+/// and emit — an action index or the cancel sentinel.
+fun kayaAnswerAlert(alert: Long, choice: Int) {
+    KayaSceneModel.alertId = null
+    KayaPresent.emitAlertResult(alert, choice)
 }

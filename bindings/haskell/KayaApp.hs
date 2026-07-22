@@ -63,6 +63,8 @@ module KayaApp
     createWindow,
     destroyWindow,
     WindowAttr (..),
+    AlertAttr (..),
+    showAlert,
     onCloseRequested,
     onWindowClosed,
     windowTitle,
@@ -181,7 +183,8 @@ data Counters = Counters
   { cSignal :: !Word64,
     cWidget :: !Word64,
     cCollection :: !Word64,
-    cNode :: !Word64
+    cNode :: !Word64,
+    cAlert :: !Word64
   }
 
 -- One instance of a collection: the table inside the stamped copy
@@ -234,6 +237,7 @@ data BuildState = BuildState
 
 data Pending
   = PClick !Word64 (IO ())
+  | PAlert !Word64 (Word32 -> IO ())
   | PChange !Word64 (String -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
@@ -609,6 +613,54 @@ onCloseRequested app handler =
 onWindowClosed :: App -> (Word64 -> IO ()) -> IO ()
 onWindowClosed app handler =
   writeIORef (appWindowClosed app) (Just handler)
+
+-- | Alert construction attributes — the config-list spelling.
+data AlertAttr
+  = ATitle String
+  | AMessage String
+  | AAction String
+  | ACancel String
+
+-- | Request a modal alert (the request/result grammar), the handler
+-- riding the request like 'buttonOn':
+-- @showAlert [ATitle "delete item?", AMessage "…", AAction "Delete",
+-- AAction "Archive", ACancel "Keep"] $ \choice -> …@. The handler
+-- fires exactly once — choice is an action index (0 or 1) or
+-- 'W.alertChoiceCancel', every platform-native dismissal — and its
+-- registration retires with the result. Ids are binding-allocated.
+-- At most two AActions (the platform floor) and exactly one ACancel
+-- — required, the slot every native dismissal resolves to (no
+-- binding invents a default label). One alert may be live per
+-- process; show the next from the handler.
+showAlert :: [AlertAttr] -> (Word32 -> IO ()) -> Build ()
+showAlert attrs handler = do
+  let titles = [t | ATitle t <- attrs]
+      messages = [m | AMessage m <- attrs]
+      actions = [a | AAction a <- attrs]
+      cancels = [c | ACancel c <- attrs]
+  case () of
+    _
+      | length actions > 2 ->
+          error "kaya: an alert carries at most 2 actions (the platform floor)"
+      | null cancels || any null cancels ->
+          error "kaya: the cancel slot always exists and needs a name — add ACancel"
+      | otherwise -> do
+          n <- Build $ \s ->
+            let c = bCounters s
+                next = cAlert c + 1
+             in (next, s {bCounters = c {cAlert = next}})
+          pendB (PAlert n handler)
+          emitB
+            ( W.txShowAlert
+                0
+                n
+                (fromIntegral (length actions))
+                (W.VStr (concat (take 1 titles)))
+                (W.VStr (concat (take 1 messages)))
+                (W.VStr (concat (take 1 actions)))
+                (W.VStr (concat (take 1 (drop 1 actions))))
+                (W.VStr (concat (take 1 cancels)))
+            )
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
@@ -1322,7 +1374,9 @@ data App = App
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
     -- Window lifecycle: one handler each, receiving the window id.
     appCloseRequested :: IORef (Maybe (Word64 -> IO ())),
-    appWindowClosed :: IORef (Maybe (Word64 -> IO ()))
+    appWindowClosed :: IORef (Maybe (Word64 -> IO ())),
+    appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
+    appNextAlert :: IORef Word64
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -1363,6 +1417,7 @@ buildTx app (Build f) = do
 register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
+  PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
   PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
@@ -1419,7 +1474,7 @@ onToggleNode app (Node n) handler =
 newApp :: IO App
 newApp =
   App
-    <$> newIORef (Counters 0 0 0 0)
+    <$> newIORef (Counters 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -1431,6 +1486,8 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Nothing
     <*> newIORef Nothing
+    <*> newIORef Map.empty
+    <*> newIORef 0
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -1497,6 +1554,16 @@ dispatchLoop app = do
       | kind == W.occKindWindowClosed -> do
           handler <- readIORef (appWindowClosed app)
           dispatch (mapM_ ($ ident) handler)
+          dispatchLoop app
+      | kind == W.occKindAlertResult -> do
+          -- The parser boxes the u32 choice as VI64. One-shot: the
+          -- registration retires with the result.
+          let choice = case payload of
+                Just (W.VI64 c) -> fromIntegral c :: Word32
+                _ -> 0
+          handlers <- readIORef (appAlertHandlers app)
+          writeIORef (appAlertHandlers app) (Map.delete ident handlers)
+          dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)

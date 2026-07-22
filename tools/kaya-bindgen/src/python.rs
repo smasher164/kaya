@@ -231,6 +231,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(", ");
     c.line(&format!("    if kind not in ({accepted}):"));
     c.line("        return kind, None, [], None");
+        c.line("    if kind == OCC_ALERT_RESULT:");
+    c.line("        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
+    c.line("        alert, choice = struct.unpack_from(\"<QI\", buf, 8)");
+    c.line("        return kind, alert, [], choice");
         c.line("    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):");
     c.line("        # Window lifecycle records carry the window id alone —");
     c.line("        # no key path, no payload.");

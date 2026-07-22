@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xecc906b893ee37ae
+let kayaSpecHash: UInt64 = 0x4da364d017f52b15
 
 struct KayaTx {
     var bytes = Data()
@@ -257,6 +257,21 @@ struct KayaTx {
     mutating func destroyWindow(_ windowId: UInt64) {
         let start = self.begin(UInt16(KAYA_TX_DESTROY_WINDOW))
         self.u64(windowId)
+        self.end(start)
+    }
+
+    /// Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
+    mutating func showAlert(_ window: UInt64, _ alert: UInt64, _ actions: UInt32, _ title: KayaValue, _ message: KayaValue, _ action0: KayaValue, _ action1: KayaValue, _ cancel: KayaValue) {
+        let start = self.begin(UInt16(KAYA_TX_SHOW_ALERT))
+        self.u64(window)
+        self.u64(alert)
+        self.u32(actions)
+        self.u32(0)
+        self.value(title)
+        self.value(message)
+        self.value(action0)
+        self.value(action1)
+        self.value(cancel)
         self.end(start)
     }
 
@@ -652,9 +667,15 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
+            || kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         // Window lifecycle records carry the window id alone.
+        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
+            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
+            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
+            return (kind, id, [], .i64(Int64(choice)))
+        }
         if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
         {

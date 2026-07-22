@@ -91,6 +91,18 @@ else:
     if not re.search(rf"SPEC_HASH: ULong = 0x{h}uL\b", kotlin):
         fail(f"spec hash 0x{h}: expected `SPEC_HASH: ULong = 0x{h}uL` in KayaCompose.kt")
 
+# The vtable rule: the SwiftUI interpreter reaches the host ONLY
+# through KayaHost's function-pointer table. A direct C-symbol call
+# (kaya_emit_*, kaya_next_*, ...) typechecks and even links, then
+# dies at dlopen against a static-rust or RTLD_LOCAL host ("symbol
+# not found in flat namespace" — the confirm slice hit it live).
+# C symbols are exactly the kaya_ + underscore namespace; Swift-side
+# helpers are camelCase and never match.
+for m in re.finditer(r"\bkaya_[a-z_]+\s*\(", swift):
+    fail(f"KayaSwiftUI.swift calls C symbol `{m.group(0).strip('( ')}` directly — "
+         "route it through KayaHost's api table (the vtable pins the one "
+         "live kaya instance; direct symbols die on static/RTLD_LOCAL hosts)")
+
 if failures:
     for f in failures:
         print(f"check-verbs: {f}", file=sys.stderr)

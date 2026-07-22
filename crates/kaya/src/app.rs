@@ -19,6 +19,7 @@ use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
+    AlertChoice, AlertId, AlertSpec,
     CollectionId, CommandKind, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
     WindowId, WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
@@ -402,6 +403,7 @@ pub struct AppCtx {
     pub(crate) transactions: Sender<Transaction>,
     next_signal: Cell<u64>,
     next_widget: Cell<u64>,
+    next_alert: Cell<u64>,
     next_collection: Cell<u64>,
     next_node: Cell<u64>,
     model: RefCell<HashMap<CollectionId, Vec<Instance>>>,
@@ -420,6 +422,7 @@ impl AppCtx {
             transactions,
             next_signal: Cell::new(1),
             next_widget: Cell::new(1),
+            next_alert: Cell::new(1),
             next_collection: Cell::new(1),
             next_node: Cell::new(1),
             model: RefCell::new(HashMap::new()),
@@ -467,6 +470,12 @@ impl AppCtx {
         let id = self.next_signal.get();
         self.next_signal.set(id + 1);
         SignalId(id)
+    }
+
+    fn alloc_alert(&self) -> AlertId {
+        let id = self.next_alert.get();
+        self.next_alert.set(id + 1);
+        AlertId(id)
     }
 
     fn alloc_widget(&self) -> WidgetId {
@@ -886,6 +895,34 @@ impl<'a> Tx<'a> {
     /// reconciliation after a window_closed.
     pub fn destroy_window(&mut self, window: WindowId) {
         self.ops.push(TxOp::DestroyWindow { window });
+    }
+
+    /// Request a modal alert (the request/result grammar): a chain
+    /// that ends in [`AlertRef::show`], which sends the one atomic
+    /// record and returns the request's id —
+    /// `let a = tx.show_alert().title("delete item?").message("…")
+    ///     .action("Delete").action("Archive").cancel("Keep").show();
+    ///  msgs.on_alert(a, Msg::Answered);`
+    /// The id is binding-allocated (like widget ids): the result
+    /// handler is bound to the REQUEST, never to the app, so the
+    /// guest carries no correlation plumbing. Up to two actions (the
+    /// platform floor); the cancel label is required and explicit —
+    /// the slot every platform-native dismissal (Esc, back, outside
+    /// tap) resolves to. One alert may be live per process; show the
+    /// next from the first's result handler.
+    pub fn show_alert(&mut self) -> AlertRef<'_, 'a> {
+        let alert = self.ctx.alloc_alert();
+        AlertRef {
+            tx: self,
+            spec: AlertSpec {
+                window: DEFAULT_WINDOW,
+                alert,
+                title: String::new(),
+                message: String::new(),
+                actions: Vec::new(),
+                cancel: String::new(),
+            },
+        }
     }
 
     /// Set a property on any window ([`set_window`] targets the
@@ -1557,6 +1594,7 @@ pub struct Messages<M> {
     // close events are app-global grammar, not per-widget wiring.
     close_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
     window_closed: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -1574,6 +1612,7 @@ impl<M> Messages<M> {
             nodes: RefCell::new(HashMap::new()),
             close_requested: RefCell::new(None),
             window_closed: RefCell::new(None),
+            alerts: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1683,6 +1722,15 @@ impl<M> Messages<M> {
         *self.window_closed.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Bind the one-shot result handler to a REQUEST (the id
+    /// [`AlertRef::show`] returned): an action index or Cancel (every
+    /// platform-native dismissal). The registration retires with the
+    /// result — correlation is the library's, never the guest's, and
+    /// per-request binding is exactly the widget-handler precedent.
+    pub fn on_alert(&self, alert: AlertId, f: impl Fn(AlertChoice) -> M + 'static) {
+        self.alerts.borrow_mut().insert(alert.0, Box::new(f));
+    }
+
     /// The mapped occurrence stream: blocks for the next occurrence
     /// with a registered meaning. Unmapped occurrences fold into
     /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
@@ -1709,11 +1757,75 @@ impl<M> Messages<M> {
                 Occurrence::WindowClosed { window } => {
                     self.window_closed.borrow().as_ref().map(|f| f(*window))
                 }
+                Occurrence::AlertResult { alert, choice } => {
+                    // One-shot: the registration retires with the result.
+                    self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
+                }
             };
             if let Some(m) = mapped {
                 return Some(m);
             }
         }
+    }
+}
+
+/// The alert chain, in the construction-sugar tier: accumulates the
+/// one atomic SHOW_ALERT record and sends it at [`AlertRef::show`]
+/// (a request has a send moment, unlike a window declaration — hence
+/// the terminal method, and #[must_use] so a chain that never shows
+/// is a compiler warning, not a silent no-op).
+#[must_use = "an alert chain sends nothing until .show()"]
+pub struct AlertRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: AlertSpec,
+}
+
+impl AlertRef<'_, '_> {
+    /// Present over this window instead of the primary.
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+
+    pub fn title(mut self, title: &str) -> Self {
+        self.spec.title = title.to_owned();
+        self
+    }
+
+    pub fn message(mut self, message: &str) -> Self {
+        self.spec.message = message.to_owned();
+        self
+    }
+
+    /// Add an action button (at most two — the platform floor; the
+    /// third is a construction-time error, matching the scene gate).
+    pub fn action(mut self, label: &str) -> Self {
+        assert!(
+            self.spec.actions.len() < 2,
+            "kaya: an alert carries at most 2 actions (the platform floor)"
+        );
+        self.spec.actions.push(label.to_owned());
+        self
+    }
+
+    /// Name the always-present cancel slot. Required — no binding
+    /// invents a default label (no hidden English in the floor).
+    pub fn cancel(mut self, label: &str) -> Self {
+        self.spec.cancel = label.to_owned();
+        self
+    }
+
+    /// Send the request, returning its id — the handle
+    /// [`Messages::on_alert`] binds the one-shot result handler to.
+    pub fn show(self) -> AlertId {
+        assert!(
+            !self.spec.cancel.is_empty(),
+            "kaya: the cancel slot always exists and needs a name — \
+             call .cancel(label) before .show()"
+        );
+        let id = self.spec.alert;
+        self.tx.ops.push(TxOp::ShowAlert(self.spec));
+        id
     }
 }
 
@@ -2291,6 +2403,7 @@ mod tests {
                     | Occurrence::InstanceToggled { .. }
                     | Occurrence::CloseRequested { .. }
                     | Occurrence::WindowClosed { .. }
+                    | Occurrence::AlertResult { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. } => {}
                     Occurrence::Shutdown => break,

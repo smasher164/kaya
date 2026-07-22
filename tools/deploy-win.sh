@@ -74,6 +74,7 @@ for arg in "$@"; do
         align_rust|align_python|align_go|align_csharp) SUITE="$arg" ;;
         window_rust|window_python|window_go|window_csharp) SUITE="$arg" ;;
         panels_rust|panels_python|panels_go|panels_csharp) SUITE="$arg" ;;
+        confirm_rust|confirm_python|confirm_go|confirm_csharp) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -120,7 +121,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -560,6 +561,13 @@ case "$SUITE" in
         run_suite panels_python
         run_suite panels_go
         run_suite panels_csharp
+        # The confirm scene: the modal-alert grammar (ContentDialog),
+        # all three answer paths through the REAL press (automation
+        # peer Invoke; Hide for the cancel slot).
+        run_suite confirm_rust
+        run_suite confirm_python
+        run_suite confirm_go
+        run_suite confirm_csharp
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

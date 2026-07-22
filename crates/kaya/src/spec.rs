@@ -432,6 +432,33 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   stale entries are inert). The primary is not destroyable: \
                   the process owns it.",
         },
+        Record {
+            kind: 21,
+            name: "show_alert",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("alert", FieldTy::U64),
+                f("actions", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("title", FieldTy::Value),
+                f("message", FieldTy::Value),
+                f("action0", FieldTy::Value),
+                f("action1", FieldTy::Value),
+                f("cancel", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Request a modal alert over a live window (0 = primary): \
+                  the request/result grammar's first client (DESIGN.md, \
+                  Presentation contexts). One atomic record: title, \
+                  message, `actions` action labels (0..=2 — the platform \
+                  floor; ContentDialog's three slots are two actions plus \
+                  close), and the always-present cancel slot, which is \
+                  what EVERY platform-native dismissal (Esc, back, outside \
+                  tap) resolves to. All five Values are Str; action slots \
+                  beyond `actions` ride empty and are ignored. Alert ids \
+                  are guest-chosen; one alert may be live per process, and \
+                  the id retires when its result fires.",
+        },
     ],
     apply: &[
         Record {
@@ -533,6 +560,27 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Close and release the native window.",
         },
+        Record {
+            kind: 11,
+            name: "present_alert",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("alert", FieldTy::U64),
+                f("actions", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("title", FieldTy::Value),
+                f("message", FieldTy::Value),
+                f("action0", FieldTy::Value),
+                f("action1", FieldTy::Value),
+                f("cancel", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Present the platform's real modal dialog over the window \
+                  (SHOW_ALERT, already validated by the core). The \
+                  presentation answers with kaya_emit_alert_result exactly \
+                  once — an action index, or the cancel sentinel for every \
+                  platform-native dismissal.",
+        },
     ],
     occurrence: &[
         Record {
@@ -606,6 +654,21 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   Informational and post-fact: the native window is gone \
                   and the core has already pruned its tree.",
         },
+        Record {
+            kind: 7,
+            name: "alert_result",
+            fields: &[
+                f("alert", FieldTy::U64),
+                f("choice", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The alert's one answer: choice is an ALERT_CHOICE value — \
+                  an action index (0 or 1), or `cancel` for every \
+                  platform-native dismissal (Esc, back, outside tap, the \
+                  cancel button itself). The alert id retires here; the \
+                  dialog is already gone when this fires.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -649,6 +712,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             ],
         },
         EnumSpec {
+            // The sentinel is deliberately not an index: any
+            // platform-native dismissal resolves to it, and action
+            // indices can grow without colliding.
+            name: "alert_choice",
+            variants: &[
+                ("action0", 0),
+                ("action1", 1),
+                ("cancel", 4294967295),
+            ],
+        },
+        EnumSpec {
             name: "align",
             variants: &[
                 ("start", 0),
@@ -683,8 +757,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
 mod tests {
     use super::*;
     use crate::protocol::{
-        CollectionId, CommandKind, Prop, PropValue, SignalId, TxOp, Value, ValueType, WidgetId, WidgetKind,
-        WindowId,
+        AlertId, AlertSpec, CollectionId, CommandKind, Prop, PropValue, SignalId, TxOp, Value,
+        ValueType, WidgetId, WidgetKind, WindowId,
     };
     use crate::wire;
 
@@ -809,6 +883,7 @@ mod tests {
             ("set_window_prop", wire::TX_SET_WINDOW_PROP),
             ("create_window", wire::TX_CREATE_WINDOW),
             ("destroy_window", wire::TX_DESTROY_WINDOW),
+            ("show_alert", wire::TX_SHOW_ALERT),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -832,6 +907,7 @@ mod tests {
                 ("set_window_prop", wire::APPLY_SET_WINDOW_PROP),
                 ("create_window", wire::APPLY_CREATE_WINDOW),
                 ("destroy_window", wire::APPLY_DESTROY_WINDOW),
+                ("present_alert", wire::APPLY_PRESENT_ALERT),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -840,6 +916,7 @@ mod tests {
         assert_eq!(SPEC.occurrence[3].kind, crate::ring::REC_VALUE_CHANGED);
         assert_eq!(SPEC.occurrence[4].kind, crate::ring::REC_CLOSE_REQUESTED);
         assert_eq!(SPEC.occurrence[5].kind, crate::ring::REC_WINDOW_CLOSED);
+        assert_eq!(SPEC.occurrence[6].kind, crate::ring::REC_ALERT_RESULT);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -900,6 +977,9 @@ mod tests {
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
+                    ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
+                    ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
+                    ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
                     ("align", "start") => wire::ALIGN_START,
                     ("align", "center") => wire::ALIGN_CENTER,
                     ("align", "end") => wire::ALIGN_END,
@@ -986,6 +1066,20 @@ mod tests {
             tx_record("widget_command"),
             &[Arg::U64(2), Arg::U32(wire::COMMAND_FOCUS), Arg::U32(0)],
         );
+        w.record(
+            tx_record("show_alert"),
+            &[
+                Arg::U64(0),
+                Arg::U64(9),
+                Arg::U32(2),
+                Arg::U32(0),
+                Arg::Value(Value::from("delete item?")),
+                Arg::Value(Value::from("this cannot be undone")),
+                Arg::Value(Value::from("Delete")),
+                Arg::Value(Value::from("Archive")),
+                Arg::Value(Value::from("Keep")),
+            ],
+        );
 
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
@@ -1038,6 +1132,14 @@ mod tests {
                 widget: WidgetId(2),
                 command: CommandKind::Focus,
             },
+            TxOp::ShowAlert(AlertSpec {
+                window: WindowId(0),
+                alert: AlertId(9),
+                title: "delete item?".into(),
+                message: "this cannot be undone".into(),
+                actions: vec!["Delete".into(), "Archive".into()],
+                cancel: "Keep".into(),
+            }),
         ];
         assert_eq!(ops.len(), expected.len());
         for (a, b) in ops.iter().zip(expected.iter()) {

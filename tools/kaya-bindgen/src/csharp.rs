@@ -292,6 +292,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
     c.line("        // Window lifecycle records carry the window id alone.");
+    c.line("        if (kind == OccKindAlertResult)");
+    c.line("        {");
+    c.line("            // The alert's one answer: id + u32 choice (AlertChoice*).");
+    c.line("            payload = BitConverter.ToUInt32(rec, 16);");
+    c.line("            return true;");
+    c.line("        }");
     c.line("        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)");
     c.line("            return true;");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
