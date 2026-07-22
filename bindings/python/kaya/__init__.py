@@ -1114,6 +1114,27 @@ def checkbox(text=None, checked=None, on_toggle=None, grow=None):
     return handle
 
 
+def progress(value=None, indeterminate=None, grow=None):
+    """A progress bar: display-only, like label and image. `value` is
+    the determinate fraction (0..=1; a float, a Signal, or an element
+    field); `indeterminate=True` switches to the platform's activity
+    mode and the fraction is ignored while it is on."""
+    handle = _widget(wire.KIND_PROGRESS)
+    if value is not None:
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_value(handle.id, value.id))
+        elif isinstance(value, FieldRef):
+            _records().append(wire.tx_bind_value_element(
+                handle.id, value._level, value._field))
+        else:
+            _records().append(wire.tx_set_value(handle.id, float(value)))
+    if indeterminate is not None:
+        _records().append(
+            wire.tx_set_indeterminate(handle.id, bool(indeterminate)))
+    _set_grow(handle, grow)
+    return handle
+
+
 def slider(value=None, min=None, max=None, on_change=None, grow=None):
     """A slider over a numeric range. Uncontrolled, like the entry: the
     widget owns its position and reports each change to `on_change`

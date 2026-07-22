@@ -83,6 +83,7 @@ pub const KIND_CHECKBOX: u32 = 6;
 pub const KIND_SLIDER: u32 = 7;
 pub const KIND_IMAGE: u32 = 8;
 pub const KIND_SCROLL: u32 = 9;
+pub const KIND_PROGRESS: u32 = 10;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -94,6 +95,7 @@ pub const PROP_SOURCE: u32 = 6;
 pub const PROP_GROW: u32 = 7;
 pub const PROP_SPACING: u32 = 8;
 pub const PROP_ALIGN: u32 = 9;
+pub const PROP_INDETERMINATE: u32 = 10;
 
 /// Window property ids (spec::WINDOW_PROPS) — their own namespace;
 /// windows are not widgets.
@@ -275,6 +277,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_SLIDER => WidgetKind::Slider,
         KIND_IMAGE => WidgetKind::Image,
         KIND_SCROLL => WidgetKind::Scroll,
+        KIND_PROGRESS => WidgetKind::Progress,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -290,6 +293,7 @@ fn prop(raw: u32) -> Prop {
         PROP_GROW => Prop::Grow,
         PROP_SPACING => Prop::Spacing,
         PROP_ALIGN => Prop::Align,
+        PROP_INDETERMINATE => Prop::Indeterminate,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1063,6 +1067,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Slider => KIND_SLIDER,
         WidgetKind::Image => KIND_IMAGE,
         WidgetKind::Scroll => KIND_SCROLL,
+        WidgetKind::Progress => KIND_PROGRESS,
     }
 }
 
@@ -1077,6 +1082,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Grow => PROP_GROW,
         Prop::Spacing => PROP_SPACING,
         Prop::Align => PROP_ALIGN,
+        Prop::Indeterminate => PROP_INDETERMINATE,
     }
 }
 

@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
             // affordance; nav runs here for real.
             "nav" -> Nav::app
             "scroll" -> Scroll::app
+            "progress" -> Progress::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

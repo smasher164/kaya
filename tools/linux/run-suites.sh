@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -350,6 +350,18 @@ for proto in x11 wayland; do
     run "$proto" scroll-ocaml env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/scroll.exe
     run "$proto" scroll-haskell env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
     run "$proto" scroll-java env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The progress scene: fraction + activity mode read back from
+    # GtkProgressBar (the pulse ticker IS the activity mode).
+    run "$proto" progress-rust env KAYA_SELFTEST=progress "$CARGO_TARGET_DIR/debug/examples/progress"
+    run "$proto" progress-python env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
+        python3 guests/python/progress.py
+    run "$proto" progress-go env KAYA_SELFTEST=progress /tmp/go-guests/progress
+    run "$proto" progress-csharp env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" progress-ocaml env KAYA_SELFTEST=progress KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/progress.exe
+    run "$proto" progress-haskell env KAYA_SELFTEST=progress "$(hs_bin progress)"
+    run "$proto" progress-java env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

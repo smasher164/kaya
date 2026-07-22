@@ -78,6 +78,9 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // (maxValue > 0 = overflow; value == maxValue = at end) and the
     // API scroll_end drives.
     val scrollState = androidx.compose.foundation.ScrollState(0)
+    // Progress-only: the platform's activity mode (value carries the
+    // determinate fraction, reused from the slider).
+    var indeterminate by mutableStateOf(false)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
      * natural size; positive weights divide the leftover main-axis space
@@ -183,6 +186,7 @@ object KayaSceneModel {
     val columns = ArrayList<KayaNode>()
     val rows = ArrayList<KayaNode>()
     val scrolls = ArrayList<KayaNode>()
+    val progresses = ArrayList<KayaNode>()
 }
 
 /** One navigation entry: a pushed scene root, retained while covered,
@@ -203,7 +207,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xcf648f6cbf430f8euL
+    private const val SPEC_HASH: ULong = 0xd28e3e58dcd039e6uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -246,6 +250,7 @@ object KayaCompose {
     const val KIND_SLIDER = 7
     const val KIND_IMAGE = 8
     const val KIND_SCROLL = 9
+    const val KIND_PROGRESS = 10
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -255,6 +260,7 @@ object KayaCompose {
     private const val PROP_GROW = 7
     private const val PROP_SPACING = 8
     private const val PROP_ALIGN = 9
+    private const val PROP_INDETERMINATE = 10
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -368,6 +374,7 @@ object KayaCompose {
                         KIND_COLUMN -> KayaSceneModel.columns.add(node)
                         KIND_ROW -> KayaSceneModel.rows.add(node)
                         KIND_SCROLL -> KayaSceneModel.scrolls.add(node)
+                        KIND_PROGRESS -> KayaSceneModel.progresses.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -385,6 +392,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.spacing = readF64(b)
                         PROP_ALIGN ->
                             KayaSceneModel.nodes[id]!!.align = readI64(b)
+                        PROP_INDETERMINATE ->
+                            KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -715,6 +724,11 @@ object KayaCompose {
                                 target(parts[1], "entry", KayaSceneModel.entries)?.text
                             else if (parts[1].startsWith("image"))
                                 target(parts[1], "image", KayaSceneModel.images)?.imageSize
+                            else if (parts[1].startsWith("progress"))
+                                target(parts[1], "progress", KayaSceneModel.progresses)?.let {
+                                    if (it.indeterminate) "indeterminate"
+                                    else "${Math.round(it.value * 100)}%"
+                                }
                             else target(parts[1], "label", KayaSceneModel.labels)?.text
                         }
                         when {
@@ -1141,6 +1155,16 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
     // everywhere else.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
     when (node.kind) {
+        KayaCompose.KIND_PROGRESS ->
+            // The dressed floor: M3's own LinearProgressIndicator —
+            // determinate over the 0..=1 fraction, or the activity
+            // flavor while indeterminate is on.
+            if (node.indeterminate) {
+                androidx.compose.material3.LinearProgressIndicator()
+            } else {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { node.value.toFloat() })
+            }
         KayaCompose.KIND_SCROLL ->
             // The vertical scroll viewport over its ONE child (the
             // scene enforces the count): verticalScroll over the

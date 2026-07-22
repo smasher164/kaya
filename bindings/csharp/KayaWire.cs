@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xcf648f6cbf430f8e;
+    public const ulong SpecHash = 0xd28e3e58dcd039e6;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -28,6 +28,7 @@ static class KayaWire
     public const uint KindSlider = 7;
     public const uint KindImage = 8;
     public const uint KindScroll = 9;
+    public const uint KindProgress = 10;
     public const uint PropText = 1;
     public const uint PropChecked = 2;
     public const uint PropValue = 3;
@@ -37,6 +38,7 @@ static class KayaWire
     public const uint PropGrow = 7;
     public const uint PropSpacing = 8;
     public const uint PropAlign = 9;
+    public const uint PropIndeterminate = 10;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -635,6 +637,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropAlign); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant indeterminate value.
+    public static byte[] TxSetIndeterminate(ulong widgetId, bool indeterminate)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropIndeterminate); w.Write(SourceConst);
+        EncodeValue(w, indeterminate);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound indeterminate value.
+    public static byte[] TxBindIndeterminate(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropIndeterminate); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindIndeterminateElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropIndeterminate); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

@@ -113,6 +113,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("grow", 7, PropKind::F64),
     ("spacing", 8, PropKind::F64),
     ("align", 9, PropKind::Enum("align")),
+    // Progress-only: the bar shows activity without a fraction
+    // (pulse/spinner mode). Bool, default false; Value carries the
+    // determinate fraction (0..=1, domain-checked at the root).
+    ("indeterminate", 10, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -800,6 +804,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("slider", 7),
                 ("image", 8),
                 ("scroll", 9),
+                ("progress", 10),
             ],
         },
         EnumSpec {
@@ -814,6 +819,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("grow", 7),
                 ("spacing", 8),
                 ("align", 9),
+                ("indeterminate", 10),
             ],
         },
         EnumSpec {
@@ -1101,6 +1107,7 @@ mod tests {
                     ("kind", "slider") => wire::KIND_SLIDER,
                     ("kind", "image") => wire::KIND_IMAGE,
                     ("kind", "scroll") => wire::KIND_SCROLL,
+                    ("kind", "progress") => wire::KIND_PROGRESS,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
@@ -1110,6 +1117,7 @@ mod tests {
                     ("prop", "grow") => wire::PROP_GROW,
                     ("prop", "spacing") => wire::PROP_SPACING,
                     ("prop", "align") => wire::PROP_ALIGN,
+                    ("prop", "indeterminate") => wire::PROP_INDETERMINATE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

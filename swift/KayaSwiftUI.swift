@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xcf648f6cbf430f8e
+let kayaSpecHash: UInt64 = 0xd28e3e58dcd039e6
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -63,6 +63,7 @@ private let kindCheckbox: UInt32 = 6
 private let kindSlider: UInt32 = 7
 private let kindImage: UInt32 = 8
 private let kindScroll: UInt32 = 9
+private let kindProgress: UInt32 = 10
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propValue: UInt32 = 3
@@ -72,6 +73,7 @@ private let propSource: UInt32 = 6
 private let propGrow: UInt32 = 7
 private let propSpacing: UInt32 = 8
 private let propAlign: UInt32 = 9
+private let propIndeterminate: UInt32 = 10
 // The align enum's wire values (spec enum "align").
 private let alignStart: Int64 = 0
 private let alignCenter: Int64 = 1
@@ -112,6 +114,9 @@ final class KayaNode: Identifiable {
     var scrollViewportH = 0.0
     var scrollContentH = 0.0
     var scrollContentMaxY = 0.0
+    /// Progress-only: the platform's activity mode (Value carries
+    /// the determinate fraction, reused from the slider).
+    var indeterminate = false
     /// This child's flex weight within its enclosing row/column. 0 is
     /// natural size; positive weights divide the leftover main-axis
     /// space in proportion. See Prop::Grow in protocol.rs.
@@ -204,6 +209,7 @@ final class KayaSceneModel {
     var columns: [KayaNode] = []
     var rows: [KayaNode] = []
     var scrolls: [KayaNode] = []
+    var progresses: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -594,6 +600,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindColumn: kayaScene.columns.append(node)
                 case kindRow: kayaScene.rows.append(node)
                 case kindScroll: kayaScene.scrolls.append(node)
+                case kindProgress: kayaScene.progresses.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -757,6 +764,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propAlign, valueI64):
                     kayaScene.nodes[id]!.align =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propIndeterminate, valueBool):
+                    kayaScene.nodes[id]!.indeterminate = raw[body + 24] != 0
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -1043,7 +1052,13 @@ private func kayaRunScript(_ script: String) {
                         ? kayaTarget(parts[1], "entry", kayaScene.entries)?.text
                         : parts[1].hasPrefix("image")
                             ? kayaTarget(parts[1], "image", kayaScene.images)?.imageSize
-                            : kayaTarget(parts[1], "label", kayaScene.labels)?.text
+                            : parts[1].hasPrefix("progress")
+                                ? kayaTarget(parts[1], "progress", kayaScene.progresses).map {
+                                    $0.indeterminate
+                                        ? "indeterminate"
+                                        : "\(Int(($0.value * 100).rounded()))%"
+                                }
+                                : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
                 if let got, got == want {
                     observed.append(got)
@@ -1961,6 +1976,18 @@ struct KayaRender: View {
             .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindEntry:
             KayaEntry(node: node)
+        case kindProgress:
+            // The dressed floor: SwiftUI's own ProgressView — linear
+            // determinate over the 0..=1 fraction, or the activity
+            // flavor while indeterminate is on.
+            Group {
+                if node.indeterminate {
+                    ProgressView()
+                } else {
+                    ProgressView(value: node.value)
+                }
+            }
+            .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindScroll:
             // The vertical scroll viewport over its ONE child (the
             // scene enforces the count). ScrollViewReader's proxy is

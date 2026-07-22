@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xcf648f6cbf430f8e
+	SpecHash uint64 = 0xd28e3e58dcd039e6
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -28,6 +28,7 @@ const (
 	KindSlider = 7
 	KindImage = 8
 	KindScroll = 9
+	KindProgress = 10
 	PropText = 1
 	PropChecked = 2
 	PropValue = 3
@@ -37,6 +38,7 @@ const (
 	PropGrow = 7
 	PropSpacing = 8
 	PropAlign = 9
+	PropIndeterminate = 10
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -679,6 +681,38 @@ func TxBindAlignElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropAlign)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetIndeterminate: set_property with a constant indeterminate value.
+func TxSetIndeterminate(widgetID uint64, indeterminate bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropIndeterminate)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, indeterminate)
+	return endRecord(b)
+}
+
+// TxBindIndeterminate: set_property with a signal-bound indeterminate value.
+func TxBindIndeterminate(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropIndeterminate)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindIndeterminateElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindIndeterminateElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropIndeterminate)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

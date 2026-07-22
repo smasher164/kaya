@@ -127,6 +127,16 @@ fn main() {
         "Windows.ApplicationModel.Core.UnhandledError".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueue".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueueHandler".to_string(),
+        // App-scope stub brushes for theme keys that dictionary
+        // realization demands when the full XamlControlsResources
+        // merge cannot load (dll-hosted guests have no exe-adjacent
+        // resources.pri, so ms-appx never resolves there).
+        "Microsoft.UI.Xaml.Media.SolidColorBrush".to_string(),
+        "Microsoft.UI.Xaml.Media.Brush".to_string(),
+        "Windows.UI.Color".to_string(),
+        // The progress bar: RangeBase descendant like Slider;
+        // IsIndeterminate is the activity mode.
+        "Microsoft.UI.Xaml.Controls.ProgressBar".to_string(),
         // The scroll viewport: ScrollViewer is the platform's own
         // machinery — ScrollableHeight/VerticalOffset are the
         // observation sources and ChangeView the API scroll_end

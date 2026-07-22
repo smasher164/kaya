@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xcf648f6cbf430f8e
+SPEC_HASH = 0xd28e3e58dcd039e6
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -26,6 +26,7 @@ KIND_CHECKBOX = 6
 KIND_SLIDER = 7
 KIND_IMAGE = 8
 KIND_SCROLL = 9
+KIND_PROGRESS = 10
 PROP_TEXT = 1
 PROP_CHECKED = 2
 PROP_VALUE = 3
@@ -35,6 +36,7 @@ PROP_SOURCE = 6
 PROP_GROW = 7
 PROP_SPACING = 8
 PROP_ALIGN = 9
+PROP_INDETERMINATE = 10
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -386,6 +388,21 @@ def tx_bind_align(widget_id, signal_id):
 def tx_bind_align_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ALIGN, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_indeterminate(widget_id, indeterminate):
+    """set_property with a constant indeterminate value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_INDETERMINATE, SOURCE_CONST) + _enc.value(indeterminate))
+
+
+def tx_bind_indeterminate(widget_id, signal_id):
+    """set_property with a signal-bound indeterminate value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_INDETERMINATE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_indeterminate_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INDETERMINATE, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

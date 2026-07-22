@@ -25,6 +25,7 @@ static class Program
             case "panels": PanelsScene.Run(); break;
             case "nav": NavScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;
+            case "progress": ProgressScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;

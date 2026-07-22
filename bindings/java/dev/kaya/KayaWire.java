@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xcf648f6cbf430f8eL;
+    public static final long SPEC_HASH = 0xd28e3e58dcd039e6L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -29,6 +29,7 @@ public final class KayaWire {
     public static final int KIND_SLIDER = 7;
     public static final int KIND_IMAGE = 8;
     public static final int KIND_SCROLL = 9;
+    public static final int KIND_PROGRESS = 10;
     public static final int PROP_TEXT = 1;
     public static final int PROP_CHECKED = 2;
     public static final int PROP_VALUE = 3;
@@ -38,6 +39,7 @@ public final class KayaWire {
     public static final int PROP_GROW = 7;
     public static final int PROP_SPACING = 8;
     public static final int PROP_ALIGN = 9;
+    public static final int PROP_INDETERMINATE = 10;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -575,6 +577,29 @@ public final class KayaWire {
     public static byte[] txBindAlignElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ALIGN).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant indeterminate value. */
+    public static byte[] txSetIndeterminate(long widgetId, boolean indeterminate) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_CONST);
+        encodeValue(b, indeterminate);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound indeterminate value. */
+    public static byte[] txBindIndeterminate(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindIndeterminateElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

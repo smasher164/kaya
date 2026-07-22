@@ -63,6 +63,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "confirm" => Some(include_str!("../../../tools/scenes/confirm.steps")),
         "nav" => Some(include_str!("../../../tools/scenes/nav.steps")),
         "scroll" => Some(include_str!("../../../tools/scenes/scroll.steps")),
+        "progress" => Some(include_str!("../../../tools/scenes/progress.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -92,6 +93,7 @@ pub enum TargetKind {
     /// only columns would have passed the whole matrix.
     Row,
     Image,
+    Progress,
     /// Scroll viewports are targetable under the same convention as
     /// columns: only index 0, only in a scene that keeps exactly one
     /// scroll (tools/check-steps.sh holds the line).
@@ -309,6 +311,12 @@ pub trait Stage: Send + 'static {
     fn entry_count(&self, window: u64) -> usize;
     /// Drive the window's REAL back affordance. No default.
     fn back(&self, window: u64);
+    /// The progress bar's state, read from the toolkit: the
+    /// determinate fraction as an integer percent ("42%" — the slider
+    /// verdict's spelling, identical in every language by
+    /// construction) or "indeterminate" while activity mode is on.
+    /// No default: a backend that forgets it must fail to compile.
+    fn progress_state(&self, target: Target) -> String;
     /// The scroll viewport's overflow, read from the toolkit after
     /// forcing pending layout: the empty string when the content
     /// exceeds the viewport, otherwise a short platform-flavored
@@ -529,6 +537,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "row" => TargetKind::Row,
         "image" => TargetKind::Image,
         "scroll" => TargetKind::Scroll,
+        "progress" => TargetKind::Progress,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -676,9 +685,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     TargetKind::Entry => stage.read_text(*t),
                     TargetKind::Image => stage.image_size(*t),
                     TargetKind::Label => stage.read_label(*t),
+                    TargetKind::Progress => stage.progress_state(*t),
                     other => {
                         failures.push(format!(
-                            "expect reads labels, entries and images — not {other:?}"
+                            "expect reads labels, entries, images and progress — not {other:?}"
                         ));
                         continue;
                     }
@@ -926,6 +936,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Row => "row",
         TargetKind::Image => "image",
         TargetKind::Scroll => "scroll",
+        TargetKind::Progress => "progress",
     };
     if t.index < 0 {
         format!("{kind}#last")
@@ -1094,6 +1105,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn progress_state(&self, _: Target) -> String {
+            String::new()
+        }
         fn window_count(&self) -> usize {
             1
         }
@@ -1242,6 +1256,9 @@ mod tests {
         fn scroll_at_end(&self, _: Target) -> String {
             String::new()
         }
+        fn progress_state(&self, _: Target) -> String {
+            String::new()
+        }
         fn window_count(&self) -> usize {
             1
         }
@@ -1346,6 +1363,9 @@ mod tests {
         }
         fn scroll_end(&self, _: Target) {}
         fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
+        fn progress_state(&self, _: Target) -> String {
             String::new()
         }
         fn window_count(&self) -> usize {

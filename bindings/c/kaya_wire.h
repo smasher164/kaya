@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xcf648f6cbf430f8eULL
+#define KAYA_SPEC_HASH 0xd28e3e58dcd039e6ULL
 
 
 /* Create a signal holding `initial`. */
@@ -631,6 +631,38 @@ static inline void kaya_tx_bind_align_element(KayaTx *tx, uint64_t widget_id, ui
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ALIGN);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a constant indeterminate value. */
+static inline void kaya_tx_set_indeterminate(KayaTx *tx, uint64_t widget_id, int indeterminate) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(indeterminate));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound indeterminate value. */
+static inline void kaya_tx_bind_indeterminate(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_indeterminate_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

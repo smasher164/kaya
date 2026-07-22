@@ -68,6 +68,9 @@ public final class Main {
             case "scroll":
                 app = Scroll::app;
                 break;
+            case "progress":
+                app = Progress::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

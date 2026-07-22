@@ -612,6 +612,22 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 
 // Slider creates a slider over min..max at value, with its change
 // handler co-located (nil for none) — the Fyne shape, like Button.
+// Progress is a progress bar: display-only, like Label and Image.
+// value is the determinate fraction (0..=1, domain-checked at the
+// root); chain .Indeterminate() for the platform's activity mode.
+func (tx *Tx) Progress(value float64) Widget {
+	w := tx.Widget(KindProgress)
+	tx.records = append(tx.records, TxSetValue(w.id, value))
+	return w
+}
+
+// Indeterminate switches a progress bar to the platform's activity
+// mode (the fraction is ignored while it is on).
+func (w Widget) Indeterminate() Widget {
+	w.tx.records = append(w.tx.records, TxSetIndeterminate(w.id, true))
+	return w
+}
+
 func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
 	tx.records = append(tx.records, TxSetMin(w.id, min))

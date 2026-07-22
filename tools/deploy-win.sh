@@ -77,6 +77,7 @@ for arg in "$@"; do
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
+        progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -123,7 +124,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -624,6 +625,21 @@ case "$SUITE" in
         run_suite scroll_go
         run_suite scroll_csharp
         run_suite scroll_java
+        # The progress scene: fraction + activity mode read back from
+        # ProgressBar (IsIndeterminate is the platform's own flag).
+        # ProgressBar is the first control whose template REQUIRES the
+        # XamlControlsResources merge, and ms-appx resolves against
+        # the PROCESS exe's directory — so every leg arranges kaya's
+        # minimal resources.pri beside its host exe (go builds into
+        # C:\kaya like rust; C# runs its apphost with the pri copied
+        # beside it; python/java get the pri beside their
+        # interpreters, idempotent and inert elsewhere). See
+        # docs/traps.md (the pri-adjacency rule).
+        run_suite progress_rust
+        run_suite progress_python
+        run_suite progress_go
+        run_suite progress_csharp
+        run_suite progress_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

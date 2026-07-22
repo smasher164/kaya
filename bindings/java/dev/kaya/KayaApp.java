@@ -836,6 +836,23 @@ public final class KayaApp {
 
         /** A slider over min..max at value, with its change handler
          * co-located (null for none). */
+        /** A progress bar: display-only, like label and image.
+         * value is the determinate fraction (0..=1); chain
+         * .indeterminate() on the returned widget... the JVM
+         * spelling is the second overload. */
+        public Widget progress(double value) {
+            Widget w = widget(KayaWire.KIND_PROGRESS);
+            records.add(KayaWire.txSetValue(w.id, value));
+            return w;
+        }
+
+        /** A progress bar in the platform's activity mode. */
+        public Widget progressIndeterminate() {
+            Widget w = widget(KayaWire.KIND_PROGRESS);
+            records.add(KayaWire.txSetIndeterminate(w.id, true));
+            return w;
+        }
+
         public Widget slider(double min, double max, double value,
                 BiConsumer<Tx, Double> onChange) {
             Widget w = widget(KayaWire.KIND_SLIDER);

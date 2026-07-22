@@ -1106,6 +1106,24 @@ impl<'a> Tx<'a> {
 
     /// A slider over min..max at value; moves arrive in the
     /// occurrence loop.
+    /// A progress bar: display-only, like label and image. `value`
+    /// is the determinate fraction (0..=1, domain-checked at the
+    /// root); chain `.indeterminate(true)`... no — pass
+    /// [`Prop::Indeterminate`] via set for the activity mode, or use
+    /// `progress_indeterminate`.
+    pub fn progress(&mut self, value: f64) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Progress);
+        self.set(w, Prop::Value, value);
+        Widget { id: w, out: (), tx: self }
+    }
+
+    /// A progress bar in the platform's activity mode (no fraction).
+    pub fn progress_indeterminate(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Progress);
+        self.set(w, Prop::Indeterminate, true);
+        Widget { id: w, out: (), tx: self }
+    }
+
     pub fn slider(&mut self, min: f64, max: f64, value: f64) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Slider);
         self.set(w, Prop::Min, min);

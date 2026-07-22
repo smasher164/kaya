@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xcf648f6cbf430f8e
+specHash = 0xd28e3e58dcd039e6
 
 valueBool :: Word32
 valueBool = 1
@@ -54,6 +54,8 @@ kindImage :: Word32
 kindImage = 8
 kindScroll :: Word32
 kindScroll = 9
+kindProgress :: Word32
+kindProgress = 10
 propText :: Word32
 propText = 1
 propChecked :: Word32
@@ -72,6 +74,8 @@ propSpacing :: Word32
 propSpacing = 8
 propAlign :: Word32
 propAlign = 9
+propIndeterminate :: Word32
+propIndeterminate = 10
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -511,6 +515,25 @@ txBindAlign widgetId signalId = wireRecord txKindSetProperty
 txBindAlignElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindAlignElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAlign <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant indeterminate value.
+txSetIndeterminate :: Word64 -> Bool -> Builder
+txSetIndeterminate widgetId indeterminate = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propIndeterminate <> word32LE sourceConst
+    <> encodeValue (VBool indeterminate))
+
+-- set_property with a signal-bound indeterminate value.
+txBindIndeterminate :: Word64 -> Word64 -> Builder
+txBindIndeterminate widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propIndeterminate <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindIndeterminateElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindIndeterminateElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propIndeterminate <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

@@ -134,6 +134,8 @@
 
 #define KIND_SCROLL 9
 
+#define KIND_PROGRESS 10
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -151,6 +153,8 @@
 #define PROP_SPACING 8
 
 #define PROP_ALIGN 9
+
+#define PROP_INDETERMINATE 10
 
 /**
  * Window property ids (spec::WINDOW_PROPS) — their own namespace;
@@ -440,6 +444,8 @@
 
 #define KAYA_KIND_SCROLL 9
 
+#define KAYA_KIND_PROGRESS 10
+
 /**
  * Property keys.
  */
@@ -460,6 +466,8 @@
 #define KAYA_PROP_SPACING 8
 
 #define KAYA_PROP_ALIGN 9
+
+#define KAYA_PROP_INDETERMINATE 10
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

@@ -225,7 +225,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry | WidgetKind::Checkbox
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
-        Prop::Value | Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
+        // Value is the slider's position AND the progress bar's
+        // determinate fraction; min/max stay slider-only (progress is
+        // fixed 0..=1).
+        Prop::Value => matches!(kind, WidgetKind::Slider | WidgetKind::Progress),
+        Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
+        Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image),
         // Layout weight is kind-agnostic: any child of a row/column may
         // grow, so it applies to every widget kind.
@@ -268,6 +273,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
         Prop::Align => ValueType::I64,
+        Prop::Indeterminate => ValueType::Bool,
     }
 }
 
@@ -341,6 +347,17 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             !(*mode == 4 && kind == WidgetKind::Column),
             "kaya: baseline alignment applies to rows only"
         );
+    }
+    // A progress fraction outside 0..=1 has no reading — nonsense
+    // dies at the root, the grow discipline (the slider keeps its own
+    // min/max range; this arm is progress-only).
+    if let (Prop::Value, Value::F64(fraction)) = (prop, value) {
+        if kind == WidgetKind::Progress {
+            assert!(
+                (0.0..=1.0).contains(fraction),
+                "kaya: a progress fraction lives in 0..=1, got {fraction}"
+            );
+        }
     }
 }
 

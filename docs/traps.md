@@ -520,6 +520,27 @@ the same patterns return through interpreter drop-downs
   parser branch's own comment). Guard: the ocaml emitter defuses
   both delimiters (`*)` → `* )`, `(*` → `( *`) on every doc it
   copies, so no future spec doc can break the generated module.
+- **WinUI resource resolution is anchored to the PROCESS exe's
+  directory — every kaya host needs resources.pri beside its exe.**
+  ProgressBar was the first control whose template REQUIRES the
+  merged XamlControlsResources (missing-theme-key death at
+  realization: "TabViewScrollButtonBackground"); the merge loads via
+  ms-appx, and ms-appx in an unpackaged process resolves against the
+  directory of the EXECUTABLE — not the dll, not the CWD. Rust scene
+  exes sat beside C:\kaya\resources.pri and worked; python.exe,
+  java.exe, dotnet.exe, and go-run's temp exe did not, and the
+  process fail-fasts 0xC000027B (bare
+  RoFailFastWithErrorContextInternal2; app-scope stub keys do NOT
+  satisfy the walk). The rule, applied per host in deploy-win's
+  progress legs: arrange kaya's minimal resources.pri beside the
+  host exe — go builds into C:\kaya (never `go run` for WinUI
+  legs), C# runs its APPHOST exe with the pri copied beside it,
+  python/java get the pri placed beside their interpreters
+  (idempotent; inert for non-WinUI programs). The merge itself is
+  tiered in OnLaunched: real XamlControlsResources where ms-appx
+  resolves, log-and-continue where it cannot — never fatal, so a
+  host without the pri keeps every control whose template resolves
+  locally.
 - **A depth-slice stub compiles; only a suite notices it against
   wired legs.** `unimplemented!("<scene> is not yet materialized")`
   arms are the sanctioned way to hold breadth open, and they COMPILE

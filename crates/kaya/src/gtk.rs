@@ -354,6 +354,7 @@ enum NativeWidget {
     Slider(gtk4::Scale),
     Image(gtk4::Picture),
     Scroll(gtk4::ScrolledWindow),
+    Progress(gtk4::ProgressBar),
 }
 
 impl NativeWidget {
@@ -368,6 +369,7 @@ impl NativeWidget {
             NativeWidget::Slider(w) => w.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
+            NativeWidget::Progress(w) => w.clone().upcast(),
         }
     }
 }
@@ -398,6 +400,11 @@ struct CoreState {
     sliders: Vec<gtk4::Scale>,
     images: Vec<gtk4::Picture>,
     scrolls: Vec<gtk4::ScrolledWindow>,
+    progresses: Vec<gtk4::ProgressBar>,
+    /// Indeterminate bars pulse on a shared ticker (GTK's activity
+    /// mode is pulse-driven, not a property); membership here IS the
+    /// indeterminate flag the observation reads.
+    indeterminate: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     columns: Vec<gtk4::Box>,
     rows: Vec<gtk4::Box>,
     window: gtk4::Window,
@@ -706,6 +713,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.scrolls.push(scrolled.clone());
                     NativeWidget::Scroll(scrolled)
                 }
+                WidgetKind::Progress => {
+                    // Display-only, like Label: no tag, no signal.
+                    // Determinate = set_fraction; indeterminate =
+                    // GTK's pulse mode, driven by a ticker while the
+                    // prop is on (see the SetProp arm).
+                    let bar = gtk4::ProgressBar::new();
+                    core.progresses.push(bar.clone());
+                    NativeWidget::Progress(bar)
+                }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no signal. The
                     // source arrives as a SetProp blob and decodes
@@ -957,6 +973,38 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Slider(scale), Prop::Value, Value::F64(v)) => {
                     scale.set_value(v);
+                }
+                (NativeWidget::Progress(bar), Prop::Value, Value::F64(v)) => {
+                    bar.set_fraction(v);
+                }
+                (NativeWidget::Progress(bar), Prop::Indeterminate, Value::Bool(on)) => {
+                    // GTK's activity mode is pulse-driven, not a
+                    // property: a ticker pulses every armed bar; the
+                    // membership set is also what the observation
+                    // reads. Turning it off restores the fraction
+                    // display (set_fraction repaints the bar).
+                    let key = id.0;
+                    let mut armed = core.indeterminate.borrow_mut();
+                    if on {
+                        if armed.insert(key) {
+                            let bar = bar.clone();
+                            let set = core.indeterminate.clone();
+                            glib::timeout_add_local(
+                                std::time::Duration::from_millis(100),
+                                move || {
+                                    if set.borrow().contains(&key) {
+                                        bar.pulse();
+                                        glib::ControlFlow::Continue
+                                    } else {
+                                        glib::ControlFlow::Break
+                                    }
+                                },
+                            );
+                        }
+                    } else {
+                        armed.remove(&key);
+                        bar.set_fraction(bar.fraction());
+                    }
                 }
                 (NativeWidget::Slider(scale), Prop::Min, Value::F64(v)) => {
                     scale.adjustment().set_lower(v);
@@ -1242,6 +1290,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 sliders: Vec::new(),
                 images: Vec::new(),
                 scrolls: Vec::new(),
+                progresses: Vec::new(),
+                indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 rows: Vec::new(),
                 window: window.upcast(),
@@ -1671,6 +1721,38 @@ impl crate::harness::Stage for GtkStage {
             // write it).
             let adj = core.scrolls[i].vadjustment();
             adj.set_value(adj.upper() - adj.page_size());
+        })
+    }
+
+    fn progress_state(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.progresses.len());
+            let bar = &core.progresses[i];
+            // The REAL control's state: membership in the pulse set is
+            // the indeterminate flag; the fraction is the bar's own.
+            let armed = core
+                .progresses
+                .get(i)
+                .map(|b| {
+                    // Recover the widget id by identity against the
+                    // registry order is unnecessary: the pulse set is
+                    // keyed by widget id, so read it via the bar's
+                    // kaya id stored at creation.
+                    b.clone()
+                })
+                .is_some()
+                && core
+                    .indeterminate
+                    .borrow()
+                    .iter()
+                    .any(|key| core.widgets.get(&WidgetId(*key)).is_some_and(|w| {
+                        matches!(w, NativeWidget::Progress(p) if p == bar)
+                    }));
+            if armed {
+                "indeterminate".to_string()
+            } else {
+                format!("{}%", (bar.fraction() * 100.0).round() as i64)
+            }
         })
     }
 

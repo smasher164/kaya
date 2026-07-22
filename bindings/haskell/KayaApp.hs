@@ -86,6 +86,8 @@ module KayaApp
     row,
     column,
     scroll,
+    progress,
+    progressIndeterminate,
     bindTextElement,
     KayaFieldType (..),
     KayaRecord (..),
@@ -885,6 +887,23 @@ checkboxOn text handler = leafish $ do
 
 -- | A slider over min..max at value, with its change handler
 -- co-located.
+-- | A progress bar: display-only, like label and image — the
+-- determinate fraction (0..=1).
+progress :: (LeafArgs r) => Double -> r
+progress fraction = leafish $ do
+  w <- widget W.kindProgress
+  let (Widget n) = w
+  emitB (W.txSetValue n fraction)
+  return w
+
+-- | A progress bar in the platform's activity mode (no fraction).
+progressIndeterminate :: (LeafArgs r) => r
+progressIndeterminate = leafish $ do
+  w <- widget W.kindProgress
+  let (Widget n) = w
+  emitB (W.txSetIndeterminate n True)
+  return w
+
 sliderOn :: (LeafArgs r) => Double -> Double -> Double -> (Double -> IO ()) -> r
 sliderOn lo hi value handler = leafish $ do
   w@(Widget n) <- widget W.kindSlider

@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -593,6 +593,22 @@ run scroll-ocaml-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/l
 run scroll-haskell-swiftui env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
 run scroll-swift-swiftui env KAYA_SELFTEST=scroll target/swift-guests/scroll
 run scroll-java-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The progress scene: the bar's contract — fraction and activity
+# mode read back from the REAL control. All eight languages.
+KAYA_SELFTEST_SCRIPT="$(scene_script progress)"
+export KAYA_SELFTEST_SCRIPT
+run progress-rust-swiftui env KAYA_SELFTEST=progress target/debug/examples/progress
+run progress-python-swiftui env KAYA_SELFTEST=progress python3 guests/python/progress.py
+run progress-go-swiftui env KAYA_SELFTEST=progress target/go-guests/progress
+run progress-csharp-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run progress-ocaml-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/progress.exe
+run progress-haskell-swiftui env KAYA_SELFTEST=progress "$(hs_bin progress)"
+run progress-swift-swiftui env KAYA_SELFTEST=progress target/swift-guests/progress
+run progress-java-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

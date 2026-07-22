@@ -33,8 +33,8 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ContentDialog, ContentDialogButton, ContentDialogResult,
-    Grid, Image, RowDefinition, ScrollBarVisibility, ScrollMode, ScrollViewer, Slider,
-    TextBlock, TextBox, TextChangedEventHandler,
+    Grid, Image, ProgressBar, RowDefinition, ScrollBarVisibility, ScrollMode, ScrollViewer,
+    Slider, TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
@@ -62,6 +62,7 @@ enum NativeWidget {
     Entry(TextBox),
     Image(Image),
     Scroll(ScrollViewer),
+    Progress(ProgressBar),
 }
 
 impl NativeWidget {
@@ -77,6 +78,7 @@ impl NativeWidget {
             NativeWidget::Entry(field) => field.cast(),
             NativeWidget::Image(image) => image.cast(),
             NativeWidget::Scroll(viewer) => viewer.cast(),
+            NativeWidget::Progress(bar) => bar.cast(),
         }
     }
 }
@@ -112,6 +114,7 @@ struct CoreState {
     sliders: Vec<Slider>,
     images: Vec<Image>,
     scrolls: Vec<ScrollViewer>,
+    progresses: Vec<ProgressBar>,
     columns: Vec<Grid>,
     rows: Vec<Grid>,
     window: Window,
@@ -356,8 +359,46 @@ impl app_overrides::IApplicationOverrides_Impl for KayaApplication_Impl {
         &self,
         _args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::LaunchActivatedEventArgs>,
     ) -> windows_core::Result<()> {
+        // Merge the framework's control resources once, at launch: a
+        // code-only app has no App.xaml to do it, and while most
+        // control templates happen to resolve without the merge,
+        // ProgressBar's was the first to hit a missing theme key
+        // ("Cannot find a Resource ... TabViewScrollButtonBackground",
+        // 2026-07-22) — the research footnote from the entry work,
+        // now load-bearing. Application.Current() is unusable here
+        // (the composition trap: identity is the outer), so the
+        // handle comes from the thread-local stashed at composition.
+        //
+        // The merge is TIERED because it cannot always load:
+        // XamlControlsResources resolves through ms-appx, which needs
+        // the exe-adjacent resources.pri — present for the scene
+        // executables, structurally absent for dll-hosted guests
+        // (python.exe, java.exe, dotnet, go: kaya.dll is not the
+        // exe). Where the real merge fails, kaya logs and continues:
+        // every control except ProgressBar resolves without it (the
+        // dll-hosted ProgressBar gap is ledgered — app-scope stub
+        // keys were tried and do NOT satisfy the realization walk;
+        // it fail-fasts 0xC000027B regardless).
+        APP.with_borrow(|app| -> windows_core::Result<()> {
+            let Some(app) = app.as_ref() else {
+                return Ok(());
+            };
+            let merged: windows_core::Result<()> = (|| {
+                let resources =
+                    bindings::Microsoft::UI::Xaml::Controls::XamlControlsResources::new()?;
+                app.Resources()?.MergedDictionaries()?.Append(&resources)?;
+                Ok(())
+            })();
+            if let Err(e) = merged {
+                eprintln!(
+                    "kaya: winui XamlControlsResources unavailable ({})",
+                    e.message()
+                );
+            }
+            Ok(())
+        })?;
         // Scene setup runs via the dispatcher from run_core's
-        // initialization callback; nothing to do at launch.
+        // initialization callback.
         Ok(())
     }
 }
@@ -863,6 +904,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.scrolls.push(viewer.clone());
                     NativeWidget::Scroll(viewer)
                 }
+                WidgetKind::Progress => {
+                    // Display-only, like Label: no tag, no handler.
+                    // RangeBase's default span is 0..100; kaya's
+                    // fraction contract is 0..=1, set explicitly.
+                    let bar = ProgressBar::new()?;
+                    bar.SetMinimum(0.0)?;
+                    bar.SetMaximum(1.0)?;
+                    core.progresses.push(bar.clone());
+                    NativeWidget::Progress(bar)
+                }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no handler. The
                     // source arrives as a SetProp blob and decodes
@@ -909,6 +960,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Scroll(viewer) => {
                         windows_core::Interface::cast(viewer).expect("scroll is a UIElement")
+                    }
+                    NativeWidget::Progress(bar) => {
+                        windows_core::Interface::cast(bar).expect("progress is a UIElement")
                     }
                 }
             };
@@ -1191,6 +1245,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
                     slider.SetValue(v)?;
                 }
+                (NativeWidget::Progress(bar), Prop::Value, Value::F64(v)) => {
+                    bar.SetValue(v)?;
+                }
+                (NativeWidget::Progress(bar), Prop::Indeterminate, Value::Bool(on)) => {
+                    bar.SetIsIndeterminate(on)?;
+                }
                 (NativeWidget::Column(grid), Prop::Spacing, Value::F64(gap)) => {
                     // A column's children stack as rows; the gap is the
                     // row spacing (expect_fills reads it back live).
@@ -1274,6 +1334,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Slider(slider) => children.Append(slider)?,
                 NativeWidget::Image(image) => children.Append(image)?,
                 NativeWidget::Scroll(viewer) => children.Append(viewer)?,
+                NativeWidget::Progress(bar) => children.Append(bar)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -1820,6 +1881,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             sliders: Vec::new(),
             images: Vec::new(),
             scrolls: Vec::new(),
+            progresses: Vec::new(),
             columns: Vec::new(),
             rows: Vec::new(),
             child_order: HashMap::new(),
@@ -2298,6 +2360,19 @@ impl crate::harness::Stage for WinUiStage {
             });
             queue.TryEnqueue(&handler)?;
             Ok(())
+        })
+    }
+
+    fn progress_state(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.progresses.len());
+            let bar = &core.progresses[i];
+            // The REAL control's state, never a model copy.
+            Ok(if bar.IsIndeterminate()? {
+                "indeterminate".to_string()
+            } else {
+                format!("{}%", (bar.Value()? * 100.0).round() as i64)
+            })
         })
     }
 

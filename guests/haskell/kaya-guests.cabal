@@ -85,6 +85,11 @@ executable scroll
   main-is: scroll.hs
   build-depends: kaya-guests
 
+executable progress
+  import: shared
+  main-is: progress.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

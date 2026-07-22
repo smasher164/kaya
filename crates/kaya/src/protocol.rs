@@ -309,6 +309,13 @@ pub enum WidgetKind {
     /// for the content-buffer path (DESIGN: "Image covers content
     /// buffers").
     Image,
+    /// A horizontal progress bar. Display-only, like Label and
+    /// Image: no occurrence, no tag. Prop::Value carries the
+    /// determinate fraction (0..=1, domain-checked at the root, the
+    /// grow discipline); Prop::Indeterminate switches the bar to the
+    /// platform's activity mode (pulse/animation) and Value is
+    /// ignored while it is on.
+    Progress,
     /// A vertical scroll viewport over EXACTLY ONE child (usually a
     /// column) — the ScrolledWindow/SingleChildScrollView shape; the
     /// scene rejects a second child. Vertical-only in v1 (an axis
@@ -361,6 +368,10 @@ pub enum Prop {
     /// approximating it with a priority, which would be merely ordinal
     /// and would render differently per platform.
     Grow,
+    /// Progress-only (Bool): the bar shows activity without a
+    /// fraction — the platform's pulse/animation mode; Value is
+    /// ignored while it is on.
+    Indeterminate,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],

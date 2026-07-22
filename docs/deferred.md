@@ -405,8 +405,9 @@ Landed history lives in git; this file only carries what is still open.
   the existing rec/s floors, which would otherwise deflate.)
 - Windows entry follow-ups: IME contract notes for mobile; the WinUI
   text-flyout-open path is untested; XamlControlsResources merging can
-  crash even with the metadata provider (test when adopting fluent
-  styling).
+  crash even with the metadata provider — RESOLVED 2026-07-22: the
+  merge landed (tiered, in OnLaunched) and works with the provider;
+  the real constraint was pri adjacency (traps.md).
 - Packaging: at-release items — Hackage/opam publication, Go vanity
   import path (akhil.cc/kaya + go-import meta; dev.kaya is
   unpublishable), Maven publication under cc.akhil, npm kaya-gui after
@@ -414,6 +415,24 @@ Landed history lives in git; this file only carries what is still open.
   trusted publishing (OIDC) on nuget/PyPI/npm when releases start.
   Android Python/Go guests need binding bootstrap (briefcase/gomobile).
   Swift SPM packaging needs a modulemap target.
+  APP-DISTRIBUTION PAYLOADS (Akhil, 2026-07-22): a user who imports
+  kaya and ships an app must get every runtime artifact the platform
+  needs, per platform, without reading our runbooks. The inventory
+  the suites already prove out: WINDOWS — resources.pri beside the
+  PROCESS exe (the pri-adjacency rule in traps.md; for dll-hosted
+  languages the packaging story must place it beside the interpreter
+  or ship an apphost), the WindowsAppRuntime bootstrap dll, and
+  kaya.dll on PATH; MAC — libkaya.dylib plus the SwiftUI interpreter
+  dylib (KAYA_SWIFTUI_LIB or dyld-adjacent); iOS — both inside the
+  bundle (the run-sim make_bundle recipe is the spec); ANDROID —
+  libkaya.so in jniLibs + the Kotlin interpreter classes; LINUX —
+  libkaya.so with the GTK backend compiled in. Each language's
+  package should carry or fetch these so `pip install kaya-gui` /
+  `go get` / `cargo add` yields a runnable, distributable app —
+  wheels with platform tags, cargo build-script asset embedding,
+  gradle AAR, etc. This is the packaging milestone's acceptance
+  test: a fresh machine, one package-manager install, one binary
+  handed to a friend.
 - Alert relaxations, each waiting on a REAL need, none speculative:
   programmatic dismissal (a guest-side cancel verb — rare; adds a
   second retire path to a grammar whose whole point is ONE),

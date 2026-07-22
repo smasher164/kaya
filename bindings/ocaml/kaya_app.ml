@@ -406,6 +406,17 @@ let entry ?grow ?on_change () tx =
 (* A slider over min..max at value. Uncontrolled, like the entry: the
    bar owns its position and reports each change to [on_change] (the
    new value as a float). *)
+(* A progress bar: display-only, like label and image. [~value] is
+   the determinate fraction (0..=1); [~indeterminate:true] switches
+   to the platform's activity mode. *)
+let progress ?grow ?(value = 0.0) ?indeterminate () tx =
+  let w = widget Kaya_wire.kind_progress tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_value id value);
+  Option.iter (fun i -> emit tx (Kaya_wire.tx_set_indeterminate id i)) indeterminate;
+  w
+
 let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?on_change () tx =
   let w = widget Kaya_wire.kind_slider tx in
   Option.iter (fun g -> set_grow w g tx) grow;

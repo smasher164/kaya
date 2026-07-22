@@ -749,6 +749,18 @@ sealed class Tx
 
     /// A slider over min..max at value, with its change handler
     /// co-located.
+    /// A progress bar: display-only, like Label and Image. value is
+    /// the determinate fraction (0..=1); indeterminate: true switches
+    /// to the platform's activity mode.
+    public Widget Progress(double value = 0.0, bool? indeterminate = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindProgress);
+        Records.Add(KayaWire.TxSetValue(w.Id, value));
+        if (indeterminate is { } i) Records.Add(KayaWire.TxSetIndeterminate(w.Id, i));
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
         Action<Tx, double> onChange = null, double? grow = null)
     {

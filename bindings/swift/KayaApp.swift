@@ -905,6 +905,19 @@ final class KayaAppTx {
 
     /// A slider over min...max at value, with its change handler
     /// co-located.
+    /// A progress bar: display-only, like label and image. value is
+    /// the determinate fraction (0..=1); indeterminate: true switches
+    /// to the platform's activity mode.
+    func progress(
+        value: Double = 0.0, indeterminate: Bool? = nil, grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_PROGRESS))
+        tx.setValue(w.id, value)
+        if let indeterminate { tx.setIndeterminate(w.id, indeterminate) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
         onChange: ((KayaAppTx, Double) throws -> Void)? = nil,
