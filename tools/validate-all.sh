@@ -92,7 +92,8 @@ if [ "$MODE" = parallel ]; then
             cat "$LANES_DIR/$name.log"
             status=1
         fi
-        legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null || echo 0)
+        legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null)
+        legs=${legs:-0}
         echo "$name: $verdict (${secs}s, $legs legs)"
     done
 fi

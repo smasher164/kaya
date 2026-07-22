@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xa78836939a484688L
+let spec_hash = 0x73d2b60a639054baL
 
 let value_bool = 1
 let value_i64 = 2
@@ -34,6 +34,7 @@ let kind_scroll = 9
 let kind_progress = 10
 let kind_select = 11
 let kind_radio = 12
+let kind_grid = 13
 let prop_text = 1
 let prop_checked = 2
 let prop_value = 3
@@ -44,6 +45,7 @@ let prop_grow = 7
 let prop_spacing = 8
 let prop_align = 9
 let prop_indeterminate = 10
+let prop_columns = 11
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -585,6 +587,32 @@ let tx_bind_indeterminate_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_indeterminate);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant columns value. *)
+let tx_set_columns widget_id columns =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_columns);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 columns))
+
+(* set_property with a signal-bound columns value. *)
+let tx_bind_columns widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_columns);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_columns_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_columns);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

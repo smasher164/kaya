@@ -77,6 +77,9 @@ public final class Main {
             case "radio":
                 app = Radio::app;
                 break;
+            case "grid":
+                app = GridScene::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

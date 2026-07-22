@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -708,6 +708,23 @@ run radio-ocaml-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/lib
 run radio-haskell-swiftui env KAYA_SELFTEST=radio "$(hs_bin radio)"
 run radio-swift-swiftui env KAYA_SELFTEST=radio target/swift-guests/radio
 run radio-java-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The grid scene: the 2D layout contract (natural-width columns
+# aligned across rows) plus the spacer's grow sugar. All eight
+# languages.
+KAYA_SELFTEST_SCRIPT="$(scene_script grid)"
+export KAYA_SELFTEST_SCRIPT
+run grid-rust-swiftui env KAYA_SELFTEST=grid target/debug/examples/grid
+run grid-python-swiftui env KAYA_SELFTEST=grid python3 guests/python/grid.py
+run grid-go-swiftui env KAYA_SELFTEST=grid target/go-guests/grid
+run grid-csharp-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run grid-ocaml-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/grid.exe
+run grid-haskell-swiftui env KAYA_SELFTEST=grid "$(hs_bin grid)"
+run grid-swift-swiftui env KAYA_SELFTEST=grid target/swift-guests/grid
+run grid-java-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

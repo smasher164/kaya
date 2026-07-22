@@ -671,3 +671,16 @@ the same patterns return through interpreter drop-downs
   When ADDING an apply-path call, ask: does this need a live tree,
   a layout pass, or an island? If yes, it rides a readiness event,
   one-shot, or it is a bug that a fast guest will find.
+
+- **Parallel lanes can hand a container a stale dune artifact.** With
+  validate-all's lanes concurrent, the linux container's incremental
+  dune build once linked 15 of 17 ocaml exes fresh and left two on
+  the previous run's binaries — dune's digest view through the
+  virtiofs mount racing the mac lane's concurrent host builds. The
+  per-guest spec-hash check caught it loudly at LEG time (that guard
+  paying rent); the durable guard moved the catch to BUILD time: the
+  container's build_ocaml asserts every exe is newer than the newest
+  binding source and self-heals with one `dune build --force`
+  (2026-07-22). The general rule for mounted-tree builds: an
+  incremental build that shares sources with a concurrent writer
+  must assert output freshness itself.

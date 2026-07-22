@@ -252,11 +252,17 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // grow, so it applies to every widget kind.
         Prop::Grow => true,
         // Spacing is the container's own property — the gap between
-        // ITS children — so only the container kinds carry it.
-        Prop::Spacing => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        // ITS children — so only the container kinds carry it (a
+        // grid's spacing is its inter-cell gap, both axes).
+        Prop::Spacing => {
+            matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid)
+        }
         // Alignment likewise: where the container places ITS children
         // on the cross axis.
         Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        // The grid's own shape: how many columns children fill
+        // row-major.
+        Prop::Columns => matches!(kind, WidgetKind::Grid),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -290,6 +296,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Spacing => ValueType::F64,
         Prop::Align => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
+        Prop::Columns => ValueType::F64,
     }
 }
 
@@ -340,6 +347,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             *weight >= 0.0 && weight.is_finite(),
             "kaya: grow weight must be finite and non-negative, got {weight}"
+        );
+    }
+    // A grid's column count has no reading below one, and a
+    // fractional count has none at all — nonsense dies at the root.
+    if let (Prop::Columns, Value::F64(cols)) = (prop, value) {
+        assert!(
+            cols.is_finite() && *cols >= 1.0 && cols.fract() == 0.0,
+            "kaya: a grid's columns is an integral count >= 1, got {cols}"
         );
     }
     // Same argument as grow's domain: a negative gap has no reading
@@ -3288,6 +3303,36 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Value,
                 value: PropValue::Const(Value::F64(1.0)),
+            },
+        ]);
+    }
+
+    /// The grid's column count: integral and >= 1, or it has no
+    /// reading.
+    #[test]
+    #[should_panic(expected = "integral count >= 1")]
+    fn grid_zero_columns_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Grid },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Columns,
+                value: PropValue::Const(Value::F64(0.0)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn columns_on_a_column_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Columns,
+                value: PropValue::Const(Value::F64(2.0)),
             },
         ]);
     }

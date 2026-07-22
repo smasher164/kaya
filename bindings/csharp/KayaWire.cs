@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xa78836939a484688;
+    public const ulong SpecHash = 0x73d2b60a639054ba;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -31,6 +31,7 @@ static class KayaWire
     public const uint KindProgress = 10;
     public const uint KindSelect = 11;
     public const uint KindRadio = 12;
+    public const uint KindGrid = 13;
     public const uint PropText = 1;
     public const uint PropChecked = 2;
     public const uint PropValue = 3;
@@ -41,6 +42,7 @@ static class KayaWire
     public const uint PropSpacing = 8;
     public const uint PropAlign = 9;
     public const uint PropIndeterminate = 10;
+    public const uint PropColumns = 11;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -664,6 +666,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropIndeterminate); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant columns value.
+    public static byte[] TxSetColumns(ulong widgetId, double columns)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColumns); w.Write(SourceConst);
+        EncodeValue(w, columns);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound columns value.
+    public static byte[] TxBindColumns(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColumns); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindColumnsElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropColumns); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

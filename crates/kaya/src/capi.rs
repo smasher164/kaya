@@ -279,6 +279,7 @@ pub const KAYA_KIND_SCROLL: u32 = 9;
 pub const KAYA_KIND_PROGRESS: u32 = 10;
 pub const KAYA_KIND_SELECT: u32 = 11;
 pub const KAYA_KIND_RADIO: u32 = 12;
+pub const KAYA_KIND_GRID: u32 = 13;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -292,6 +293,7 @@ const _: () = assert!(
         && KAYA_KIND_PROGRESS == wire::KIND_PROGRESS
         && KAYA_KIND_SELECT == wire::KIND_SELECT
         && KAYA_KIND_RADIO == wire::KIND_RADIO
+        && KAYA_KIND_GRID == wire::KIND_GRID
 );
 // Completeness, not just agreement (the PROPS count guard's sibling
 // — this exact gap recurred: KIND_PROGRESS shipped to every
@@ -311,7 +313,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 12,
+        kinds == 13,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -343,6 +345,7 @@ pub const KAYA_PROP_GROW: u32 = 7;
 pub const KAYA_PROP_SPACING: u32 = 8;
 pub const KAYA_PROP_ALIGN: u32 = 9;
 pub const KAYA_PROP_INDETERMINATE: u32 = 10;
+pub const KAYA_PROP_COLUMNS: u32 = 11;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -379,6 +382,7 @@ const _: () = assert!(
         && KAYA_PROP_SPACING == wire::PROP_SPACING
         && KAYA_PROP_ALIGN == wire::PROP_ALIGN
         && KAYA_PROP_INDETERMINATE == wire::PROP_INDETERMINATE
+        && KAYA_PROP_COLUMNS == wire::PROP_COLUMNS
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -406,7 +410,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 10,
+    crate::spec::PROPS.len() == 11,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

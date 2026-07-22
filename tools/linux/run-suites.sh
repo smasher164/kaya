@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -214,7 +214,28 @@ run_build c build_c
 # through the repo mount, and dune keys targets on source hashes, not
 # platform — without this the container gets handed mac binaries as
 # "fresh" (the same disease target-linux/ exists to prevent for cargo).
-build_ocaml() { dune build --build-dir=_build-linux; }
+build_ocaml() {
+    dune build --build-dir=_build-linux || return 1
+    # Freshness assert (caught live 2026-07-22: under PARALLEL lanes,
+    # two exes rode a previous run's link — dune's incremental view
+    # through the virtiofs mount raced the host lane's concurrent
+    # builds. The per-guest spec-hash guard caught it at LEG time;
+    # this moves the catch to build time and self-heals with one
+    # forced rebuild). An exe older than the newest binding source is
+    # stale by definition.
+    local newest exe fresh_exe
+    newest=$(ls -t bindings/ocaml/*.ml | head -1)
+    for exe in _build-linux/default/guests/ocaml/*.exe; do
+        if [ ! "$exe" -nt "$newest" ]; then
+            echo "stale ocaml artifact ($exe); forcing a full rebuild" >&2
+            dune build --force --build-dir=_build-linux || return 1
+            for fresh_exe in _build-linux/default/guests/ocaml/*.exe; do
+                [ "$fresh_exe" -nt "$newest" ] || return 1
+            done
+            return 0
+        fi
+    done
+}
 run_build ocaml build_ocaml
 
 # The Haskell guests: one cabal build; list-bin locates the outputs.
@@ -446,6 +467,18 @@ for proto in x11 wayland; do
     run "$proto" radio-ocaml env KAYA_SELFTEST=radio KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/radio.exe
     run "$proto" radio-haskell env KAYA_SELFTEST=radio "$(hs_bin radio)"
     run "$proto" radio-java env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The grid scene: GtkGrid's natural-width aligned columns + the
+    # spacer's grow sugar.
+    run "$proto" grid-rust env KAYA_SELFTEST=grid "$CARGO_TARGET_DIR/debug/examples/grid"
+    run "$proto" grid-python env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
+        python3 guests/python/grid.py
+    run "$proto" grid-go env KAYA_SELFTEST=grid /tmp/go-guests/grid
+    run "$proto" grid-csharp env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" grid-ocaml env KAYA_SELFTEST=grid KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grid.exe
+    run "$proto" grid-haskell env KAYA_SELFTEST=grid "$(hs_bin grid)"
+    run "$proto" grid-java env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

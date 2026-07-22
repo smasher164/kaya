@@ -140,6 +140,8 @@
 
 #define KIND_RADIO 12
 
+#define KIND_GRID 13
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -159,6 +161,8 @@
 #define PROP_ALIGN 9
 
 #define PROP_INDETERMINATE 10
+
+#define PROP_COLUMNS 11
 
 /**
  * Window property ids (spec::WINDOW_PROPS) — their own namespace;
@@ -454,6 +458,8 @@
 
 #define KAYA_KIND_RADIO 12
 
+#define KAYA_KIND_GRID 13
+
 /**
  * Property keys.
  */
@@ -476,6 +482,8 @@
 #define KAYA_PROP_ALIGN 9
 
 #define KAYA_PROP_INDETERMINATE 10
+
+#define KAYA_PROP_COLUMNS 11
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

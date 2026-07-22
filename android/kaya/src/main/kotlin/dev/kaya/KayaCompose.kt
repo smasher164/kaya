@@ -83,6 +83,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // Progress-only: the platform's activity mode (value carries the
     // determinate fraction, reused from the slider).
     var indeterminate by mutableStateOf(false)
+    var columns by mutableStateOf(1)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
      * natural size; positive weights divide the leftover main-axis space
@@ -191,6 +192,11 @@ object KayaSceneModel {
     val progresses = ArrayList<KayaNode>()
     val selects = ArrayList<KayaNode>()
     val radios = ArrayList<KayaNode>()
+    val grids = ArrayList<KayaNode>()
+    // Grid cell leading edges by child node id, grid-local (recorded
+    // at place time): the expect_grid_columns observation clusters
+    // these — geometry, never the model's columns copy.
+    val cellMinX = HashMap<Long, Int>()
 }
 
 /** One navigation entry: a pushed scene root, retained while covered,
@@ -211,7 +217,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xa78836939a484688uL
+    private const val SPEC_HASH: ULong = 0x73d2b60a639054bauL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -257,6 +263,7 @@ object KayaCompose {
     const val KIND_PROGRESS = 10
     const val KIND_SELECT = 11
     const val KIND_RADIO = 12
+    const val KIND_GRID = 13
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -267,6 +274,7 @@ object KayaCompose {
     private const val PROP_SPACING = 8
     private const val PROP_ALIGN = 9
     private const val PROP_INDETERMINATE = 10
+    private const val PROP_COLUMNS = 11
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -383,6 +391,7 @@ object KayaCompose {
                         KIND_PROGRESS -> KayaSceneModel.progresses.add(node)
                         KIND_SELECT -> KayaSceneModel.selects.add(node)
                         KIND_RADIO -> KayaSceneModel.radios.add(node)
+                        KIND_GRID -> KayaSceneModel.grids.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -402,6 +411,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.align = readI64(b)
                         PROP_INDETERMINATE ->
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
+                        PROP_COLUMNS ->
+                            KayaSceneModel.nodes[id]!!.columns = readF64(b).toInt()
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -965,6 +976,36 @@ object KayaCompose {
                         // gesture. Silent, like click.
                         onUi(activity) { kayaUserBack() }
                     }
+                    "expect_grid_columns" -> {
+                        val want = parts[2].toInt()
+                        val off = onUi(activity) {
+                            val grid = target(parts[1], "grid", KayaSceneModel.grids)
+                                ?: return@onUi "no such target"
+                            // Geometry, never the model's columns
+                            // copy: distinct leading-edge clusters of
+                            // the cells ARE the columns.
+                            val edges = grid.children.map {
+                                KayaSceneModel.cellMinX[it.id]
+                                    ?: return@onUi "cell geometry not recorded"
+                            }.sorted()
+                            if (edges.isEmpty()) return@onUi "no cells"
+                            var clusters = 0
+                            var last = Int.MIN_VALUE
+                            for (x in edges) {
+                                if (clusters == 0 || x - last > 2) {
+                                    clusters++
+                                    last = x
+                                }
+                            }
+                            if (clusters == want) ""
+                            else "$clusters column edges, wanted $want"
+                        }
+                        when (off) {
+                            "" -> observed.add("${parts[1]} columns $want")
+                            "no such target" -> failures.add("no such target ${parts[1]}")
+                            else -> failures.add("${parts[1]} misaligned ($off)")
+                        }
+                    }
                     "expect_overflow" -> {
                         // The toolkit's own ScrollState: maxValue > 0
                         // IS overflow.
@@ -1256,6 +1297,46 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
                                 node.value = i.toDouble()
                                 KayaPresent.emitValueChanged(node.tag, i.toDouble())
                             })
+                    }
+                }
+            }
+        }
+        KayaCompose.KIND_GRID -> {
+            // The 2D layout contract: Compose has no grid primitive,
+            // so this Layout IS the policy — children measure at
+            // natural size, column widths are per-column maxima
+            // (aligned across rows by construction), children fill
+            // row-major. Each cell's leading edge is recorded at
+            // place time for the geometry observation.
+            val cols = maxOf(1, node.columns)
+            val gapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
+            androidx.compose.ui.layout.Layout(
+                content = { node.children.forEach { child -> KayaRender(child) } },
+            ) { measurables, _ ->
+                val placeables = measurables.map {
+                    it.measure(androidx.compose.ui.unit.Constraints())
+                }
+                val rows = (placeables.size + cols - 1) / cols
+                val colW = IntArray(cols)
+                val rowH = IntArray(rows)
+                placeables.forEachIndexed { i, p ->
+                    colW[i % cols] = maxOf(colW[i % cols], p.width)
+                    rowH[i / cols] = maxOf(rowH[i / cols], p.height)
+                }
+                val width = colW.sum() + gapPx * (cols - 1).coerceAtLeast(0)
+                val height = rowH.sum() + gapPx * (rows - 1).coerceAtLeast(0)
+                layout(width, height) {
+                    var y = 0
+                    for (r in 0 until rows) {
+                        var x = 0
+                        for (c in 0 until cols) {
+                            val i = r * cols + c
+                            if (i >= placeables.size) break
+                            placeables[i].placeRelative(x, y)
+                            KayaSceneModel.cellMinX[node.children[i].id] = x
+                            x += colW[c] + gapPx
+                        }
+                        y += rowH[r] + gapPx
                     }
                 }
             }

@@ -41,7 +41,7 @@ bad = []
 for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
-    for kind, index in re.findall(r"\b(row|column|scroll)#(\d+)\b", line):
+    for kind, index in re.findall(r"\b(row|column|scroll|grid)#(\d+)\b", line):
         # Index 0 of a container kind is the blessed pattern, on one
         # convention: the scene keeps exactly one widget of that
         # kind, so creation order cannot enter. column#0 is the For

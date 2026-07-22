@@ -357,6 +357,7 @@ enum NativeWidget {
     Progress(gtk4::ProgressBar),
     Select(gtk4::DropDown),
     Radio(gtk4::Box),
+    Grid(gtk4::Grid),
 }
 
 impl NativeWidget {
@@ -374,6 +375,7 @@ impl NativeWidget {
             NativeWidget::Progress(w) => w.clone().upcast(),
             NativeWidget::Select(w) => w.clone().upcast(),
             NativeWidget::Radio(w) => w.clone().upcast(),
+            NativeWidget::Grid(w) => w.clone().upcast(),
         }
     }
 }
@@ -407,6 +409,12 @@ struct CoreState {
     progresses: Vec<gtk4::ProgressBar>,
     selects: Vec<gtk4::DropDown>,
     radios: Vec<gtk4::Box>,
+    grids: Vec<gtk4::Grid>,
+    /// Grid layout state: ordered children + column count. Children
+    /// can arrive BEFORE the columns prop (children-first sugars),
+    /// so both paths re-flow the attach positions.
+    grid_children: HashMap<u64, Vec<gtk4::Widget>>,
+    grid_cols: HashMap<u64, i32>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// radio's id, its row); the row's REAL widget is the grouped
     /// CheckButton in radio_buttons.
@@ -644,6 +652,27 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     }
 }
 
+/// Re-attach a grid's children row-major per its current column
+/// count — called when children or the columns prop arrive, in
+/// either order (children-first sugars emit adds before the prop).
+fn reflow_grid(core: &mut CoreState, grid_id: u64) {
+    let Some(NativeWidget::Grid(grid)) = core.widgets.get(&crate::protocol::WidgetId(grid_id))
+    else {
+        return;
+    };
+    let cols = core.grid_cols.get(&grid_id).copied().unwrap_or(1).max(1);
+    let children = core.grid_children.get(&grid_id).cloned().unwrap_or_default();
+    for child in &children {
+        if child.parent().is_some() {
+            grid.remove(child);
+        }
+    }
+    for (i, child) in children.iter().enumerate() {
+        let i = i as i32;
+        grid.attach(child, i % cols, i / cols, 1, 1);
+    }
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) {
     match op {
         ApplyOp::Create { id, kind, tag } => {
@@ -768,6 +797,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let bar = gtk4::ProgressBar::new();
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
+                }
+                WidgetKind::Grid => {
+                    // The 2D layout contract on GTK's own Grid:
+                    // columns take their natural width (homogeneous
+                    // off is the default), aligned across rows by the
+                    // toolkit itself. Attach positions re-flow when
+                    // children or the columns prop arrive.
+                    let grid = gtk4::Grid::new();
+                    core.grid_children.insert(id.0, Vec::new());
+                    core.grid_cols.insert(id.0, 1);
+                    core.grids.push(grid.clone());
+                    NativeWidget::Grid(grid)
                 }
                 WidgetKind::Radio => {
                     // The choice contract inline: GTK's radio idiom
@@ -1086,6 +1127,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     dropdown.set_selected(v as u32);
                     core.apply_quiet.set(false);
                 }
+                (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
+                    core.grid_cols.insert(id.0, cols as i32);
+                    let grid = grid.clone();
+                    let _ = grid;
+                    reflow_grid(core, id.0);
+                }
+                (NativeWidget::Grid(grid), Prop::Spacing, Value::F64(gap)) => {
+                    grid.set_row_spacing(gap as u32);
+                    grid.set_column_spacing(gap as u32);
+                }
                 (NativeWidget::Radio(_), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet.set(true);
                     if let Some(check) = core
@@ -1207,6 +1258,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // not shift every later label's index. The append rides
             // the quiet guard: GTK auto-selects row 0 when the first
             // item lands, and that notify is not a user pick.
+            if let NativeWidget::Grid(_) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let child_widget = core
+                    .widgets
+                    .get(&child)
+                    .expect("scene validated the id")
+                    .widget();
+                child_widget.set_halign(gtk4::Align::Start);
+                child_widget.set_valign(gtk4::Align::Start);
+                core.grid_children
+                    .get_mut(&parent.0)
+                    .expect("grid created")
+                    .push(child_widget);
+                reflow_grid(core, parent.0);
+                return;
+            }
             if let NativeWidget::Radio(group) =
                 core.widgets.get(&parent).expect("scene validated the id")
             {
@@ -1505,6 +1573,9 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 progresses: Vec::new(),
                 selects: Vec::new(),
                 radios: Vec::new(),
+                grids: Vec::new(),
+                grid_children: HashMap::new(),
+                grid_cols: HashMap::new(),
                 radio_options: HashMap::new(),
                 radio_buttons: HashMap::new(),
                 radio_tags: HashMap::new(),
@@ -1992,6 +2063,41 @@ impl crate::harness::Stage for GtkStage {
                 "indeterminate".to_string()
             } else {
                 format!("{}%", (bar.fraction() * 100.0).round() as i64)
+            }
+        })
+    }
+
+    fn grid_columns(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.grids.len()) else {
+                return "<no such target>".to_string();
+            };
+            let grid = &core.grids[i];
+            // Geometry, never the model's columns copy: cluster the
+            // cells' leading edges (allocations are parent-relative
+            // in GTK4); the distinct clusters ARE the columns.
+            let mut edges: Vec<i32> = Vec::new();
+            let mut child = grid.first_child();
+            while let Some(c) = child {
+                edges.push(c.allocation().x());
+                child = c.next_sibling();
+            }
+            if edges.is_empty() {
+                return "no cells".to_string();
+            }
+            edges.sort_unstable();
+            let mut clusters = 0;
+            let mut last = i32::MIN;
+            for x in edges {
+                if clusters == 0 || x - last > 2 {
+                    clusters += 1;
+                    last = x;
+                }
+            }
+            if clusters == want {
+                String::new()
+            } else {
+                format!("{clusters} column edges, wanted {want}")
             }
         })
     }

@@ -798,6 +798,29 @@ public final class KayaApp {
             return containerOf(KayaWire.KIND_SCROLL, body);
         }
 
+        /** A grid laying its children out row-major into columns
+         * columns — each column takes its NATURAL width, aligned
+         * across rows (the thing nested rows cannot express). */
+        public Widget grid(int columns, Runnable body) {
+            Widget parent = widget(KayaWire.KIND_GRID);
+            records.add(KayaWire.txSetColumns(parent.id, columns));
+            parents.add(parent.id);
+            if (body != null) {
+                body.run();
+            }
+            parents.remove(parents.size() - 1);
+            return parent;
+        }
+
+        /** A spacer: PURE SUGAR for an empty grown column — it
+         * consumes the leftover main-axis space between its
+         * siblings. */
+        public Widget spacer() {
+            Widget w = widget(KayaWire.KIND_COLUMN);
+            records.add(KayaWire.txSetGrow(w.id, 1.0));
+            return w;
+        }
+
         private Widget containerOf(int kind, Runnable body) {
             Widget parent = widget(kind);
             parents.add(parent.id);
@@ -922,6 +945,15 @@ public final class KayaApp {
                 KayaApp.this.onValueChanged(w,
                         (tx, v) -> onSelect.accept(tx, (int) (double) v));
             }
+            return w;
+        }
+
+        /** A label with constant text (the signal-bound flavor is
+         * the overload below) — the const-label sugar every other
+         * binding already had. */
+        public Widget label(String text) {
+            Widget w = widget(KayaWire.KIND_LABEL);
+            setText(w, text);
             return w;
         }
 

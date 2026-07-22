@@ -318,6 +318,7 @@ pub enum WidgetKind {
     Progress,
     Select,
     Radio,
+    Grid,
     /// A vertical scroll viewport over EXACTLY ONE child (usually a
     /// column) — the ScrolledWindow/SingleChildScrollView shape; the
     /// scene rejects a second child. Vertical-only in v1 (an axis
@@ -374,6 +375,10 @@ pub enum Prop {
     /// fraction — the platform's pulse/animation mode; Value is
     /// ignored while it is on.
     Indeterminate,
+    /// Grid-only (F64, integral >= 1): how many columns children
+    /// fill row-major. Columns take their NATURAL width, aligned
+    /// across rows — the thing nested rows cannot express.
+    Columns,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],

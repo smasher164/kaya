@@ -51,6 +51,8 @@ mod progress;
 mod select;
 #[path = "radio.rs"]
 mod radio;
+#[path = "grid.rs"]
+mod grid;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -75,6 +77,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),
         Ok("radio") => radio::app(ctx),
+        Ok("grid") => grid::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

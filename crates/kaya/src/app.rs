@@ -1065,6 +1065,31 @@ impl<'a> Tx<'a> {
         self.container_of(WidgetKind::Scroll, body)
     }
 
+    /// A grid laying its children out row-major into `columns`
+    /// columns — each column takes its NATURAL width, aligned across
+    /// rows (the thing nested rows cannot express); `spacing` is the
+    /// inter-cell gap on both axes.
+    pub fn grid<R>(
+        &mut self,
+        columns: usize,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> Widget<'_, 'a, R> {
+        let w = self.container_of(WidgetKind::Grid, body);
+        let id = w.id;
+        w.tx.set(id, Prop::Columns, columns as f64);
+        Widget { id, out: w.out, tx: w.tx }
+    }
+
+    /// A spacer: PURE SUGAR for an empty grown column — it consumes
+    /// the leftover main-axis space between its siblings (weight 1;
+    /// the grow contract). No new vocabulary: it lowers to what every
+    /// backend already proves.
+    pub fn spacer(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Column);
+        self.set(w, Prop::Grow, 1.0);
+        Widget { id: w, out: (), tx: self }
+    }
+
     fn container_of<R>(
         &mut self,
         kind: WidgetKind,

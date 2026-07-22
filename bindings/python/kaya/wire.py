@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xa78836939a484688
+SPEC_HASH = 0x73d2b60a639054ba
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -29,6 +29,7 @@ KIND_SCROLL = 9
 KIND_PROGRESS = 10
 KIND_SELECT = 11
 KIND_RADIO = 12
+KIND_GRID = 13
 PROP_TEXT = 1
 PROP_CHECKED = 2
 PROP_VALUE = 3
@@ -39,6 +40,7 @@ PROP_GROW = 7
 PROP_SPACING = 8
 PROP_ALIGN = 9
 PROP_INDETERMINATE = 10
+PROP_COLUMNS = 11
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -405,6 +407,21 @@ def tx_bind_indeterminate(widget_id, signal_id):
 def tx_bind_indeterminate_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INDETERMINATE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_columns(widget_id, columns):
+    """set_property with a constant columns value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_COLUMNS, SOURCE_CONST) + _enc.value(columns))
+
+
+def tx_bind_columns(widget_id, signal_id):
+    """set_property with a signal-bound columns value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_COLUMNS, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_columns_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_COLUMNS, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

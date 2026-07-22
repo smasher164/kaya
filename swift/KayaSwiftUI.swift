@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xa78836939a484688
+let kayaSpecHash: UInt64 = 0x73d2b60a639054ba
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -66,8 +66,10 @@ private let kindScroll: UInt32 = 9
 private let kindProgress: UInt32 = 10
 private let kindSelect: UInt32 = 11
 private let kindRadio: UInt32 = 12
+private let kindGrid: UInt32 = 13
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
+private let propColumns: UInt32 = 11
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -119,6 +121,8 @@ final class KayaNode: Identifiable {
     /// Progress-only: the platform's activity mode (Value carries
     /// the determinate fraction, reused from the slider).
     var indeterminate = false
+    /// Grid-only: how many columns children fill row-major.
+    var columns = 1
     /// This child's flex weight within its enclosing row/column. 0 is
     /// natural size; positive weights divide the leftover main-axis
     /// space in proportion. See Prop::Grow in protocol.rs.
@@ -214,6 +218,7 @@ final class KayaSceneModel {
     var progresses: [KayaNode] = []
     var selects: [KayaNode] = []
     var radios: [KayaNode] = []
+    var grids: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -245,6 +250,11 @@ var kayaDismissWindow: ((UInt64) -> Void)?
 /// The live ScrollViewReader proxies by scroll node id (main actor):
 /// how scroll_end drives the REAL scrolling API.
 var kayaScrollProxies: [UInt64: ScrollViewProxy] = [:]
+/// Grid cell leading edges by child node id, in the grid's own
+/// coordinate space (main actor): the expect_grid_columns
+/// observation clusters these — geometry, never the model's columns
+/// copy.
+var kayaCellMinX: [UInt64: Double] = [:]
 /// Mounts that arrived before the environment actions were stashed
 /// (a batch can apply before the first view appears): drained by
 /// KayaRoot's onAppear.
@@ -607,6 +617,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindProgress: kayaScene.progresses.append(node)
                 case kindSelect: kayaScene.selects.append(node)
                 case kindRadio: kayaScene.radios.append(node)
+                case kindGrid: kayaScene.grids.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -772,6 +783,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propIndeterminate, valueBool):
                     kayaScene.nodes[id]!.indeterminate = raw[body + 24] != 0
+                case (propColumns, valueF64):
+                    kayaScene.nodes[id]!.columns =
+                        Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -1316,6 +1330,41 @@ private func kayaRunScript(_ script: String) {
                 DispatchQueue.main.sync {
                     let depth = kayaScene.windows[wid]?.entries.count ?? 0
                     kayaUserPops(wid, to: max(0, depth - 1))
+                }
+            case "expect_grid_columns":
+                let want = Int(parts[2])!
+                let off = DispatchQueue.main.sync { () -> String? in
+                    guard let grid = kayaTarget(parts[1], "grid", kayaScene.grids) else {
+                        return nil
+                    }
+                    // Geometry, never the model's columns copy: the
+                    // distinct leading-edge clusters of the cells ARE
+                    // the columns, and clustering within 2pt asserts
+                    // per-column alignment in the same breath.
+                    var edges: [Double] = []
+                    for cell in grid.children {
+                        guard let x = kayaCellMinX[cell.id] else {
+                            return "cell geometry not recorded"
+                        }
+                        edges.append(x)
+                    }
+                    if edges.isEmpty { return "no cells" }
+                    var clusters: [Double] = []
+                    for x in edges.sorted() {
+                        if clusters.last.map({ x - $0 > 2 }) ?? true {
+                            clusters.append(x)
+                        }
+                    }
+                    return clusters.count == want
+                        ? "" : "\(clusters.count) column edges, wanted \(want)"
+                }
+                switch off {
+                case ""?:
+                    observed.append("\(parts[1]) columns \(want)")
+                case let s?:
+                    failures.append("\(parts[1]) misaligned (\(s))")
+                case nil:
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_overflow":
                 // Content exceeds the viewport — both readings are
@@ -2066,6 +2115,41 @@ struct KayaRender: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+        case kindGrid:
+            // The 2D layout contract: SwiftUI's own Grid — columns
+            // take their natural width, aligned across rows. The
+            // node's children chunk row-major by its columns count;
+            // each cell records its leading edge for the geometry
+            // observation.
+            Grid(
+                alignment: .leading,
+                horizontalSpacing: node.spacing, verticalSpacing: node.spacing
+            ) {
+                let cols = max(1, node.columns)
+                let rows = stride(from: 0, to: node.children.count, by: cols).map {
+                    Array(node.children[$0..<min($0 + cols, node.children.count)])
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, cells in
+                    GridRow {
+                        ForEach(cells, id: \.id) { cell in
+                            KayaRender(node: cell)
+                                .background(
+                                    GeometryReader { g in
+                                        Color.clear
+                                            .onAppear {
+                                                kayaCellMinX[cell.id] =
+                                                    g.frame(in: .named("kaya-grid-\(node.id)")).minX
+                                            }
+                                            .onChange(of: g.frame(in: .named("kaya-grid-\(node.id)")).minX) { _, x in
+                                                kayaCellMinX[cell.id] = x
+                                            }
+                                    }
+                                )
+                        }
+                    }
+                }
+            }
+            .coordinateSpace(name: "kaya-grid-\(node.id)")
         case kindRadio:
             // The choice contract in its inline presentation. The
             // dressed floor per platform: macOS renders the REAL

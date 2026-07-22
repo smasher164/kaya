@@ -116,6 +116,8 @@ module KayaApp
     sliderOn,
     selectOn,
     radioOn,
+    gridOf,
+    spacer,
     imageBytes,
     imageBound,
     TplTextSource (..),
@@ -833,6 +835,26 @@ column = rowish W.kindColumn
 -- unconstrained viewport hugs its content and nothing overflows.
 scroll :: [Attr 'BoxW] -> Build Widget -> Build Widget
 scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
+
+-- | A grid from its children, laid out row-major into N columns —
+-- each column takes its NATURAL width, aligned across rows (the
+-- thing nested rows cannot express). The columns record lands before
+-- the addChilds (backends re-flow either way).
+gridOf :: Int -> [Build Widget] -> Build Widget
+gridOf columns children = do
+  handles <- sequence children
+  parent@(Widget n) <- widget W.kindGrid
+  emitB (W.txSetColumns n (fromIntegral columns))
+  mapM_ (addChild parent) handles
+  return parent
+
+-- | A spacer: PURE SUGAR for an empty grown column — it consumes the
+-- leftover main-axis space between its siblings.
+spacer :: Build Widget
+spacer = do
+  w@(Widget n) <- widget W.kindColumn
+  emitB (W.txSetGrow n 1.0)
+  return w
 
 -- The leaf half of the same idiom: every leaf constructor's result is
 -- either the widget or a function awaiting its attr list —

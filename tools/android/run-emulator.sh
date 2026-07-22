@@ -354,6 +354,12 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity radio \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script radio)'"
+    # The grid scene: the custom measurement Layout (Compose has no
+    # grid primitive) + the spacer's grow sugar.
+    run_apk grid-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity grid \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grid)'"
     drain
     timing legs-compose
 fi
@@ -432,6 +438,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity radio \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script radio)'"
+    # The grid scene through the JVM binding.
+    run_apk grid-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity grid \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grid)'"
     drain
     timing legs-jvm
 fi

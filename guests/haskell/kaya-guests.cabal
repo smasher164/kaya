@@ -100,6 +100,11 @@ executable radio
   main-is: radio.hs
   build-depends: kaya-guests
 
+executable grid
+  import: shared
+  main-is: grid.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

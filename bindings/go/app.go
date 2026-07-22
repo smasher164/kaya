@@ -573,6 +573,28 @@ func (tx *Tx) Scroll(body func()) Widget {
 	return tx.containerOf(KindScroll, body)
 }
 
+// Grid creates a grid laying its children out row-major into columns
+// columns — each column takes its NATURAL width, aligned across rows
+// (the thing nested rows cannot express).
+func (tx *Tx) Grid(columns int, body func()) Widget {
+	parent := tx.Widget(KindGrid)
+	tx.records = append(tx.records, TxSetColumns(parent.id, float64(columns)))
+	tx.app.parents = append(tx.app.parents, parent.id)
+	if body != nil {
+		body()
+	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+	return parent
+}
+
+// Spacer is PURE SUGAR for an empty grown column: it consumes the
+// leftover main-axis space between its siblings (the grow contract;
+// no new vocabulary).
+func (tx *Tx) Spacer() Widget {
+	w := tx.Widget(KindColumn)
+	return w.Grow(1)
+}
+
 func (tx *Tx) containerOf(kind uint32, body func()) Widget {
 	parent := tx.Widget(kind)
 	tx.app.parents = append(tx.app.parents, parent.id)
@@ -591,6 +613,15 @@ func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
 	if onClick != nil {
 		tx.app.OnClick(w, onClick)
 	}
+	return w
+}
+
+// LabelText creates a label with constant text (Label is the
+// signal-bound flavor) — the const-label sugar every other binding
+// already had.
+func (tx *Tx) LabelText(text string) Widget {
+	w := tx.Widget(KindLabel)
+	tx.SetText(w, text)
 	return w
 }
 

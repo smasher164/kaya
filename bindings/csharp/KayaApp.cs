@@ -867,6 +867,31 @@ sealed class Tx
     public Widget Scroll(Action body, double? grow = null) =>
         ContainerOf(KayaWire.KindScroll, body, grow, null, null);
 
+    /// A grid laying its children out row-major into `columns`
+    /// columns — each column takes its NATURAL width, aligned across
+    /// rows (the thing nested rows cannot express); `spacing` is the
+    /// inter-cell gap on both axes.
+    public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null)
+    {
+        var parent = Widget(KayaWire.KindGrid);
+        Records.Add(KayaWire.TxSetColumns(parent.Id, columns));
+        if (spacing is double gap) SetSpacing(parent, gap);
+        if (grow is double g) SetGrow(parent, g);
+        App.Parents.Add(parent.Id);
+        body?.Invoke();
+        App.Parents.RemoveAt(App.Parents.Count - 1);
+        return parent;
+    }
+
+    /// A spacer: PURE SUGAR for an empty grown column — it consumes
+    /// the leftover main-axis space between its siblings.
+    public Widget Spacer()
+    {
+        var w = Widget(KayaWire.KindColumn);
+        SetGrow(w, 1.0);
+        return w;
+    }
+
     Widget ContainerOf(
         uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null)
     {

@@ -66,6 +66,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "progress" => Some(include_str!("../../../tools/scenes/progress.steps")),
         "select" => Some(include_str!("../../../tools/scenes/select.steps")),
         "radio" => Some(include_str!("../../../tools/scenes/radio.steps")),
+        "grid" => Some(include_str!("../../../tools/scenes/grid.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -104,6 +105,10 @@ pub enum TargetKind {
     /// The radio group: the choice contract in its inline
     /// presentation — same choose/expect verbs as select.
     Radio,
+    /// Grids are targetable under the container convention: only
+    /// index 0, only in a scene that keeps exactly one grid
+    /// (tools/check-steps.sh holds the line).
+    Grid,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -211,6 +216,12 @@ pub enum Step {
     /// action, silent like click; `expect select#N "label"` is the
     /// observable.
     Choose(Target, usize),
+    /// Expect the grid to lay its children out in exactly N columns
+    /// with each column's cells sharing their leading edge — the
+    /// observation the columns prop is verified by, and the one
+    /// nested rows can never fake: geometry from the toolkit, never
+    /// a model copy.
+    ExpectGridColumns(Target, usize),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -339,6 +350,12 @@ pub trait Stage: Send + 'static {
     /// model copy. Labels, not indices: byte-compared across every
     /// language like all expects. No default.
     fn selected_label(&self, target: Target) -> String;
+    /// The grid observation: empty when the grid lays out in exactly
+    /// `want` columns whose cells share their leading edges (within
+    /// two device units); otherwise the toolkit's own description of
+    /// the mismatch, for the failure text. Geometry, never a model
+    /// copy. No default.
+    fn grid_columns(&self, target: Target, want: usize) -> String;
     /// The scroll viewport's overflow, read from the toolkit after
     /// forcing pending layout: the empty string when the content
     /// exceeds the viewport, otherwise a short platform-flavored
@@ -532,6 +549,17 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                         .map_err(|_| format!("choose wants a 0-based index: {line:?}"))?,
                 )
             }
+            "expect_grid_columns" => {
+                let (target, n) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_grid_columns wants a target and a count: {line:?}"))?;
+                Step::ExpectGridColumns(
+                    parse_target(target)?,
+                    n.trim()
+                        .parse()
+                        .map_err(|_| format!("expect_grid_columns wants a count: {line:?}"))?,
+                )
+            }
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
             "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
@@ -574,6 +602,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "progress" => TargetKind::Progress,
         "select" => TargetKind::Select,
         "radio" => TargetKind::Radio,
+        "grid" => TargetKind::Grid,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -993,6 +1022,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     }))
                 }
             }
+            Step::ExpectGridColumns(t, want) => {
+                if t.kind != TargetKind::Grid {
+                    Some(Err(format!("{t:?} is not a grid target")))
+                } else {
+                    Some(poll(|| {
+                        let off = stage.grid_columns(*t, *want);
+                        if off.is_empty() {
+                            Ok(format!("{} columns {want}", target_spec(t)))
+                        } else {
+                            Err(format!("{} misaligned ({off})", target_spec(t)))
+                        }
+                    }))
+                }
+            }
             Step::ExpectFocused(t) => Some(poll(|| {
                 if stage.is_focused(*t) {
                     Ok(format!("{t:?} focused"))
@@ -1033,6 +1076,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Progress => "progress",
         TargetKind::Select => "select",
         TargetKind::Radio => "radio",
+        TargetKind::Grid => "grid",
     };
     if t.index < 0 {
         format!("{kind}#last")
@@ -1245,6 +1289,9 @@ mod tests {
         fn selected_label(&self, _: Target) -> String {
             String::new()
         }
+        fn grid_columns(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -1400,6 +1447,9 @@ mod tests {
         fn selected_label(&self, _: Target) -> String {
             String::new()
         }
+        fn grid_columns(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -1511,6 +1561,9 @@ mod tests {
         }
         fn choose(&self, _: Target, _: usize) {}
         fn selected_label(&self, _: Target) -> String {
+            String::new()
+        }
+        fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
         }
         fn progress_state(&self, _: Target) -> String {

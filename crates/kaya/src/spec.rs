@@ -117,6 +117,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // (pulse/spinner mode). Bool, default false; Value carries the
     // determinate fraction (0..=1, domain-checked at the root).
     ("indeterminate", 10, PropKind::Bool),
+    // Grid-only: how many columns children fill row-major (F64 like
+    // every numeric slot; integral >= 1, domain-checked at the root).
+    ("columns", 11, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -813,6 +816,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("progress", 10),
                 ("select", 11),
                 ("radio", 12),
+                ("grid", 13),
             ],
         },
         EnumSpec {
@@ -828,6 +832,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("spacing", 8),
                 ("align", 9),
                 ("indeterminate", 10),
+                ("columns", 11),
             ],
         },
         EnumSpec {
@@ -1118,6 +1123,7 @@ mod tests {
                     ("kind", "progress") => wire::KIND_PROGRESS,
                     ("kind", "select") => wire::KIND_SELECT,
                     ("kind", "radio") => wire::KIND_RADIO,
+                    ("kind", "grid") => wire::KIND_GRID,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,
@@ -1128,6 +1134,7 @@ mod tests {
                     ("prop", "spacing") => wire::PROP_SPACING,
                     ("prop", "align") => wire::PROP_ALIGN,
                     ("prop", "indeterminate") => wire::PROP_INDETERMINATE,
+                    ("prop", "columns") => wire::PROP_COLUMNS,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

@@ -1,0 +1,13 @@
+# The grid scene: the 2D layout contract — children fill row-major
+# into N columns whose cells take their NATURAL width and share their
+# leading edge across rows (read from real geometry; the thing nested
+# rows cannot express). The spacer half: a grown gap between the two
+# buttons makes the row span its box (fills is the observation grow
+# rides).
+expect label#0 "Name:"
+expect label#1 "Ada Lovelace"
+expect label#2 "Role:"
+expect label#3 "Engine programmer"
+expect_grid_columns grid#0 2
+expect_root_fills
+expect_fills row#0

@@ -1048,6 +1048,33 @@ final class KayaAppTx {
             UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing, align: align)
     }
 
+    /// A grid laying its children out row-major into `columns`
+    /// columns — each column takes its NATURAL width, aligned across
+    /// rows (the thing nested rows cannot express); `spacing` is the
+    /// inter-cell gap on both axes.
+    func grid(
+        columns: Int, spacing: Double? = nil, grow: Double? = nil,
+        @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        let parent = widget(UInt32(KAYA_KIND_GRID))
+        tx.setColumns(parent.id, Double(columns))
+        if let spacing { setSpacing(parent, spacing) }
+        if let grow { setGrow(parent, grow) }
+        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        children()
+        let ids = app.childFrames.removeLast().ids
+        for id in ids { tx.addChild(parent.id, id) }
+        return parent
+    }
+
+    /// A spacer: PURE SUGAR for an empty grown column — it consumes
+    /// the leftover main-axis space between its siblings.
+    func spacer() -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_COLUMN))
+        setGrow(w, 1.0)
+        return w
+    }
+
     private func containerOf(
         _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil,
         align: KayaAlign? = nil

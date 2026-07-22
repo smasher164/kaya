@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xa78836939a484688
+specHash = 0x73d2b60a639054ba
 
 valueBool :: Word32
 valueBool = 1
@@ -60,6 +60,8 @@ kindSelect :: Word32
 kindSelect = 11
 kindRadio :: Word32
 kindRadio = 12
+kindGrid :: Word32
+kindGrid = 13
 propText :: Word32
 propText = 1
 propChecked :: Word32
@@ -80,6 +82,8 @@ propAlign :: Word32
 propAlign = 9
 propIndeterminate :: Word32
 propIndeterminate = 10
+propColumns :: Word32
+propColumns = 11
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -538,6 +542,25 @@ txBindIndeterminate widgetId signalId = wireRecord txKindSetProperty
 txBindIndeterminateElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindIndeterminateElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propIndeterminate <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant columns value.
+txSetColumns :: Word64 -> Double -> Builder
+txSetColumns widgetId columns = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColumns <> word32LE sourceConst
+    <> encodeValue (VF64 columns))
+
+-- set_property with a signal-bound columns value.
+txBindColumns :: Word64 -> Word64 -> Builder
+txBindColumns widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColumns <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindColumnsElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindColumnsElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propColumns <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

@@ -66,6 +66,9 @@ enum NativeWidget {
     Progress(ProgressBar),
     Select(ComboBox),
     Radio(RadioButtons),
+    /// The 2D grid widget (KIND_GRID) — a WinUI Grid with Auto
+    /// tracks, distinct from Column/Row's star-sized Grids.
+    Grid2D(Grid),
 }
 
 impl NativeWidget {
@@ -84,6 +87,7 @@ impl NativeWidget {
             NativeWidget::Progress(bar) => bar.cast(),
             NativeWidget::Select(combo) => combo.cast(),
             NativeWidget::Radio(group) => group.cast(),
+            NativeWidget::Grid2D(grid) => grid.cast(),
         }
     }
 }
@@ -138,6 +142,12 @@ struct CoreState {
     progresses: Vec<ProgressBar>,
     selects: Vec<ComboBox>,
     radios: Vec<RadioButtons>,
+    grids: Vec<Grid>,
+    /// Grid layout state: ordered children + column count; both the
+    /// adds and the columns prop re-flow the attach positions
+    /// (children-first sugars emit adds before the prop).
+    grid_children: HashMap<u64, Vec<UIElement>>,
+    grid_cols: HashMap<u64, i32>,
     /// Radio plumbing, the select_options shape: label id -> (its
     /// group, its row in the group's Items vector) — option text
     /// updates land with SetAt.
@@ -535,6 +545,44 @@ fn trace_enabled() -> bool {
 /// in proportion to the star values", which is exactly [`Prop::Grow`],
 /// so unlike AppKit and GTK there is no arithmetic to do here — only the
 /// weights to hand over.
+/// Re-attach a 2D grid's children row-major per its current column
+/// count, with one Auto track per row/column — called when children
+/// or the columns prop arrive, in either order.
+fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
+    let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
+        return Ok(());
+    };
+    let cols = core.grid_cols.get(&grid_id).copied().unwrap_or(1).max(1);
+    let children = match core.grid_children.get(&grid_id) {
+        Some(c) => c.clone(),
+        None => return Ok(()),
+    };
+    let rows = (children.len() as i32 + cols - 1) / cols;
+    let coldefs = grid.ColumnDefinitions()?;
+    coldefs.Clear()?;
+    for _ in 0..cols {
+        let def = ColumnDefinition::new()?;
+        def.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+        coldefs.Append(&def)?;
+    }
+    let rowdefs = grid.RowDefinitions()?;
+    rowdefs.Clear()?;
+    for _ in 0..rows {
+        let def = RowDefinition::new()?;
+        def.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+        rowdefs.Append(&def)?;
+    }
+    let slots = grid.Children()?;
+    slots.Clear()?;
+    for (i, child) in children.iter().enumerate() {
+        let i = i as i32;
+        Grid::SetColumn(&child.cast::<FrameworkElement>()?, i % cols)?;
+        Grid::SetRow(&child.cast::<FrameworkElement>()?, i / cols)?;
+        slots.Append(child)?;
+    }
+    Ok(())
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let (grid, vertical) = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) => (g.clone(), true),
@@ -997,6 +1045,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
                 }
+                WidgetKind::Grid => {
+                    // The 2D layout contract on WinUI's own Grid with
+                    // Auto tracks: columns take their natural width,
+                    // aligned across rows by the toolkit itself.
+                    let grid = Grid::new()?;
+                    core.grid_children.insert(id.0, Vec::new());
+                    core.grid_cols.insert(id.0, 1);
+                    core.grids.push(grid.clone());
+                    NativeWidget::Grid2D(grid)
+                }
                 WidgetKind::Radio => {
                     // The choice contract inline: RadioButtons — the
                     // platform's own group control (string items
@@ -1112,6 +1170,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Radio(group) => {
                         windows_core::Interface::cast(group).expect("radio is a UIElement")
+                    }
+                    NativeWidget::Grid2D(grid) => {
+                        windows_core::Interface::cast(grid).expect("grid is a UIElement")
                     }
                 }
             };
@@ -1468,6 +1529,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
                 }
+                (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
+                    core.grid_cols.insert(id.0, cols as i32);
+                    reflow_grid(core, id.0)?;
+                }
+                (NativeWidget::Grid2D(grid), Prop::Spacing, Value::F64(gap)) => {
+                    grid.SetRowSpacing(gap)?;
+                    grid.SetColumnSpacing(gap)?;
+                }
                 (NativeWidget::Radio(group), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1551,6 +1620,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 viewer.SetContent(&element)?;
                 return Ok(());
             }
+            if let NativeWidget::Grid2D(_) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let element = core
+                    .widgets
+                    .get(&child)
+                    .expect("scene validated the id")
+                    .element()?;
+                core.grid_children
+                    .get_mut(&parent.0)
+                    .expect("grid created")
+                    .push(element);
+                reflow_grid(core, parent.0)?;
+                return Ok(());
+            }
             // A radio's label children are its OPTIONS: string rows
             // of the group's Items vector (strings render as radio
             // rows; the label's SetProp text lands with SetAt), and
@@ -1617,6 +1701,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Progress(bar) => children.Append(bar)?,
                 NativeWidget::Select(combo) => children.Append(combo)?,
                 NativeWidget::Radio(group) => children.Append(group)?,
+                NativeWidget::Grid2D(grid) => children.Append(grid)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -2207,6 +2292,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             progresses: Vec::new(),
             selects: Vec::new(),
             radios: Vec::new(),
+            grids: Vec::new(),
+            grid_children: HashMap::new(),
+            grid_cols: HashMap::new(),
             radio_options: HashMap::new(),
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2777,6 +2865,48 @@ impl crate::harness::Stage for WinUiStage {
                 "indeterminate".to_string()
             } else {
                 format!("{}%", (bar.Value()? * 100.0).round() as i64)
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn grid_columns(&self, t: crate::harness::Target, want: usize) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.grids.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let grid = &core.grids[i];
+            // Geometry, never the model's columns copy: each cell's
+            // leading edge in the grid's own space via
+            // TransformToVisual; the distinct clusters ARE the
+            // columns.
+            let children = grid.Children()?;
+            let mut edges: Vec<f64> = Vec::new();
+            for k in 0..children.Size()? {
+                let cell: UIElement = children.GetAt(k)?;
+                let transform = cell.TransformToVisual(&grid.cast::<UIElement>()?)?;
+                let origin = transform.TransformPoint(bindings::Windows::Foundation::Point {
+                    X: 0.0,
+                    Y: 0.0,
+                })?;
+                edges.push(f64::from(origin.X));
+            }
+            if edges.is_empty() {
+                return Ok("no cells".to_string());
+            }
+            edges.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mut clusters = 0;
+            let mut last = f64::MIN;
+            for x in edges {
+                if clusters == 0 || x - last > 2.0 {
+                    clusters += 1;
+                    last = x;
+                }
+            }
+            Ok(if clusters == want {
+                String::new()
+            } else {
+                format!("{clusters} column edges, wanted {want}")
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

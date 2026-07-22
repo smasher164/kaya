@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xa78836939a484688
+	SpecHash uint64 = 0x73d2b60a639054ba
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -31,6 +31,7 @@ const (
 	KindProgress = 10
 	KindSelect = 11
 	KindRadio = 12
+	KindGrid = 13
 	PropText = 1
 	PropChecked = 2
 	PropValue = 3
@@ -41,6 +42,7 @@ const (
 	PropSpacing = 8
 	PropAlign = 9
 	PropIndeterminate = 10
+	PropColumns = 11
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -715,6 +717,38 @@ func TxBindIndeterminateElement(widgetID uint64, level uint32, field uint32) []b
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropIndeterminate)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetColumns: set_property with a constant columns value.
+func TxSetColumns(widgetID uint64, columns float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropColumns)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, columns)
+	return endRecord(b)
+}
+
+// TxBindColumns: set_property with a signal-bound columns value.
+func TxBindColumns(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropColumns)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindColumnsElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindColumnsElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropColumns)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

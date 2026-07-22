@@ -1056,6 +1056,28 @@ def scroll(grow=None):
     return _Container(handle)
 
 
+def grid(columns, grow=None, spacing=None):
+    """A grid container: `with kaya.grid(2):` parents its children,
+    laying them out row-major into `columns` columns — each column
+    takes its NATURAL width, aligned across rows (the thing nested
+    rows cannot express). `spacing` is the inter-cell gap on both
+    axes."""
+    handle = _widget(wire.KIND_GRID)
+    _records().append(wire.tx_set_columns(handle.id, float(columns)))
+    _set_grow(handle, grow)
+    _set_spacing(handle, spacing)
+    return _Container(handle)
+
+
+def spacer(grow=1.0):
+    """A spacer: PURE SUGAR for an empty grown column — it consumes
+    the leftover main-axis space between its siblings (the grow
+    contract; no new vocabulary)."""
+    handle = _widget(wire.KIND_COLUMN)
+    _set_grow(handle, grow)
+    return handle
+
+
 def column(grow=None, spacing=None, align=None):
     """A column container: `with kaya.column():` parents everything
     declared inside it. `grow` is its flex weight within the enclosing

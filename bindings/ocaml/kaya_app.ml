@@ -518,6 +518,28 @@ let container ?grow ?spacing ?align kind children tx =
   List.iter (fun child -> add_child parent child tx) handles;
   parent
 
+(* A grid from its children, laid out row-major into [~columns]
+   columns — each column takes its NATURAL width, aligned across rows
+   (the thing nested rows cannot express). [~spacing] is the
+   inter-cell gap on both axes. The columns record lands BEFORE the
+   add_childs (backends re-flow either way). *)
+let grid ~columns ?grow ?spacing children tx =
+  let handles = List.map (fun child -> child tx) children in
+  let parent = widget Kaya_wire.kind_grid tx in
+  let (Widget id) = parent in
+  emit tx (Kaya_wire.tx_set_columns id (float_of_int columns));
+  Option.iter (fun g -> set_grow parent g tx) grow;
+  Option.iter (fun s -> set_spacing parent s tx) spacing;
+  List.iter (fun child -> add_child parent child tx) handles;
+  parent
+
+(* A spacer: PURE SUGAR for an empty grown column — it consumes the
+   leftover main-axis space between its siblings. *)
+let spacer ?(grow = 1.0) () tx =
+  let w = widget Kaya_wire.kind_column tx in
+  set_grow w grow tx;
+  w
+
 let column ?grow ?spacing ?align children tx =
   container ?grow ?spacing ?align Kaya_wire.kind_column children tx
 

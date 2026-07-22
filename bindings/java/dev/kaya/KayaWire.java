@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xa78836939a484688L;
+    public static final long SPEC_HASH = 0x73d2b60a639054baL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -32,6 +32,7 @@ public final class KayaWire {
     public static final int KIND_PROGRESS = 10;
     public static final int KIND_SELECT = 11;
     public static final int KIND_RADIO = 12;
+    public static final int KIND_GRID = 13;
     public static final int PROP_TEXT = 1;
     public static final int PROP_CHECKED = 2;
     public static final int PROP_VALUE = 3;
@@ -42,6 +43,7 @@ public final class KayaWire {
     public static final int PROP_SPACING = 8;
     public static final int PROP_ALIGN = 9;
     public static final int PROP_INDETERMINATE = 10;
+    public static final int PROP_COLUMNS = 11;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -602,6 +604,29 @@ public final class KayaWire {
     public static byte[] txBindIndeterminateElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_INDETERMINATE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant columns value. */
+    public static byte[] txSetColumns(long widgetId, double columns) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_CONST);
+        encodeValue(b, columns);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound columns value. */
+    public static byte[] txBindColumns(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindColumnsElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }
