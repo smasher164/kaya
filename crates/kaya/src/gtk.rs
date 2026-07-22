@@ -1490,21 +1490,27 @@ impl crate::harness::Stage for GtkStage {
 
     fn read_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.labels.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.labels.len()) else {
+                return "<no such target>".to_string();
+            };
             core.labels[i].text().to_string()
         })
     }
 
     fn read_text(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.entries.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
+                return "<no such target>".to_string();
+            };
             core.entries[i].text().to_string()
         })
     }
 
     fn image_size(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.images.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return "<no such target>".to_string();
+            };
             // The paintable's intrinsic size, in pixels for a texture;
             // no paintable is the placeholder class, "0x0".
             match core.images[i].paintable() {
@@ -1527,7 +1533,9 @@ impl crate::harness::Stage for GtkStage {
             // per-window (key status not required).
             match t.kind {
                 crate::harness::TargetKind::Entry => {
-                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
+                        return false;
+                    };
                     core.entries[i]
                         .state_flags()
                         .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
@@ -1545,7 +1553,9 @@ impl crate::harness::Stage for GtkStage {
             } else {
                 &core.rows
             };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return "<no such target>".to_string();
+            };
             // Child order as the toolkit holds it — the registries are
             // creation-ordered and cannot observe a move.
             let mut texts = Vec::new();
@@ -1570,7 +1580,9 @@ impl crate::harness::Stage for GtkStage {
             // rejects any other kind before it gets here).
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return "<no such target>".to_string();
+            };
             let container = &registry[i];
             // Pending resizes must land before the sizes mean anything;
             // otherwise the first read after mount sees zeros.
@@ -1590,7 +1602,9 @@ impl crate::harness::Stage for GtkStage {
             use gtk4::prelude::WidgetExt;
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return "<no such target>".to_string();
+            };
             let container = &registry[i];
             while glib::MainContext::default().iteration(false) {}
             // width()/height() are ALREADY the content box on GTK4 —
@@ -1635,7 +1649,9 @@ impl crate::harness::Stage for GtkStage {
             use gtk4::prelude::WidgetExt;
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return "<no such target>".to_string();
+            };
             let container = &registry[i];
             while glib::MainContext::default().iteration(false) {}
             // Cross axis: horizontal for a column, vertical for a row.
@@ -1822,7 +1838,9 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+                return "<no such target>".to_string();
+            };
             // The toolkit's own adjustment: upper is the content
             // extent, page_size the viewport.
             let adj = core.scrolls[i].vadjustment();
@@ -1847,7 +1865,9 @@ impl crate::harness::Stage for GtkStage {
 
     fn progress_state(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.progresses.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.progresses.len()) else {
+                return "<no such target>".to_string();
+            };
             let bar = &core.progresses[i];
             // The REAL control's state: membership in the pulse set is
             // the indeterminate flag; the fraction is the bar's own.
@@ -1890,7 +1910,9 @@ impl crate::harness::Stage for GtkStage {
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.selects.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.selects.len()) else {
+                return "<no such target>".to_string();
+            };
             // The REAL control's state: the selected item out of the
             // DropDown's own model — what the collapsed button shows.
             core.selects[i]
@@ -1903,7 +1925,9 @@ impl crate::harness::Stage for GtkStage {
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+                return "<no such target>".to_string();
+            };
             let adj = core.scrolls[i].vadjustment();
             let short = adj.upper() - (adj.value() + adj.page_size());
             if short.abs() <= 2.0 {

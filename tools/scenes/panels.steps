@@ -4,12 +4,10 @@
 # the REAL close path (performClose / WM_CLOSE / gtk close), the guest
 # records the request and confirms with destroy_window, and the count
 # drops. Desktop-only: phone hosts reject create_window by capability.
-settle 1500
 expect_windows 2
 expect_title "panels"
 expect_title window#1 "inspector"
 expect_window_size window#1 480x320
 close_window window#1
-settle 800
 expect label#0 "close requested"
 expect_windows 1

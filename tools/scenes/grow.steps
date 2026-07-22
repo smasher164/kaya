@@ -39,7 +39,6 @@
 # window made 200pt of slack visible; expect_fills is the gate that
 # sees it structurally: the children (plus the normalized 8-unit gaps)
 # must span the container's content box on the main axis.
-settle 1500
 expect label#0 "grow probe"
 expect_root_fills
 expect_fills column#0

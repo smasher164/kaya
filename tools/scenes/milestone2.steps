@@ -2,11 +2,13 @@
 # items, and the When), one click on the most recently stamped remove
 # button, and the status label proves the whole loop — stamping, tags,
 # data-addressed removal, and the answering signal write.
-settle 1500
+# The opening expect doubles as the scene-ready wait
+expect label#0 "step 0"
 click button#0
-settle 400
+# Each expect gates the next click: button#last is a STAMPED copy, so
+# the click after it must not outrun the stamp (the retry proves it).
+expect label#0 "step 1"
 click button#0
-settle 400
+expect label#0 "step 2"
 click button#last
-settle 700
 expect label#0 "removed g2/a, 0 left"

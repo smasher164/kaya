@@ -698,13 +698,72 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 step
             ));
         }
-        match step {
-            Step::Settle(ms) => std::thread::sleep(Duration::from_millis(*ms)),
-            Step::Click(t) => stage.click(*t),
-            Step::Toggle(t, on) => stage.toggle(*t, *on),
-            Step::SetValue(t, v) => stage.set_value(*t, *v),
-            Step::SetText(t, s) => stage.set_text(*t, s),
-            Step::Expect(t, want) => {
+        // Actions run once, immediately; observations are bounded
+        // retries (see POLL_DEADLINE): each arm builds a pass/fail
+        // outcome, and `poll` re-evaluates a failing one until it
+        // passes or the deadline lands the last failure text.
+        let outcome: Option<Result<String, String>> = match step {
+            Step::Settle(ms) => {
+                std::thread::sleep(Duration::from_millis(*ms));
+                None
+            }
+            Step::Click(t) => {
+                stage.click(*t);
+                None
+            }
+            Step::Toggle(t, on) => {
+                stage.toggle(*t, *on);
+                None
+            }
+            Step::SetValue(t, v) => {
+                stage.set_value(*t, *v);
+                None
+            }
+            Step::SetText(t, s) => {
+                stage.set_text(*t, s);
+                None
+            }
+            Step::CloseWindow(window) => {
+                // An action, silent like click: the veto grammar's
+                // observable is what the scene does next.
+                stage.close_window(*window);
+                None
+            }
+            Step::AlertChoose(choice) => {
+                // An action, silent like click: the observable is the
+                // guest's reaction to the result.
+                stage.choose_alert(*choice);
+                None
+            }
+            Step::Back(window) => {
+                // An action, silent like click: the observable is
+                // whether the stack popped (expect_entries) or the
+                // guest's back_requested reaction.
+                stage.back(window.unwrap_or(0));
+                None
+            }
+            Step::ScrollEnd(t) => {
+                if t.kind != TargetKind::Scroll {
+                    Some(Err(format!("{t:?} is not a scroll target")))
+                } else {
+                    // An action, silent like click: expect_at_end is
+                    // the observable.
+                    stage.scroll_end(*t);
+                    None
+                }
+            }
+            Step::Choose(t, index) => {
+                if t.kind != TargetKind::Select {
+                    Some(Err(format!("{t:?} is not a select target")))
+                } else {
+                    // An action, silent like click: `expect select#N`
+                    // and the guest's value_changed reaction are the
+                    // observables.
+                    stage.choose(*t, *index);
+                    None
+                }
+            }
+            Step::Expect(t, want) => Some(match t.kind {
                 // The target kind picks the observation: an entry
                 // reads its own displayed text, an image its decoded
                 // size, a label its text — and nothing else reads at
@@ -712,25 +771,29 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 // index the LABELS registry with a foreign target and
                 // silently read a different widget (the interpreters
                 // already reject these loudly).
-                let got = match t.kind {
-                    TargetKind::Entry => stage.read_text(*t),
-                    TargetKind::Image => stage.image_size(*t),
-                    TargetKind::Label => stage.read_label(*t),
-                    TargetKind::Progress => stage.progress_state(*t),
-                    TargetKind::Select => stage.selected_label(*t),
-                    other => {
-                        failures.push(format!(
-                            "expect reads labels, entries, images, progress and selects — not {other:?}"
-                        ));
-                        continue;
+                TargetKind::Entry
+                | TargetKind::Image
+                | TargetKind::Label
+                | TargetKind::Progress
+                | TargetKind::Select => poll(|| {
+                    let got = match t.kind {
+                        TargetKind::Entry => stage.read_text(*t),
+                        TargetKind::Image => stage.image_size(*t),
+                        TargetKind::Label => stage.read_label(*t),
+                        TargetKind::Progress => stage.progress_state(*t),
+                        TargetKind::Select => stage.selected_label(*t),
+                        _ => unreachable!(),
+                    };
+                    if got == *want {
+                        Ok(got)
+                    } else {
+                        Err(format!("{t:?} reads {got:?}, wanted {want:?}"))
                     }
-                };
-                if got == *want {
-                    observed.push(got);
-                } else {
-                    failures.push(format!("{t:?} reads {got:?}, wanted {want:?}"));
-                }
-            }
+                }),
+                other => Err(format!(
+                    "expect reads labels, entries, images, progress and selects — not {other:?}"
+                )),
+            }),
             Step::ExpectOrder(t, want) => {
                 // Container verbs take container targets and nothing
                 // else — resolving a label target against a container
@@ -738,40 +801,44 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 // DIFFERENT widget, the false-verdict class the
                 // interpreters already reject loudly.
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    failures.push(format!("{t:?} is not a container target"));
-                    continue;
-                }
-                let got = stage.child_texts(*t);
-                if got == *want {
-                    observed.push(got);
+                    Some(Err(format!("{t:?} is not a container target")))
                 } else {
-                    failures.push(format!("{t:?} ordered {got:?}, wanted {want:?}"));
+                    Some(poll(|| {
+                        let got = stage.child_texts(*t);
+                        if got == *want {
+                            Ok(got)
+                        } else {
+                            Err(format!("{t:?} ordered {got:?}, wanted {want:?}"))
+                        }
+                    }))
                 }
             }
             Step::ExpectShares(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    failures.push(format!("{t:?} is not a container target"));
-                    continue;
-                }
-                let got = stage.child_shares(*t);
-                if got == *want {
-                    observed.push(got);
+                    Some(Err(format!("{t:?} is not a container target")))
                 } else {
-                    failures.push(format!("{t:?} splits {got:?}, wanted {want:?}"));
+                    Some(poll(|| {
+                        let got = stage.child_shares(*t);
+                        if got == *want {
+                            Ok(got)
+                        } else {
+                            Err(format!("{t:?} splits {got:?}, wanted {want:?}"))
+                        }
+                    }))
                 }
             }
-            Step::ExpectRootFills => {
+            Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
                 // alone — the pass observation is the byte-identical
                 // "root fills" on every backend.
                 let hug = stage.root_fills();
                 if hug.is_empty() {
-                    observed.push("root fills".to_owned());
+                    Ok("root fills".to_owned())
                 } else {
-                    failures.push(format!("root hugs ({hug})"));
+                    Err(format!("root hugs ({hug})"))
                 }
-            }
+            })),
             Step::ExpectTitle(window, want) => {
                 // The REAL materialized title (the title bar / task
                 // label), never the scene model's copy — a backend
@@ -783,12 +850,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Some(n) => format!("window#{n} "),
                     None => String::new(),
                 };
-                let got = stage.window_title(id);
-                if got == *want {
-                    observed.push(format!("{prefix}title {want:?}"));
-                } else {
-                    failures.push(format!("{prefix}title {got:?}, wanted {want:?}"));
-                }
+                Some(poll(|| {
+                    let got = stage.window_title(id);
+                    if got == *want {
+                        Ok(format!("{prefix}title {want:?}"))
+                    } else {
+                        Err(format!("{prefix}title {got:?}, wanted {want:?}"))
+                    }
+                }))
             }
             Step::ExpectWindowSize(window, w, h) => {
                 // The surface's REAL content extent against the
@@ -798,29 +867,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Some(n) => format!("window#{n} "),
                     None => String::new(),
                 };
-                let (gw, gh) = stage.window_content_size(id);
-                if (gw - w).abs() <= 2.0 && (gh - h).abs() <= 2.0 {
-                    observed.push(format!("{prefix}window {}x{}", *w as i64, *h as i64));
-                } else {
-                    failures.push(format!(
-                        "{prefix}window {}x{}, wanted {}x{}",
-                        gw as i64, gh as i64, *w as i64, *h as i64
-                    ));
-                }
+                Some(poll(|| {
+                    let (gw, gh) = stage.window_content_size(id);
+                    if (gw - w).abs() <= 2.0 && (gh - h).abs() <= 2.0 {
+                        Ok(format!("{prefix}window {}x{}", *w as i64, *h as i64))
+                    } else {
+                        Err(format!(
+                            "{prefix}window {}x{}, wanted {}x{}",
+                            gw as i64, gh as i64, *w as i64, *h as i64
+                        ))
+                    }
+                }))
             }
-            Step::CloseWindow(window) => {
-                // An action, silent like click: the veto grammar's
-                // observable is what the scene does next.
-                stage.close_window(*window);
-            }
-            Step::ExpectWindows(n) => {
+            Step::ExpectWindows(n) => Some(poll(|| {
                 let got = stage.window_count();
                 if got == *n {
-                    observed.push(format!("windows {n}"));
+                    Ok(format!("windows {n}"))
                 } else {
-                    failures.push(format!("windows {got}, wanted {n}"));
+                    Err(format!("windows {got}, wanted {n}"))
                 }
-            }
+            })),
             Step::ExpectAlert(window, want) => {
                 // The REAL presented title, never the request's copy —
                 // a backend that materialized nothing must fail here.
@@ -829,130 +895,110 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Some(n) => format!("window#{n} "),
                     None => String::new(),
                 };
-                match stage.alert_title(id) {
-                    Some(got) if got == *want => {
-                        observed.push(format!("{prefix}alert {want:?}"));
-                    }
-                    Some(got) => {
-                        failures.push(format!("{prefix}alert {got:?}, wanted {want:?}"));
-                    }
-                    None => {
-                        failures.push(format!("{prefix}no alert live, wanted {want:?}"));
-                    }
-                }
+                Some(poll(|| match stage.alert_title(id) {
+                    Some(got) if got == *want => Ok(format!("{prefix}alert {want:?}")),
+                    Some(got) => Err(format!("{prefix}alert {got:?}, wanted {want:?}")),
+                    None => Err(format!("{prefix}no alert live, wanted {want:?}")),
+                }))
             }
-            Step::AlertChoose(choice) => {
-                // An action, silent like click: the observable is the
-                // guest's reaction to the result.
-                stage.choose_alert(*choice);
-            }
-            Step::ExpectAlerts(n) => {
+            Step::ExpectAlerts(n) => Some(poll(|| {
                 let got = stage.alert_count();
                 if got == *n {
-                    observed.push(format!("alerts {n}"));
+                    Ok(format!("alerts {n}"))
                 } else {
-                    failures.push(format!("alerts {got}, wanted {n}"));
+                    Err(format!("alerts {got}, wanted {n}"))
                 }
-            }
+            })),
             Step::ExpectEntries(window, n) => {
                 let id = window.unwrap_or(0);
                 let prefix = match window {
                     Some(w) => format!("window#{w} "),
                     None => String::new(),
                 };
-                let got = stage.entry_count(id);
-                if got == *n {
-                    observed.push(format!("{prefix}entries {n}"));
-                } else {
-                    failures.push(format!("{prefix}entries {got}, wanted {n}"));
-                }
-            }
-            Step::Back(window) => {
-                // An action, silent like click: the observable is
-                // whether the stack popped (expect_entries) or the
-                // guest's back_requested reaction.
-                stage.back(window.unwrap_or(0));
+                Some(poll(|| {
+                    let got = stage.entry_count(id);
+                    if got == *n {
+                        Ok(format!("{prefix}entries {n}"))
+                    } else {
+                        Err(format!("{prefix}entries {got}, wanted {n}"))
+                    }
+                }))
             }
             Step::ExpectOverflow(t) => {
                 if t.kind != TargetKind::Scroll {
-                    failures.push(format!("{t:?} is not a scroll target"));
-                    continue;
-                }
-                let slack = stage.scroll_overflow(*t);
-                if slack.is_empty() {
-                    observed.push(format!("{} overflows", target_spec(t)));
+                    Some(Err(format!("{t:?} is not a scroll target")))
                 } else {
-                    failures.push(format!("{} fits ({slack})", target_spec(t)));
+                    Some(poll(|| {
+                        let slack = stage.scroll_overflow(*t);
+                        if slack.is_empty() {
+                            Ok(format!("{} overflows", target_spec(t)))
+                        } else {
+                            Err(format!("{} fits ({slack})", target_spec(t)))
+                        }
+                    }))
                 }
-            }
-            Step::ScrollEnd(t) => {
-                if t.kind != TargetKind::Scroll {
-                    failures.push(format!("{t:?} is not a scroll target"));
-                    continue;
-                }
-                // An action, silent like click: expect_at_end is the
-                // observable.
-                stage.scroll_end(*t);
-            }
-            Step::Choose(t, index) => {
-                if t.kind != TargetKind::Select {
-                    failures.push(format!("{t:?} is not a select target"));
-                    continue;
-                }
-                // An action, silent like click: `expect select#N` and
-                // the guest's value_changed reaction are the
-                // observables.
-                stage.choose(*t, *index);
             }
             Step::ExpectAtEnd(t) => {
                 if t.kind != TargetKind::Scroll {
-                    failures.push(format!("{t:?} is not a scroll target"));
-                    continue;
-                }
-                let off = stage.scroll_at_end(*t);
-                if off.is_empty() {
-                    observed.push(format!("{} at end", target_spec(t)));
+                    Some(Err(format!("{t:?} is not a scroll target")))
                 } else {
-                    failures.push(format!("{} short of end ({off})", target_spec(t)));
+                    Some(poll(|| {
+                        let off = stage.scroll_at_end(*t);
+                        if off.is_empty() {
+                            Ok(format!("{} at end", target_spec(t)))
+                        } else {
+                            Err(format!("{} short of end ({off})", target_spec(t)))
+                        }
+                    }))
                 }
             }
             Step::ExpectFills(t) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    failures.push(format!("{t:?} is not a container target"));
-                    continue;
-                }
-                // Empty means the children span the content box; the
-                // pass observation is the byte-identical
-                // "column#0 fills" every backend and interpreter emits.
-                let slack = stage.container_fills(*t);
-                if slack.is_empty() {
-                    observed.push(format!("{} fills", target_spec(t)));
+                    Some(Err(format!("{t:?} is not a container target")))
                 } else {
-                    failures.push(format!("{} leaves leftover ({slack})", target_spec(t)));
+                    // Empty means the children span the content box;
+                    // the pass observation is the byte-identical
+                    // "column#0 fills" every backend and interpreter
+                    // emits.
+                    Some(poll(|| {
+                        let slack = stage.container_fills(*t);
+                        if slack.is_empty() {
+                            Ok(format!("{} fills", target_spec(t)))
+                        } else {
+                            Err(format!("{} leaves leftover ({slack})", target_spec(t)))
+                        }
+                    }))
                 }
             }
             Step::ExpectAligned(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    failures.push(format!("{t:?} is not a container target"));
-                    continue;
-                }
-                let got = stage.cross_mode(*t);
-                if got == *want {
-                    observed.push(format!("{} aligns {got}", target_spec(t)));
+                    Some(Err(format!("{t:?} is not a container target")))
                 } else {
-                    failures.push(format!(
-                        "{} aligns {got:?}, wanted {want:?}",
-                        target_spec(t)
-                    ));
+                    Some(poll(|| {
+                        let got = stage.cross_mode(*t);
+                        if got == *want {
+                            Ok(format!("{} aligns {got}", target_spec(t)))
+                        } else {
+                            Err(format!(
+                                "{} aligns {got:?}, wanted {want:?}",
+                                target_spec(t)
+                            ))
+                        }
+                    }))
                 }
             }
-            Step::ExpectFocused(t) => {
+            Step::ExpectFocused(t) => Some(poll(|| {
                 if stage.is_focused(*t) {
-                    observed.push(format!("{t:?} focused"));
+                    Ok(format!("{t:?} focused"))
                 } else {
-                    failures.push(format!("{t:?} does not hold focus"));
+                    Err(format!("{t:?} does not hold focus"))
                 }
-            }
+            })),
+        };
+        match outcome {
+            Some(Ok(o)) => observed.push(o),
+            Some(Err(e)) => failures.push(e),
+            None => {}
         }
     }
     record_linger();
@@ -1012,6 +1058,46 @@ pub fn shares(extents: &[f64]) -> String {
 
 /// Resolve `#last` against a registry length; panics on out-of-range,
 /// which is a script bug worth dying loudly for.
+/// The observation contract: every expect is a BOUNDED RETRY — the
+/// predicate is polled until it holds or the deadline passes
+/// (ratified 2026-07-22, replacing scripted settles: fixed sleeps
+/// became actual latency, and the pacing race class died at the
+/// root). One uniform mechanism, no per-platform event plumbing: the
+/// poll interval is noise next to the settles it replaced, and the
+/// deadline keeps a wrong scene loudly failing with its last read.
+/// The FIRST expect of a script doubles as the scene-ready wait —
+/// scripts open with an expect of initial state (check-steps holds
+/// the line) — so reads must be TOTAL: a missing target is a
+/// retryable non-match ("no such target"), never a panic
+/// (try_resolve; the interpreters were already total).
+pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
+pub const POLL_DEADLINE: Duration = Duration::from_secs(5);
+
+fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, String> {
+    let deadline = Instant::now() + POLL_DEADLINE;
+    loop {
+        let outcome = eval();
+        if outcome.is_ok() || Instant::now() >= deadline {
+            return outcome;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// The total flavor for OBSERVATION reads (retried, so absence is a
+/// non-match, not a bug — the scene may simply not have applied
+/// yet). Actions keep the panicking `resolve`: they run only after
+/// an expect proved their target's scene state, so a miss there IS a
+/// bug.
+pub fn try_resolve(index: isize, len: usize) -> Option<usize> {
+    if index < 0 {
+        len.checked_sub(index.unsigned_abs())
+    } else {
+        let i = index as usize;
+        (i < len).then_some(i)
+    }
+}
+
 pub fn resolve(index: isize, len: usize) -> usize {
     if index < 0 {
         len.checked_sub(index.unsigned_abs())

@@ -116,6 +116,20 @@ struct CoreState {
     checkboxes: Vec<CheckBox>,
     labels: Vec<TextBlock>,
     entries: Vec<TextBox>,
+    /// Aligned with `entries`: the widget id per registry slot (the
+    /// stage indexes by creation order; the maps below key by id).
+    entry_ids: Vec<u64>,
+    /// TextChanged is raised ASYNCHRONOUSLY, so programmatic text
+    /// paths cannot ride it in order: SetProp, the clear command,
+    /// and the stage's set_text all bump this counter, write the
+    /// text, and (for the emitting paths) send the occurrence
+    /// SYNCHRONOUSLY themselves — the late native raise is swallowed
+    /// 1:1. User typing bumps nothing and emits through the real
+    /// raise. Caught live 2026-07-22: without this, a click's
+    /// occurrence OVERTAKES the edit and the guest's add handler
+    /// runs on an empty draft.
+    entry_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    entry_tags: HashMap<u64, Vec<u8>>,
     sliders: Vec<Slider>,
     images: Vec<Image>,
     scrolls: Vec<ScrollViewer>,
@@ -808,18 +822,35 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let field = TextBox::new()?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
+                    let handler_tag = tag.clone();
                     let field_for_handler = field.clone();
-                    let quiet = core.apply_quiet.clone();
+                    let swallow =
+                        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let handler_swallow = swallow.clone();
                     let handler = TextChangedEventHandler::new(move |_, _| {
-                        if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                        // A programmatic write already emitted its
+                        // occurrence synchronously (or, for SetProp,
+                        // deliberately not at all) — this late raise
+                        // is its shadow. See entry_swallow.
+                        if handler_swallow
+                            .fetch_update(
+                                std::sync::atomic::Ordering::Relaxed,
+                                std::sync::atomic::Ordering::Relaxed,
+                                |n| n.checked_sub(1),
+                            )
+                            .is_ok()
+                        {
                             return Ok(());
                         }
                         let text = field_for_handler.Text()?.to_string();
-                        sink.send_text_tag(&tag, &text);
+                        sink.send_text_tag(&handler_tag, &text);
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
                     core.entries.push(field.clone());
+                    core.entry_ids.push(id.0);
+                    core.entry_swallow.insert(id.0, swallow);
+                    core.entry_tags.insert(id.0, tag);
                     NativeWidget::Entry(field)
                 }
                 WidgetKind::Column => {
@@ -1216,6 +1247,42 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     .expect("scene validated the alert's window")
                     .clone()
             };
+            // A dialog needs the host's LIVE XamlRoot, and a guest
+            // can request one within milliseconds of launch — before
+            // the content island exists (caught live 2026-07-22 the
+            // moment the settles stopped hiding it: the expect
+            // aborted the UI thread). Not ready yet: re-enqueue this
+            // whole present on the dispatcher and let the queue load
+            // the content first; the harness's expect_alert retries
+            // until the dialog is really up.
+            let root_live = host
+                .Content()
+                .and_then(|c| {
+                    let root: FrameworkElement = windows_core::Interface::cast(&c)?;
+                    root.XamlRoot()
+                })
+                .is_ok();
+            if !root_live {
+                // Re-present when the root actually loads — its
+                // Loaded event is the platform's own "the island is
+                // up" signal. (A dispatcher self-re-enqueue loop
+                // STARVES the queue that would do the loading; a
+                // timer is a guess. This is backend-internal — the
+                // harness's uniform mechanism stays bounded polling.)
+                let root: FrameworkElement = windows_core::Interface::cast(&host.Content()?)?;
+                let cell = std::sync::Mutex::new(Some(spec));
+                let handler = RoutedEventHandler::new(move |_, _| {
+                    if let Some(spec) = cell.lock().unwrap().take() {
+                        CORE.with_borrow_mut(|core| {
+                            let core = core.as_mut().expect("core state initialized");
+                            let _ = apply(core, ApplyOp::PresentAlert(spec));
+                        });
+                    }
+                    Ok(())
+                });
+                root.Loaded(&handler)?;
+                return Ok(());
+            }
             let dialog = ContentDialog::new().expect("ContentDialog::new");
             let title = PropertyValue::CreateString(&HSTRING::from(spec.title.as_str()))
                 .expect("title box");
@@ -1317,13 +1384,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
                     // Quiet: a property write is configuration, not a
-                    // user edit (see apply_quiet).
-                    core.apply_quiet
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
-                    let write = field.SetText(&HSTRING::from(&s));
-                    core.apply_quiet
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                    write?;
+                    // user edit — and TextChanged is raised async, so
+                    // the flag is a counter (see entry_swallow).
+                    if field.Text()?.to_string() != s {
+                        if let Some(swallow) = core.entry_swallow.get(&id.0) {
+                            swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        field.SetText(&HSTRING::from(&s))?;
+                    }
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
@@ -1544,11 +1612,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let NativeWidget::Entry(field) = widget else {
                         panic!("kaya: clear on a non-entry (scene validates kinds)")
                     };
-                    // WinUI raises TextChanged for programmatic SetText
-                    // (the Create arm's comment), so the empty edit
-                    // reaches the app through the entry's own path —
-                    // no manual emit.
-                    field.SetText(&HSTRING::new())?;
+                    // A command ACTS LIKE THE USER, and its echo must
+                    // stay ORDERED with what follows — TextChanged is
+                    // raised async, so the echo is emitted here
+                    // synchronously and the late raise is swallowed
+                    // (see entry_swallow).
+                    if !field.Text()?.to_string().is_empty() {
+                        if let Some(swallow) = core.entry_swallow.get(&id.0) {
+                            swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        field.SetText(&HSTRING::new())?;
+                        if let Some(tag) = core.entry_tags.get(&id.0) {
+                            core.occurrences.send_text_tag(tag, "");
+                        }
+                    }
                 }
                 CommandKind::Focus => {
                     let _ = widget.element()?.Focus(FocusState::Programmatic)?;
@@ -2016,6 +2093,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             checkboxes: Vec::new(),
             labels: Vec::new(),
             entries: Vec::new(),
+            entry_ids: Vec::new(),
+            entry_swallow: HashMap::new(),
+            entry_tags: HashMap::new(),
             sliders: Vec::new(),
             images: Vec::new(),
             scrolls: Vec::new(),
@@ -2072,6 +2152,34 @@ impl WinUiStage {
             .expect("the dispatcher applied the step")
             .expect("the step's WinRT calls succeeded")
     }
+
+    /// The observation flavor: a read that errors mid-materialization
+    /// (a null Content cast before the first layout, a not-yet-live
+    /// XamlRoot) is a RETRYABLE miss for the harness's bounded polls,
+    /// never a panic — a panic here either kills the harness thread
+    /// or, worse, aborts the process when it crosses a dispatcher
+    /// callback (caught live 2026-07-22: window/grow/panels legs
+    /// fail-fasted or hung the moment the settles stopped hiding the
+    /// materialization window). Actions keep on_ui: their targets are
+    /// proven by a preceding expect, so an error there IS a bug.
+    fn on_ui_read<T: Send + 'static>(
+        f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
+    ) -> windows_core::Result<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dispatcher = DISPATCHER.get().expect("the dispatcher is up");
+        let cell = std::sync::Mutex::new(Some((f, tx)));
+        let handler = DispatcherQueueHandler::new(move || {
+            if let Some((f, tx)) = cell.lock().unwrap().take() {
+                CORE.with_borrow(|core| {
+                    let core = core.as_ref().expect("core state initialized");
+                    let _ = tx.send(f(core));
+                });
+            }
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+        rx.recv().expect("the dispatcher applied the step")
+    }
 }
 
 impl crate::harness::Stage for WinUiStage {
@@ -2103,29 +2211,50 @@ impl crate::harness::Stage for WinUiStage {
     fn set_text(&self, t: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         Self::on_ui(move |core| {
+            // The user path, ordered: TextChanged is raised async, so
+            // the occurrence is emitted here synchronously and the
+            // late raise swallowed — a following click can never
+            // overtake the edit (see entry_swallow).
             let i = crate::harness::resolve(t.index, core.entries.len());
-            core.entries[i].SetText(&HSTRING::from(&text))?;
+            if core.entries[i].Text()?.to_string() != text {
+                let id = core.entry_ids[i];
+                if let Some(swallow) = core.entry_swallow.get(&id) {
+                    swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                core.entries[i].SetText(&HSTRING::from(&text))?;
+                if let Some(tag) = core.entry_tags.get(&id) {
+                    core.occurrences.send_text_tag(tag, &text);
+                }
+            }
             Ok(())
         });
     }
 
     fn read_label(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.labels.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.labels.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             Ok(core.labels[i].Text()?.to_string())
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn read_text(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.entries.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             Ok(core.entries[i].Text()?.to_string())
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn image_size(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.images.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.images.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             // The stored BitmapImage's decoded pixel size; no source
             // (or a source that never decoded) is the placeholder
             // class, "0x0".
@@ -2141,31 +2270,36 @@ impl crate::harness::Stage for WinUiStage {
                 None => "0x0".into(),
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn is_focused(&self, t: crate::harness::Target) -> bool {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             // The element's own FocusState, never FocusManager's global
             // focused element — per-window focus, so parallel tiled
             // legs cannot steal each other's assertion.
             match t.kind {
                 crate::harness::TargetKind::Entry => {
-                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
+                        return Ok(false);
+                    };
                     Ok(core.entries[i].FocusState()? != FocusState::Unfocused)
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on winui"),
             }
-        })
+        }).unwrap_or(false)
     }
 
     fn child_texts(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             let registry = if matches!(t.kind, crate::harness::TargetKind::Column) {
                 &core.columns
             } else {
                 &core.rows
             };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let children = registry[i].Children()?;
             // Child order as the toolkit holds it — the registries are
             // creation-ordered and cannot observe a move.
@@ -2179,10 +2313,11 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(texts.join("|"))
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn child_shares(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             // Kind picks the registry and the definition axis (the
             // runner rejects any other kind before it gets here). The
             // first Windows run of the row assertion caught this method
@@ -2192,7 +2327,9 @@ impl crate::harness::Stage for WinUiStage {
             // clean sweep.
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let grid = &registry[i];
             // Measure/arrange are lazy; force them or the first read
             // after mount sees zeros.
@@ -2218,13 +2355,16 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(crate::harness::shares(&extents))
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn container_fills(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let grid = &registry[i];
             grid.UpdateLayout()?;
             // A Grid places tracks from the padding edge with
@@ -2267,13 +2407,16 @@ impl crate::harness::Stage for WinUiStage {
                 )
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn cross_mode(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             let vertical = matches!(t.kind, crate::harness::TargetKind::Column);
             let registry = if vertical { &core.columns } else { &core.rows };
-            let i = crate::harness::resolve(t.index, registry.len());
+            let Some(i) = crate::harness::try_resolve(t.index, registry.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let grid = registry[i].clone();
             grid.UpdateLayout()?;
             let padding = grid.Padding()?;
@@ -2373,21 +2516,23 @@ impl crate::harness::Stage for WinUiStage {
                 many => format!("ambiguous ({})", many.join("|")),
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn window_title(&self, window: u64) -> String {
-        Self::on_ui(move |core| Ok(winui_window(core, window)?.Title()?.to_string()))
+        Self::on_ui_read(move |core| Ok(winui_window(core, window)?.Title()?.to_string()))
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn window_content_size(&self, window: u64) -> (f64, f64) {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             // The XamlRoot's size IS the client area in DIP — the
             // same notion root_fills reads.
             let target = winui_window(core, window)?;
             let root: FrameworkElement = target.Content()?.cast()?;
             let area = root.XamlRoot()?.Size()?;
             Ok((f64::from(area.Width), f64::from(area.Height)))
-        })
+        }).unwrap_or((f64::NAN, f64::NAN))
     }
 
     fn close_window(&self, window: u64) {
@@ -2411,11 +2556,21 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn alert_title(&self, window: u64) -> Option<String> {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             let Some(live) = core.live_alert.as_ref() else {
                 return Ok(None);
             };
             if live.window != window {
+                return Ok(None);
+            }
+            // Present-gated: the stored handle answers before the
+            // popup is actually open, and an expect_alert that
+            // passed then let alert_choose press a not-yet-
+            // interactive dialog — the press dropped silently and
+            // the alert never retired (caught live 2026-07-22).
+            // IsLoaded flips when the dialog enters the tree, i.e.
+            // when the popup is really up and pressable.
+            if !live.dialog.IsLoaded()? {
                 return Ok(None);
             }
             // The REAL dialog object's Title, never the request's
@@ -2423,7 +2578,7 @@ impl crate::harness::Stage for WinUiStage {
             // IPropertyValue).
             let title: IReference<HSTRING> = live.dialog.Title()?.cast()?;
             Ok(Some(title.Value()?.to_string()))
-        })
+        }).unwrap_or(None)
     }
 
     fn choose_alert(&self, choice: u32) {
@@ -2505,8 +2660,10 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn progress_state(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.progresses.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.progresses.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let bar = &core.progresses[i];
             // The REAL control's state, never a model copy.
             Ok(if bar.IsIndeterminate()? {
@@ -2515,6 +2672,7 @@ impl crate::harness::Stage for WinUiStage {
                 format!("{}%", (bar.Value()? * 100.0).round() as i64)
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn choose(&self, t: crate::harness::Target, index: usize) {
@@ -2530,8 +2688,10 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.selects.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.selects.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let combo = &core.selects[i];
             // The REAL control's state: the selected row's string
             // content out of the ComboBox's items (see
@@ -2546,11 +2706,14 @@ impl crate::harness::Stage for WinUiStage {
                 windows_core::Interface::cast(&item.Content()?)?;
             Ok(value.Value()?.to_string())
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn scroll_overflow(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let viewer = &core.scrolls[i];
             // The toolkit's own metrics: ScrollableHeight is the
             // overflow itself (extent minus viewport).
@@ -2565,6 +2728,7 @@ impl crate::harness::Stage for WinUiStage {
                 )
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn scroll_end(&self, t: crate::harness::Target) {
@@ -2585,8 +2749,10 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn scroll_at_end(&self, t: crate::harness::Target) -> String {
-        Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.scrolls.len());
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.scrolls.len()) else {
+                return Ok("<no such target>".to_string());
+            };
             let viewer = &core.scrolls[i];
             let short = viewer.ScrollableHeight()? - viewer.VerticalOffset()?;
             Ok(if short.abs() <= 2.0 {
@@ -2599,6 +2765,7 @@ impl crate::harness::Stage for WinUiStage {
                 )
             })
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn alert_count(&self) -> usize {
@@ -2606,7 +2773,7 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn root_fills(&self) -> String {
-        Self::on_ui(move |core| {
+        Self::on_ui_read(move |core| {
             // The mounted root is the window's Content; the content
             // island (XamlRoot) is the framework's own notion of the
             // area handed to it.
@@ -2628,6 +2795,7 @@ impl crate::harness::Stage for WinUiStage {
                 },
             )
         })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn finish(&self, code: i32, verdict: &str) {

@@ -3,11 +3,10 @@
 # image row pins the content-buffer path both ways: a valid 2x2 PNG
 # decodes to its size, and deliberately invalid bytes read 0x0 —
 # decode failure is the placeholder class, never a crash.
-settle 1500
+# The opening expect doubles as the scene-ready wait
+expect label#0 "urgent: false"
 toggle checkbox#0 on
-settle 400
 set_value slider#0 0.75
-settle 700
 expect label#0 "urgent: true"
 expect label#1 "volume: 75%"
 expect image#0 "2x2"
@@ -19,5 +18,8 @@ expect image#1 "0x0"
 # must still read the USER's last change. A backend that echoes
 # programmatic writes fails here with "volume: 25%".
 click button#0
+# The one DELIBERATE settle left in the scenes: this expect asserts an
+# ABSENCE (no echo occurrence), and polling can prove presence, never
+# absence — the echo needs a time window in which it would have landed.
 settle 700
 expect label#1 "volume: 75%"

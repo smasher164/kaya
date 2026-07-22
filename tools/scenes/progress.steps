@@ -2,6 +2,5 @@
 # reads back from the REAL control as an integer percent (the slider
 # verdict's spelling), and the indeterminate arm reads back as the
 # platform's activity mode. Display-only: no events, no interaction.
-settle 1500
 expect progress#0 "25%"
 expect progress#1 "indeterminate"

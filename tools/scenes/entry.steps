@@ -4,14 +4,12 @@
 # put focus back in it, and emptied the app's draft through the
 # clear's own text_changed("") occurrence — so a second add finds
 # nothing to add (a stale draft would read "added milk, 2 total").
-settle 1500
+# The opening expect doubles as the scene-ready wait
+expect label#0 "no todos"
 set_text entry#0 "milk"
-settle 400
 click button#0
-settle 700
 expect label#0 "added milk, 1 total"
 expect entry#0 ""
 expect_focused entry#0
 click button#0
-settle 400
 expect label#0 "nothing to add, 1 total"

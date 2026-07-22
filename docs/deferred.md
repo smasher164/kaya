@@ -420,16 +420,35 @@ Landed history lives in git; this file only carries what is still open.
   (a programmatic write, then the assertion that the fold did NOT
   run); signal-bound slider value sugar now exists in all 8
   languages (was python-only).
-- Matrix speed: event-driven expects (benchmarked 2026-07-22; the
+- Matrix speed: bounded-retry expects — LANDED 2026-07-22, same
+  day it was ratified. Every observation step polls at 20ms to a 5s
+  deadline (harness.rs is the norm; both interpreters carry the
+  step-level twin); scenes lost their settles (ONE deliberate one
+  remains: gallery's echo test asserts an ABSENCE, which polling
+  cannot prove); scripts open with an expect (check-steps' opening
+  lint, replacing the pacing lint); GTK/WinUI harness reads are
+  TOTAL (try_resolve / on_ui_read — a missing target or
+  mid-materialization error is a retryable miss, never a panic).
+  Measured: leg phases mac 52s->18s, linux 132s->71s, windows
+  95s->57s, iOS 83s->51s, android 57s->45s; serial matrix 8m28s ->
+  ~6m03s (remaining wall is builds/gates/deploy — the pool-width,
+  deploy-skip, and iOS-module levers below still stand). The
+  rollout also flushed out four REAL WinUI bugs the settles had
+  preserved (see traps.md).
+  The original benchmark record: (benchmarked 2026-07-22; the
   full writeup is the "matrix gets a stopwatch" artifact). Per-leg
   instrumentation across all five runners showed 70% of the matrix's
   1,767 leg-seconds are scripted settle floors (settle 1500 openers
   + 400-700ms post-action settles; scene cost ranks by settle
-  budget). The structural fix: make `expect` a BOUNDED RETRY (poll
-  until match or deadline) and open scenes with a first-render wait,
-  then drop the settles — converts fixed sleeps into actual latency,
-  removes the pacing race class at the root (retiring check-steps'
-  pacing lint), estimated 50-65% leg-time saving. Secondary levers:
+  budget). The structural fix (RATIFIED 2026-07-22, Akhil: bounded
+  polling uniformly, for one unified testing solution): make `expect`
+  a BOUNDED RETRY — poll the predicate at ~10-20ms until match or
+  deadline — everywhere, including the scene-open wait (the first
+  expect simply polls until the scene renders); no per-platform
+  event-driven variants. Then drop the settles: fixed sleeps become
+  actual latency, the pacing race class dies at the root (retiring
+  check-steps' pacing lint), estimated 50-65% leg-time saving. This
+  is the NEXT infra move, green-lit after "add select" landed. Secondary levers:
   wider windows/phone pools (their x2.5-3.9 parallelism is
   device-bound, not leg-bound), skip-unchanged windows deploy (20s),
   pooled mac guest builds (29s serial), iOS bindings compiled once

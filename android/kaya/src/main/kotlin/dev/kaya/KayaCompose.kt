@@ -688,6 +688,19 @@ object KayaCompose {
                 val parts = line.split(' ').filter { it.isNotEmpty() }
                 val offset = (System.nanoTime() - start) / 1_000_000
                 Log.i("kaya", "KAYA_HARNESS: +${offset}ms $line")
+                // The observation contract (harness.rs is the norm):
+                // every expect is a BOUNDED RETRY — each verb case
+                // appends exactly one failure on a miss, so the
+                // wrapper retracts it and re-runs the case until it
+                // passes or the deadline lands the last failure
+                // text. Actions never re-run; the FIRST expect
+                // doubles as the scene-ready wait (scripts open
+                // with one).
+                val stepDeadline = System.nanoTime() + 5_000_000_000L
+                var retryStep = true
+                while (retryStep) {
+                retryStep = false
+                val failuresBefore = failures.size
                 when (parts[0]) {
                     "settle" -> Thread.sleep(parts[1].toLong())
                     "click" -> {
@@ -1152,6 +1165,14 @@ object KayaCompose {
                         }
                     }
                     else -> failures.add("unknown step $line")
+                }
+                if (failures.size > failuresBefore && parts[0].startsWith("expect") &&
+                    System.nanoTime() < stepDeadline
+                ) {
+                    while (failures.size > failuresBefore) failures.removeAt(failures.size - 1)
+                    Thread.sleep(20)
+                    retryStep = true
+                }
                 }
             }
         }

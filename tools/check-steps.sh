@@ -72,55 +72,41 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# The pacing lint: an expect that immediately follows an action races
-# the guest fold — the occurrence -> guest write -> apply -> render
-# round trip is asynchronous on every backend, and an expect with no
-# settle between only passes where the interpreter happens to be fast
-# (select passed in-process on mac and raced on GTK, 2026-07-22).
-# The gallery convention is a settle after every action, before its
-# observations; this holds the line structurally.
-pacing_lint() {
+# The opening lint: a script must OPEN with an observation. Expects
+# are bounded retries (harness.rs POLL_DEADLINE), and the FIRST one
+# doubles as the scene-ready wait — a script that opens with an
+# action races the mount on every platform at once (scripted settles
+# are gone; retries replaced them, 2026-07-22).
+opening_lint() {
     python3 -c '
 import sys
 
 path = sys.argv[1]
 text = sys.stdin.read() if path == "-" else open(path).read()
-ACTIONS = {"click", "toggle", "set_value", "set_text", "choose",
-           "back", "close_window", "alert_choose", "scroll_end"}
-bad = []
-prev = None
-for lineno, line in enumerate(text.splitlines(), 1):
-    if line.lstrip().startswith("#"):
+for line in text.splitlines():
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
         continue
-    for part in line.split(";"):
-        words = part.split()
-        if not words:
-            continue
-        verb = words[0]
-        if verb in ACTIONS:
-            prev = (verb, lineno)
-        elif verb == "settle":
-            prev = None
-        elif verb.startswith("expect") and prev:
-            bad.append(
-                f"{path}:{lineno}: {verb} follows {prev[0]} (line "
-                f"{prev[1]}) with no settle — the fold round trip is "
-                f"asynchronous everywhere")
-            prev = None
-print("\n".join(bad))
-sys.exit(1 if bad else 0)
+    first = stripped.split(";")[0].split()
+    verb = first[0] if first else ""
+    if verb.startswith("expect"):
+        sys.exit(0)
+    print(f"{path}: opens with {verb!r} — the first step must be an "
+          "expect (its bounded retry is the scene-ready wait)")
+    sys.exit(1)
+sys.exit(0)
 ' "$1"
 }
 
 # The guard guards itself.
-if printf 'choose select#0 2\nexpect label#0 "x"\n' | pacing_lint - >/dev/null; then
-    echo "check-steps: SELF-TEST FAIL (unpaced expect passed)" >&2
+if printf 'click button#0\nexpect label#0 "x"\n' | opening_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (action-first script passed)" >&2
     exit 1
 fi
 
 for f in tools/scenes/*.steps; do
-    out="$(pacing_lint "$f")" || {
-        echo "check-steps: $f expects immediately after an action (settle first — the fold round trip is asynchronous):" >&2
+    out="$(opening_lint "$f")" || {
+        echo "check-steps: $f must open with an expect (the retry is the scene-ready wait):" >&2
         echo "$out" >&2
         status=1
     }

@@ -12,34 +12,27 @@
 # (alert_choose presses the native button / fires the native
 # dismissal), each id retired (a fresh show succeeds each round),
 # and the dialog gone (expect_alerts 0).
-settle 1500
 expect label#0 "no decision"
 click button#0
-settle 500
 expect_alert "delete item?"
 alert_choose 0
-settle 500
 expect label#0 "deleted"
 click button#0
-settle 500
+# Prove the dialog is live before answering it (the retry is the
+# synchronization; an unproven alert_choose would race the present).
+expect_alert "delete item?"
 alert_choose 1
-settle 500
 expect label#0 "archived"
 click button#0
-settle 500
 expect_alert "delete item?"
 alert_choose cancel
-settle 500
 expect label#0 "kept"
 click button#1
-settle 500
 expect_alert "eject disk?"
 alert_choose 0
-settle 500
 expect label#0 "ejected"
 click button#1
-settle 500
+expect_alert "eject disk?"
 alert_choose cancel
-settle 500
 expect label#0 "held"
 expect_alerts 0

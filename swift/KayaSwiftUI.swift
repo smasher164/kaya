@@ -1010,7 +1010,19 @@ private func kayaRunScript(_ script: String) {
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)
             let offset = Int(Date().timeIntervalSince(start) * 1000)
             print("KAYA_HARNESS: +\(offset)ms \(line)")
-            switch parts[0] {
+            // The observation contract (harness.rs is the norm):
+            // every expect is a BOUNDED RETRY — each verb case
+            // appends exactly one failure on a miss, so the wrapper
+            // retracts it and re-runs the case until it passes or
+            // the deadline lands the last failure text. Actions
+            // never re-run; the FIRST expect doubles as the
+            // scene-ready wait (scripts open with one).
+            let stepDeadline = Date().addingTimeInterval(5.0)
+            var retryStep = true
+            while retryStep {
+                retryStep = false
+                let failuresBefore = failures.count
+                switch parts[0] {
             case "settle":
                 Thread.sleep(forTimeInterval: Double(parts[1])! / 1000)
             case "click":
@@ -1526,6 +1538,14 @@ private func kayaRunScript(_ script: String) {
                 }
             default:
                 failures.append("unknown step \(line)")
+            }
+                if failures.count > failuresBefore, parts[0].hasPrefix("expect"),
+                    Date() < stepDeadline
+                {
+                    failures.removeLast(failures.count - failuresBefore)
+                    Thread.sleep(forTimeInterval: 0.02)
+                    retryStep = true
+                }
             }
         }
     }

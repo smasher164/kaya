@@ -627,3 +627,29 @@ the same patterns return through interpreter drop-downs
   asynchronous everywhere, and 2ms is not a contract. The gallery
   scene's 400–700ms post-action settles are the convention; select
   learned it the hard way (2026-07-22).
+
+- **Scripted settles were hiding four real WinUI bugs; bounded-retry
+  expects flushed them all out in one run (2026-07-22).** When the
+  scenes dropped their sleeps: (1) observation reads that error
+  mid-materialization (null Content cast, not-yet-live XamlRoot)
+  panicked — on the harness thread via on_ui's expect, or fatally
+  inside a dispatcher callback where a panic cannot unwind and
+  ABORTS the process (the 390s hung legs). Guard: on_ui_read — a
+  read's WinRT error is a retryable miss, never a panic. (2)
+  TextBox.TextChanged is raised ASYNCHRONOUSLY (Checked/ValueChanged
+  are not), so a click's occurrence overtook the edit and add
+  handlers ran on empty drafts; a FIFO flush hop does NOT fix it.
+  Guard: per-entry swallow counters — every programmatic text path
+  (SetProp, clear, the stage) writes, emits synchronously where it
+  must, and swallows the late native raise 1:1. (3) Presenting a
+  ContentDialog milliseconds after launch dies on the not-yet-live
+  XamlRoot, and deferring by dispatcher SELF-RE-ENQUEUE starves the
+  very queue that loads the island. Guard: present from the root's
+  Loaded event. (4) alert_title answered from the stored dialog
+  handle BEFORE the popup opened, so expect_alert passed early and
+  the automation press dropped silently on a not-yet-interactive
+  dialog — the alert never retired and the next show tripped the
+  one-alert floor. Guard: alert_title gates on dialog.IsLoaded.
+  The class lesson: a fixed sleep in a test is a bug preservative —
+  every one of these was a real app-facing defect (an app showing an
+  alert at launch aborts), reachable the day a guest got faster.

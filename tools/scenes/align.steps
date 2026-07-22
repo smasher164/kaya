@@ -21,7 +21,6 @@
 # normalized start default. end and stretch have classification arms
 # on every backend; the recordings are their visual record until a
 # scene earns them.
-settle 1500
 expect label#0 "align probe"
 expect_aligned column#0 "center"
 expect_aligned row#0 "baseline"

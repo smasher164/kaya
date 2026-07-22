@@ -1,12 +1,10 @@
 # The todos round trip: type, add, toggle the stamped row's checkbox
 # (a field-level update), and read the items-left label.
-settle 1500
+# The opening expect doubles as the scene-ready wait
+expect label#0 "0 items left"
 set_text entry#0 "buy milk"
-settle 400
 click button#0
-settle 400
 expect entry#0 ""
 expect_focused entry#0
 toggle checkbox#0 on
-settle 700
 expect label#0 "0 items left"
