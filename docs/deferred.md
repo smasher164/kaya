@@ -453,6 +453,13 @@ Landed history lives in git; this file only carries what is still open.
   device-bound, not leg-bound), skip-unchanged windows deploy (20s),
   pooled mac guest builds (29s serial), iOS bindings compiled once
   as a module (~60s of per-scene swiftc).
+- Mount-transaction focus negative test: the Focus command now
+  defers until the element is loaded/mapped on WinUI/GTK (the
+  materialization class, traps.md), but no scene issues focus IN the
+  mount tx — the entry scene focuses from the add fold, long after
+  load. The class fix is structural; the missing gate is a scene (or
+  an entry-scene opening step) that focuses at mount and asserts
+  expect_focused, proving the deferral on all platforms.
 - Select follow-ons, each waiting on a REAL need: a template
   (For-body) select only gets the stateless index checks — the
   option-count upper bound is live-widget-only (the count map keys

@@ -1300,8 +1300,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 CommandKind::Focus => {
                     // grab_focus is per-window (the toplevel's focus
                     // widget), so parallel tiled suite legs cannot
-                    // steal each other's focus assertions.
-                    widget.widget().grab_focus();
+                    // steal each other's focus assertions. The
+                    // materialization class (see traps.md): an
+                    // unmapped widget cannot take focus and the bool
+                    // is discarded — a mount-tx focus would silently
+                    // drop. Not mapped yet: one-shot re-grab from the
+                    // widget's own map signal.
+                    let w = widget.widget();
+                    if w.is_mapped() {
+                        w.grab_focus();
+                    } else {
+                        // One-shot: map re-fires on every re-map, and
+                        // a stale handler must not steal focus later.
+                        let armed = Rc::new(RefCell::new(None));
+                        let armed2 = armed.clone();
+                        let handler = w.connect_map(move |w| {
+                            w.grab_focus();
+                            if let Some(id) = armed2.borrow_mut().take() {
+                                w.disconnect(id);
+                            }
+                        });
+                        *armed.borrow_mut() = Some(handler);
+                    }
                 }
             }
         }

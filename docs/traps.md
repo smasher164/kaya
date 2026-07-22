@@ -653,3 +653,21 @@ the same patterns return through interpreter drop-downs
   The class lesson: a fixed sleep in a test is a bug preservative —
   every one of these was a real app-facing defect (an app showing an
   alert at launch aborts), reachable the day a guest got faster.
+
+- **The materialization class, generalized: any IMPERATIVE platform
+  call in the APPLY path whose prerequisite materializes
+  asynchronously.** A guest's ops can arrive milliseconds after
+  launch — before the first layout, before the content island,
+  before tree attachment — and the strict imperative backends (WinUI
+  above all; GTK for focus) either abort or silently drop. The
+  full audit (2026-07-22) found four instances, all now on one of
+  three strategies: presents and metrics DEFER to the platform's own
+  readiness event, one-shot (ContentDialog on the root's Loaded;
+  baseline reindex on the panel's Loaded; Focus on the element's
+  Loaded / GTK map); observations are TOTAL reads that return a
+  retryable miss; plain object manipulation (create/set/add_child)
+  needs nothing. The declarative backends (SwiftUI, Compose) are
+  immune by architecture — presentation derives from model state.
+  When ADDING an apply-path call, ask: does this need a live tree,
+  a layout pass, or an island? If yes, it rides a readiness event,
+  one-shot, or it is a bug that a fast guest will find.

@@ -1628,7 +1628,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                 }
                 CommandKind::Focus => {
-                    let _ = widget.element()?.Focus(FocusState::Programmatic)?;
+                    // The materialization class (see traps.md): an
+                    // element not yet in the live tree cannot take
+                    // focus, and the call's bool would be discarded —
+                    // a mount-tx focus would silently drop. Not
+                    // loaded yet: one-shot re-run from the element's
+                    // own Loaded, the alert/baseline pattern.
+                    let element = widget.element()?;
+                    let fe: FrameworkElement = windows_core::Interface::cast(&element)?;
+                    if fe.IsLoaded()? {
+                        let _ = element.Focus(FocusState::Programmatic)?;
+                    } else {
+                        // One-shot (the alert pattern): Loaded
+                        // re-fires on every re-attach, and a stale
+                        // handler must not steal focus later.
+                        let armed = std::sync::Mutex::new(true);
+                        let deferred = RoutedEventHandler::new(
+                            move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
+                                if !std::mem::take(&mut *armed.lock().unwrap()) {
+                                    return Ok(());
+                                }
+                                if let Some(sender) = sender.as_ref() {
+                                    let element: UIElement =
+                                        windows_core::Interface::cast(sender)?;
+                                    let _ = element.Focus(FocusState::Programmatic)?;
+                                }
+                                Ok(())
+                            },
+                        );
+                        fe.Loaded(&deferred)?;
+                    }
                 }
             }
         }
