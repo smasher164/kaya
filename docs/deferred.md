@@ -442,13 +442,14 @@ Landed history lives in git; this file only carries what is still open.
   stay regardless: kayaEnsureOpen (at-least-once aux open — safe by
   value-identified WindowGroup uniqueness) and kayaAwaitWindow (the
   runner's window-targeted verbs await materialization boundedly).
-- A java leg on Windows. The dll already exports the KayaRing
-  natives (jvm.rs compiles for the windows target; check-targets
-  proves it), the launcher needs no first-thread flag there, and the
-  Main selector is platform-neutral — the whole gap is a JDK
-  provisioned on the UTM VM (winget/zulu, one-time) plus the
-  deploy-win legs. Mac and Linux already prove the desktop JVM tier
-  live on 24 legs.
+- ~~A java leg on Windows~~ LANDED: 12 java legs in deploy-win (60
+  checks total) — sources shipped, javac IN PLACE on the VM (the C#
+  ship-and-build precedent), quote-free run_ssh lines (the sshd
+  re-wrap trap), idempotent ARM64-JDK provisioning (Microsoft
+  OpenJDK 17 via winget with --architecture arm64 — winget's default
+  under the emulated shell is x64, whose JVM cannot load the aarch64
+  dll; zulu ships no arm64 winget package). The desktop JVM tier now
+  runs live on all three desktops.
 - Swift guests on Linux and Windows. Upstream swift.org toolchains
   exist for both, but neither pinned world (docker image, VM) carries
   one, and the swift SURFACE is already fully proven — typecheck on

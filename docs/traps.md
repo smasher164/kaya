@@ -533,3 +533,12 @@ the same patterns return through interpreter drop-downs
   signal, and the runner's window-targeted verbs additionally await
   materialization boundedly (kayaAwaitWindow) rather than reading a
   not-yet-real window.
+- **Interior double quotes break run_ssh commands to the Windows
+  VM.** Windows sshd wraps the whole received command in its own
+  `cmd /c "..."`, so double quotes INSIDE the command re-pair across
+  the line — chained `& mkdir` halves land inside a quoted region
+  and the exit code still reads 0. The older `cmd /c "if exist ..."`
+  lines survive only by accident: their single TRAILING quote is
+  eaten harmlessly. Guard: write run_ssh commands quote-free (cmd
+  needs no quotes for backslash paths; split chains into separate
+  run_ssh calls; mkdir creates parents with extensions on).

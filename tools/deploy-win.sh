@@ -64,18 +64,18 @@ SUITE="all"
 for arg in "$@"; do
     case "$arg" in
         --provision) PROVISION=1 ;;
-        rust|python|go|csharp|all) SUITE="$arg" ;;
-        entry_rust|entry_python|entry_go|entry_csharp) SUITE="$arg" ;;
-        gallery_rust|gallery_python|gallery_go|gallery_csharp) SUITE="$arg" ;;
-        todos_rust|todos_python|todos_go|todos_csharp) SUITE="$arg" ;;
-        reorder_rust|reorder_python|reorder_go|reorder_csharp) SUITE="$arg" ;;
-        feed_rust|feed_python|feed_go|feed_csharp) SUITE="$arg" ;;
-        grow_rust|grow_python|grow_go|grow_csharp) SUITE="$arg" ;;
-        align_rust|align_python|align_go|align_csharp) SUITE="$arg" ;;
-        window_rust|window_python|window_go|window_csharp) SUITE="$arg" ;;
-        panels_rust|panels_python|panels_go|panels_csharp) SUITE="$arg" ;;
-        confirm_rust|confirm_python|confirm_go|confirm_csharp) SUITE="$arg" ;;
-        layout_rust|layout_python|layout_go|layout_csharp) SUITE="$arg" ;;
+        rust|python|go|csharp|java|all) SUITE="$arg" ;;
+        entry_rust|entry_python|entry_go|entry_csharp|entry_java) SUITE="$arg" ;;
+        gallery_rust|gallery_python|gallery_go|gallery_csharp|gallery_java) SUITE="$arg" ;;
+        todos_rust|todos_python|todos_go|todos_csharp|todos_java) SUITE="$arg" ;;
+        reorder_rust|reorder_python|reorder_go|reorder_csharp|reorder_java) SUITE="$arg" ;;
+        feed_rust|feed_python|feed_go|feed_csharp|feed_java) SUITE="$arg" ;;
+        grow_rust|grow_python|grow_go|grow_csharp|grow_java) SUITE="$arg" ;;
+        align_rust|align_python|align_go|align_csharp|align_java) SUITE="$arg" ;;
+        window_rust|window_python|window_go|window_csharp|window_java) SUITE="$arg" ;;
+        panels_rust|panels_python|panels_go|panels_csharp|panels_java) SUITE="$arg" ;;
+        confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
+        layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -167,6 +167,14 @@ if [ "$PROVISION" = 1 ]; then
     run_ssh 'C:\kaya\WindowsAppRuntimeInstall-arm64.exe --quiet --force'
 fi
 
+# The ARM64 JDK for the java legs: fetched once, idempotently, via
+# winget. --architecture arm64 is LOAD-BEARING: winget under the
+# emulated x64 shell defaults to the x64 build, whose JVM cannot
+# load the aarch64 kaya.dll ("Can't load ARM 64-bit .dll on a AMD
+# 64-bit platform"); zulu ships no arm64 winget package, Microsoft's
+# OpenJDK does.
+run_ssh 'cmd /c java -version >nul 2>&1 && echo jdk present || winget install --id Microsoft.OpenJDK.17 --architecture arm64 --silent --accept-package-agreements --accept-source-agreements --scope machine'
+
 # Go 1.27rc2 on the VM (generic methods; pre-release until August
 # 2026): fetched once, idempotently; the go guest scripts prepend
 # C:\kaya\go127\go\bin so it wins over any stable install.
@@ -179,7 +187,7 @@ run_ssh 'cmd /c if exist C:\kaya\go127\go\bin\go.exe (echo go127 present) else (
 # after any suite timeout, and on every exit path (trap below).
 kill_guests() {
     kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & ' "$s"; done)
-    run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
+    run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
@@ -215,6 +223,25 @@ scp -q "$ROOT"/bindings/go/*.go "$HOST:C:/kaya/bindings/go/"
 scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
     "$ROOT"/bindings/csharp/*.cs \
     "$HOST:C:/kaya/cs/"
+# The java guests: sources shipped flat (every basename is unique and
+# javac takes explicit files, so package-dir layout is classpath
+# business, not source business) and compiled IN PLACE — the C#
+# precedent: the suite builds what it verifies. Recreated from
+# scratch every deploy; a javac failure fails the deploy loudly.
+# Quote-free on purpose: Windows sshd re-wraps the command in its
+# own cmd /c "...", and interior double quotes re-pair across the
+# line (docs/traps.md). mkdir creates parents with extensions on.
+run_ssh 'cmd /c if exist C:\kaya\java rmdir /s /q C:\kaya\java'
+run_ssh 'cmd /c mkdir C:\kaya\java\src'
+scp -q "$ROOT"/bindings/java/dev/kaya/*.java \
+    "$ROOT/bindings/java-desktop/dev/kaya/KayaRing.java" \
+    "$ROOT"/guests/java/dev/kaya/milestone2kt/*.java \
+    "$ROOT/guests/java-desktop/dev/kaya/milestone2kt/Main.java" \
+    "$HOST:C:/kaya/java/src/"
+run_ssh 'cmd /c javac -d C:\kaya\java\classes C:\kaya\java\src\*.java' || {
+    echo "javac failed on the VM" >&2
+    exit 1
+}
 
 # What landed must be what was built: Windows keeps loaded DLLs locked,
 # so an overwrite can fail while everything else copies fine, and the
@@ -516,26 +543,32 @@ case "$SUITE" in
         run_suite python
         run_suite go
         run_suite csharp
+        run_suite java
         run_suite entry_rust
         run_suite entry_python
         run_suite entry_go
         run_suite entry_csharp
+        run_suite entry_java
         run_suite gallery_rust
         run_suite gallery_python
         run_suite gallery_go
         run_suite gallery_csharp
+        run_suite gallery_java
         run_suite todos_rust
         run_suite todos_python
         run_suite todos_go
         run_suite todos_csharp
+        run_suite todos_java
         run_suite reorder_rust
         run_suite reorder_python
         run_suite reorder_go
         run_suite reorder_csharp
+        run_suite reorder_java
         run_suite feed_rust
         run_suite feed_python
         run_suite feed_go
         run_suite feed_csharp
+        run_suite feed_java
         # The grow scene (the layout contract, asserted as shares and
         # root-fills) and the layout observation scene, every language
         # this platform runs.
@@ -543,24 +576,28 @@ case "$SUITE" in
         run_suite grow_python
         run_suite grow_go
         run_suite grow_csharp
+        run_suite grow_java
         # The align scene (the cross-axis contract: center + baseline),
         # every language this platform runs.
         run_suite align_rust
         run_suite align_python
         run_suite align_go
         run_suite align_csharp
+        run_suite align_java
         # The window scene: the primary surface's props — title
         # materialized, the advisory 640x400 honored.
         run_suite window_rust
         run_suite window_python
         run_suite window_go
         run_suite window_csharp
+        run_suite window_java
         # The panels scene: the auxiliary-window grammar (rust depth;
         # the language sweep rides the next slice of the phase).
         run_suite panels_rust
         run_suite panels_python
         run_suite panels_go
         run_suite panels_csharp
+        run_suite panels_java
         # The confirm scene: the modal-alert grammar (ContentDialog),
         # all three answer paths through the REAL press (automation
         # peer Invoke; Hide for the cancel slot).
@@ -568,10 +605,12 @@ case "$SUITE" in
         run_suite confirm_python
         run_suite confirm_go
         run_suite confirm_csharp
+        run_suite confirm_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go
         run_suite layout_csharp
+        run_suite layout_java
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;
