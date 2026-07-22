@@ -95,6 +95,11 @@ executable select
   main-is: select.hs
   build-depends: kaya-guests
 
+executable radio
+  import: shared
+  main-is: radio.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

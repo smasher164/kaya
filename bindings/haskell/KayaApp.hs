@@ -115,6 +115,7 @@ module KayaApp
     checkboxOn,
     sliderOn,
     selectOn,
+    radioOn,
     imageBytes,
     imageBound,
     TplTextSource (..),
@@ -931,6 +932,23 @@ sliderOn lo hi value handler = leafish $ do
 selectOn :: (LeafArgs r) => [String] -> Int -> (Int -> IO ()) -> r
 selectOn options selected handler = leafish $ do
   w@(Widget n) <- widget W.kindSelect
+  mapM_
+    ( \optionText -> do
+        o <- widget W.kindLabel
+        setText o optionText
+        addChild w o
+    )
+    options
+  emitB (W.txSetValue n (fromIntegral selected))
+  pendB (PValue n (handler . round))
+  return w
+
+-- | A radio group over fixed options — the choice contract
+-- ('selectOn') in its inline presentation: same option children,
+-- same 0-based index, same pick handler.
+radioOn :: (LeafArgs r) => [String] -> Int -> (Int -> IO ()) -> r
+radioOn options selected handler = leafish $ do
+  w@(Widget n) <- widget W.kindRadio
   mapM_
     ( \optionText -> do
         o <- widget W.kindLabel

@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -188,6 +190,7 @@ object KayaSceneModel {
     val scrolls = ArrayList<KayaNode>()
     val progresses = ArrayList<KayaNode>()
     val selects = ArrayList<KayaNode>()
+    val radios = ArrayList<KayaNode>()
 }
 
 /** One navigation entry: a pushed scene root, retained while covered,
@@ -208,7 +211,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x28f68340441927b5uL
+    private const val SPEC_HASH: ULong = 0xa78836939a484688uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -253,6 +256,7 @@ object KayaCompose {
     const val KIND_SCROLL = 9
     const val KIND_PROGRESS = 10
     const val KIND_SELECT = 11
+    const val KIND_RADIO = 12
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -378,6 +382,7 @@ object KayaCompose {
                         KIND_SCROLL -> KayaSceneModel.scrolls.add(node)
                         KIND_PROGRESS -> KayaSceneModel.progresses.add(node)
                         KIND_SELECT -> KayaSceneModel.selects.add(node)
+                        KIND_RADIO -> KayaSceneModel.radios.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -515,13 +520,15 @@ object KayaCompose {
                     KayaSceneModel.nodes[parent]!!.children
                         .add(KayaSceneModel.nodes[child]!!)
                     KayaSceneModel.parents[child] = parent
-                    // A select's label children are its OPTIONS — the
-                    // dropdown's rows, not standalone widgets — so
-                    // they leave the harness's label#N registry (their
+                    // A choice widget's label children are its
+                    // OPTIONS — rows of the dropdown / entries of the
+                    // radio group, not standalone widgets — so they
+                    // leave the harness's label#N registry (their
                     // create arm appended before this parent was
-                    // known). Without this, every label after a
-                    // select would shift index.
-                    if (KayaSceneModel.nodes[parent]!!.kind == KIND_SELECT) {
+                    // known). Without this, every label after one
+                    // would shift index.
+                    val parentKind = KayaSceneModel.nodes[parent]!!.kind
+                    if (parentKind == KIND_SELECT || parentKind == KIND_RADIO) {
                         KayaSceneModel.labels.removeAll { it.id == child }
                     }
                 }
@@ -729,15 +736,19 @@ object KayaCompose {
                         if (!ok) failures.add("no such target ${parts[1]}")
                     }
                     "choose" -> {
-                        // The select's real change route in this
-                        // interpreter is the menu item's onClick —
+                        // The choice widget's real change route in
+                        // this interpreter is the item's onClick —
                         // mirrored here exactly as set_value mirrors
                         // the slider's binding: write the state the
-                        // field reads, emit with the identity tag.
+                        // control reads, emit with the identity tag.
                         val ok = onUi(activity) {
-                            target(parts[1], "select", KayaSceneModel.selects)?.also { node ->
-                                node.value = parts[2].toDouble()
-                                KayaPresent.emitValueChanged(node.tag, node.value)
+                            val node =
+                                if (parts[1].startsWith("radio"))
+                                    target(parts[1], "radio", KayaSceneModel.radios)
+                                else target(parts[1], "select", KayaSceneModel.selects)
+                            node?.also {
+                                it.value = parts[2].toDouble()
+                                KayaPresent.emitValueChanged(it.tag, it.value)
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -768,11 +779,13 @@ object KayaCompose {
                                     if (it.indeterminate) "indeterminate"
                                     else "${Math.round(it.value * 100)}%"
                                 }
-                            else if (parts[1].startsWith("select"))
+                            else if (parts[1].startsWith("select") || parts[1].startsWith("radio"))
                                 // The selected option's LABEL — what
-                                // the collapsed field shows (child
-                                // order is option order).
-                                target(parts[1], "select", KayaSceneModel.selects)?.let {
+                                // the control shows (child order is
+                                // option order).
+                                (if (parts[1].startsWith("radio"))
+                                    target(parts[1], "radio", KayaSceneModel.radios)
+                                else target(parts[1], "select", KayaSceneModel.selects))?.let {
                                     it.children.getOrNull(it.value.toInt())?.text ?: ""
                                 }
                             else target(parts[1], "label", KayaSceneModel.labels)?.text
@@ -1247,6 +1260,32 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
                 }
             }
         }
+        KayaCompose.KIND_RADIO ->
+            // The choice contract inline: M3's radio idiom is a
+            // selectable group of RadioButton rows. Every USER pick
+            // emits with the group's identity tag — the select's
+            // uncontrolled contract.
+            Column(modifier = Modifier.selectableGroup()) {
+                node.children.forEachIndexed { i, option ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier =
+                            Modifier.selectable(
+                                selected = node.value.toInt() == i,
+                                onClick = {
+                                    node.value = i.toDouble()
+                                    KayaPresent.emitValueChanged(node.tag, i.toDouble())
+                                },
+                            ),
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = node.value.toInt() == i,
+                            onClick = null,
+                        )
+                        Text(option.text)
+                    }
+                }
+            }
         KayaCompose.KIND_PROGRESS ->
             // The dressed floor: M3's own LinearProgressIndicator —
             // determinate over the 0..=1 fraction, or the activity

@@ -1,0 +1,14 @@
+# The radio scene: the choice contract in its inline presentation —
+# the group shows the selected option (read from the REAL control,
+# never a model copy), choose drives the toolkit's own selection
+# path, and the pick reaches the guest as the new 0-based index (the
+# label proves the fold ran; the expects' bounded retries cover the
+# round trip).
+expect radio#0 "Small"
+expect label#0 "size: Small"
+choose radio#0 2
+expect radio#0 "Large"
+expect label#0 "size: Large"
+choose radio#0 1
+expect radio#0 "Medium"
+expect label#0 "size: Medium"

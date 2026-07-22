@@ -1160,6 +1160,27 @@ def select(options, selected=0, on_select=None, grow=None):
     return handle
 
 
+def radio(options, selected=0, on_select=None, grow=None):
+    """A radio group over fixed options — the choice contract
+    (see `select`) in its inline presentation: same option children,
+    same 0-based `selected` index, same `on_select` pick handler
+    (USER picks only; programmatic writes never echo)."""
+    handle = _widget(wire.KIND_RADIO)
+    with _Container(handle):
+        for option in options:
+            label(text=option)
+    if isinstance(selected, Signal):
+        _records().append(wire.tx_bind_value(handle.id, selected.id))
+    else:
+        _records().append(wire.tx_set_value(handle.id, float(selected)))
+    if on_select is not None:
+        _app._register(
+            handle, wire.OCC_VALUE_CHANGED,
+            lambda *args: on_select(*args[:-1], int(args[-1])))
+    _set_grow(handle, grow)
+    return handle
+
+
 def slider(value=None, min=None, max=None, on_change=None, grow=None):
     """A slider over a numeric range. Uncontrolled, like the entry: the
     widget owns its position and reports each change to `on_change`

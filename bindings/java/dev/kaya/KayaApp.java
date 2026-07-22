@@ -904,6 +904,27 @@ public final class KayaApp {
             return w;
         }
 
+        /** A radio group over fixed options — the choice contract
+         * (see select) in its inline presentation: same option
+         * children, same 0-based selected index, same pick handler
+         * (null for none). */
+        public Widget radio(String[] options, int selected,
+                BiConsumer<Tx, Integer> onSelect) {
+            Widget w = widget(KayaWire.KIND_RADIO);
+            parents.add(w.id);
+            for (String option : options) {
+                Widget o = widget(KayaWire.KIND_LABEL);
+                setText(o, option);
+            }
+            parents.remove(parents.size() - 1);
+            records.add(KayaWire.txSetValue(w.id, selected));
+            if (onSelect != null) {
+                KayaApp.this.onValueChanged(w,
+                        (tx, v) -> onSelect.accept(tx, (int) (double) v));
+            }
+            return w;
+        }
+
         /** A label bound to a signal. */
         public Widget label(Signal<String> s) {
             Widget w = widget(KayaWire.KIND_LABEL);

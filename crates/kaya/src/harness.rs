@@ -65,6 +65,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "scroll" => Some(include_str!("../../../tools/scenes/scroll.steps")),
         "progress" => Some(include_str!("../../../tools/scenes/progress.steps")),
         "select" => Some(include_str!("../../../tools/scenes/select.steps")),
+        "radio" => Some(include_str!("../../../tools/scenes/radio.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -100,6 +101,9 @@ pub enum TargetKind {
     /// scroll (tools/check-steps.sh holds the line).
     Scroll,
     Select,
+    /// The radio group: the choice contract in its inline
+    /// presentation — same choose/expect verbs as select.
+    Radio,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -569,6 +573,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "scroll" => TargetKind::Scroll,
         "progress" => TargetKind::Progress,
         "select" => TargetKind::Select,
+        "radio" => TargetKind::Radio,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -753,8 +758,8 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 }
             }
             Step::Choose(t, index) => {
-                if t.kind != TargetKind::Select {
-                    Some(Err(format!("{t:?} is not a select target")))
+                if !matches!(t.kind, TargetKind::Select | TargetKind::Radio) {
+                    Some(Err(format!("{t:?} is not a choice (select/radio) target")))
                 } else {
                     // An action, silent like click: `expect select#N`
                     // and the guest's value_changed reaction are the
@@ -775,13 +780,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 | TargetKind::Image
                 | TargetKind::Label
                 | TargetKind::Progress
-                | TargetKind::Select => poll(|| {
+                | TargetKind::Select
+                | TargetKind::Radio => poll(|| {
                     let got = match t.kind {
                         TargetKind::Entry => stage.read_text(*t),
                         TargetKind::Image => stage.image_size(*t),
                         TargetKind::Label => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
-                        TargetKind::Select => stage.selected_label(*t),
+                        TargetKind::Select | TargetKind::Radio => stage.selected_label(*t),
                         _ => unreachable!(),
                     };
                     if got == *want {
@@ -1026,6 +1032,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Scroll => "scroll",
         TargetKind::Progress => "progress",
         TargetKind::Select => "select",
+        TargetKind::Radio => "radio",
     };
     if t.index < 0 {
         format!("{kind}#last")

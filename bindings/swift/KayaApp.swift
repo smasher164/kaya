@@ -968,6 +968,30 @@ final class KayaAppTx {
         return w
     }
 
+    /// A radio group over fixed options — the choice contract
+    /// (`select`) in its inline presentation: same option children,
+    /// same 0-based `selected` index, same pick handler.
+    func radio(
+        _ options: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_RADIO))
+        app.childFrames.append(KayaApp.KayaFrame(template: false))
+        for option in options {
+            let o = widget(UInt32(KAYA_KIND_LABEL))
+            setText(o, option)
+        }
+        let ids = app.childFrames.removeLast().ids
+        for id in ids { tx.addChild(w.id, id) }
+        tx.setValue(w.id, Double(selected))
+        if let onSelect {
+            app.onValueChanged(w) { tx, v in try onSelect(tx, Int(v)) }
+        }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     func checkbox(
         _ text: String? = nil, checked: Bool? = nil,
         onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,

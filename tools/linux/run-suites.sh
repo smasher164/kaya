@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -434,6 +434,18 @@ for proto in x11 wayland; do
     run "$proto" select-ocaml env KAYA_SELFTEST=select KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/select.exe
     run "$proto" select-haskell env KAYA_SELFTEST=select "$(hs_bin select)"
     run "$proto" select-java env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The radio scene: grouped CheckButtons, the choice contract
+    # inline.
+    run "$proto" radio-rust env KAYA_SELFTEST=radio "$CARGO_TARGET_DIR/debug/examples/radio"
+    run "$proto" radio-python env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
+        python3 guests/python/radio.py
+    run "$proto" radio-go env KAYA_SELFTEST=radio /tmp/go-guests/radio
+    run "$proto" radio-csharp env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" radio-ocaml env KAYA_SELFTEST=radio KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/radio.exe
+    run "$proto" radio-haskell env KAYA_SELFTEST=radio "$(hs_bin radio)"
+    run "$proto" radio-java env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

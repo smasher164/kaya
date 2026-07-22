@@ -675,6 +675,24 @@ func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Wi
 	return w
 }
 
+// Radio creates a radio group over fixed options — the choice
+// contract (see Select) in its inline presentation: same option
+// children, same 0-based selected index, same pick handler.
+func (tx *Tx) Radio(options []string, selected int, onSelect func(*Tx, int)) Widget {
+	w := tx.Widget(KindRadio)
+	tx.app.parents = append(tx.app.parents, w.id)
+	for _, option := range options {
+		o := tx.Widget(KindLabel)
+		tx.SetText(o, option)
+	}
+	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
+	tx.records = append(tx.records, TxSetValue(w.id, float64(selected)))
+	if onSelect != nil {
+		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
+	}
+	return w
+}
+
 // Checkbox creates a labeled box with its toggle handler (nil for
 // none).
 func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {

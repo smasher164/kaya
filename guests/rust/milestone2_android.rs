@@ -49,6 +49,8 @@ mod scroll;
 mod progress;
 #[path = "select.rs"]
 mod select;
+#[path = "radio.rs"]
+mod radio;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -72,6 +74,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("scroll") => scroll::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),
+        Ok("radio") => radio::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

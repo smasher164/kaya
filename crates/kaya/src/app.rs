@@ -1159,6 +1159,21 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A radio group over its options — the choice contract
+    /// ([`Self::select`]) in its inline presentation; same option
+    /// children, same index semantics, same [`Messages::on_select`].
+    pub fn radio(&mut self, options: &[&str], selected: usize) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Radio);
+        self.parents.push(w.0);
+        for option in options {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *option);
+        }
+        self.parents.pop();
+        self.set(w, Prop::Value, selected as f64);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
     /// decodes natively. The bytes ride the blob channel — one Arc'd
     /// copy in core memory, an 8-byte handle everywhere else — so a

@@ -79,6 +79,7 @@ for arg in "$@"; do
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
         select_rust|select_python|select_go|select_csharp|select_java) SUITE="$arg" ;;
+        radio_rust|radio_python|radio_go|radio_csharp|radio_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -132,7 +133,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -725,6 +726,13 @@ case "$SUITE" in
         run_suite select_go
         run_suite select_csharp
         run_suite select_java
+        # The radio scene: RadioButtons — same XamlControlsResources
+        # dependency class, same pri-adjacency arrangement.
+        run_suite radio_rust
+        run_suite radio_python
+        run_suite radio_go
+        run_suite radio_csharp
+        run_suite radio_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

@@ -730,10 +730,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: Some(PropKind::F64),
             doc: "path_len key values follow, then the widget's new value as \
                   one F64 value: the slider's position, or the select's new \
-                  selected index (integral, 0-based). One occurrence per \
-                  USER change (programmatic writes never echo — without \
-                  that, a handler writing back a different value would \
-                  ping-pong forever); same ownership stance.",
+                  selected index (integral, 0-based; the radio group is \
+                  the same contract in its inline presentation). One \
+                  occurrence per USER change (programmatic writes never \
+                  echo — without that, a handler writing back a different \
+                  value would ping-pong forever); same ownership stance.",
         },
         Record {
             kind: 5,
@@ -811,6 +812,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("scroll", 9),
                 ("progress", 10),
                 ("select", 11),
+                ("radio", 12),
             ],
         },
         EnumSpec {
@@ -1115,6 +1117,7 @@ mod tests {
                     ("kind", "scroll") => wire::KIND_SCROLL,
                     ("kind", "progress") => wire::KIND_PROGRESS,
                     ("kind", "select") => wire::KIND_SELECT,
+                    ("kind", "radio") => wire::KIND_RADIO,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,

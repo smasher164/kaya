@@ -165,6 +165,10 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Primitives.SelectorItem".to_string(),
         "Microsoft.UI.Xaml.Controls.SelectionChangedEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.SelectionChangedEventArgs".to_string(),
+        // The radio group: RadioButtons is the choice contract's
+        // inline control — Items (a plain IVector, no ItemCollection
+        // hierarchy), SelectedIndex, SelectionChanged.
+        "Microsoft.UI.Xaml.Controls.RadioButtons".to_string(),
         // The runner's REAL press: the open dialog lives in the popup
         // layer (GetOpenPopupsForXamlRoot), its template buttons are
         // found by part name, and ButtonAutomationPeer.Invoke runs

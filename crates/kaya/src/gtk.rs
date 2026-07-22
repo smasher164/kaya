@@ -356,6 +356,7 @@ enum NativeWidget {
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
     Select(gtk4::DropDown),
+    Radio(gtk4::Box),
 }
 
 impl NativeWidget {
@@ -372,6 +373,7 @@ impl NativeWidget {
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
             NativeWidget::Select(w) => w.clone().upcast(),
+            NativeWidget::Radio(w) => w.clone().upcast(),
         }
     }
 }
@@ -404,6 +406,13 @@ struct CoreState {
     scrolls: Vec<gtk4::ScrolledWindow>,
     progresses: Vec<gtk4::ProgressBar>,
     selects: Vec<gtk4::DropDown>,
+    radios: Vec<gtk4::Box>,
+    /// Radio plumbing, the select_options shape: label id -> (its
+    /// radio's id, its row); the row's REAL widget is the grouped
+    /// CheckButton in radio_buttons.
+    radio_options: HashMap<u64, (u64, u32)>,
+    radio_buttons: HashMap<u64, Vec<gtk4::CheckButton>>,
+    radio_tags: HashMap<u64, Vec<u8>>,
     /// Option-label plumbing: label widget id -> (its select's id,
     /// its option row). A select's label children are its OPTIONS —
     /// rows of the DropDown's StringList, not standalone widgets —
@@ -760,6 +769,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
                 }
+                WidgetKind::Radio => {
+                    // The choice contract inline: GTK's radio idiom
+                    // is grouped CheckButtons (set_group renders the
+                    // circle); the group's Box is the widget. Rows
+                    // materialize at AddChild; each USER pick emits
+                    // with the group's identity tag (toggled fires
+                    // for programmatic set_active too, so the picks
+                    // ride apply_quiet like every interactive kind).
+                    let group = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+                    core.radio_tags
+                        .insert(id.0, tag.clone().expect("radio groups carry a tag"));
+                    core.radio_buttons.insert(id.0, Vec::new());
+                    core.radios.push(group.clone());
+                    NativeWidget::Radio(group)
+                }
                 WidgetKind::Select => {
                     // The dressed floor: GtkDropDown over a
                     // StringList — the select's label children are
@@ -1024,11 +1048,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.set_text(&s);
                     // An option label's text lands in its DropDown
                     // row (the model is what the popup and the
-                    // collapsed button both render).
+                    // collapsed button both render) — or its radio
+                    // row's CheckButton label.
                     if let Some((select, row)) = core.select_options.get(&id.0) {
                         core.apply_quiet.set(true);
                         core.select_models[select].splice(*row, 1, &[&s]);
                         core.apply_quiet.set(false);
+                    }
+                    if let Some((radio, row)) = core.radio_options.get(&id.0) {
+                        core.radio_buttons[radio][*row as usize].set_label(Some(&s));
                     }
                 }
                 (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
@@ -1056,6 +1084,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // semantics: only the user path emits).
                     core.apply_quiet.set(true);
                     dropdown.set_selected(v as u32);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Radio(_), Prop::Value, Value::F64(v)) => {
+                    core.apply_quiet.set(true);
+                    if let Some(check) = core
+                        .radio_buttons
+                        .get(&id.0)
+                        .and_then(|b| b.get(v as usize))
+                    {
+                        check.set_active(true);
+                    }
                     core.apply_quiet.set(false);
                 }
                 (NativeWidget::Progress(bar), Prop::Value, Value::F64(v)) => {
@@ -1168,6 +1207,42 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // not shift every later label's index. The append rides
             // the quiet guard: GTK auto-selects row 0 when the first
             // item lands, and that notify is not a user pick.
+            if let NativeWidget::Radio(group) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                // A radio's label children are its OPTIONS: grouped
+                // CheckButton rows, never standalone widgets. The row
+                // initializes from the label's CURRENT text
+                // (children-first sugars set it before this AddChild)
+                // and the label leaves the harness's label registry.
+                let group = group.clone();
+                let text = match core.widgets.get(&child).expect("scene validated the id") {
+                    NativeWidget::Label(l) => {
+                        let l = l.clone();
+                        core.labels.retain(|x| x != &l);
+                        l.text().to_string()
+                    }
+                    _ => String::new(),
+                };
+                let check = gtk4::CheckButton::with_label(&text);
+                let buttons = core.radio_buttons.get_mut(&parent.0).expect("radio created");
+                if let Some(first) = buttons.first() {
+                    check.set_group(Some(first));
+                }
+                let row = buttons.len() as u32;
+                let sink = core.occurrences.clone();
+                let tag = core.radio_tags[&parent.0].clone();
+                let quiet = core.apply_quiet.clone();
+                check.connect_toggled(move |c| {
+                    if c.is_active() && !quiet.get() {
+                        sink.send_value_tag(&tag, f64::from(row));
+                    }
+                });
+                group.append(&check);
+                buttons.push(check);
+                core.radio_options.insert(child.0, (parent.0, row));
+                return;
+            }
             if let NativeWidget::Select(_) = core.widgets.get(&parent).expect("scene validated the id")
             {
                 // The row initializes from the label's CURRENT text:
@@ -1429,6 +1504,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 scrolls: Vec::new(),
                 progresses: Vec::new(),
                 selects: Vec::new(),
+                radios: Vec::new(),
+                radio_options: HashMap::new(),
+                radio_buttons: HashMap::new(),
+                radio_tags: HashMap::new(),
                 select_options: HashMap::new(),
                 select_models: HashMap::new(),
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
@@ -1919,17 +1998,51 @@ impl crate::harness::Stage for GtkStage {
 
     fn choose(&self, t: crate::harness::Target, index: usize) {
         Self::on_main(move |core| {
+            // The REAL selection route per kind, quiet guard off so
+            // the native signal emits exactly as a user pick does.
+            if t.kind == crate::harness::TargetKind::Radio {
+                let i = crate::harness::resolve(t.index, core.radios.len());
+                let group = &core.radios[i];
+                for (id, buttons) in &core.radio_buttons {
+                    if matches!(core.widgets.get(&WidgetId(*id)),
+                                Some(NativeWidget::Radio(b)) if b == group)
+                    {
+                        if let Some(check) = buttons.get(index) {
+                            check.set_active(true);
+                        }
+                        return;
+                    }
+                }
+                return;
+            }
             let i = crate::harness::resolve(t.index, core.selects.len());
-            // The REAL selection route: set_selected IS how GTK picks
-            // (row activation in the popup writes it). The quiet
-            // guard is off here, so notify::selected emits exactly as
-            // a user pick does.
             core.selects[i].set_selected(index as u32);
         });
     }
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
+            if t.kind == crate::harness::TargetKind::Radio {
+                // The REAL control's state: the ACTIVE grouped
+                // CheckButton's own label.
+                let Some(i) = crate::harness::try_resolve(t.index, core.radios.len()) else {
+                    return "<no such target>".to_string();
+                };
+                let group = &core.radios[i];
+                for (id, buttons) in &core.radio_buttons {
+                    if matches!(core.widgets.get(&WidgetId(*id)),
+                                Some(NativeWidget::Radio(b)) if b == group)
+                    {
+                        return buttons
+                            .iter()
+                            .find(|c| c.is_active())
+                            .and_then(|c| c.label())
+                            .map(|l| l.to_string())
+                            .unwrap_or_default();
+                    }
+                }
+                return String::new();
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.selects.len()) else {
                 return "<no such target>".to_string();
             };

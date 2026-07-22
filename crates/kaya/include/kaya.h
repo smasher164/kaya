@@ -138,6 +138,8 @@
 
 #define KIND_SELECT 11
 
+#define KIND_RADIO 12
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -449,6 +451,8 @@
 #define KAYA_KIND_PROGRESS 10
 
 #define KAYA_KIND_SELECT 11
+
+#define KAYA_KIND_RADIO 12
 
 /**
  * Property keys.

@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -691,6 +691,23 @@ run select-ocaml-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/l
 run select-haskell-swiftui env KAYA_SELFTEST=select "$(hs_bin select)"
 run select-swift-swiftui env KAYA_SELFTEST=select target/swift-guests/select
 run select-java-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The radio scene: the choice contract inline — the group shows the
+# selected option, choose drives the toolkit's own route. All eight
+# languages.
+KAYA_SELFTEST_SCRIPT="$(scene_script radio)"
+export KAYA_SELFTEST_SCRIPT
+run radio-rust-swiftui env KAYA_SELFTEST=radio target/debug/examples/radio
+run radio-python-swiftui env KAYA_SELFTEST=radio python3 guests/python/radio.py
+run radio-go-swiftui env KAYA_SELFTEST=radio target/go-guests/radio
+run radio-csharp-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run radio-ocaml-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/radio.exe
+run radio-haskell-swiftui env KAYA_SELFTEST=radio "$(hs_bin radio)"
+run radio-swift-swiftui env KAYA_SELFTEST=radio target/swift-guests/radio
+run radio-java-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

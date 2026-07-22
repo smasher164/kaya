@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x28f68340441927b5
+let kayaSpecHash: UInt64 = 0xa78836939a484688
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -65,6 +65,7 @@ private let kindImage: UInt32 = 8
 private let kindScroll: UInt32 = 9
 private let kindProgress: UInt32 = 10
 private let kindSelect: UInt32 = 11
+private let kindRadio: UInt32 = 12
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propValue: UInt32 = 3
@@ -212,6 +213,7 @@ final class KayaSceneModel {
     var scrolls: [KayaNode] = []
     var progresses: [KayaNode] = []
     var selects: [KayaNode] = []
+    var radios: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -604,6 +606,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindScroll: kayaScene.scrolls.append(node)
                 case kindProgress: kayaScene.progresses.append(node)
                 case kindSelect: kayaScene.selects.append(node)
+                case kindRadio: kayaScene.radios.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -793,12 +796,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
                 kayaScene.parents[child] = parent
-                // A select's label children are its OPTIONS — the
-                // dropdown's rows, not standalone widgets — so they
-                // leave the harness's label#N registry (their create
-                // arm appended before this parent was known). Without
-                // this, every label after a select would shift index.
-                if kayaScene.nodes[parent]!.kind == kindSelect {
+                // A choice widget's label children are its OPTIONS —
+                // rows of the dropdown / entries of the radio group,
+                // not standalone widgets — so they leave the
+                // harness's label#N registry (their create arm
+                // appended before this parent was known). Without
+                // this, every label after one would shift index.
+                let parentKind = kayaScene.nodes[parent]!.kind
+                if parentKind == kindSelect || parentKind == kindRadio {
                     kayaScene.labels.removeAll { $0.id == child }
                 }
             case applyMount:
@@ -1060,7 +1065,11 @@ private func kayaRunScript(_ script: String) {
                 // as set_value mirrors the slider's: write the model
                 // the binding reads, emit with the identity tag.
                 let ok = DispatchQueue.main.sync { () -> Bool in
-                    guard let node = kayaTarget(parts[1], "select", kayaScene.selects) else {
+                    let node =
+                        parts[1].hasPrefix("radio")
+                        ? kayaTarget(parts[1], "radio", kayaScene.radios)
+                        : kayaTarget(parts[1], "select", kayaScene.selects)
+                    guard let node else {
                         return false
                     }
                     node.value = Double(parts[2])!
@@ -1095,16 +1104,19 @@ private func kayaRunScript(_ script: String) {
                                         ? "indeterminate"
                                         : "\(Int(($0.value * 100).rounded()))%"
                                 }
-                                : parts[1].hasPrefix("select")
-                                    ? kayaTarget(parts[1], "select", kayaScene.selects).map {
-                                        // The selected option's LABEL —
-                                        // what the collapsed control
-                                        // shows (child order is option
-                                        // order).
-                                        let index = Int($0.value)
-                                        return $0.children.indices.contains(index)
-                                            ? $0.children[index].text : ""
-                                    }
+                                : parts[1].hasPrefix("select") || parts[1].hasPrefix("radio")
+                                    ? (parts[1].hasPrefix("radio")
+                                        ? kayaTarget(parts[1], "radio", kayaScene.radios)
+                                        : kayaTarget(parts[1], "select", kayaScene.selects))
+                                        .map {
+                                            // The selected option's LABEL
+                                            // — what the control shows
+                                            // (child order is option
+                                            // order).
+                                            let index = Int($0.value)
+                                            return $0.children.indices.contains(index)
+                                                ? $0.children[index].text : ""
+                                        }
                                     : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
                 if let got, got == want {
@@ -2052,6 +2064,32 @@ struct KayaRender: View {
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+        case kindRadio:
+            // The choice contract in its inline presentation. The
+            // dressed floor per platform: macOS renders the REAL
+            // radio group (Picker's radioGroup style); iOS has no
+            // radio idiom — its native spelling of one-of-N inline
+            // is the segmented control.
+            Picker(
+                "",
+                selection: Binding(
+                    get: { Int(node.value) },
+                    set: { newIndex in
+                        node.value = Double(newIndex)
+                        KayaHost.emitValue(node.tag, Double(newIndex))
+                    })
+            ) {
+                ForEach(Array(node.children.enumerated()), id: \.element.id) { index, option in
+                    Text(option.text).tag(index)
+                }
+            }
+            #if os(macOS)
+                .pickerStyle(.radioGroup)
+            #else
+                .pickerStyle(.segmented)
+            #endif
             .labelsHidden()
             .fixedSize()
         case kindProgress:

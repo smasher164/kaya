@@ -458,6 +458,27 @@ let select ?grow ?(selected = 0) ?on_select options () tx =
   | None -> ());
   w
 
+(* A radio group over fixed [options] — the choice contract
+   ([select]) in its inline presentation: same option children, same
+   0-based [~selected] index, same [~on_select] pick handler. *)
+let radio ?grow ?(selected = 0) ?on_select options () tx =
+  let w = widget Kaya_wire.kind_radio tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
+  List.iter
+    (fun option_text ->
+      let o = widget Kaya_wire.kind_label tx in
+      set_text o option_text tx;
+      add_child w o tx)
+    options;
+  let (Widget id) = w in
+  emit tx (Kaya_wire.tx_set_value id (float_of_int selected));
+  (match on_select with
+  | Some handler ->
+      Hashtbl.replace tx.app.widget_values id
+        (fun v -> handler (int_of_float v))
+  | None -> ());
+  w
+
 let checkbox ?grow ?text ?checked ?on_toggle () tx =
   let w = widget Kaya_wire.kind_checkbox tx in
   Option.iter (fun g -> set_grow w g tx) grow;

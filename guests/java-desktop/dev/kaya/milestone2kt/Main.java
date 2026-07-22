@@ -74,6 +74,9 @@ public final class Main {
             case "select":
                 app = Select::app;
                 break;
+            case "radio":
+                app = Radio::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

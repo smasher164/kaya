@@ -349,6 +349,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity select \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script select)'"
+    # The radio scene: M3 RadioButton rows, the choice contract inline.
+    run_apk radio-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity radio \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script radio)'"
     drain
     timing legs-compose
 fi
@@ -422,6 +427,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity select \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script select)'"
+    # The radio scene through the JVM binding.
+    run_apk radio-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity radio \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script radio)'"
     drain
     timing legs-jvm
 fi

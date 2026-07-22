@@ -222,6 +222,14 @@ pub(crate) struct Scene {
     next_scope: u64,
 }
 
+/// The choice kinds: one selection among label-children options.
+/// Select is the dropdown presentation, Radio the inline group —
+/// SAME semantics (options as label children, Value as the 0-based
+/// index, value_changed on user picks only), different chrome.
+fn is_choice(kind: WidgetKind) -> bool {
+    matches!(kind, WidgetKind::Select | WidgetKind::Radio)
+}
+
 fn check_prop(kind: WidgetKind, prop: Prop) {
     let ok = match prop {
         Prop::Text => matches!(
@@ -235,7 +243,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // (progress is fixed 0..=1, the select's range is its option
         // count).
         Prop::Value => {
-            matches!(kind, WidgetKind::Slider | WidgetKind::Progress | WidgetKind::Select)
+            matches!(kind, WidgetKind::Slider | WidgetKind::Progress) || is_choice(kind)
         }
         Prop::Min | Prop::Max => matches!(kind, WidgetKind::Slider),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
@@ -366,14 +374,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
                 "kaya: a progress fraction lives in 0..=1, got {fraction}"
             );
         }
-        // A select's value is a 0-based option index: integral and
-        // non-negative, or it has no reading. The upper bound (index
-        // < option count) needs scene state, so it lives at the
-        // live SetProp site, not here.
-        if kind == WidgetKind::Select {
+        // A choice widget's value is a 0-based option index:
+        // integral and non-negative, or it has no reading. The upper
+        // bound (index < option count) needs scene state, so it
+        // lives at the live SetProp site, not here.
+        if is_choice(kind) {
             assert!(
                 fraction.is_finite() && *fraction >= 0.0 && fraction.fract() == 0.0,
-                "kaya: a select's value is a 0-based option index \
+                "kaya: a {kind:?}'s value is a 0-based option index \
                  (integral, non-negative), got {fraction}"
             );
         }
@@ -475,7 +483,8 @@ impl Scene {
                         | WidgetKind::Entry
                         | WidgetKind::Checkbox
                         | WidgetKind::Slider
-                        | WidgetKind::Select => Self::button_tag(id.0, &vec![]),
+                        | WidgetKind::Select
+                        | WidgetKind::Radio => Self::button_tag(id.0, &vec![]),
                         _ => None,
                     };
                     out.push(ApplyOp::Create { id, kind, tag });
@@ -498,7 +507,7 @@ impl Scene {
                             // (append-only), so "add options, then
                             // select" is the required tx shape and an
                             // out-of-range index dies at the root.
-                            if kind == WidgetKind::Select && prop == Prop::Value {
+                            if is_choice(kind) && prop == Prop::Value {
                                 if let Value::F64(idx) = &v {
                                     let count =
                                         self.select_options.get(&widget).copied().unwrap_or(0);
@@ -532,7 +541,7 @@ impl Scene {
                             // bound: checked here against the current
                             // value; later writes only type-check
                             // (the progress-fraction policy).
-                            if kind == WidgetKind::Select && prop == Prop::Value {
+                            if is_choice(kind) && prop == Prop::Value {
                                 if let Value::F64(idx) = &current {
                                     let count =
                                         self.select_options.get(&widget).copied().unwrap_or(0);
@@ -773,16 +782,17 @@ impl Scene {
                             "kaya: scroll {parent:?} already holds its one                              child — a scroll viewport takes exactly one                              (wrap the content in a column)"
                         );
                     }
-                    // A select's children ARE its options: label
-                    // widgets, one per row of the dropdown. Anything
-                    // else has no dropdown reading, so it dies here
-                    // with one message rather than as four backend
+                    // A choice widget's children ARE its options:
+                    // label widgets, one per row/entry. Anything else
+                    // has no options reading, so it dies here with
+                    // one message rather than as four backend
                     // improvisations.
-                    if self.widgets[&parent] == WidgetKind::Select {
+                    if is_choice(self.widgets[&parent]) {
                         assert!(
                             self.widgets[&child] == WidgetKind::Label,
-                            "kaya: a select's children are its options — \
+                            "kaya: a {:?}'s children are its options — \
                              labels only, got {:?}",
+                            self.widgets[&parent],
                             self.widgets[&child]
                         );
                         *self.select_options.entry(parent).or_insert(0) += 1;
@@ -3238,6 +3248,46 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Value,
                 value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+    }
+
+    /// The radio group shares the choice contract wholesale: same
+    /// arms, so one happy path and one negative pin the sharing.
+    #[test]
+    fn radio_shares_the_choice_contract() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Radio },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+        ]);
+        let tagged = ops.iter().any(|op| {
+            matches!(op, ApplyOp::Create { id, kind: WidgetKind::Radio, tag: Some(_) }
+                     if *id == WidgetId(1))
+        });
+        assert!(tagged, "a radio group carries its identity tag");
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn radio_index_out_of_range_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Radio },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Value,
+                value: PropValue::Const(Value::F64(1.0)),
             },
         ]);
     }

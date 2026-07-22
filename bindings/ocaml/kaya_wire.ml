@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x28f68340441927b5L
+let spec_hash = 0xa78836939a484688L
 
 let value_bool = 1
 let value_i64 = 2
@@ -33,6 +33,7 @@ let kind_image = 8
 let kind_scroll = 9
 let kind_progress = 10
 let kind_select = 11
+let kind_radio = 12
 let prop_text = 1
 let prop_checked = 2
 let prop_value = 3

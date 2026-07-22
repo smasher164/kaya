@@ -34,8 +34,8 @@ use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandl
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
     ContentDialogButton, ContentDialogResult, Grid, Image, ProgressBar, RowDefinition,
-    ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler, Slider,
-    TextBlock, TextBox, TextChangedEventHandler,
+    RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
+    Slider, TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
@@ -65,6 +65,7 @@ enum NativeWidget {
     Scroll(ScrollViewer),
     Progress(ProgressBar),
     Select(ComboBox),
+    Radio(RadioButtons),
 }
 
 impl NativeWidget {
@@ -82,6 +83,7 @@ impl NativeWidget {
             NativeWidget::Scroll(viewer) => viewer.cast(),
             NativeWidget::Progress(bar) => bar.cast(),
             NativeWidget::Select(combo) => combo.cast(),
+            NativeWidget::Radio(group) => group.cast(),
         }
     }
 }
@@ -135,6 +137,11 @@ struct CoreState {
     scrolls: Vec<ScrollViewer>,
     progresses: Vec<ProgressBar>,
     selects: Vec<ComboBox>,
+    radios: Vec<RadioButtons>,
+    /// Radio plumbing, the select_options shape: label id -> (its
+    /// group, its row in the group's Items vector) — option text
+    /// updates land with SetAt.
+    radio_options: HashMap<u64, (RadioButtons, u32)>,
     /// Option-label plumbing: label widget id -> (its select's
     /// ComboBox, its option row's own TextBlock). A select's label
     /// children are its OPTIONS — ComboBoxItems in the popup, not
@@ -990,6 +997,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
                 }
+                WidgetKind::Radio => {
+                    // The choice contract inline: RadioButtons — the
+                    // platform's own group control (string items
+                    // render as radio rows). Same quiet-guard stance
+                    // as the ComboBox: SelectionChanged cannot tell a
+                    // user pick from SetSelectedIndex.
+                    let group = RadioButtons::new()?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("radio groups carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let handler = SelectionChangedEventHandler::new(
+                        move |sender: windows_core::Ref<'_, windows_core::IInspectable>, _| {
+                            if quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                                return Ok(());
+                            }
+                            if let Some(sender) = sender.as_ref() {
+                                let group: RadioButtons =
+                                    windows_core::Interface::cast(sender)?;
+                                let index = group.SelectedIndex()?;
+                                if index >= 0 {
+                                    sink.send_value_tag(&tag, f64::from(index));
+                                }
+                            }
+                            Ok(())
+                        },
+                    );
+                    group.SelectionChanged(&handler)?;
+                    core.radios.push(group.clone());
+                    NativeWidget::Radio(group)
+                }
                 WidgetKind::Select => {
                     // The dressed floor: ComboBox — the select's
                     // label children are its OPTIONS, ComboBoxItems
@@ -1072,6 +1109,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Select(combo) => {
                         windows_core::Interface::cast(combo).expect("select is a UIElement")
+                    }
+                    NativeWidget::Radio(group) => {
+                        windows_core::Interface::cast(group).expect("radio is a UIElement")
                     }
                 }
             };
@@ -1377,9 +1417,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     label.SetText(&HSTRING::from(&s))?;
                     // An option label's text lands on its ComboBox
                     // row too, as string content (see select_options
-                    // for why never a TextBlock).
+                    // for why never a TextBlock) — or its radio row.
                     if let Some((_, item)) = core.select_options.get(&id.0) {
                         item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&s))?)?;
+                    }
+                    if let Some((group, row)) = core.radio_options.get(&id.0) {
+                        group
+                            .Items()?
+                            .SetAt(*row, &PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
                 }
                 (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
@@ -1419,6 +1464,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     let write = combo.SetSelectedIndex(v as i32);
+                    core.apply_quiet
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    write?;
+                }
+                (NativeWidget::Radio(group), Prop::Value, Value::F64(v)) => {
+                    core.apply_quiet
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    let write = group.SetSelectedIndex(v as i32);
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
@@ -1498,6 +1551,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 viewer.SetContent(&element)?;
                 return Ok(());
             }
+            // A radio's label children are its OPTIONS: string rows
+            // of the group's Items vector (strings render as radio
+            // rows; the label's SetProp text lands with SetAt), and
+            // the label leaves the harness's label registry.
+            if let NativeWidget::Radio(group) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let group = group.clone();
+                let items = group.Items()?;
+                let row = items.Size()?;
+                if let NativeWidget::Label(label) =
+                    core.widgets.get(&child).expect("scene validated the id")
+                {
+                    items.Append(&PropertyValue::CreateString(&label.Text()?)?)?;
+                    let label = label.clone();
+                    core.labels.retain(|x| x != &label);
+                } else {
+                    items.Append(&PropertyValue::CreateString(&HSTRING::new())?)?;
+                }
+                core.radio_options.insert(child.0, (group, row));
+                return Ok(());
+            }
             // A select's label children are its OPTIONS: ComboBoxItems
             // in the popup, never children of a panel. The row gets
             // its own TextBlock (the label's SetProp text lands on
@@ -1541,6 +1616,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Scroll(viewer) => children.Append(viewer)?,
                 NativeWidget::Progress(bar) => children.Append(bar)?,
                 NativeWidget::Select(combo) => children.Append(combo)?,
+                NativeWidget::Radio(group) => children.Append(group)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -2130,6 +2206,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             scrolls: Vec::new(),
             progresses: Vec::new(),
             selects: Vec::new(),
+            radios: Vec::new(),
+            radio_options: HashMap::new(),
             select_options: HashMap::new(),
             apply_quiet: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             columns: Vec::new(),
@@ -2706,11 +2784,16 @@ impl crate::harness::Stage for WinUiStage {
 
     fn choose(&self, t: crate::harness::Target, index: usize) {
         Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.selects.len());
-            // The REAL selection route: SetSelectedIndex raises
-            // SelectionChanged exactly as a popup pick does (the
-            // quiet guard is off here), the slider's SetValue
+            // The REAL selection route per kind: SetSelectedIndex
+            // raises SelectionChanged exactly as a native pick does
+            // (the quiet guard is off here), the slider's SetValue
             // stance.
+            if t.kind == crate::harness::TargetKind::Radio {
+                let i = crate::harness::resolve(t.index, core.radios.len());
+                core.radios[i].SetSelectedIndex(index as i32)?;
+                return Ok(());
+            }
+            let i = crate::harness::resolve(t.index, core.selects.len());
             core.selects[i].SetSelectedIndex(index as i32)?;
             Ok(())
         });
@@ -2718,6 +2801,21 @@ impl crate::harness::Stage for WinUiStage {
 
     fn selected_label(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
+            if t.kind == crate::harness::TargetKind::Radio {
+                // The REAL control's state: the selected row's string
+                // out of the group's own Items vector.
+                let Some(i) = crate::harness::try_resolve(t.index, core.radios.len()) else {
+                    return Ok("<no such target>".to_string());
+                };
+                let group = &core.radios[i];
+                let index = group.SelectedIndex()?;
+                if index < 0 {
+                    return Ok(String::new());
+                }
+                let value: IReference<HSTRING> =
+                    windows_core::Interface::cast(&group.Items()?.GetAt(index as u32)?)?;
+                return Ok(value.Value()?.to_string());
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.selects.len()) else {
                 return Ok("<no such target>".to_string());
             };

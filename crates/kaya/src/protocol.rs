@@ -317,6 +317,7 @@ pub enum WidgetKind {
     /// ignored while it is on.
     Progress,
     Select,
+    Radio,
     /// A vertical scroll viewport over EXACTLY ONE child (usually a
     /// column) — the ScrolledWindow/SingleChildScrollView shape; the
     /// scene rejects a second child. Vertical-only in v1 (an axis

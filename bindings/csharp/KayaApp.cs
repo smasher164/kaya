@@ -802,6 +802,27 @@ sealed class Tx
         return w;
     }
 
+    /// A radio group over fixed options — the choice contract
+    /// (see Select) in its inline presentation: same option
+    /// children, same 0-based selected index, same pick handler.
+    public Widget Radio(string[] options, int selected = 0,
+        Action<Tx, int> onSelect = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindRadio);
+        App.Parents.Add(w.Id);
+        foreach (var option in options)
+        {
+            var o = Widget(KayaWire.KindLabel);
+            SetText(o, option);
+        }
+        App.Parents.RemoveAt(App.Parents.Count - 1);
+        Records.Add(KayaWire.TxSetValue(w.Id, selected));
+        if (onSelect != null)
+            App.OnValueChanged(w, (tx, v) => onSelect(tx, (int)v));
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     public Widget Checkbox(string text = null, bool? isChecked = null,
         Action<Tx, bool> onToggle = null, double? grow = null)
     {
