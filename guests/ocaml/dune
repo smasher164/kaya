@@ -1,6 +1,6 @@
 (executables
- (names milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav encodebench)
- (modules milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav encodebench)
+ (names milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll encodebench)
+ (modules milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll encodebench)
  (libraries kaya_guest_binding unix)
  (preprocess
   (pps kaya_ppx)))

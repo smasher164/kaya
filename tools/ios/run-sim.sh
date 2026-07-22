@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's scroll legs land
-# with the breadth slice (docs/deferred.md holds the item open).
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -669,6 +666,20 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle navswift dev.kaya.navswift "$BUNDLES/navswift-bin")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on nav-swift "$APP" dev.kaya.navswift nav-swift nav nav
+
+    # The scroll scene: ScrollView is phone-native machinery.
+    cp guests/swift/scroll.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/scrollswift-bin"
+    APP=$(make_bundle scrollswift dev.kaya.scrollswift "$BUNDLES/scrollswift-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on scroll-swift "$APP" dev.kaya.scrollswift scroll-swift scroll scroll
     drain
     timing swift-build+legs
 fi
@@ -742,6 +753,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle navrs-swiftui dev.kaya.navswiftui "$TARGET_DIR/examples/nav")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on nav-swiftui "$APP" dev.kaya.navswiftui nav-swiftui nav nav
+
+    # The scroll scene (see the swift leg).
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example scroll
+    APP=$(make_bundle scrollrs-swiftui dev.kaya.scrollswiftui "$TARGET_DIR/examples/scroll")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on scroll-swiftui "$APP" dev.kaya.scrollswiftui scroll-swiftui scroll scroll
     drain
     timing swiftui-build+legs
 fi

@@ -65,6 +65,9 @@ public final class Main {
             case "nav":
                 app = Nav::app;
                 break;
+            case "scroll":
+                app = Scroll::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

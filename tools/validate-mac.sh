@@ -48,11 +48,11 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
-DEPTH_SCENES="scroll"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -71,6 +71,8 @@ tools/check-sugar-surface.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
 tools/check-verbs.sh || exit 1
+tools/check-stubs.sh || exit 1
+tools/check-compose.sh || exit 1
 tools/swift-typecheck.sh || exit 1
 tools/java-typecheck.sh || exit 1
 timing core-build+gates
@@ -577,12 +579,21 @@ run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.
 
 # The scroll scene: the scroll viewport's contract — overflow,
 # scroll_end through the REAL scrolling API, at-end read back, and a
-# live click on the scrolled-to button. Rust depth; the language
-# sweep rides the phase's next slice (scroll joins SCENES with its
-# guests then).
+# live click on the scrolled-to button. All eight languages,
+# byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT
 run scroll-rust-swiftui env KAYA_SELFTEST=scroll target/debug/examples/scroll
+run scroll-python-swiftui env KAYA_SELFTEST=scroll python3 guests/python/scroll.py
+run scroll-go-swiftui env KAYA_SELFTEST=scroll target/go-guests/scroll
+run scroll-csharp-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run scroll-ocaml-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/scroll.exe
+run scroll-haskell-swiftui env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
+run scroll-swift-swiftui env KAYA_SELFTEST=scroll target/swift-guests/scroll
+run scroll-java-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform
 # dialog materialized, all three answer paths (action 0, action 1,

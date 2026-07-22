@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's scroll legs land
-# with the breadth slice (docs/deferred.md holds the item open).
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -276,9 +273,14 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # Identical app to the rust suite; the backend is a runtime choice.
     JNILIBS="$ROOT/android/milestone2/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --example milestone2_android
+    # Builds fail the RUN, loudly: an unguarded build failure here
+    # would install the PREVIOUS apk and green the legs against stale
+    # code — the stale-artifact class (validation scripts build and
+    # verify what they ship). Caught live 2026-07-22: a Kotlin
+    # compile error produced a zero-verdict run instead of a failure.
+    cargo ndk -t arm64-v8a build --example milestone2_android || exit 1
     cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone2:assembleDebug)
+    (cd android && gradle --console=plain -q :milestone2:assembleDebug) || exit 1
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity 1 \
@@ -328,6 +330,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity nav \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'"
+    # The scroll scene: verticalScroll is phone-native machinery.
+    run_apk scroll-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity scroll \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script scroll)'"
     drain
     timing legs-compose
 fi
@@ -335,9 +342,9 @@ fi
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2kt/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --lib
+    cargo ndk -t arm64-v8a build --lib || exit 1
     cp "$ROOT/target/aarch64-linux-android/debug/libkaya.so" "$JNILIBS/"
-    (cd android && gradle --console=plain -q :milestone2kt:assembleDebug)
+    (cd android && gradle --console=plain -q :milestone2kt:assembleDebug) || exit 1
     timing build-jvm
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
@@ -386,6 +393,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity nav \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'"
+    # The scroll scene through the JVM binding (see the compose leg).
+    run_apk scroll-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity scroll \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script scroll)'"
     drain
     timing legs-jvm
 fi

@@ -43,6 +43,8 @@ mod grow;
 mod confirm;
 #[path = "nav.rs"]
 mod nav;
+#[path = "scroll.rs"]
+mod scroll;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -63,6 +65,7 @@ fn app(ctx: kaya::AppCtx) {
         // Navigation is phone-native too: predictive back IS the
         // affordance; nav runs here for real.
         Ok("nav") => nav::app(ctx),
+        Ok("scroll") => scroll::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

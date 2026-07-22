@@ -353,6 +353,7 @@ enum NativeWidget {
     Checkbox(gtk4::CheckButton),
     Slider(gtk4::Scale),
     Image(gtk4::Picture),
+    Scroll(gtk4::ScrolledWindow),
 }
 
 impl NativeWidget {
@@ -366,6 +367,7 @@ impl NativeWidget {
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
+            NativeWidget::Scroll(w) => w.clone().upcast(),
         }
     }
 }
@@ -395,6 +397,7 @@ struct CoreState {
     entries: Vec<gtk4::Entry>,
     sliders: Vec<gtk4::Scale>,
     images: Vec<gtk4::Picture>,
+    scrolls: Vec<gtk4::ScrolledWindow>,
     columns: Vec<gtk4::Box>,
     rows: Vec<gtk4::Box>,
     window: gtk4::Window,
@@ -691,11 +694,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
-                // Scroll is not yet materialized on this backend (depth =
-                // SwiftUI on mac; the fan-out is ledgered) — the first
-                // scroll scene here must fail loudly.
                 WidgetKind::Scroll => {
-                    unimplemented!("kaya: scroll is not yet materialized on this backend")
+                    // The vertical scroll viewport over its ONE child
+                    // (the scene enforces the count):
+                    // GtkScrolledWindow, the platform's own machinery
+                    // — its vadjustment is both the observation
+                    // source and the API scroll_end drives.
+                    let scrolled = gtk4::ScrolledWindow::new();
+                    // Vertical-only v1: no horizontal bar, ever.
+                    scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+                    core.scrolls.push(scrolled.clone());
+                    NativeWidget::Scroll(scrolled)
                 }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no signal. The
@@ -1049,6 +1058,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(column) => column.append(&child_widget),
                 NativeWidget::Row(row) => row.append(&child_widget),
+                // The viewport's one child (the scene rejects a
+                // second): the content fills the viewport's width and
+                // scrolls on its own height.
+                NativeWidget::Scroll(scrolled) => {
+                    child_widget.set_halign(gtk4::Align::Fill);
+                    scrolled.set_child(Some(&child_widget));
+                }
                 _ => panic!("kaya: add_child parent is not a container"),
             }
             // Only now is the parent — and so the main axis — known, so
@@ -1225,6 +1241,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 entries: Vec::new(),
                 sliders: Vec::new(),
                 images: Vec::new(),
+                scrolls: Vec::new(),
                 columns: Vec::new(),
                 rows: Vec::new(),
                 window: window.upcast(),
@@ -1632,16 +1649,46 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn scroll_overflow(&self, _target: crate::harness::Target) -> String {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_overflow(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            // The toolkit's own adjustment: upper is the content
+            // extent, page_size the viewport.
+            let adj = core.scrolls[i].vadjustment();
+            if adj.upper() > adj.page_size() + 2.0 {
+                String::new()
+            } else {
+                format!("content {} in viewport {}", adj.upper(), adj.page_size())
+            }
+        })
     }
 
-    fn scroll_end(&self, _target: crate::harness::Target) {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_end(&self, t: crate::harness::Target) {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            // The REAL scrolling API: setting the adjustment's value
+            // IS how GTK scrolls (scrollbars and kinetic panning both
+            // write it).
+            let adj = core.scrolls[i].vadjustment();
+            adj.set_value(adj.upper() - adj.page_size());
+        })
     }
 
-    fn scroll_at_end(&self, _target: crate::harness::Target) -> String {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_at_end(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let adj = core.scrolls[i].vadjustment();
+            let short = adj.upper() - (adj.value() + adj.page_size());
+            if short.abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "content bottom {} vs viewport {}",
+                    adj.value() + adj.page_size(),
+                    adj.upper()
+                )
+            }
+        })
     }
 
     fn alert_count(&self) -> usize {

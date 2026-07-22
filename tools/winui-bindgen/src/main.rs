@@ -127,6 +127,14 @@ fn main() {
         "Windows.ApplicationModel.Core.UnhandledError".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueue".to_string(),
         "Microsoft.UI.Dispatching.DispatcherQueueHandler".to_string(),
+        // The scroll viewport: ScrollViewer is the platform's own
+        // machinery — ScrollableHeight/VerticalOffset are the
+        // observation sources and ChangeView the API scroll_end
+        // drives. The mode/visibility enums must be named or the
+        // properties vanish (the transitivity trap).
+        "Microsoft.UI.Xaml.Controls.ScrollViewer".to_string(),
+        "Microsoft.UI.Xaml.Controls.ScrollMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.ScrollBarVisibility".to_string(),
         // The alert vocabulary: ContentDialog's three slots ARE the
         // shape (two actions + close). The result/button enums must
         // be named or the properties vanish (the transitivity trap);

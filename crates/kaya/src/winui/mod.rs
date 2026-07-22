@@ -33,7 +33,8 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ContentDialog, ContentDialogButton, ContentDialogResult,
-    Grid, Image, RowDefinition, Slider, TextBlock, TextBox, TextChangedEventHandler,
+    Grid, Image, RowDefinition, ScrollBarVisibility, ScrollMode, ScrollViewer, Slider,
+    TextBlock, TextBox, TextChangedEventHandler,
 };
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
@@ -60,6 +61,7 @@ enum NativeWidget {
     Label(TextBlock),
     Entry(TextBox),
     Image(Image),
+    Scroll(ScrollViewer),
 }
 
 impl NativeWidget {
@@ -74,6 +76,7 @@ impl NativeWidget {
             NativeWidget::Label(label) => label.cast(),
             NativeWidget::Entry(field) => field.cast(),
             NativeWidget::Image(image) => image.cast(),
+            NativeWidget::Scroll(viewer) => viewer.cast(),
         }
     }
 }
@@ -108,6 +111,7 @@ struct CoreState {
     entries: Vec<TextBox>,
     sliders: Vec<Slider>,
     images: Vec<Image>,
+    scrolls: Vec<ScrollViewer>,
     columns: Vec<Grid>,
     rows: Vec<Grid>,
     window: Window,
@@ -845,11 +849,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
-                // Scroll is not yet materialized on this backend (depth =
-                // SwiftUI on mac; the fan-out is ledgered) — the first
-                // scroll scene here must fail loudly.
                 WidgetKind::Scroll => {
-                    unimplemented!("kaya: scroll is not yet materialized on this backend")
+                    // The vertical scroll viewport over its ONE child
+                    // (the scene enforces the count): ScrollViewer,
+                    // the platform's own machinery — ScrollableHeight
+                    // and VerticalOffset are the observation sources
+                    // and ChangeView the API scroll_end drives.
+                    let viewer = ScrollViewer::new()?;
+                    // Vertical-only v1: no horizontal scrolling, ever.
+                    viewer.SetHorizontalScrollMode(ScrollMode::Disabled)?;
+                    viewer.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
+                    viewer.SetVerticalScrollMode(ScrollMode::Enabled)?;
+                    core.scrolls.push(viewer.clone());
+                    NativeWidget::Scroll(viewer)
                 }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no handler. The
@@ -894,6 +906,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Image(image) => {
                         windows_core::Interface::cast(image).expect("image is a UIElement")
+                    }
+                    NativeWidget::Scroll(viewer) => {
+                        windows_core::Interface::cast(viewer).expect("scroll is a UIElement")
                     }
                 }
             };
@@ -1231,6 +1246,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
         }
         ApplyOp::AddChild { parent, child } => {
+            // The viewport's one child (the scene rejects a second):
+            // ScrollViewer is a ContentControl, not a panel.
+            if let NativeWidget::Scroll(viewer) =
+                core.widgets.get(&parent).expect("scene validated the id")
+            {
+                let viewer = viewer.clone();
+                let element = core
+                    .widgets
+                    .get(&child)
+                    .expect("scene validated the id")
+                    .element()?;
+                viewer.SetContent(&element)?;
+                return Ok(());
+            }
             let panel = match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(panel) | NativeWidget::Row(panel) => panel.clone(),
                 _ => panic!("kaya: add_child parent is not a container"),
@@ -1244,6 +1273,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Checkbox { check, .. } => children.Append(check)?,
                 NativeWidget::Slider(slider) => children.Append(slider)?,
                 NativeWidget::Image(image) => children.Append(image)?,
+                NativeWidget::Scroll(viewer) => children.Append(viewer)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -1789,6 +1819,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             entries: Vec::new(),
             sliders: Vec::new(),
             images: Vec::new(),
+            scrolls: Vec::new(),
             columns: Vec::new(),
             rows: Vec::new(),
             child_order: HashMap::new(),
@@ -2270,16 +2301,57 @@ impl crate::harness::Stage for WinUiStage {
         })
     }
 
-    fn scroll_overflow(&self, _target: crate::harness::Target) -> String {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_overflow(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let viewer = &core.scrolls[i];
+            // The toolkit's own metrics: ScrollableHeight is the
+            // overflow itself (extent minus viewport).
+            let scrollable = viewer.ScrollableHeight()?;
+            Ok(if scrollable > 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "content {} in viewport {}",
+                    viewer.ExtentHeight()?,
+                    viewer.ViewportHeight()?
+                )
+            })
+        })
     }
 
-    fn scroll_end(&self, _target: crate::harness::Target) {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_end(&self, t: crate::harness::Target) {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let viewer = &core.scrolls[i];
+            // The REAL scrolling API: ChangeView is what scrollbars
+            // and touch panning drive.
+            let target = viewer.ScrollableHeight()?;
+            let offset: IReference<f64> = PropertyValue::CreateDouble(target)?.cast()?;
+            viewer.ChangeView(
+                None::<&IReference<f64>>,
+                &offset,
+                None::<&IReference<f32>>,
+            )?;
+            Ok(())
+        })
     }
 
-    fn scroll_at_end(&self, _target: crate::harness::Target) -> String {
-        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    fn scroll_at_end(&self, t: crate::harness::Target) -> String {
+        Self::on_ui(move |core| {
+            let i = crate::harness::resolve(t.index, core.scrolls.len());
+            let viewer = &core.scrolls[i];
+            let short = viewer.ScrollableHeight()? - viewer.VerticalOffset()?;
+            Ok(if short.abs() <= 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "content bottom {} vs viewport {}",
+                    viewer.VerticalOffset()? + viewer.ViewportHeight()?,
+                    viewer.ExtentHeight()?
+                )
+            })
+        })
     }
 
     fn alert_count(&self) -> usize {

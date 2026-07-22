@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's scroll legs land
-# with the breadth slice (docs/deferred.md holds the item open).
 # Runs inside the container (see tools/validate-linux.sh): builds kaya
 # against the container's GTK and runs the milestone-0 validations under
 # both display protocols — X11 (Xvfb) and Wayland (headless Weston). The
@@ -30,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -340,6 +337,19 @@ for proto in x11 wayland; do
     run "$proto" nav-ocaml env KAYA_SELFTEST=nav KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/nav.exe
     run "$proto" nav-haskell env KAYA_SELFTEST=nav "$(hs_bin nav)"
     run "$proto" nav-java env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The scroll scene: the viewport's contract through
+    # GtkScrolledWindow — its vadjustment is both the observation and
+    # the scrolling API.
+    run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
+    run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
+        python3 guests/python/scroll.py
+    run "$proto" scroll-go env KAYA_SELFTEST=scroll /tmp/go-guests/scroll
+    run "$proto" scroll-csharp env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" scroll-ocaml env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/scroll.exe
+    run "$proto" scroll-haskell env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
+    run "$proto" scroll-java env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

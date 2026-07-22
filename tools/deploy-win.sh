@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's scroll legs land
-# with the breadth slice (docs/deferred.md holds the item open).
 
 # Everything runs inside the dev shell: the flake pins every toolchain
 # (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
@@ -79,6 +76,7 @@ for arg in "$@"; do
         panels_rust|panels_python|panels_go|panels_csharp|panels_java) SUITE="$arg" ;;
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
+        scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -125,7 +123,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -619,6 +617,13 @@ case "$SUITE" in
         run_suite nav_go
         run_suite nav_csharp
         run_suite nav_java
+        # The scroll scene: the viewport's contract through
+        # ScrollViewer — ChangeView is the real scrolling API.
+        run_suite scroll_rust
+        run_suite scroll_python
+        run_suite scroll_go
+        run_suite scroll_csharp
+        run_suite scroll_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

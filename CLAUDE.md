@@ -73,6 +73,12 @@ in docs/deferred.md.
    constructor in all 8 bindings), `tools/check-abort.sh` (uniform abort
    semantics, all languages), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends),
+   `tools/check-stubs.sh` (no runner wires a scene's legs while its
+   backend still stubs the feature — depth-slice stubs compile, so
+   only this cross-check sees the combination),
+   `tools/check-compose.sh` (KayaCompose.kt actually compiles — the
+   swift-typecheck sibling; the emulator must never be the first
+   compiler to see the Kotlin layer),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which

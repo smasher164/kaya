@@ -520,6 +520,32 @@ the same patterns return through interpreter drop-downs
   parser branch's own comment). Guard: the ocaml emitter defuses
   both delimiters (`*)` → `* )`, `(*` → `( *`) on every doc it
   copies, so no future spec doc can break the generated module.
+- **A depth-slice stub compiles; only a suite notices it against
+  wired legs.** `unimplemented!("<scene> is not yet materialized")`
+  arms are the sanctioned way to hold breadth open, and they COMPILE
+  — so every compile gate (check-targets, check-gtk) stays green
+  while a runner that has since gained the scene's legs will die on
+  the stub at suite time (the GTK scroll materialization was
+  believed applied while the stub survived; the linux suite was the
+  first to notice, 2026-07-22). Guard: tools/check-stubs.sh
+  cross-checks every runner's wired scenes against its backend's
+  stub strings (the "<scene> is not yet materialized" spelling is
+  the contract), self-tested with a synthesized bad pair. Corollary
+  for agents: never chain an edit script and its verification in one
+  background command — the tail shows the LAST command's success,
+  not the edit's failure; verify the edit itself (grep the new
+  symbol) before trusting anything downstream.
+- **An unguarded suite-runner build greens legs against stale
+  artifacts.** run-emulator's gradle/cargo-ndk lines had no
+  `|| exit 1`: a Kotlin compile failure produced a zero-verdict run
+  (and would have installed the PREVIOUS apk had one leg still
+  queued) — the stale-artifact class inside the runner itself. All
+  four build lines now fail the run loudly, and KayaCompose.kt has a
+  mac-side compile gate at last (tools/check-compose.sh — the
+  swift-typecheck sibling; the emulator used to be the FIRST
+  compiler to see the Kotlin layer). When reading suite results,
+  check verdict COUNTS, never just exit codes — pipeline wrappers
+  can eat the code.
 - **One-shot registration hooks race window attachment — register on
   viewDidMoveToWindow, never on a queued closure.** (Corrected
   diagnosis 2026-07-21; the entry here previously blamed
