@@ -198,10 +198,10 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
     // Window lifecycle: one handler each, receiving the window id.
-    Action<Tx, ulong>? closeRequested;
+    internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
     internal readonly Dictionary<ulong, Action<Tx>> backRequested = new();
-    Action<Tx, ulong>? windowClosed;
+    internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
     internal ulong nextAlert;
 
@@ -399,13 +399,16 @@ sealed class KayaApp
             }
             else if (kind == KayaWire.OccKindCloseRequested)
             {
-                if (closeRequested is { } fn)
-                    Dispatch(tx => fn(tx, id));
+                if (closeRequested.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx));
             }
             else if (kind == KayaWire.OccKindWindowClosed)
             {
-                if (windowClosed is { } fn)
-                    Dispatch(tx => fn(tx, id));
+                // One-shot: the window is gone; both registrations
+                // retire with it.
+                closeRequested.Remove(id);
+                if (windowClosed.Remove(id, out var fn))
+                    Dispatch(tx => fn(tx));
             }
             else if (kind == KayaWire.OccKindEntryPopped)
             {
@@ -430,13 +433,6 @@ sealed class KayaApp
         }
     }
 
-    /// The veto class: the user asked a veto_close window to close;
-    /// nothing has closed — answer with tx.DestroyWindow to agree.
-    public void OnCloseRequested(Action<Tx, ulong> fn) => closeRequested = fn;
-
-    /// A non-veto auxiliary's chrome close (informational;
-    /// DestroyWindow reconciles).
-    public void OnWindowClosed(Action<Tx, ulong> fn) => windowClosed = fn;
 
 
     /// Enter the core on the calling thread (must be the process main
@@ -1102,15 +1098,24 @@ sealed class Tx
     /// reject at the root). Materializes hidden; MountIn presents it.
     /// Named arguments are the C# spelling:
     /// tx.CreateWindow(1, title: "inspector", width: 480, height: 320, vetoClose: true).
+    /// The handlers ride the declaration (per-window — handlers
+    /// scope to the thing that creates them): onCloseRequested fires
+    /// per chrome close while vetoClose is armed — nothing has
+    /// closed; answer with tx.DestroyWindow to agree. onClosed fires
+    /// when the non-veto auxiliary is chrome-closed (informational;
+    /// DestroyWindow reconciles) and retires with it.
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
-        bool? vetoClose = null)
+        bool? vetoClose = null, Action<Tx>? onCloseRequested = null,
+        Action<Tx>? onClosed = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
         if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
         if (height is { } h) Records.Add(KayaWire.TxSetWindowHeight(id, h));
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
+        if (onCloseRequested is { } r) App.closeRequested[id] = r;
+        if (onClosed is { } c) App.windowClosed[id] = c;
     }
 
     /// Request a modal alert (the request/result grammar), named

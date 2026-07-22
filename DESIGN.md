@@ -755,7 +755,13 @@ declaration/request principle:
   carve-out itself stated uniformly, failing loudly at the root.
 - **Close** inherits the settled veto class unchanged: the core
   defaults to staying open, emits CloseRequested, and the app later
-  issues close() if it agrees.
+  issues close() if it agrees. The handlers bind to the WINDOW at its
+  declaration (2026-07-22, completing the handlers-scope-to-their-
+  creator rule after alerts and navigation): on_close_requested and
+  on_closed ride create_window per language idiom — Rust registers
+  per-id on Messages — and no app-global window handler exists;
+  window_closed's registration is one-shot and retires with its
+  window, taking the close registration with it.
 - **Back never touches windows.** At the primary surface's root the
   back gesture belongs to the system (leave the app); kaya offers no
   interception in v1. An app that wants back to mean something must
@@ -892,7 +898,9 @@ shape; the target's domain grows from "windows" to "surfaces"
   request while armed. Registrations on programmatically-popped
   entries go inert harmlessly, the widget-handler discipline (click
   handlers on destroyed widgets are the precedent). App-global
-  navigation handlers do not exist.
+  navigation handlers do not exist — and as of 2026-07-22 neither do
+  app-global WINDOW handlers (see Close above): every lifecycle
+  callback in the vocabulary now binds to the entity that creates it.
 - **No capability gate** — the deliberate contrast with aux_windows:
   every host materializes a serial stack natively (Android's
   predictive back, iOS swipe-back, and on the desktops the

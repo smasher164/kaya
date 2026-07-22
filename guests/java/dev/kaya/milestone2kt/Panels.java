@@ -25,7 +25,17 @@ final class Panels {
                 tx.label(s); // label#0
             }));
 
-            tx.createWindow(1).title("inspector").size(480.0, 320.0).vetoClose(true);
+            // The veto handler binds to the inspector at its
+            // declaration (handlers scope to the thing that creates
+            // them): it can only ever mean this window's close.
+            tx.createWindow(1)
+                    .title("inspector")
+                    .size(480.0, 320.0)
+                    .vetoClose(true)
+                    .onCloseRequested(tx2 -> {
+                        tx2.write(s, "close requested");
+                        tx2.destroyWindow(1);
+                    });
             tx.mountIn(1, tx.column(() -> {
                 KayaApp.Signal<String> caption = tx.signal("inspector pane");
                 tx.label(caption); // label#1
@@ -33,10 +43,7 @@ final class Panels {
             return s;
         });
 
-        app.onCloseRequested((tx, window) -> {
-            tx.write(status, "close requested");
-            tx.destroyWindow(window);
-        });
+        if (status == null) throw new IllegalStateException();
 
         app.dispatchLoop();
     }

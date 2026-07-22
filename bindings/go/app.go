@@ -108,8 +108,8 @@ type App struct {
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
 	// Window lifecycle: one handler each, receiving the window id.
-	closeRequested func(*Tx, uint64)
-	windowClosed   func(*Tx, uint64)
+	closeRequested map[uint64]func(*Tx)
+	windowClosed   map[uint64]func(*Tx)
 	entryPopped    map[uint64]func(*Tx)
 	backRequested  map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
@@ -147,8 +147,10 @@ func NewApp() *App {
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
-		entryPopped:   make(map[uint64]func(*Tx)),
-		backRequested: make(map[uint64]func(*Tx)),
+		entryPopped:    make(map[uint64]func(*Tx)),
+		backRequested:  make(map[uint64]func(*Tx)),
+		closeRequested: make(map[uint64]func(*Tx)),
+		windowClosed:   make(map[uint64]func(*Tx)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
@@ -381,18 +383,6 @@ func (a *App) Build(fn func(*Tx)) {
 // model is restored and the records are dropped, so the loop logs and
 // moves to the next occurrence. Aborts the runtime cannot recover
 // still die — uniformly with every other binding's fatal floor.
-// OnCloseRequested handles the veto class: the user asked a
-// veto_close window to close; nothing has closed — answer with
-// tx.DestroyWindow to agree.
-func (a *App) OnCloseRequested(fn func(*Tx, uint64)) {
-	a.closeRequested = fn
-}
-
-// OnWindowClosed handles a non-veto auxiliary's chrome close
-// (informational; DestroyWindow reconciles).
-func (a *App) OnWindowClosed(fn func(*Tx, uint64)) {
-	a.windowClosed = fn
-}
 
 
 
@@ -1058,6 +1048,23 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 	return w
 }
 
+// OnCloseRequested binds the close-veto handler to THIS window
+// (per-window — handlers scope to the thing that creates them):
+// fires per chrome close while VetoClose is armed; nothing has
+// closed — answer with tx.DestroyWindow to agree.
+func (w WindowRef) OnCloseRequested(fn func(*Tx)) WindowRef {
+	w.tx.app.closeRequested[w.id] = fn
+	return w
+}
+
+// OnClosed binds the closed handler to THIS window: fires when the
+// non-veto auxiliary is chrome-closed (informational; DestroyWindow
+// reconciles), retiring with it — a window closes at most once.
+func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
+	w.tx.app.windowClosed[w.id] = fn
+	return w
+}
+
 // Id returns the window id, for MountIn.
 func (w WindowRef) Id() uint64 {
 	return w.id
@@ -1283,12 +1290,16 @@ func (a *App) Run() int {
 					a.dispatch(func(tx *Tx) { fn(tx, value) })
 				}
 			case kind == occCloseRequested:
-				if fn := a.closeRequested; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, id) })
+				if fn := a.closeRequested[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx) })
 				}
 			case kind == occWindowClosed:
-				if fn := a.windowClosed; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, id) })
+				// One-shot: the window is gone; both registrations
+				// retire with it.
+				delete(a.closeRequested, id)
+				if fn := a.windowClosed[id]; fn != nil {
+					delete(a.windowClosed, id)
+					a.dispatch(func(tx *Tx) { fn(tx) })
 				}
 			case kind == occEntryPopped:
 				// One-shot: the entry is gone; both registrations

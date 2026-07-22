@@ -56,13 +56,13 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
-    private BiConsumer<Tx, Long> closeRequested;
+    final java.util.Map<Long, Consumer<Tx>> closeRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> backRequested = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
-    private BiConsumer<Tx, Long> windowClosed;
+    final java.util.Map<Long, Consumer<Tx>> windowClosed = new java.util.HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
@@ -259,11 +259,30 @@ public final class KayaApp {
 
     public static final class WindowRef {
         private final Tx tx;
+        private final KayaApp app;
         private final long id;
 
-        WindowRef(Tx tx, long id) {
+        WindowRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
+            this.app = app;
             this.id = id;
+        }
+
+        /** Binds the close-veto handler to THIS window (per-window —
+         * handlers scope to the thing that creates them): fires per
+         * chrome close while vetoClose is armed; nothing has closed —
+         * answer with tx.destroyWindow to agree. */
+        public WindowRef onCloseRequested(Consumer<Tx> handler) {
+            app.closeRequested.put(id, handler);
+            return this;
+        }
+
+        /** Binds the closed handler to THIS window: fires when the
+         * non-veto auxiliary is chrome-closed (informational;
+         * destroyWindow reconciles), retiring with it. */
+        public WindowRef onClosed(Consumer<Tx> handler) {
+            app.windowClosed.put(id, handler);
+            return this;
         }
 
         /** The surface's title (title bar / switcher / task label). */
@@ -1183,12 +1202,12 @@ public final class KayaApp {
 
         public WindowRef createWindow(long id) {
             records.add(KayaWire.txCreateWindow(id));
-            return new WindowRef(this, id);
+            return new WindowRef(this, KayaApp.this, id);
         }
 
         /** The prop chain for an existing window (0 = the primary). */
         public WindowRef window(long id) {
-            return new WindowRef(this, id);
+            return new WindowRef(this, KayaApp.this, id);
         }
 
         /**
@@ -1602,21 +1621,6 @@ public final class KayaApp {
      * dispatch discipline across every binding. VM-fatal errors still
      * die.
      */
-    /**
-     * The veto class: the user asked a veto_close window to close;
-     * nothing has closed — answer with tx.destroyWindow to agree.
-     */
-    public void onCloseRequested(BiConsumer<Tx, Long> handler) {
-        closeRequested = handler;
-    }
-
-    /**
-     * A non-veto auxiliary's chrome close (informational;
-     * destroyWindow reconciles).
-     */
-    public void onWindowClosed(BiConsumer<Tx, Long> handler) {
-        windowClosed = handler;
-    }
 
 
     private void dispatch(Consumer<Tx> handler) {
@@ -1705,14 +1709,17 @@ public final class KayaApp {
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_CLOSE_REQUESTED) {
-                BiConsumer<Tx, Long> handler = closeRequested;
+                Consumer<Tx> handler = closeRequested.get(occ.id);
                 if (handler != null) {
-                    dispatch(tx -> handler.accept(tx, occ.id));
+                    dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_WINDOW_CLOSED) {
-                BiConsumer<Tx, Long> handler = windowClosed;
+                // One-shot: the window is gone; both registrations
+                // retire with it.
+                closeRequested.remove(occ.id);
+                Consumer<Tx> handler = windowClosed.remove(occ.id);
                 if (handler != null) {
-                    dispatch(tx -> handler.accept(tx, occ.id));
+                    dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ENTRY_POPPED) {
                 // One-shot: the entry is gone; both registrations

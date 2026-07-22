@@ -14,19 +14,23 @@ with app.window(title="panels"):
     with kaya.column():
         kaya.label(bind=status)  # label#0
 
-with app.aux_window(1, title="inspector", width=480, height=320,
-                    veto_close=True):
+INSPECTOR = 1
+
+
+def close_asked():
+    # Bound to the inspector at its declaration (handlers scope to
+    # the thing that creates them): this can only ever mean this
+    # window's close was vetoed.
+    with app.build():
+        status.set("close requested")
+        kaya.destroy_window(INSPECTOR)
+
+
+with app.aux_window(INSPECTOR, title="inspector", width=480, height=320,
+                    veto_close=True, on_close_requested=close_asked):
     caption = kaya.signal("inspector pane")
     with kaya.column():
         kaya.label(bind=caption)  # label#1
 
-
-def close_asked(window_id):
-    with app.build():
-        status.set("close requested")
-        kaya.destroy_window(window_id)
-
-
-app.on_close_requested(close_asked)
 
 sys.exit(app.run())

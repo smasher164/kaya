@@ -26,20 +26,22 @@ func main() {
 			tx.Label(status) // label#0
 		}))
 
+		// The veto handler binds to the inspector at its
+		// declaration (handlers scope to the thing that creates
+		// them): it can only ever mean this window's close.
 		inspector := tx.CreateWindow(1).
 			Title("inspector").
 			Size(480, 320).
-			VetoClose(true)
+			VetoClose(true).
+			OnCloseRequested(func(tx *kaya.Tx) {
+				tx.Write(status, "close requested")
+				tx.DestroyWindow(1)
+			})
 		aux := tx.Column(func() {
 			caption := tx.Signal("inspector pane")
 			tx.Label(caption) // label#1
 		})
 		tx.MountIn(inspector.Id(), aux)
-	})
-
-	app.OnCloseRequested(func(tx *kaya.Tx, window uint64) {
-		tx.Write(status, "close requested")
-		tx.DestroyWindow(window)
 	})
 
 	os.Exit(app.Run())

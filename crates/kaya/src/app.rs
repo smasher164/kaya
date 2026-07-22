@@ -1630,8 +1630,8 @@ pub struct Messages<M> {
     nodes: RefCell<HashMap<u64, Mapper<M>>>,
     // Window lifecycle: one handler each, receiving the window id —
     // close events are app-global grammar, not per-widget wiring.
-    close_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
-    window_closed: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    close_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    window_closed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     back_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
@@ -1650,8 +1650,8 @@ impl<M> Messages<M> {
         Messages {
             widgets: RefCell::new(HashMap::new()),
             nodes: RefCell::new(HashMap::new()),
-            close_requested: RefCell::new(None),
-            window_closed: RefCell::new(None),
+            close_requested: RefCell::new(HashMap::new()),
+            window_closed: RefCell::new(HashMap::new()),
             back_requested: RefCell::new(HashMap::new()),
             entry_popped: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
@@ -1752,16 +1752,32 @@ impl<M> Messages<M> {
         );
     }
 
-    /// The user asked a veto_close window to close (the veto class:
+    /// Bind the close-veto handler to ONE window (the veto class:
     /// nothing has closed; answer with destroy_window to agree).
-    pub fn on_close_requested(&self, f: impl Fn(WindowId) -> M + 'static) {
-        *self.close_requested.borrow_mut() = Some(Box::new(f));
+    /// Per-window, never app-global — the declaration site knows what
+    /// closing ITS window means (the request-bound alert precedent;
+    /// handlers scope to the thing that creates them). Fires per
+    /// chrome close while veto_close is armed.
+    pub fn on_close_requested(&self, window: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.close_requested
+            .borrow_mut()
+            .insert(window.0, Box::new(move || msg.clone()));
     }
 
-    /// A non-veto auxiliary window was chrome-closed (informational;
-    /// destroy_window reconciles the scene).
-    pub fn on_window_closed(&self, f: impl Fn(WindowId) -> M + 'static) {
-        *self.window_closed.borrow_mut() = Some(Box::new(f));
+    /// Bind the closed handler to ONE window: fires when the non-veto
+    /// auxiliary is chrome-closed (informational; destroy_window
+    /// reconciles), and the registration retires with it — a window
+    /// closes at most once (ids never reused).
+    pub fn on_window_closed(&self, window: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.window_closed
+            .borrow_mut()
+            .insert(window.0, Box::new(move || msg.clone()));
     }
 
     /// Bind the back-veto handler to ONE entry (the id
@@ -1823,10 +1839,13 @@ impl<M> Messages<M> {
                     self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
                 }
                 Occurrence::CloseRequested { window } => {
-                    self.close_requested.borrow().as_ref().map(|f| f(*window))
+                    self.close_requested.borrow().get(&window.0).map(|f| f())
                 }
                 Occurrence::WindowClosed { window } => {
-                    self.window_closed.borrow().as_ref().map(|f| f(*window))
+                    // One-shot: the window is gone; both registrations
+                    // retire with it.
+                    self.close_requested.borrow_mut().remove(&window.0);
+                    self.window_closed.borrow_mut().remove(&window.0).map(|f| f())
                 }
                 Occurrence::AlertResult { alert, choice } => {
                     // One-shot: the registration retires with the result.

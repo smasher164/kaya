@@ -9,8 +9,14 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
 
+    const INSPECTOR: WindowId = WindowId(1);
+
+    // The handler binds to THE INSPECTOR at its declaration (handlers
+    // scope to the thing that creates them): it can only ever mean
+    // this window's close was vetoed — no id inspection anywhere.
+    #[derive(Clone, Copy)]
     enum Msg {
-        CloseAsked(WindowId),
+        CloseAsked,
     }
 
     let msgs = kaya::Messages::<Msg>::new();
@@ -26,7 +32,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.mount(root);
 
         let inspector = tx
-            .create_window(WindowId(1))
+            .create_window(INSPECTOR)
             .title("inspector")
             .size(480.0, 320.0)
             .veto_close(true)
@@ -42,13 +48,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         status
     });
 
-    msgs.on_close_requested(Msg::CloseAsked);
+    msgs.on_close_requested(INSPECTOR, Msg::CloseAsked);
 
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
-            Msg::CloseAsked(window) => ctx.apply(|tx| {
+            Msg::CloseAsked => ctx.apply(|tx| {
                 tx.write(status, "close requested");
-                tx.destroy_window(window);
+                tx.destroy_window(INSPECTOR);
             }),
         }
     }

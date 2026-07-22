@@ -14,13 +14,26 @@ main = kayaMain $ \app -> do
     root <- column [] [labelBound s] -- label#0
     mount root
 
-    createWindow 1 [WTitle "inspector", WSize 480 320, WVetoClose True]
+    -- The veto handler binds to the inspector at its declaration
+    -- (handlers scope to the thing that creates them): it can only
+    -- ever mean this window's close.
+    createWindow
+      1
+      [ WTitle "inspector",
+        WSize 480 320,
+        WVetoClose True,
+        WOnCloseRequested
+          ( buildTx app $ do
+              writeSignal s (VStr "close requested")
+              destroyWindow 1
+          )
+      ]
     caption <- signal (VStr "inspector pane")
     aux <- column [] [labelBound caption] -- label#1
     mountIn 1 aux
     return s
 
-  onCloseRequested app $ \window ->
-    buildTx app $ do
-      writeSignal status (VStr "close requested")
-      destroyWindow window
+  -- The handler rides the declaration above; nothing app-global
+  -- remains.
+  _ <- return status
+  return ()

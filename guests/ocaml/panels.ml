@@ -17,18 +17,21 @@ let () =
      let* root = column [ label ~bind:s () (* label#0 *) ] in
      let* () = mount root in
 
+     (* The veto handler binds to the inspector at its declaration
+        (handlers scope to the thing that creates them): it can only
+        ever mean this window's close. *)
      let* () =
        create_window ~title:"inspector" ~width:480.0 ~height:320.0
-         ~veto_close:true 1L
+         ~veto_close:true
+         ~on_close_requested:(fun tx ->
+           write s (Str "close requested") tx;
+           destroy_window 1L tx)
+         1L
      in
      let* caption = signal (Str "inspector pane") in
      let* aux = column [ label ~bind:caption () (* label#1 *) ] in
      mount_in 1L aux);
 
-  on_close_requested app (fun window tx ->
-      (match !status with
-      | Some s -> write s (Str "close requested") tx
-      | None -> ());
-      destroy_window window tx);
+  ignore !status;
 
   exit (run app)

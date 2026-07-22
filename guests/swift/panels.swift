@@ -23,17 +23,20 @@ app.build { tx in
     }
     tx.mount(root)
 
-    tx.createWindow(1, title: "inspector", width: 480.0, height: 320.0, vetoClose: true)
+    // The veto handler binds to the inspector at its declaration
+    // (handlers scope to the thing that creates them): it can only
+    // ever mean this window's close.
+    tx.createWindow(
+        1, title: "inspector", width: 480.0, height: 320.0, vetoClose: true,
+        onCloseRequested: { tx2 in
+            tx2.write(status, .str("close requested"))
+            tx2.destroyWindow(1)
+        })
     let auxRoot = tx.column {
         let caption = tx.signal(.str("inspector pane"))
         tx.label(bind: caption)  // label#1
     }
     tx.mountIn(1, auxRoot)
-}
-
-app.onCloseRequested { tx, window in
-    tx.write(status, .str("close requested"))
-    tx.destroyWindow(window)
 }
 
 app.run()

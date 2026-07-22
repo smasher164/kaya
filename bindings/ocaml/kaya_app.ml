@@ -60,12 +60,12 @@ type app = {
   widget_toggles : (int64, bool -> tx -> unit) Hashtbl.t;
   widget_values : (int64, float -> tx -> unit) Hashtbl.t;
   (* Window lifecycle: one handler each, receiving the window id. *)
-  mutable close_requested : (int64 -> tx -> unit) option;
+  close_requested : (int64, tx -> unit) Hashtbl.t;
   entry_popped : (int64, tx -> unit) Hashtbl.t;
   back_requested : (int64, tx -> unit) Hashtbl.t;
   alert_handlers : (int64, int -> tx -> unit) Hashtbl.t;
   mutable next_alert : int64;
-  mutable window_closed : (int64 -> tx -> unit) option;
+  window_closed : (int64, tx -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> tx -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
@@ -116,12 +116,12 @@ let create () =
     node_changes = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
-    close_requested = None;
+    close_requested = Hashtbl.create 8;
     entry_popped = Hashtbl.create 8;
     back_requested = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
-    window_closed = None;
+    window_closed = Hashtbl.create 8;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -721,12 +721,22 @@ let window_size width height tx =
 (* Create an auxiliary window (capability-gated: phone hosts reject
    at the root); materializes hidden, [mount_in] presents. Labeled
    optional arguments are the OCaml spelling. *)
-let create_window ?title ?width ?height ?veto_close id tx =
+let create_window ?title ?width ?height ?veto_close ?on_close_requested
+    ?on_closed id tx =
   emit tx (Kaya_wire.tx_create_window id);
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
-  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
+  (* The handlers ride the declaration (per-window — handlers scope
+     to the thing that creates them): [~on_close_requested] fires per
+     chrome close while veto_close is armed (answer with
+     [destroy_window] to agree); [~on_closed] fires when the non-veto
+     auxiliary is chrome-closed and retires with it. *)
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.close_requested id f)
+    on_close_requested;
+  Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed
 
 (* Close and forget an auxiliary window — also the veto grammar's
    confirmation and the reconciliation after a chrome close. *)
@@ -801,13 +811,6 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
    0xFFFFFFFF as an OCaml int32 (-1l). Deliberately not an index. *)
 let alert_cancel = Kaya_wire.alert_choice_cancel
 
-(* The veto class: the user asked a veto_close window to close;
-   nothing has closed — answer with [destroy_window] to agree. *)
-let on_close_requested app handler = app.close_requested <- Some handler
-
-(* A non-veto auxiliary's chrome close (informational;
-   [destroy_window] reconciles). *)
-let on_window_closed app handler = app.window_closed <- Some handler
 
 
 let mount (Widget root) tx = emit tx (Kaya_wire.tx_mount 0L root)
@@ -1169,12 +1172,17 @@ let dispatch_loop app =
                | None -> ())
            | _ -> ()
          else if kind = Kaya_wire.occ_kind_close_requested then
-           (match app.close_requested with
-           | Some handler -> dispatch app (handler id)
+           (match Hashtbl.find_opt app.close_requested id with
+           | Some handler -> dispatch app handler
            | None -> ())
-         else if kind = Kaya_wire.occ_kind_window_closed then
-           (match app.window_closed with
-           | Some handler -> dispatch app (handler id)
+         else if kind = Kaya_wire.occ_kind_window_closed then (
+           (* One-shot: the window is gone; both registrations retire
+              with it. *)
+           Hashtbl.remove app.close_requested id;
+           match Hashtbl.find_opt app.window_closed id with
+           | Some handler ->
+               Hashtbl.remove app.window_closed id;
+               dispatch app handler
            | None -> ())
          else if kind = Kaya_wire.occ_kind_entry_popped then (
            (* One-shot: the entry is gone; both registrations retire

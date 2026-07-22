@@ -68,8 +68,6 @@ module KayaApp
     WindowAttr (..),
     AlertAttr (..),
     showAlert,
-    onCloseRequested,
-    onWindowClosed,
     windowTitle,
     windowSize,
     clearWidget,
@@ -243,6 +241,8 @@ data Pending
   | PAlert !Word64 (Word32 -> IO ())
   | PEntryPopped !Word64 (IO ())
   | PBackRequested !Word64 (IO ())
+  | PCloseRequested !Word64 (IO ())
+  | PWindowClosed !Word64 (IO ())
   | PChange !Word64 (String -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
@@ -578,11 +578,18 @@ windowSize w h = do
   emitB (W.txSetWindowWidth 0 w)
   emitB (W.txSetWindowHeight 0 h)
 
--- | Window construction attributes — the config-list spelling.
+-- | Window construction attributes — the config-list spelling. The
+-- handler attrs ride the declaration (per-window — handlers scope to
+-- the thing that creates them): 'WOnCloseRequested' fires per chrome
+-- close while veto_close is armed (answer with 'destroyWindow' to
+-- agree); 'WOnClosed' fires when the non-veto auxiliary is
+-- chrome-closed and retires with it.
 data WindowAttr
   = WTitle String
   | WSize Double Double
   | WVetoClose Bool
+  | WOnCloseRequested (IO ())
+  | WOnClosed (IO ())
 
 -- | Create an auxiliary window (capability-gated: phone hosts reject
 -- at the root); materializes hidden, 'mountIn' presents:
@@ -597,6 +604,8 @@ createWindow n attrs = do
       emitB (W.txSetWindowWidth n w)
       emitB (W.txSetWindowHeight n h)
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
+    apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
+    apply (WOnClosed handler) = pendB (PWindowClosed n handler)
 
 -- | Close and forget an auxiliary window — also the veto grammar's
 -- confirmation and the reconciliation after a chrome close.
@@ -644,17 +653,6 @@ pushEntry n attrs = do
 popEntry :: Build ()
 popEntry = emitB (W.txPopEntry 0)
 
--- | The veto class: the user asked a veto_close window to close;
--- nothing has closed — answer with 'destroyWindow' to agree.
-onCloseRequested :: App -> (Word64 -> IO ()) -> IO ()
-onCloseRequested app handler =
-  writeIORef (appCloseRequested app) (Just handler)
-
--- | A non-veto auxiliary's chrome close (informational;
--- 'destroyWindow' reconciles).
-onWindowClosed :: App -> (Word64 -> IO ()) -> IO ()
-onWindowClosed app handler =
-  writeIORef (appWindowClosed app) (Just handler)
 
 
 -- | Alert construction attributes — the config-list spelling.
@@ -1415,9 +1413,10 @@ data App = App
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
-    -- Window lifecycle: one handler each, receiving the window id.
-    appCloseRequested :: IORef (Maybe (Word64 -> IO ())),
-    appWindowClosed :: IORef (Maybe (Word64 -> IO ())),
+    -- Per-window lifecycle handlers, keyed by window id — handlers
+    -- scope to the thing that creates them.
+    appCloseRequested :: IORef (Map.Map Word64 (IO ())),
+    appWindowClosed :: IORef (Map.Map Word64 (IO ())),
     -- Per-entry navigation handlers, keyed by entry surface id (the
     -- request-bound alert precedent).
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),
@@ -1467,6 +1466,8 @@ register app pending = case pending of
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
   PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
+  PCloseRequested n handler -> modifyIORef' (appCloseRequested app) (Map.insert n handler)
+  PWindowClosed n handler -> modifyIORef' (appWindowClosed app) (Map.insert n handler)
   PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
@@ -1533,8 +1534,8 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
-    <*> newIORef Nothing
-    <*> newIORef Nothing
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -1599,12 +1600,16 @@ dispatchLoop app = do
             _ -> return ()
           dispatchLoop app
       | kind == W.occKindCloseRequested -> do
-          handler <- readIORef (appCloseRequested app)
-          dispatch (mapM_ ($ ident) handler)
+          handlers <- readIORef (appCloseRequested app)
+          dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindWindowClosed -> do
-          handler <- readIORef (appWindowClosed app)
-          dispatch (mapM_ ($ ident) handler)
+          -- One-shot: the window is gone; both registrations retire
+          -- with it.
+          modifyIORef' (appCloseRequested app) (Map.delete ident)
+          handlers <- readIORef (appWindowClosed app)
+          modifyIORef' (appWindowClosed app) (Map.delete ident)
+          dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindEntryPopped -> do
           -- One-shot: the entry is gone; both registrations retire

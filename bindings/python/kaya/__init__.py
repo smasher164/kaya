@@ -1347,12 +1347,15 @@ class App:
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
-        self._window_handlers = {}
         self._alert_handlers = {}
         # Per-entry navigation handlers, keyed by entry surface id
         # (the request-bound alert precedent).
         self._entry_popped = {}
         self._back_requested = {}
+        # Per-window lifecycle handlers, keyed by window id — same
+        # rule: handlers scope to the thing that creates them.
+        self._close_requested = {}
+        self._window_closed = {}
         self._node_handlers = {}
         _app = self
 
@@ -1367,11 +1370,23 @@ class App:
             self._widget_handlers[(kind, handle.id)] = fn
 
     def aux_window(self, window_id, title=None, width=None, height=None,
-                   veto_close=None):
+                   veto_close=None, on_close_requested=None, on_closed=None):
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO
         IT on exit. Capability-gated — a phone host rejects at the
-        root (DESIGN.md, Presentation contexts)."""
+        root (DESIGN.md, Presentation contexts).
+
+        The handlers ride the declaration (per-window — handlers scope
+        to the thing that creates them): on_close_requested() fires
+        per chrome close while veto_close is armed — nothing has
+        closed; answer with kaya.destroy_window to agree.
+        on_closed() fires when the non-veto auxiliary is chrome-closed
+        (informational; destroy_window reconciles) and retires with
+        it."""
+        if on_close_requested is not None:
+            self._close_requested[int(window_id)] = on_close_requested
+        if on_closed is not None:
+            self._window_closed[int(window_id)] = on_closed
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close)
@@ -1413,25 +1428,26 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def on_close_requested(self, fn):
-        """The user asked a veto_close window to close: fn(window_id).
-        Nothing has closed; answer with kaya.destroy_window inside a
-        build to agree (the request/confirm veto class)."""
-        self._window_handlers[wire.OCC_CLOSE_REQUESTED] = fn
-
-    def on_window_closed(self, fn):
-        """A non-veto auxiliary window was chrome-closed: fn(window_id)
-        (informational; destroy_window reconciles)."""
-        self._window_handlers[wire.OCC_WINDOW_CLOSED] = fn
 
     def _dispatch_loop(self):
         while occurrence := runtime.next_occurrence():
             kind, ident, keys, payload = occurrence
-            if kind in (wire.OCC_CLOSE_REQUESTED, wire.OCC_WINDOW_CLOSED):
-                handler = self._window_handlers.get(kind)
+            if kind == wire.OCC_CLOSE_REQUESTED:
+                handler = self._close_requested.get(ident)
                 if handler is not None:
                     try:
-                        handler(ident)
+                        handler()
+                    except Exception:
+                        traceback.print_exc()
+                continue
+            if kind == wire.OCC_WINDOW_CLOSED:
+                # One-shot: the window is gone; both registrations
+                # retire with it.
+                self._close_requested.pop(ident, None)
+                handler = self._window_closed.pop(ident, None)
+                if handler is not None:
+                    try:
+                        handler()
                     except Exception:
                         traceback.print_exc()
                 continue

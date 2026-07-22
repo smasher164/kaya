@@ -215,12 +215,12 @@ final class KayaApp {
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
-    private var closeRequested: ((KayaAppTx, UInt64) throws -> Void)?
+    private var closeRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var nextAlert: UInt64 = 0
-    private var windowClosed: ((KayaAppTx, UInt64) throws -> Void)?
+    private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
@@ -488,10 +488,11 @@ final class KayaApp {
         }
     }
 
-    /// The veto class: the user asked a veto_close window to close;
-    /// nothing has closed — answer with tx.destroyWindow to agree.
-    func onCloseRequested(_ handler: @escaping (KayaAppTx, UInt64) throws -> Void) {
-        closeRequested = handler
+    /// Per-window lifecycle registrations (internal: the createWindow
+    /// sugar registers at declaration — handlers scope to the thing
+    /// that creates them; the closed one retires with its window).
+    func onCloseRequested(_ window: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        closeRequested[window] = handler
     }
 
     /// Bind the one-shot result handler to a request (internal: the
@@ -506,10 +507,8 @@ final class KayaApp {
         return nextAlert
     }
 
-    /// A non-veto auxiliary's chrome close (informational;
-    /// destroyWindow reconciles).
-    func onWindowClosed(_ handler: @escaping (KayaAppTx, UInt64) throws -> Void) {
-        windowClosed = handler
+    func onWindowClosed(_ window: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        windowClosed[window] = handler
     }
 
     /// Per-entry navigation registrations (internal: the pushEntry
@@ -573,12 +572,15 @@ final class KayaApp {
                     dispatch { try build { tx in try handler(tx, value) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED), _):
-                if let handler = closeRequested {
-                    dispatch { try build { tx in try handler(tx, id) } }
+                if let handler = closeRequested[id] {
+                    dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED), _):
-                if let handler = windowClosed {
-                    dispatch { try build { tx in try handler(tx, id) } }
+                // One-shot: the window is gone; both registrations
+                // retire with it.
+                closeRequested.removeValue(forKey: id)
+                if let handler = windowClosed.removeValue(forKey: id) {
+                    dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_ENTRY_POPPED), _):
                 // One-shot: the entry is gone; both registrations
@@ -1248,15 +1250,25 @@ final class KayaAppTx {
     /// Create an auxiliary window (capability-gated: phone hosts
     /// reject at the root); materializes hidden, mountIn presents.
     /// Named arguments are the Swift spelling.
+    /// The handlers ride the declaration (per-window — handlers
+    /// scope to the thing that creates them): onCloseRequested fires
+    /// per chrome close while vetoClose is armed — nothing has
+    /// closed; answer with tx.destroyWindow to agree. onClosed fires
+    /// when the non-veto auxiliary is chrome-closed (informational;
+    /// destroyWindow reconciles) and retires with it.
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
-        height: Double? = nil, vetoClose: Bool? = nil
+        height: Double? = nil, vetoClose: Bool? = nil,
+        onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
+        onClosed: ((KayaAppTx) throws -> Void)? = nil
     ) {
         tx.createWindow(id)
         if let title { tx.setWindowTitle(id, title) }
         if let width { tx.setWindowWidth(id, width) }
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
+        if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
+        if let onClosed { app.onWindowClosed(id, onClosed) }
     }
 
     /// Close and forget an auxiliary window — also the veto grammar's
