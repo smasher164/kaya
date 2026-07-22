@@ -1135,6 +1135,15 @@ private func kayaRunScript(_ script: String) {
                         }
                         return wid == 0 ? kayaScene.windows[0]?.title ?? "" : ""
                     #else
+                        // iOS has no title bar; the surface-title read
+                        // is the model that feeds UIScene.title — and
+                        // while a navigation entry covers the window,
+                        // the entry's title is the visible one (the
+                        // nav bar's), exactly as the macOS window
+                        // title reads.
+                        if let top = kayaScene.windows[wid]?.entries.last {
+                            return top.title
+                        }
                         return kayaScene.windows[wid]?.title ?? ""
                     #endif
                 }

@@ -57,6 +57,8 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
     private BiConsumer<Tx, Long> closeRequested;
+    final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
+    final java.util.Map<Long, Consumer<Tx>> backRequested = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
@@ -284,6 +286,56 @@ public final class KayaApp {
         }
 
         /** The window id, for mountIn. */
+        public long id() {
+            return id;
+        }
+    }
+
+    /** Chains navigation-entry props, the construction-sugar tier:
+     * tx.pushEntry(7).title("detail").interceptBack(true). */
+    public static final class EntryRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+
+        EntryRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** The entry's title — the back affordance's label source. */
+        public EntryRef title(String title) {
+            tx.records.add(KayaWire.txSetEntryTitle(id, title));
+            return this;
+        }
+
+        /** Arms the close-veto class transplanted to POP: back emits
+         * back_requested and nothing pops until popEntry agrees. */
+        public EntryRef interceptBack(boolean on) {
+            tx.records.add(KayaWire.txSetEntryInterceptBack(id, on));
+            return this;
+        }
+
+        /** Binds the popped handler to THIS entry (per-entry, the
+         * request-bound alert precedent — no id inspection anywhere):
+         * fires when the user's back affordance pops it natively
+         * (post-fact; a programmatic popEntry does not fire it — its
+         * caller already knows), retiring with the one pop. */
+        public EntryRef onPopped(Consumer<Tx> handler) {
+            app.entryPopped.put(id, handler);
+            return this;
+        }
+
+        /** Binds the back-veto handler to THIS entry: fires per back
+         * request while interceptBack is armed — nothing has popped;
+         * answer with tx.popEntry to agree. */
+        public EntryRef onBackRequested(Consumer<Tx> handler) {
+            app.backRequested.put(id, handler);
+            return this;
+        }
+
+        /** The entry's surface id, for mountIn. */
         public long id() {
             return id;
         }
@@ -1154,6 +1206,38 @@ public final class KayaApp {
         }
 
         /**
+         * Push a navigation entry onto the primary surface's stack
+         * (entry ids are guest-allocated in the shared surface
+         * namespace, the createWindow discipline); materializes
+         * covered, mountIn presents it. Chains are the JVM spelling:
+         * tx.pushEntry(7).title("detail").interceptBack(true).
+         */
+        public EntryRef pushEntry(long id) {
+            records.add(KayaWire.txPushEntry(0, id));
+            return new EntryRef(this, KayaApp.this, id);
+        }
+
+        /** Push onto another window's stack (the System Settings
+         * shape: a stack inside a desktop auxiliary). */
+        public EntryRef pushEntryIn(long window, long id) {
+            records.add(KayaWire.txPushEntry(window, id));
+            return new EntryRef(this, KayaApp.this, id);
+        }
+
+        /**
+         * Pop the primary stack's top entry and forget its tree —
+         * also the back-veto grammar's confirmation after
+         * onBackRequested. Popping an empty stack is a scene error.
+         */
+        public void popEntry() {
+            records.add(KayaWire.txPopEntry(0));
+        }
+
+        public void popEntryIn(long window) {
+            records.add(KayaWire.txPopEntry(window));
+        }
+
+        /**
          * Set the primary surface's title (the title bar on the
          * desktops, the switcher label on iOS, the task label on
          * Android).
@@ -1534,6 +1618,7 @@ public final class KayaApp {
         windowClosed = handler;
     }
 
+
     private void dispatch(Consumer<Tx> handler) {
         try {
             build(handler);
@@ -1628,6 +1713,19 @@ public final class KayaApp {
                 BiConsumer<Tx, Long> handler = windowClosed;
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, occ.id));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_ENTRY_POPPED) {
+                // One-shot: the entry is gone; both registrations
+                // retire with it.
+                backRequested.remove(occ.id);
+                Consumer<Tx> handler = entryPopped.remove(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_BACK_REQUESTED) {
+                Consumer<Tx> handler = backRequested.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ALERT_RESULT) {
                 // One-shot: the registration retires with the result;

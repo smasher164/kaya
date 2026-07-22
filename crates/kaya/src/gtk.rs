@@ -370,6 +370,16 @@ impl NativeWidget {
     }
 }
 
+/// One navigation entry: a pushed scene root, retained while covered
+/// (the widget refs here keep it alive), destroyed at pop.
+struct GtkNavEntry {
+    window: u64,
+    title: String,
+    /// The close-veto class transplanted to POP.
+    intercept_back: bool,
+    root: Option<gtk4::Widget>,
+}
+
 struct CoreState {
     transactions: Receiver<Transaction>,
     scene: Scene,
@@ -393,6 +403,19 @@ struct CoreState {
     aux_windows: HashMap<u64, gtk4::Window>,
     /// veto_close per window id (primary included; default false).
     window_veto: std::rc::Rc<RefCell<HashMap<u64, bool>>>,
+    /// Live navigation entries by surface id, and per-window stacks
+    /// bottom to top (DESIGN.md, Navigation): the top entry is the
+    /// window's visible child; the window's own root and title come
+    /// back when its stack empties.
+    nav_entries: HashMap<u64, GtkNavEntry>,
+    nav_stacks: HashMap<u64, Vec<u64>>,
+    /// The window's OWN mounted root and title, restored on pop.
+    window_roots: HashMap<u64, gtk4::Widget>,
+    window_titles: HashMap<u64, String>,
+    /// The header-bar back button per window — GTK's back affordance
+    /// (the ViewSwitcher-era header pattern); visible only while the
+    /// window's stack has entries.
+    back_buttons: HashMap<u64, gtk4::Button>,
     /// The live modal alert (one per process): the request's identity
     /// plus the REAL dialog object for the runner's reads. Shared with
     /// the choose callback, which clears it when the one result fires.
@@ -502,6 +525,77 @@ fn gtk_window(core: &CoreState, id: u64) -> gtk4::Window {
             .get(&id)
             .expect("harness targeted an unknown window")
             .clone()
+    }
+}
+
+/// Install the window's navigation chrome: a HeaderBar whose back
+/// button is GTK's back affordance (the ViewSwitcher-era header
+/// pattern). Hidden until the window's stack has entries; the click
+/// runs the SAME user-pop path a real press does, so the harness's
+/// `back` verb can drive the actual button.
+fn install_nav_chrome(window: &gtk4::Window, id: u64) -> gtk4::Button {
+    use gtk4::prelude::{ButtonExt, GtkWindowExt, WidgetExt};
+    let header = gtk4::HeaderBar::new();
+    let back = gtk4::Button::from_icon_name("go-previous-symbolic");
+    back.set_visible(false);
+    back.connect_clicked(move |_| {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            user_back(core, id);
+        });
+    });
+    header.pack_start(&back);
+    window.set_titlebar(Some(&header));
+    back
+}
+
+/// A user-driven back on the window's top entry: an
+/// intercept_back-armed top emits back_requested and nothing pops
+/// (the veto class); an unarmed top pops here, reconciles the
+/// core-owned stack post-fact, and reports entry_popped.
+fn user_back(core: &mut CoreState, window: u64) {
+    let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
+        return;
+    };
+    if core.nav_entries[&top].intercept_back {
+        core.occurrences.send(Occurrence::BackRequested {
+            entry: WindowId(top),
+        });
+        return;
+    }
+    core.nav_stacks.get_mut(&window).unwrap().pop();
+    core.nav_entries.remove(&top);
+    core.scene.user_popped(WindowId(top));
+    refresh_nav(core, window);
+    core.occurrences.send(Occurrence::EntryPopped {
+        entry: WindowId(top),
+    });
+}
+
+/// Reconcile the window's visible state with its stack: the top
+/// entry's root and title (the entry title IS the window title while
+/// covered, the NavigationStack semantic), or the window's own root
+/// and title when the stack is empty; the back button shows only
+/// over entries.
+fn refresh_nav(core: &mut CoreState, window: u64) {
+    use gtk4::prelude::{GtkWindowExt, WidgetExt};
+    let target = gtk_window(core, window);
+    let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
+    match top.and_then(|id| core.nav_entries.get(&id)) {
+        Some(entry) => {
+            if let Some(root) = &entry.root {
+                target.set_child(Some(root));
+            }
+            target.set_title(Some(&entry.title));
+        }
+        None => {
+            target.set_child(core.window_roots.get(&window));
+            let own = core.window_titles.get(&window).cloned().unwrap_or_default();
+            target.set_title(Some(&own));
+        }
+    }
+    if let Some(back) = core.back_buttons.get(&window) {
+        back.set_visible(top.is_some());
     }
 }
 
@@ -662,7 +756,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             };
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
-                    target.set_title(Some(title));
+                    // The window's OWN title; while a navigation
+                    // entry covers it the entry's title shows (the
+                    // NavigationStack semantic), and this one comes
+                    // back at pop.
+                    core.window_titles.insert(window.0, title.clone());
+                    let covered = core
+                        .nav_stacks
+                        .get(&window.0)
+                        .is_some_and(|s| !s.is_empty());
+                    if !covered {
+                        target.set_title(Some(title));
+                    }
                 }
                 // The advisory size request. GTK4's one public size
                 // verb is set_default_size; under the suites' X11 WM
@@ -693,6 +798,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .default_width(540)
                 .default_height(330)
                 .build();
+            let back = install_nav_chrome(&aux, window.0);
+            core.back_buttons.insert(window.0, back);
             wire_close(
                 &aux,
                 window.0,
@@ -709,13 +816,59 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 aux.destroy();
             }
             core.window_veto.borrow_mut().remove(&window.0);
+            // A destroyed window takes its navigation stack with it.
+            for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
+                core.nav_entries.remove(&entry);
+            }
+            core.window_roots.remove(&window.0);
+            core.window_titles.remove(&window.0);
+            core.back_buttons.remove(&window.0);
         }
-        // Navigation is not yet materialized on this backend
-        // (depth = SwiftUI on mac; this fan-out is ledgered) —
-        // the first nav scene here must fail loudly, never
-        // silently skip the stack.
-        ApplyOp::PushEntry { .. } | ApplyOp::PopEntry { .. } | ApplyOp::SetEntryProp { .. } => {
-            unimplemented!("kaya: navigation is not yet materialized on this backend")
+        ApplyOp::PushEntry { window, entry } => {
+            // Materializes covered/incoming: on the stack now, the
+            // mount fills and presents it.
+            core.nav_entries.insert(
+                entry.0,
+                GtkNavEntry {
+                    window: window.0,
+                    title: String::new(),
+                    intercept_back: false,
+                    root: None,
+                },
+            );
+            core.nav_stacks.entry(window.0).or_default().push(entry.0);
+        }
+        ApplyOp::PopEntry { window } => {
+            // Programmatic pop: the core already reconciled its
+            // stack; drop the top and reconcile the visible state
+            // (the batch's NET change shows once drained).
+            let top = core
+                .nav_stacks
+                .get_mut(&window.0)
+                .and_then(|s| s.pop())
+                .expect("scene validated the pop");
+            core.nav_entries.remove(&top);
+            refresh_nav(core, window.0);
+        }
+        ApplyOp::SetEntryProp { entry, prop, value } => {
+            use crate::protocol::EntryProp;
+            let record = core
+                .nav_entries
+                .get_mut(&entry.0)
+                .expect("scene validated the entry id");
+            match (prop, &value) {
+                (EntryProp::Title, Value::Str(title)) => {
+                    record.title = title.clone();
+                }
+                (EntryProp::InterceptBack, Value::Bool(on)) => {
+                    record.intercept_back = *on;
+                }
+                (p, v) => unreachable!("scene validated entry prop {p:?}/{v:?}"),
+            }
+            let window = record.window;
+            if core.nav_stacks.get(&window).and_then(|s| s.last()) == Some(&entry.0) {
+                refresh_nav(core, window);
+            }
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps
@@ -919,8 +1072,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             root_widget.set_halign(gtk4::Align::Fill);
             root_widget.set_valign(gtk4::Align::Fill);
             root_widget.add_css_class("kaya-root");
-            if window.0 == 0 {
+            // The target is a SURFACE: a navigation entry presents
+            // in-window (the push already stacked it; the mount fills
+            // it), the primary is the window's own root, an auxiliary
+            // presents its window.
+            if let Some(entry) = core.nav_entries.get_mut(&window.0) {
+                entry.root = Some(root_widget);
+                let host = entry.window;
+                if core.nav_stacks.get(&host).and_then(|s| s.last()) == Some(&window.0) {
+                    refresh_nav(core, host);
+                }
+            } else if window.0 == 0 {
                 core.window.set_child(Some(&root_widget));
+                core.window_roots.insert(0, root_widget);
             } else {
                 use gtk4::prelude::GtkWindowExt;
                 let aux = core
@@ -930,6 +1094,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 aux.set_child(Some(&root_widget));
                 // Mounting presents.
                 aux.present();
+                core.window_roots.insert(window.0, root_widget);
             }
         }
         ApplyOp::Command { id, command } => {
@@ -1000,6 +1165,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
+        let primary_back = {
+            use gtk4::prelude::Cast;
+            install_nav_chrome(window.upcast_ref::<gtk4::Window>(), 0)
+        };
         window.present();
 
         if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
@@ -1012,6 +1181,23 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 scene: Scene::new(),
                 occurrences: occ_tx.clone(),
                 aux_windows: HashMap::new(),
+                nav_entries: HashMap::new(),
+                nav_stacks: HashMap::new(),
+                window_roots: HashMap::new(),
+                window_titles: {
+                    use gtk4::prelude::GtkWindowExt;
+                    let mut titles = HashMap::new();
+                    titles.insert(
+                        0,
+                        window.title().map(String::from).unwrap_or_default(),
+                    );
+                    titles
+                },
+                back_buttons: {
+                    let mut buttons = HashMap::new();
+                    buttons.insert(0, primary_back);
+                    buttons
+                },
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
@@ -1419,15 +1605,25 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn entry_count(&self, _window: u64) -> usize {
-        // Navigation is not yet materialized here (ledgered
-        // fan-out); the apply arm above dies before any leg
-        // could read a vacuous depth.
-        unimplemented!("kaya: navigation is not yet materialized on this backend")
+    fn entry_count(&self, window: u64) -> usize {
+        Self::on_main(move |core| {
+            core.nav_stacks.get(&window).map_or(0, Vec::len)
+        })
     }
 
-    fn back(&self, _window: u64) {
-        unimplemented!("kaya: navigation is not yet materialized on this backend")
+    fn back(&self, window: u64) {
+        Self::on_main(move |core| {
+            // The REAL affordance: activate the header bar's back
+            // button — its click handler runs the same user-pop path
+            // a pointer press does. Deferred one idle tick: the
+            // handler re-borrows CORE, which this closure holds.
+            if let Some(back) = core.back_buttons.get(&window).cloned() {
+                glib::idle_add_local_once(move || {
+                    use gtk4::prelude::ButtonExt;
+                    back.emit_clicked();
+                });
+            }
+        })
     }
 
     fn alert_count(&self) -> usize {

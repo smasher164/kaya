@@ -75,6 +75,11 @@ executable confirm
   main-is: confirm.hs
   build-depends: kaya-guests
 
+executable nav
+  import: shared
+  main-is: nav.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

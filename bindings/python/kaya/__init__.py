@@ -912,6 +912,13 @@ def destroy_window(window_id):
     _records().append(wire.tx_destroy_window(int(window_id)))
 
 
+def pop_entry(window=0):
+    """Pop the window's top navigation entry and forget its tree —
+    also the back-veto grammar's confirmation after
+    on_back_requested. Popping an empty stack is a scene error."""
+    _records().append(wire.tx_pop_entry(int(window)))
+
+
 # The alert_choice cancel sentinel, spelled for handlers:
 # `if choice == kaya.CANCEL`. Deliberately not an index.
 CANCEL = wire.ALERT_CHOICE_CANCEL
@@ -1207,7 +1214,8 @@ def when(sig):
 
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
-                 window=0, create=False, veto_close=None):
+                 window=0, create=False, veto_close=None, push=False,
+                 intercept_back=None, on_popped=None, on_back=None):
         self._app = app
         self._mount = mount_on_exit
         self._title = title
@@ -1216,9 +1224,45 @@ class _TxScope:
         self._window = int(window)
         self._create = create
         self._veto_close = veto_close
+        self._push = push
+        self._intercept_back = intercept_back
+        self._on_popped = on_popped
+        self._on_back = on_back
 
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
+        if self._push:
+            # A navigation entry's scope: push onto the primary's
+            # stack, entry props, and the body's root mounts INTO the
+            # entry on exit (self._window carries the entry's surface
+            # id — entries share the namespace with windows). Unlike
+            # every other scope this one NESTS inside an open
+            # transaction: pushes happen from click handlers, which
+            # already run inside the ambient build — the records join
+            # the same commit, and only the root-tracking is scoped.
+            self._nested = _tx is not None
+            if not self._nested:
+                _tx = []
+                _journal = {}
+            self._outer = (_recording, _pending_root)
+            _recording = True
+            _pending_root = None
+            _records().append(wire.tx_push_entry(0, self._window))
+            if self._title is not None:
+                _records().append(
+                    wire.tx_set_entry_title(self._window, str(self._title)))
+            if self._intercept_back is not None:
+                _records().append(wire.tx_set_entry_intercept_back(
+                    self._window, bool(self._intercept_back)))
+            # The handlers ride the push (per-entry, the alert
+            # on_result precedent): the popped registration retires
+            # with the one pop; the back one fires per request while
+            # armed.
+            if self._on_popped is not None:
+                self._app._entry_popped[self._window] = self._on_popped
+            if self._on_back is not None:
+                self._app._back_requested[self._window] = self._on_back
+            return self
         if _tx is not None:
             raise RuntimeError("kaya: transactions do not nest")
         _tx = []
@@ -1243,7 +1287,31 @@ class _TxScope:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        global _tx, _recording, _journal
+        global _tx, _recording, _journal, _pending_root
+        if self._push:
+            # Mount the scope's root into the entry, restore the outer
+            # scope's root-tracking, and — when the scope opened its
+            # own transaction (top-level use) — submit it. Inside a
+            # handler the ambient build owns the commit (and the
+            # rollback: a later exception drops these records with the
+            # rest of the transaction).
+            root = _pending_root
+            _recording, _pending_root = self._outer
+            if exc_type is not None:
+                if not self._nested:
+                    _tx = None
+                    _journal = None
+                return False
+            if root is None:
+                raise RuntimeError(
+                    "kaya: push_entry() body declared no root container")
+            _tx.append(wire.tx_mount(self._window, root.id))
+            if not self._nested:
+                records, _tx = _tx, None
+                _journal = None
+                if records:
+                    runtime.submit(*records)
+            return False
         _recording = False
         records, _tx = _tx, None
         journal, _journal = _journal, None
@@ -1281,6 +1349,10 @@ class App:
         self._widget_handlers = {}
         self._window_handlers = {}
         self._alert_handlers = {}
+        # Per-entry navigation handlers, keyed by entry surface id
+        # (the request-bound alert precedent).
+        self._entry_popped = {}
+        self._back_requested = {}
         self._node_handlers = {}
         _app = self
 
@@ -1319,6 +1391,28 @@ class App:
         outside handlers."""
         return _TxScope(self, mount_on_exit=False)
 
+    def push_entry(self, entry_id, title=None, intercept_back=None,
+                   on_popped=None, on_back=None):
+        """A navigation entry's scene scope (DESIGN.md, Navigation):
+        push_entry onto the primary surface's stack plus the entry's
+        props on entry, and the single top-level container mounts
+        INTO IT on exit. Entry ids are guest-allocated in the shared
+        surface namespace (the create_window discipline). The covered
+        root stays alive — retained until popped.
+
+        The handlers ride the push (per-entry, the show_alert
+        on_result precedent — no id inspection anywhere): on_popped()
+        fires when the user's back affordance pops THIS entry
+        natively (post-fact; a programmatic kaya.pop_entry does not
+        fire it — its caller already knows) and retires with the one
+        pop; on_back() fires per back request while intercept_back is
+        armed — nothing has popped; answer with kaya.pop_entry to
+        agree."""
+        return _TxScope(
+            self, mount_on_exit=True, window=entry_id, push=True,
+            title=title, intercept_back=intercept_back,
+            on_popped=on_popped, on_back=on_back)
+
     def on_close_requested(self, fn):
         """The user asked a veto_close window to close: fn(window_id).
         Nothing has closed; answer with kaya.destroy_window inside a
@@ -1338,6 +1432,25 @@ class App:
                 if handler is not None:
                     try:
                         handler(ident)
+                    except Exception:
+                        traceback.print_exc()
+                continue
+            if kind == wire.OCC_ENTRY_POPPED:
+                # One-shot: the entry is gone; both registrations
+                # retire with it.
+                self._back_requested.pop(ident, None)
+                handler = self._entry_popped.pop(ident, None)
+                if handler is not None:
+                    try:
+                        handler()
+                    except Exception:
+                        traceback.print_exc()
+                continue
+            if kind == wire.OCC_BACK_REQUESTED:
+                handler = self._back_requested.get(ident)
+                if handler is not None:
+                    try:
+                        handler()
                     except Exception:
                         traceback.print_exc()
                 continue

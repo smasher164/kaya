@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The nav scene is the navigation DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's nav legs land with
-# the breadth slice (docs/deferred.md holds the item open).
 # Runs inside the container (see tools/validate-linux.sh): builds kaya
 # against the container's GTK and runs the milestone-0 validations under
 # both display protocols — X11 (Xvfb) and Wayland (headless Weston). The
@@ -30,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -327,6 +324,19 @@ for proto in x11 wayland; do
     run "$proto" confirm-ocaml env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/confirm.exe
     run "$proto" confirm-haskell env KAYA_SELFTEST=confirm "$(hs_bin confirm)"
     run "$proto" confirm-java env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The nav scene: the serial navigation grammar — the header-bar
+    # back button is GTK's back affordance, driven for real; the
+    # intercept_back veto class answers with pop_entry.
+    run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
+    run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
+        python3 guests/python/nav.py
+    run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav
+    run "$proto" nav-csharp env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" nav-ocaml env KAYA_SELFTEST=nav KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/nav.exe
+    run "$proto" nav-haskell env KAYA_SELFTEST=nav "$(hs_bin nav)"
+    run "$proto" nav-java env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

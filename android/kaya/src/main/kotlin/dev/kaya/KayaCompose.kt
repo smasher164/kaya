@@ -277,6 +277,14 @@ object KayaCompose {
         if (System.getenv("KAYA_SELFTEST") != null) startSelftest(activity)
     }
 
+    /** The visible title: the top entry's while the stack is covered
+     * (materialized as the Activity task label, the surface-title
+     * path expect_title reads), the window's own when it empties. */
+    internal fun refreshNavTitle() {
+        val top = KayaSceneModel.navEntries.lastOrNull()
+        mountedActivity?.title = top?.title ?: KayaSceneModel.windowTitle
+    }
+
     private fun startPump(activity: ComponentActivity) {
         thread(name = "kaya-compose-pump") {
             val buffer = ByteArray(64 * 1024)
@@ -400,8 +408,11 @@ object KayaCompose {
                             val title = readString(b)
                             KayaSceneModel.windowTitle = title
                             // The task-label materialization of a
-                            // surface title.
-                            mountedActivity?.title = title
+                            // surface title; while a navigation entry
+                            // covers it the entry's title shows.
+                            if (KayaSceneModel.navEntries.isEmpty()) {
+                                mountedActivity?.title = title
+                            }
                         }
                         WPROP_WIDTH -> KayaSceneModel.windowWidth = readF64(b)
                         WPROP_HEIGHT -> KayaSceneModel.windowHeight = readF64(b)
@@ -460,6 +471,7 @@ object KayaCompose {
                     val entry = KayaSceneModel.navEntries.removeAt(
                         KayaSceneModel.navEntries.size - 1)
                     KayaSceneModel.navIndex.remove(entry.id)
+                    refreshNavTitle()
                 }
                 APPLY_SET_ENTRY_PROP -> {
                     val eid = b.long
@@ -467,7 +479,10 @@ object KayaCompose {
                     b.int // pad
                     val entry = KayaSceneModel.navIndex[eid]!!
                     when (prop) {
-                        EPROP_TITLE -> entry.title = readString(b)
+                        EPROP_TITLE -> {
+                            entry.title = readString(b)
+                            refreshNavTitle()
+                        }
                         EPROP_INTERCEPT_BACK -> entry.interceptBack = readBool(b)
                         else -> error("kaya: unknown entry prop $prop")
                     }
@@ -1307,6 +1322,7 @@ fun kayaUserBack() {
     } else {
         KayaSceneModel.navEntries.removeAt(KayaSceneModel.navEntries.size - 1)
         KayaSceneModel.navIndex.remove(top.id)
+        KayaCompose.refreshNavTitle()
         KayaPresent.emitEntryPopped(top.id)
     }
 }

@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity() {
             "layout" -> Layout::app
             // Alerts are phone-native; confirm runs here for real.
             "confirm" -> Confirm::app
+            // Navigation is phone-native too: predictive back IS the
+            // affordance; nav runs here for real.
+            "nav" -> Nav::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The nav scene is the navigation DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's nav legs land with
-# the breadth slice (docs/deferred.md holds the item open).
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -652,6 +649,23 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle confirmswift dev.kaya.confirmswift "$BUNDLES/confirmswift-bin")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on confirm-swift "$APP" dev.kaya.confirmswift confirm-swift confirm confirm
+
+    # The nav scene: the serial navigation grammar — NavigationStack
+    # is this host's REAL stack; the back verb drives the same
+    # path-shortening write swipe-back makes, and intercept_back
+    # answers with popEntry.
+    cp guests/swift/nav.swift "$BUNDLES/main.swift"
+    xcrun -sdk iphonesimulator swiftc \
+        -target "arm64-apple-ios$IOS_MIN-simulator" \
+        -import-objc-header crates/kaya/include/kaya.h \
+        bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift "$BUNDLES/main.swift" \
+        -L "$TARGET_DIR" -lkaya \
+        -framework UIKit -framework Foundation -framework CoreFoundation \
+        -framework CoreGraphics -framework QuartzCore \
+        -o "$BUNDLES/navswift-bin"
+    APP=$(make_bundle navswift dev.kaya.navswift "$BUNDLES/navswift-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on nav-swift "$APP" dev.kaya.navswift nav-swift nav nav
     drain
     timing swift-build+legs
 fi
@@ -719,6 +733,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle confirmrs-swiftui dev.kaya.confirmswiftui "$TARGET_DIR/examples/confirm")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on confirm-swiftui "$APP" dev.kaya.confirmswiftui confirm-swiftui confirm confirm
+
+    # The nav scene (see the swift leg): the serial stack, phone-native.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example nav
+    APP=$(make_bundle navrs-swiftui dev.kaya.navswiftui "$TARGET_DIR/examples/nav")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on nav-swiftui "$APP" dev.kaya.navswiftui nav-swiftui nav nav
     drain
     timing swiftui-build+legs
 fi

@@ -23,6 +23,7 @@ static class Program
             case "align": AlignScene.Run(); break;
             case "window": WindowScene.Run(); break;
             case "panels": PanelsScene.Run(); break;
+            case "nav": NavScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;

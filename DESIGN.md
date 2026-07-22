@@ -880,6 +880,19 @@ shape; the target's domain grows from "windows" to "surfaces"
   the back button's click to the occurrence. POP stays user-sovereign
   except where the app explicitly armed the same opt-in class windows
   use for close.
+- **Navigation handlers bind to the ENTRY, never to the app** — the
+  request-bound alert precedent, ratified for entries 2026-07-22: the
+  push site knows what popping ITS screen means, so the popped and
+  back-requested handlers ride the push (chain methods, named
+  arguments, or config-list attrs per language; Rust registers per-id
+  on Messages, its alert spelling) and no guest ever inspects an
+  entry id. entry_popped's registration is one-shot — an entry pops
+  at most once (ids never reused) — and retires with the pop, taking
+  the entry's back registration with it; back_requested's fires per
+  request while armed. Registrations on programmatically-popped
+  entries go inert harmlessly, the widget-handler discipline (click
+  handlers on destroyed widgets are the precedent). App-global
+  navigation handlers do not exist.
 - **No capability gate** — the deliberate contrast with aux_windows:
   every host materializes a serial stack natively (Android's
   predictive back, iOS swipe-back, and on the desktops the

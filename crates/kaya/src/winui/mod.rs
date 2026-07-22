@@ -45,7 +45,8 @@ use bindings::Microsoft::UI::Xaml::{
 };
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp,
+    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
+    WindowId, WindowProp,
 };
 use crate::scene::Scene;
 
@@ -124,6 +125,26 @@ struct CoreState {
     /// plus the REAL ContentDialog for the runner's reads and press.
     /// Cleared by the ShowAsync completion — the one emit site.
     live_alert: Option<WinLiveAlert>,
+    /// Live navigation entries by surface id, and per-window stacks
+    /// bottom to top (DESIGN.md, Navigation); the window's own root
+    /// and title come back when its stack empties.
+    nav_entries: HashMap<u64, WinNavEntry>,
+    nav_stacks: HashMap<u64, Vec<u64>>,
+    window_roots: HashMap<u64, UIElement>,
+    window_titles: HashMap<u64, String>,
+}
+
+/// One navigation entry: a pushed scene root, retained while covered
+/// (the wrapper Grid holds it), destroyed at pop. The wrapper's top
+/// row is the backend-owned back bar — WinUI's back affordance here;
+/// visible only while the entry is on screen by construction.
+struct WinNavEntry {
+    window: u64,
+    title: String,
+    /// The close-veto class transplanted to POP.
+    intercept_back: bool,
+    wrapper: Option<Grid>,
+    back_button: Option<Button>,
 }
 
 /// The live alert's identity and its REAL dialog object.
@@ -582,6 +603,106 @@ fn track(weight: f64) -> GridLength {
     }
 }
 
+/// A user-driven back on the window's top entry: an
+/// intercept_back-armed top emits back_requested and nothing pops
+/// (the veto class); an unarmed top pops here, reconciles the
+/// core-owned stack post-fact, and reports entry_popped.
+fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
+        return Ok(());
+    };
+    if core.nav_entries[&top].intercept_back {
+        core.occurrences.send(Occurrence::BackRequested {
+            entry: WindowId(top),
+        });
+        return Ok(());
+    }
+    core.nav_stacks.get_mut(&window).unwrap().pop();
+    core.nav_entries.remove(&top);
+    core.scene.user_popped(WindowId(top));
+    refresh_nav(core, window)?;
+    core.occurrences.send(Occurrence::EntryPopped {
+        entry: WindowId(top),
+    });
+    Ok(())
+}
+
+/// Reconcile the window's visible state with its stack: the top
+/// entry's wrapper and title (the entry title IS the window title
+/// while covered), or the window's own root and title when the stack
+/// empties.
+fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    let target = winui_window(core, window)?;
+    let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
+    match top.and_then(|id| core.nav_entries.get(&id)) {
+        Some(entry) => {
+            if let Some(wrapper) = &entry.wrapper {
+                target.SetContent(wrapper)?;
+            }
+            target.SetTitle(&HSTRING::from(&*entry.title))?;
+        }
+        None => {
+            if let Some(root) = core.window_roots.get(&window) {
+                target.SetContent(root)?;
+            }
+            let own = core.window_titles.get(&window).cloned().unwrap_or_default();
+            target.SetTitle(&HSTRING::from(&*own))?;
+        }
+    }
+    Ok(())
+}
+
+/// Fill a navigation entry at mount: the wrapper Grid is the
+/// backend's chrome — an auto-height back bar (the back affordance;
+/// its click runs the SAME user-pop path a pointer press does) over
+/// a star-height row holding the entry's root.
+fn mount_entry(
+    core: &mut CoreState,
+    entry_id: u64,
+    element: UIElement,
+) -> windows_core::Result<()> {
+    let wrapper = Grid::new()?;
+    let defs = wrapper.RowDefinitions()?;
+    let bar = RowDefinition::new()?;
+    bar.SetHeight(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Auto,
+    })?;
+    defs.Append(&bar)?;
+    let fill = RowDefinition::new()?;
+    fill.SetHeight(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Star,
+    })?;
+    defs.Append(&fill)?;
+    let back = Button::new()?;
+    let caption = TextBlock::new()?;
+    caption.SetText(&HSTRING::from("\u{2190}"))?;
+    back.SetContent(&caption)?;
+    let host = core.nav_entries[&entry_id].window;
+    let handler = RoutedEventHandler::new(move |_, _| {
+        // Fires from the message loop, never under an apply borrow.
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return Ok(()) };
+            user_back(core, host)
+        })
+    });
+    back.Click(&handler)?;
+    let back_el: FrameworkElement = back.cast()?;
+    Grid::SetRow(&back_el, 0)?;
+    wrapper.Children()?.Append(&back_el)?;
+    let content_el: FrameworkElement = element.cast()?;
+    Grid::SetRow(&content_el, 1)?;
+    wrapper.Children()?.Append(&element)?;
+    let entry = core.nav_entries.get_mut(&entry_id).unwrap();
+    entry.wrapper = Some(wrapper);
+    entry.back_button = Some(back);
+    if core.nav_stacks.get(&host).and_then(|s| s.last()) == Some(&entry_id) {
+        refresh_nav(core, host)?;
+    }
+    Ok(())
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -834,7 +955,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let target = winui_window(core, window.0)?;
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
-                    target.SetTitle(&HSTRING::from(&**title))?;
+                    // The window's OWN title; while a navigation entry
+                    // covers it the entry's title shows, and this one
+                    // comes back at pop.
+                    core.window_titles.insert(window.0, title.clone());
+                    let covered = core
+                        .nav_stacks
+                        .get(&window.0)
+                        .is_some_and(|s| !s.is_empty());
+                    if !covered {
+                        target.SetTitle(&HSTRING::from(&**title))?;
+                    }
                 }
                 (WindowProp::Width, Value::F64(v)) => {
                     resize_request(&target, Some(*v), None)?
@@ -865,13 +996,56 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 let _ = aux.Close();
             }
             core.tearing_down.remove(&window.0);
+            // A destroyed window takes its navigation stack with it.
+            for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
+                core.nav_entries.remove(&entry);
+            }
+            core.window_roots.remove(&window.0);
+            core.window_titles.remove(&window.0);
         }
-        // Navigation is not yet materialized on this backend
-        // (depth = SwiftUI on mac; this fan-out is ledgered) —
-        // the first nav scene here must fail loudly, never
-        // silently skip the stack.
-        ApplyOp::PushEntry { .. } | ApplyOp::PopEntry { .. } | ApplyOp::SetEntryProp { .. } => {
-            unimplemented!("kaya: navigation is not yet materialized on this backend")
+        ApplyOp::PushEntry { window, entry } => {
+            // Materializes covered/incoming: on the stack now, the
+            // mount fills and presents it.
+            core.nav_entries.insert(
+                entry.0,
+                WinNavEntry {
+                    window: window.0,
+                    title: String::new(),
+                    intercept_back: false,
+                    wrapper: None,
+                    back_button: None,
+                },
+            );
+            core.nav_stacks.entry(window.0).or_default().push(entry.0);
+        }
+        ApplyOp::PopEntry { window } => {
+            let top = core
+                .nav_stacks
+                .get_mut(&window.0)
+                .and_then(|s| s.pop())
+                .expect("scene validated the pop");
+            core.nav_entries.remove(&top);
+            refresh_nav(core, window.0)?;
+        }
+        ApplyOp::SetEntryProp { entry, prop, value } => {
+            use crate::protocol::EntryProp;
+            let record = core
+                .nav_entries
+                .get_mut(&entry.0)
+                .expect("scene validated the entry id");
+            match (prop, &value) {
+                (EntryProp::Title, Value::Str(title)) => {
+                    record.title = title.clone();
+                }
+                (EntryProp::InterceptBack, Value::Bool(on)) => {
+                    record.intercept_back = *on;
+                }
+                (p, v) => unreachable!("scene validated entry prop {p:?}/{v:?}"),
+            }
+            let window = record.window;
+            if core.nav_stacks.get(&window).and_then(|s| s.last()) == Some(&entry.0) {
+                refresh_nav(core, window)?;
+            }
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
@@ -1071,63 +1245,61 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             reindex(core, parent)?;
         }
         ApplyOp::Mount { window, root } => {
-            match core.widgets.get(&root).expect("scene validated the id") {
-                NativeWidget::Column(panel) | NativeWidget::Row(panel) => {
-                    // The normalized root inset: 16 units INSIDE the
-                    // root (Grid.Padding is inside ActualSize, so the
-                    // root still fills its island and
-                    // expect_root_fills holds).
-                    panel.SetPadding(Thickness {
-                        Left: 16.0,
-                        Top: 16.0,
-                        Right: 16.0,
-                        Bottom: 16.0,
-                    })?;
-                    let target = winui_window(core, window.0)?;
-                    target.SetContent(panel)?;
-                    if window.0 != 0 {
-                        // Mounting presents.
-                        target.Activate()?;
-                    }
-                    // Baseline compensation needs REAL text metrics,
-                    // and at apply time the grid has never had a true
-                    // layout pass (a detached or just-attached measure
-                    // reads zeros — margins came out ~0 and the row
-                    // classified start on the first two Windows runs).
-                    // Loaded fires after the first real layout; the
-                    // one-shot re-runs reindex for every
-                    // baseline-aligned container with live metrics.
-                    let loaded = RoutedEventHandler::new(move |_, _| {
-                        CORE.with_borrow(|core| {
-                            let Some(core) = core.as_ref() else {
-                                return Ok(());
-                            };
-                            let ids: Vec<WidgetId> = core
-                                .aligns
-                                .iter()
-                                .filter(|&(_, &m)| m == 4)
-                                .map(|(&id, _)| id)
-                                .collect();
-                            for id in ids {
-                                reindex(core, id)?;
-                            }
-                            Ok(())
-                        })
-                    });
-                    panel.Loaded(&loaded)?;
-                }
-                NativeWidget::Button { button, .. } => {
-                    let target = winui_window(core, window.0)?;
-                    target.SetContent(button)?;
-                    if window.0 != 0 {
-                        target.Activate()?;
-                    }
-                }
-                NativeWidget::Label(label) => core.window.SetContent(label)?,
-                NativeWidget::Entry(field) => core.window.SetContent(field)?,
-                NativeWidget::Checkbox { check, .. } => core.window.SetContent(check)?,
-                NativeWidget::Slider(slider) => core.window.SetContent(slider)?,
-                NativeWidget::Image(image) => core.window.SetContent(image)?,
+            let widget = core.widgets.get(&root).expect("scene validated the id");
+            if let NativeWidget::Column(panel) | NativeWidget::Row(panel) = widget {
+                // The normalized root inset: 16 units INSIDE the
+                // root (Grid.Padding is inside ActualSize, so the
+                // root still fills its island and
+                // expect_root_fills holds).
+                panel.SetPadding(Thickness {
+                    Left: 16.0,
+                    Top: 16.0,
+                    Right: 16.0,
+                    Bottom: 16.0,
+                })?;
+                // Baseline compensation needs REAL text metrics,
+                // and at apply time the grid has never had a true
+                // layout pass (a detached or just-attached measure
+                // reads zeros — margins came out ~0 and the row
+                // classified start on the first two Windows runs).
+                // Loaded fires after the first real layout; the
+                // one-shot re-runs reindex for every
+                // baseline-aligned container with live metrics.
+                let loaded = RoutedEventHandler::new(move |_, _| {
+                    CORE.with_borrow(|core| {
+                        let Some(core) = core.as_ref() else {
+                            return Ok(());
+                        };
+                        let ids: Vec<WidgetId> = core
+                            .aligns
+                            .iter()
+                            .filter(|&(_, &m)| m == 4)
+                            .map(|(&id, _)| id)
+                            .collect();
+                        for id in ids {
+                            reindex(core, id)?;
+                        }
+                        Ok(())
+                    })
+                });
+                panel.Loaded(&loaded)?;
+            }
+            // The target is a SURFACE: a navigation entry presents
+            // in-window (the push already stacked it; the mount fills
+            // it), the primary is the window's own root, an auxiliary
+            // presents its window.
+            let element = widget.element()?;
+            if core.nav_entries.contains_key(&window.0) {
+                mount_entry(core, window.0, element)?;
+            } else if window.0 == 0 {
+                core.window.SetContent(&element)?;
+                core.window_roots.insert(0, element);
+            } else {
+                let target = winui_window(core, window.0)?;
+                target.SetContent(&element)?;
+                // Mounting presents.
+                target.Activate()?;
+                core.window_roots.insert(window.0, element);
             }
         }
         ApplyOp::Command { id, command } => {
@@ -1618,6 +1790,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             aligns: HashMap::new(),
             window,
             aux_windows: HashMap::new(),
+            nav_entries: HashMap::new(),
+            nav_stacks: HashMap::new(),
+            window_roots: HashMap::new(),
+            window_titles: HashMap::new(),
             window_veto: HashMap::new(),
             tearing_down: std::collections::HashSet::new(),
             live_alert: None,
@@ -2053,15 +2229,39 @@ impl crate::harness::Stage for WinUiStage {
         })
     }
 
-    fn entry_count(&self, _window: u64) -> usize {
-        // Navigation is not yet materialized here (ledgered
-        // fan-out); the apply arm above dies before any leg
-        // could read a vacuous depth.
-        unimplemented!("kaya: navigation is not yet materialized on this backend")
+    fn entry_count(&self, window: u64) -> usize {
+        Self::on_ui(move |core| Ok(core.nav_stacks.get(&window).map_or(0, Vec::len)))
     }
 
-    fn back(&self, _window: u64) {
-        unimplemented!("kaya: navigation is not yet materialized on this backend")
+    fn back(&self, window: u64) {
+        use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+            ButtonAutomationPeer, FrameworkElementAutomationPeer,
+        };
+        Self::on_ui(move |core| {
+            // The REAL affordance: invoke the back bar's button
+            // through its automation peer — the click pipeline a
+            // user's press runs. Deferred one dispatcher tick: the
+            // click handler re-borrows CORE, which this closure
+            // holds.
+            let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
+                return Ok(());
+            };
+            let Some(back) = core
+                .nav_entries
+                .get(&top)
+                .and_then(|e| e.back_button.clone())
+            else {
+                return Ok(());
+            };
+            let queue = DispatcherQueue::GetForCurrentThread()?;
+            let handler = DispatcherQueueHandler::new(move || {
+                let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&back)?;
+                let peer: ButtonAutomationPeer = peer.cast()?;
+                peer.Invoke()
+            });
+            queue.TryEnqueue(&handler)?;
+            Ok(())
+        })
     }
 
     fn alert_count(&self) -> usize {

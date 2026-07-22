@@ -110,6 +110,8 @@ type App struct {
 	// Window lifecycle: one handler each, receiving the window id.
 	closeRequested func(*Tx, uint64)
 	windowClosed   func(*Tx, uint64)
+	entryPopped    map[uint64]func(*Tx)
+	backRequested  map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
@@ -145,6 +147,8 @@ func NewApp() *App {
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
+		entryPopped:   make(map[uint64]func(*Tx)),
+		backRequested: make(map[uint64]func(*Tx)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
@@ -389,6 +393,8 @@ func (a *App) OnCloseRequested(fn func(*Tx, uint64)) {
 func (a *App) OnWindowClosed(fn func(*Tx, uint64)) {
 	a.windowClosed = fn
 }
+
+
 
 
 
@@ -907,6 +913,34 @@ func (tx *Tx) MountIn(window uint64, root Widget) {
 	tx.records = append(tx.records, TxMount(window, root.id))
 }
 
+// PushEntry pushes a navigation entry onto the primary surface's
+// stack (entry ids are guest-allocated in the shared surface
+// namespace, the CreateWindow discipline); it materializes covered
+// and a MountIn presents it. Returns the prop chain:
+// tx.PushEntry(7).Title("detail").InterceptBack(true).
+func (tx *Tx) PushEntry(id uint64) EntryRef {
+	tx.records = append(tx.records, TxPushEntry(0, id))
+	return EntryRef{tx: tx, id: id}
+}
+
+// PushEntryIn pushes onto another window's stack (the System
+// Settings shape: a stack inside a desktop auxiliary).
+func (tx *Tx) PushEntryIn(window, id uint64) EntryRef {
+	tx.records = append(tx.records, TxPushEntry(window, id))
+	return EntryRef{tx: tx, id: id}
+}
+
+// PopEntry pops the primary stack's top entry and forgets its tree —
+// also the back-veto grammar's confirmation after OnBackRequested.
+// Popping an empty stack is a scene error.
+func (tx *Tx) PopEntry() {
+	tx.records = append(tx.records, TxPopEntry(0))
+}
+
+func (tx *Tx) PopEntryIn(window uint64) {
+	tx.records = append(tx.records, TxPopEntry(window))
+}
+
 // ShowAlert requests a modal alert (the request/result grammar): a
 // chain that ends in Show, which sends the one atomic record —
 // tx.ShowAlert().Title("delete item?").Message("…").Action("Delete").
@@ -1027,6 +1061,49 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 // Id returns the window id, for MountIn.
 func (w WindowRef) Id() uint64 {
 	return w.id
+}
+
+// EntryRef chains navigation-entry props, the construction-sugar tier.
+type EntryRef struct {
+	tx *Tx
+	id uint64
+}
+
+// Title names the entry — the back affordance's label source (the
+// iOS back button, the desktop headers).
+func (e EntryRef) Title(title string) EntryRef {
+	e.tx.records = append(e.tx.records, TxSetEntryTitle(e.id, title))
+	return e
+}
+
+// InterceptBack arms the close-veto class transplanted to POP: back
+// emits back_requested and nothing pops until PopEntry agrees.
+func (e EntryRef) InterceptBack(on bool) EntryRef {
+	e.tx.records = append(e.tx.records, TxSetEntryInterceptBack(e.id, on))
+	return e
+}
+
+// OnPopped binds the popped handler to THIS entry (per-entry, the
+// request-bound alert precedent — no id inspection anywhere): fires
+// when the user's back affordance pops it natively (post-fact; a
+// programmatic PopEntry does not fire it — its caller already
+// knows), and the registration retires with the one pop.
+func (e EntryRef) OnPopped(fn func(*Tx)) EntryRef {
+	e.tx.app.entryPopped[e.id] = fn
+	return e
+}
+
+// OnBackRequested binds the back-veto handler to THIS entry: fires
+// each time the user drives back on it while intercept_back is armed
+// — nothing has popped; answer with tx.PopEntry to agree.
+func (e EntryRef) OnBackRequested(fn func(*Tx)) EntryRef {
+	e.tx.app.backRequested[e.id] = fn
+	return e
+}
+
+// Id returns the entry's surface id, for MountIn.
+func (e EntryRef) Id() uint64 {
+	return e.id
 }
 
 func (tx *Tx) Mount(root Widget) {
@@ -1212,6 +1289,18 @@ func (a *App) Run() int {
 			case kind == occWindowClosed:
 				if fn := a.windowClosed; fn != nil {
 					a.dispatch(func(tx *Tx) { fn(tx, id) })
+				}
+			case kind == occEntryPopped:
+				// One-shot: the entry is gone; both registrations
+				// retire with it.
+				delete(a.backRequested, id)
+				if fn := a.entryPopped[id]; fn != nil {
+					delete(a.entryPopped, id)
+					a.dispatch(func(tx *Tx) { fn(tx) })
+				}
+			case kind == occBackRequested:
+				if fn := a.backRequested[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx) })
 				}
 			case kind == occAlertResult:
 				// One-shot: the registration retires with the result.

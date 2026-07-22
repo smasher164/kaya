@@ -423,43 +423,28 @@ Landed history lives in git; this file only carries what is still open.
   action (the platform floor is ContentDialog's two-actions-plus-
   close; more means a custom row on WinUI — no longer the dressed
   floor).
-- Navigation BREADTH (the depth slice landed 2026-07-21: protocol
-  push_entry/pop_entry/set_entry_prop + ENTRY_PROPS/eprop +
-  entry_popped/back_requested, core-owned per-window stacks with
-  user_popped reconcile through capi's PRESENTATION_SCENE, SwiftUI
-  NavigationStack materialization with the path-binding interception
-  point, Compose model/BackHandler/JNI emits written (unproven on the
-  emulator), harness expect_entries/back in both interpreters, Rust
-  push_entry/pop_entry/EntryRef sugar, the nav scene rust-only on
-  mac). Still open, per language/platform: (1) the 7 remaining
-  languages' sugar + nav guests (then nav moves from DEPTH_SCENES
-  into SCENES and the four runner notes become legs); (2) GTK and
-  WinUI materializations (their apply arms and Stage entry_count/back
-  are explicit unimplemented!()s — a nav leg there dies loudly);
-  (3) live proof on Android (predictive back) and iOS (swipe-back;
-  NavigationStack path already drives it); (4) pop_to_root/pop(n)
-  sugar + the binding-side stack mirrors it needs (lowering ratified:
-  N pop_entry in ONE tx, backends animate the net change per batch);
-  (5) macOS `back` verb currently drives the path binding (the same
-  code path the toolbar button writes) — upgrading to a real-chrome
-  click on the NavigationStack toolbar button needs a stable way to
-  find the private toolbar item; (6) signal-bound entry titles have
-  wire + scene + fan-out but no binding sugar anywhere yet.
-  2026-07-21: the planned diagnostic (state dump at retry time +
-  os_log capture, under a loaded 8-wide repro harness) reproduced it
-  on the first wave and OVERTURNED the working theory — the aux
-  window was PRESENT the whole 17s (visible, titled 'inspector', in
-  NSApp.windows) and os_log carried zero SwiftUI scene errors; no
-  openWindow request was ever dropped. The real bug: the
-  KayaWindowAccessor registration was a one-shot
-  DispatchQueue.main.async from makeNSView that raced window
-  attachment and never re-fired, so kayaNSWindows stayed empty and
-  every window-targeted verb (and close_window) starved against an
-  empty registry. Fix: registration is event-driven — the accessor's
-  NSView subclass overrides viewDidMoveToWindow (AppKit's attachment
-  signal); kayaEnsureOpen kept as an idempotent belt, its exhausted
-  case now a self-diagnosing state dump. See the corrected traps.md
-  entry (one-shot registration hooks).
+- ~~Navigation BREADTH~~ LANDED 2026-07-22 (uncommitted): all 8
+  languages' sugar + nav guests byte-identical (nav in SCENES on every
+  desktop runner); GTK materialization (header-bar back button — the
+  REAL affordance, emit_clicked-driven — entry-title-as-window-title
+  with restore, destroy sweeps stacks); WinUI materialization (wrapper
+  Grid back bar, automation-peer press, same title discipline); both
+  reconcile the core via scene.user_popped on their own sinks. Mobile:
+  Compose BackHandler + task-label title materialization; iOS
+  NavigationStack with the model-title read (no title bar). HANDLER
+  REWORK ratified mid-breadth (Akhil): per-entry popped/back handlers
+  ride the push (chain/named-arg/config-list per language; Rust =
+  msgs.on_entry_popped(entry, msg), the alert spelling); app-global
+  navigation handlers DELETED everywhere; entry_popped registration is
+  one-shot and retires with the pop, taking the entry's back
+  registration; registrations on programmatically-popped entries go
+  inert (the widget-handler discipline). Recorded in DESIGN.md's
+  Navigation section. Still open from the depth ledger: (1)
+  pop_to_root/pop(n) sugar + the binding stack mirrors it needs; (2)
+  the macOS `back` verb drives the path binding (GTK/WinUI/Compose
+  drive real chrome; mac needs a stable handle on NavigationStack's
+  private toolbar button); (3) signal-bound entry titles have wire +
+  scene + fan-out but no binding sugar.
 - ~~A java leg on Windows~~ LANDED: 12 java legs in deploy-win (60
   checks total) — sources shipped, javac IN PLACE on the VM (the C#
   ship-and-build precedent), quote-free run_ssh lines (the sshd

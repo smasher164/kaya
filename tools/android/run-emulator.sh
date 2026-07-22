@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# The nav scene is the navigation DEPTH slice: protocol + SwiftUI on
-# mac + the rust guest only for now. This runner's nav legs land with
-# the breadth slice (docs/deferred.md holds the item open).
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -321,6 +318,13 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity confirm \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script confirm)'"
+    # The nav scene: navigation is phone-native — the system back
+    # gesture (the BackHandler dispatch) is the affordance, and
+    # intercept_back answers with pop_entry.
+    run_apk nav-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity nav \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'"
     drain
     timing legs-compose
 fi
@@ -374,6 +378,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity confirm \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script confirm)'"
+    # The nav scene through the JVM binding (see the compose leg).
+    run_apk nav-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity nav \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'"
     drain
     timing legs-jvm
 fi

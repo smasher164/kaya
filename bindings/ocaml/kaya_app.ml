@@ -61,6 +61,8 @@ type app = {
   widget_values : (int64, float -> tx -> unit) Hashtbl.t;
   (* Window lifecycle: one handler each, receiving the window id. *)
   mutable close_requested : (int64 -> tx -> unit) option;
+  entry_popped : (int64, tx -> unit) Hashtbl.t;
+  back_requested : (int64, tx -> unit) Hashtbl.t;
   alert_handlers : (int64, int -> tx -> unit) Hashtbl.t;
   mutable next_alert : int64;
   mutable window_closed : (int64 -> tx -> unit) option;
@@ -115,6 +117,8 @@ let create () =
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
     close_requested = None;
+    entry_popped = Hashtbl.create 8;
+    back_requested = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
     window_closed = None;
@@ -731,6 +735,37 @@ let destroy_window id tx = emit tx (Kaya_wire.tx_destroy_window id)
 (* Mount a root into a specific window; mounting presents. *)
 let mount_in window (Widget root) tx = emit tx (Kaya_wire.tx_mount window root)
 
+(* Push a navigation entry onto the primary surface's stack (entry
+   ids are guest-allocated in the shared surface namespace, the
+   [create_window] discipline); materializes covered, [mount_in]
+   presents it. Labeled optional arguments are the OCaml spelling:
+   [push_entry ~title:"detail" ~intercept_back:true 7L].
+
+   The handlers ride the push (per-entry, the [show_alert]
+   ~on_result precedent — no id inspection anywhere): [~on_popped]
+   fires when the user's back affordance pops THIS entry natively
+   (post-fact; a programmatic [pop_entry] does not fire it — its
+   caller already knows) and retires with the one pop;
+   [~on_back_requested] fires per back request while intercept_back
+   is armed — nothing has popped; answer with [pop_entry] to
+   agree. *)
+let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
+    ?on_back_requested id tx =
+  emit tx (Kaya_wire.tx_push_entry window id);
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_entry_title id t)) title;
+  Option.iter
+    (fun i -> emit tx (Kaya_wire.tx_set_entry_intercept_back id i))
+    intercept_back;
+  Option.iter (fun f -> Hashtbl.replace tx.app.entry_popped id f) on_popped;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.back_requested id f)
+    on_back_requested
+
+(* Pop the window's top navigation entry and forget its tree — also
+   the back-veto grammar's confirmation after [on_back_requested].
+   Popping an empty stack is a scene error. *)
+let pop_entry ?(window = 0L) () tx = emit tx (Kaya_wire.tx_pop_entry window)
+
 (* Request a modal alert (the request/result grammar); labeled
    arguments are the OCaml spelling:
    [show_alert ~title ~message ~actions:["Delete"; "Archive"]
@@ -773,6 +808,7 @@ let on_close_requested app handler = app.close_requested <- Some handler
 (* A non-veto auxiliary's chrome close (informational;
    [destroy_window] reconciles). *)
 let on_window_closed app handler = app.window_closed <- Some handler
+
 
 let mount (Widget root) tx = emit tx (Kaya_wire.tx_mount 0L root)
 
@@ -1139,6 +1175,19 @@ let dispatch_loop app =
          else if kind = Kaya_wire.occ_kind_window_closed then
            (match app.window_closed with
            | Some handler -> dispatch app (handler id)
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_entry_popped then (
+           (* One-shot: the entry is gone; both registrations retire
+              with it. *)
+           Hashtbl.remove app.back_requested id;
+           match Hashtbl.find_opt app.entry_popped id with
+           | Some handler ->
+               Hashtbl.remove app.entry_popped id;
+               dispatch app handler
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_back_requested then
+           (match Hashtbl.find_opt app.back_requested id with
+           | Some handler -> dispatch app handler
            | None -> ())
          else if kind = Kaya_wire.occ_kind_alert_result then
            (* One-shot: the registration retires with the result. *)

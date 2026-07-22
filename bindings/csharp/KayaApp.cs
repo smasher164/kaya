@@ -199,6 +199,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
     // Window lifecycle: one handler each, receiving the window id.
     Action<Tx, ulong>? closeRequested;
+    internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
+    internal readonly Dictionary<ulong, Action<Tx>> backRequested = new();
     Action<Tx, ulong>? windowClosed;
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
     internal ulong nextAlert;
@@ -405,6 +407,19 @@ sealed class KayaApp
                 if (windowClosed is { } fn)
                     Dispatch(tx => fn(tx, id));
             }
+            else if (kind == KayaWire.OccKindEntryPopped)
+            {
+                // One-shot: the entry is gone; both registrations
+                // retire with it.
+                backRequested.Remove(id);
+                if (entryPopped.Remove(id, out var fn))
+                    Dispatch(tx => fn(tx));
+            }
+            else if (kind == KayaWire.OccKindBackRequested)
+            {
+                if (backRequested.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx));
+            }
             else if (kind == KayaWire.OccKindAlertResult)
             {
                 // One-shot: the registration retires with the result;
@@ -422,6 +437,7 @@ sealed class KayaApp
     /// A non-veto auxiliary's chrome close (informational;
     /// DestroyWindow reconciles).
     public void OnWindowClosed(Action<Tx, ulong> fn) => windowClosed = fn;
+
 
     /// Enter the core on the calling thread (must be the process main
     /// thread), dispatching occurrences on the app thread; returns the
@@ -1135,6 +1151,35 @@ sealed class Tx
     /// Close and forget an auxiliary window — also the veto grammar's
     /// confirmation and the reconciliation after a chrome close.
     public void DestroyWindow(ulong id) => Records.Add(KayaWire.TxDestroyWindow(id));
+
+    /// Push a navigation entry onto the primary surface's stack
+    /// (entry ids are guest-allocated in the shared surface
+    /// namespace, the CreateWindow discipline). Materializes covered;
+    /// MountIn presents it. Named arguments are the C# spelling:
+    /// tx.PushEntry(7, title: "detail", interceptBack: true).
+    /// The handlers ride the push (per-entry, the ShowAlert onResult
+    /// precedent — no id inspection anywhere): onPopped fires when
+    /// the user's back affordance pops THIS entry natively
+    /// (post-fact; a programmatic PopEntry does not fire it — its
+    /// caller already knows) and retires with the one pop;
+    /// onBackRequested fires per back request while interceptBack is
+    /// armed — nothing has popped; answer with tx.PopEntry to agree.
+    public void PushEntry(
+        ulong id, string? title = null, bool? interceptBack = null,
+        Action<Tx>? onPopped = null, Action<Tx>? onBackRequested = null,
+        ulong window = 0)
+    {
+        Records.Add(KayaWire.TxPushEntry(window, id));
+        if (title is { } t) Records.Add(KayaWire.TxSetEntryTitle(id, t));
+        if (interceptBack is { } i) Records.Add(KayaWire.TxSetEntryInterceptBack(id, i));
+        if (onPopped is { } p) App.entryPopped[id] = p;
+        if (onBackRequested is { } b) App.backRequested[id] = b;
+    }
+
+    /// Pop the window's top navigation entry and forget its tree —
+    /// also the back-veto grammar's confirmation after
+    /// OnBackRequested. Popping an empty stack is a scene error.
+    public void PopEntry(ulong window = 0) => Records.Add(KayaWire.TxPopEntry(window));
 
     /// Mount a root into a specific window; mounting presents an
     /// auxiliary.

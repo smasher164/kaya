@@ -1632,8 +1632,8 @@ pub struct Messages<M> {
     // close events are app-global grammar, not per-widget wiring.
     close_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
     window_closed: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
-    back_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
-    entry_popped: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    back_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
 }
 
@@ -1652,8 +1652,8 @@ impl<M> Messages<M> {
             nodes: RefCell::new(HashMap::new()),
             close_requested: RefCell::new(None),
             window_closed: RefCell::new(None),
-            back_requested: RefCell::new(None),
-            entry_popped: RefCell::new(None),
+            back_requested: RefCell::new(HashMap::new()),
+            entry_popped: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
         }
     }
@@ -1764,18 +1764,33 @@ impl<M> Messages<M> {
         *self.window_closed.borrow_mut() = Some(Box::new(f));
     }
 
-    /// The user drove the back affordance on an entry whose
-    /// intercept_back is armed (the veto class: nothing has popped;
-    /// answer with pop_entry to agree).
-    pub fn on_back_requested(&self, f: impl Fn(WindowId) -> M + 'static) {
-        *self.back_requested.borrow_mut() = Some(Box::new(f));
+    /// Bind the back-veto handler to ONE entry (the id
+    /// [`EntryRef::id`] returned): fires each time the user drives
+    /// back on it while intercept_back is armed — nothing has popped;
+    /// answer with pop_entry to agree. Per-entry, never app-global:
+    /// the push site knows what backing out of ITS screen means (the
+    /// request-bound alert precedent — no id inspection anywhere).
+    pub fn on_back_requested(&self, entry: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.back_requested
+            .borrow_mut()
+            .insert(entry.0, Box::new(move || msg.clone()));
     }
 
-    /// The user's back affordance popped an entry natively
-    /// (informational and post-fact; the core's stack and the
-    /// binding's mirror have already reconciled).
-    pub fn on_entry_popped(&self, f: impl Fn(WindowId) -> M + 'static) {
-        *self.entry_popped.borrow_mut() = Some(Box::new(f));
+    /// Bind the popped handler to ONE entry: fires when the user's
+    /// back affordance pops it natively (post-fact; the core's stack
+    /// has already reconciled), and the registration retires with it
+    /// — an entry pops at most once. A programmatic pop_entry does
+    /// not fire it: its caller already knows.
+    pub fn on_entry_popped(&self, entry: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.entry_popped
+            .borrow_mut()
+            .insert(entry.0, Box::new(move || msg.clone()));
     }
 
     /// Bind the one-shot result handler to a REQUEST (the id
@@ -1818,10 +1833,13 @@ impl<M> Messages<M> {
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
                 }
                 Occurrence::BackRequested { entry } => {
-                    self.back_requested.borrow().as_ref().map(|f| f(*entry))
+                    self.back_requested.borrow().get(&entry.0).map(|f| f())
                 }
                 Occurrence::EntryPopped { entry } => {
-                    self.entry_popped.borrow().as_ref().map(|f| f(*entry))
+                    // One-shot: the entry is gone; both registrations
+                    // retire with it.
+                    self.back_requested.borrow_mut().remove(&entry.0);
+                    self.entry_popped.borrow_mut().remove(&entry.0).map(|f| f())
                 }
             };
             if let Some(m) = mapped {

@@ -62,6 +62,9 @@ public final class Main {
             case "confirm":
                 app = Confirm::app;
                 break;
+            case "nav":
+                app = Nav::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

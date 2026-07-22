@@ -61,6 +61,9 @@ module KayaApp
     mount,
     mountIn,
     createWindow,
+    pushEntry,
+    popEntry,
+    EntryAttr (..),
     destroyWindow,
     WindowAttr (..),
     AlertAttr (..),
@@ -238,6 +241,8 @@ data BuildState = BuildState
 data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (Word32 -> IO ())
+  | PEntryPopped !Word64 (IO ())
+  | PBackRequested !Word64 (IO ())
   | PChange !Word64 (String -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
@@ -602,6 +607,43 @@ destroyWindow n = emitB (W.txDestroyWindow n)
 mountIn :: Word64 -> Widget -> Build ()
 mountIn window (Widget n) = emitB (W.txMount window n)
 
+-- | Navigation-entry construction attributes — the config-list
+-- spelling. The handler attrs ride the push (per-entry, the
+-- 'showAlert' handler precedent — no id inspection anywhere):
+-- 'EOnPopped' fires when the user's back affordance pops THIS entry
+-- natively (post-fact; a programmatic 'popEntry' does not fire it —
+-- its caller already knows) and retires with the one pop; 'EOnBack'
+-- fires per back request while intercept_back is armed — nothing has
+-- popped; answer with 'popEntry' to agree.
+data EntryAttr
+  = ETitle String
+  | EInterceptBack Bool
+  | EOnPopped (IO ())
+  | EOnBack (IO ())
+
+-- | Push a navigation entry onto the primary surface's stack (entry
+-- ids are guest-allocated in the shared surface namespace, the
+-- 'createWindow' discipline); materializes covered, 'mountIn'
+-- presents it:
+-- @pushEntry 7 [ETitle "detail", EOnPopped (…)]@. Handler
+-- registrations ride 'bPending': an abandoned Build abandons them
+-- with its records.
+pushEntry :: Word64 -> [EntryAttr] -> Build ()
+pushEntry n attrs = do
+  emitB (W.txPushEntry 0 n)
+  mapM_ apply attrs
+  where
+    apply (ETitle t) = emitB (W.txSetEntryTitle n t)
+    apply (EInterceptBack v) = emitB (W.txSetEntryInterceptBack n v)
+    apply (EOnPopped handler) = pendB (PEntryPopped n handler)
+    apply (EOnBack handler) = pendB (PBackRequested n handler)
+
+-- | Pop the primary stack's top navigation entry and forget its tree
+-- — also the back-veto grammar's confirmation after
+-- 'onBackRequested'. Popping an empty stack is a scene error.
+popEntry :: Build ()
+popEntry = emitB (W.txPopEntry 0)
+
 -- | The veto class: the user asked a veto_close window to close;
 -- nothing has closed — answer with 'destroyWindow' to agree.
 onCloseRequested :: App -> (Word64 -> IO ()) -> IO ()
@@ -613,6 +655,7 @@ onCloseRequested app handler =
 onWindowClosed :: App -> (Word64 -> IO ()) -> IO ()
 onWindowClosed app handler =
   writeIORef (appWindowClosed app) (Just handler)
+
 
 -- | Alert construction attributes — the config-list spelling.
 data AlertAttr
@@ -1375,6 +1418,10 @@ data App = App
     -- Window lifecycle: one handler each, receiving the window id.
     appCloseRequested :: IORef (Maybe (Word64 -> IO ())),
     appWindowClosed :: IORef (Maybe (Word64 -> IO ())),
+    -- Per-entry navigation handlers, keyed by entry surface id (the
+    -- request-bound alert precedent).
+    appEntryPopped :: IORef (Map.Map Word64 (IO ())),
+    appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64
   }
@@ -1418,6 +1465,8 @@ register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
+  PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
+  PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
   PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
@@ -1487,6 +1536,8 @@ newApp =
     <*> newIORef Nothing
     <*> newIORef Nothing
     <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
     <*> newIORef 0
 
 -- | Set up (build the scene, register handlers) and run: occurrences
@@ -1554,6 +1605,18 @@ dispatchLoop app = do
       | kind == W.occKindWindowClosed -> do
           handler <- readIORef (appWindowClosed app)
           dispatch (mapM_ ($ ident) handler)
+          dispatchLoop app
+      | kind == W.occKindEntryPopped -> do
+          -- One-shot: the entry is gone; both registrations retire
+          -- with it.
+          modifyIORef' (appBackRequested app) (Map.delete ident)
+          handlers <- readIORef (appEntryPopped app)
+          modifyIORef' (appEntryPopped app) (Map.delete ident)
+          dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindBackRequested -> do
+          handlers <- readIORef (appBackRequested app)
+          dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindAlertResult -> do
           -- The parser boxes the u32 choice as VI64. One-shot: the

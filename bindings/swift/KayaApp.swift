@@ -216,6 +216,8 @@ final class KayaApp {
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
     private var closeRequested: ((KayaAppTx, UInt64) throws -> Void)?
+    private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var nextAlert: UInt64 = 0
     private var windowClosed: ((KayaAppTx, UInt64) throws -> Void)?
@@ -510,6 +512,17 @@ final class KayaApp {
         windowClosed = handler
     }
 
+    /// Per-entry navigation registrations (internal: the pushEntry
+    /// sugar registers at push time — the request-bound alert
+    /// precedent; the popped one retires with its one pop).
+    func onEntryPopped(_ entry: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        entryPopped[entry] = handler
+    }
+
+    func onBackRequested(_ entry: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        backRequested[entry] = handler
+    }
+
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
@@ -566,6 +579,17 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED), _):
                 if let handler = windowClosed {
                     dispatch { try build { tx in try handler(tx, id) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_ENTRY_POPPED), _):
+                // One-shot: the entry is gone; both registrations
+                // retire with it.
+                backRequested.removeValue(forKey: id)
+                if let handler = entryPopped.removeValue(forKey: id) {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_BACK_REQUESTED), _):
+                if let handler = backRequested[id] {
+                    dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
                 // One-shot: the registration retires with the result.
@@ -1239,6 +1263,38 @@ final class KayaAppTx {
     /// confirmation and the reconciliation after a chrome close.
     func destroyWindow(_ id: UInt64) {
         tx.destroyWindow(id)
+    }
+
+    /// Push a navigation entry onto the primary surface's stack
+    /// (entry ids are guest-allocated in the shared surface
+    /// namespace, the createWindow discipline); materializes covered,
+    /// mountIn presents it. Named arguments are the Swift spelling:
+    /// tx.pushEntry(7, title: "detail", interceptBack: true).
+    /// The handlers ride the push (per-entry, the showAlert onResult
+    /// precedent — no id inspection anywhere): onPopped fires when
+    /// the user's back affordance pops THIS entry natively
+    /// (post-fact; a programmatic popEntry does not fire it — its
+    /// caller already knows) and retires with the one pop;
+    /// onBackRequested fires per back request while interceptBack is
+    /// armed — nothing has popped; answer with tx.popEntry to agree.
+    func pushEntry(
+        _ id: UInt64, title: String? = nil, interceptBack: Bool? = nil,
+        onPopped: ((KayaAppTx) throws -> Void)? = nil,
+        onBackRequested: ((KayaAppTx) throws -> Void)? = nil,
+        window: UInt64 = 0
+    ) {
+        tx.pushEntry(window, id)
+        if let title { tx.setEntryTitle(id, title) }
+        if let interceptBack { tx.setEntryInterceptBack(id, interceptBack) }
+        if let onPopped { app.onEntryPopped(id, onPopped) }
+        if let onBackRequested { app.onBackRequested(id, onBackRequested) }
+    }
+
+    /// Pop the window's top navigation entry and forget its tree —
+    /// also the back-veto grammar's confirmation after
+    /// onBackRequested. Popping an empty stack is a scene error.
+    func popEntry(window: UInt64 = 0) {
+        tx.popEntry(window)
     }
 
     /// Mount a root into a specific window; mounting presents an
