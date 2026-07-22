@@ -438,9 +438,14 @@ Landed history lives in git; this file only carries what is still open.
   round trip), iOS per-scene compiles pooled + sims 2->3 (builds
   32+19 -> 23+15), android emus 2->3 (legs 23+22 -> 18+15). Serial
   matrix now ~4m20s warm (mac 55s, linux 1m14s, windows 47s, iOS
-  ~48s, android 43s); concurrent bound = linux. Remaining levers:
-  linux container internals (in-container builds dominate its 71s),
-  a real swiftmodule for the iOS/mac bindings, VM with more cores. The
+  ~48s, android 43s); concurrent bound = linux. THIRD PASS same day: linux
+  container builds pooled (dotnet/javac start before the cargo build
+  — they never link libkaya; dune/cabal/go/C pool after it) —
+  container phase 71s->49s, wall 50s. Every lane now runs under a
+  minute: mac 55s, linux 50s, windows 47s, iOS ~48s warm, android
+  43s — serial ~4m03s, concurrent bound ~55s. Remaining (diminishing
+  returns): a real swiftmodule for the Swift bindings, VM with more
+  cores. The
   rollout also flushed out four REAL WinUI bugs the settles had
   preserved (see traps.md).
   The original benchmark record: (benchmarked 2026-07-22; the

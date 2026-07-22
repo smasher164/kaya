@@ -30,15 +30,68 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
+
+# Phase timing, the validate-mac convention: greppable lines say
+# where the container's wall time went.
+KAYA_T0=$SECONDS
+timing() {
+    echo "TIMING $1 $((SECONDS - KAYA_T0))s"
+    KAYA_T0=$SECONDS
+}
+
+# The guest builds pool (the validate-mac convention, measured there
+# 2026-07-22): dotnet and javac never link libkaya, so they start
+# BEFORE the cargo build; everything that links (dune, cabal, go's
+# cgo, the C floor) pools after it. Each job logs to its own file;
+# a failure prints its log and dies.
+BUILDS_DIR="$(mktemp -d)"
+build_names=()
+build_pids=()
+run_build() {
+    local name="$1"
+    shift
+    ("$@") >"$BUILDS_DIR/$name.log" 2>&1 &
+    build_pids+=($!)
+    build_names+=("$name")
+}
+drain_builds() {
+    local i=0 pid failed=0
+    for pid in "${build_pids[@]}"; do
+        if ! wait "$pid"; then
+            echo "guest build FAILED: ${build_names[$i]}" >&2
+            cat "$BUILDS_DIR/${build_names[$i]}.log" >&2
+            failed=1
+        fi
+        i=$((i + 1))
+    done
+    build_pids=()
+    build_names=()
+    [ "$failed" = 0 ] || status=1
+}
+
+build_csharp() { dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null; }
+build_java() {
+    mkdir -p /tmp/java-guests
+    javac -d /tmp/java-guests \
+        bindings/java-desktop/dev/kaya/KayaRing.java \
+        bindings/java/dev/kaya/*.java \
+        guests/java/dev/kaya/milestone2kt/*.java \
+        guests/java-desktop/dev/kaya/milestone2kt/Main.java
+}
+# dotnet writes obj/bin next to the csproj; build in a scratch copy
+# so the host's in-tree dotnet artifacts (different RID) are
+# untouched. Copied BEFORE the early build starts (the pooled build
+# raced this copy once and built nothing).
+mkdir -p /tmp/cs
+cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp/cs/
+run_build csharp build_csharp
+run_build java build_java
+
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
+timing core-build
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
-
-# dotnet writes obj/bin next to the csproj; build in a scratch copy so the
-# host's in-tree dotnet artifacts (different RID) are untouched.
-mkdir -p /tmp/cs
-cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp/cs/
 
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
@@ -153,43 +206,44 @@ drain() {
 }
 
 # The C guests: the ABI's home language over the function floor.
-make -C guests/c TARGET_DIR="$CARGO_TARGET_DIR/debug" OUT=/tmp/c-guests || status=1
+build_c() { make -C guests/c TARGET_DIR="$CARGO_TARGET_DIR/debug" OUT=/tmp/c-guests; }
+run_build c build_c
 
 # The OCaml guests: one dune build for the binding library and all
 # four scenes. Its own build dir: _build is shared with the host
 # through the repo mount, and dune keys targets on source hashes, not
 # platform — without this the container gets handed mac binaries as
 # "fresh" (the same disease target-linux/ exists to prevent for cargo).
-dune build --build-dir=_build-linux || status=1
+build_ocaml() { dune build --build-dir=_build-linux; }
+run_build ocaml build_ocaml
 
 # The Haskell guests: one cabal build; list-bin locates the outputs.
 # The rpath travels via ghc-options — macOS resolves libkaya by its
 # absolute install name, Linux only by rpath or LD_LIBRARY_PATH.
-(cd guests/haskell && cabal build all \
-    --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
-    --ghc-options="-optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0) || status=1
+build_haskell() {
+    cd guests/haskell && cabal build all \
+        --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
+        --ghc-options="-optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0
+}
+run_build haskell build_haskell
 hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 
 # dotnet run and go run rebuild per invocation; build each guest once
 # and let the legs exec the outputs.
-dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null || status=1
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
-mkdir -p /tmp/go-guests
-for guest in $SCENES; do
-    go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || status=1
-done
+build_go() {
+    mkdir -p /tmp/go-guests
+    local guest
+    for guest in $SCENES; do
+        go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
+    done
+}
+run_build go build_go
 
-
-# The Java guests: the shared binding + the desktop transport
-# (bindings/java-desktop's KayaRing) + every scene + the Main
-# selector, one javac in-container (classfiles are platform-neutral,
-# but the suite builds what it ships).
-mkdir -p /tmp/java-guests
-javac -d /tmp/java-guests \
-    bindings/java-desktop/dev/kaya/KayaRing.java \
-    bindings/java/dev/kaya/*.java \
-    guests/java/dev/kaya/milestone2kt/*.java \
-    guests/java-desktop/dev/kaya/milestone2kt/Main.java || status=1
+# ... and the pool drains here: csharp/java started before the cargo
+# build (no libkaya link), the rest right after it.
+drain_builds
+timing guest-builds
 
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
@@ -396,6 +450,7 @@ for proto in x11 wayland; do
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
 done
 drain
+timing legs
 
 kill "$WESTON_PID" 2>/dev/null
 
