@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x4da364d017f52b15
+SPEC_HASH = 0x833a2a32e4a52f92
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -38,6 +38,8 @@ WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
 WPROP_VETO_CLOSE = 4
+EPROP_TITLE = 1
+EPROP_INTERCEPT_BACK = 2
 ALERT_CHOICE_ACTION0 = 0
 ALERT_CHOICE_ACTION1 = 1
 ALERT_CHOICE_CANCEL = 4294967295
@@ -78,6 +80,9 @@ TX_SET_WINDOW_PROP = 18
 TX_CREATE_WINDOW = 19
 TX_DESTROY_WINDOW = 20
 TX_SHOW_ALERT = 21
+TX_PUSH_ENTRY = 22
+TX_POP_ENTRY = 23
+TX_SET_ENTRY_PROP = 24
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -89,6 +94,9 @@ APPLY_SET_WINDOW_PROP = 8
 APPLY_CREATE_WINDOW = 9
 APPLY_DESTROY_WINDOW = 10
 APPLY_PRESENT_ALERT = 11
+APPLY_PUSH_ENTRY = 12
+APPLY_POP_ENTRY = 13
+APPLY_SET_ENTRY_PROP = 14
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -96,6 +104,8 @@ OCC_VALUE_CHANGED = 4
 OCC_CLOSE_REQUESTED = 5
 OCC_WINDOW_CLOSED = 6
 OCC_ALERT_RESULT = 7
+OCC_ENTRY_POPPED = 8
+OCC_BACK_REQUESTED = 9
 
 
 def _pad(b):
@@ -228,6 +238,18 @@ def tx_destroy_window(window_id):
 def tx_show_alert(window, alert, actions, title, message, action0, action1, cancel):
     """Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires."""
     return record(TX_SHOW_ALERT, struct.pack("<Q", window) + struct.pack("<Q", alert) + struct.pack("<I", actions) + struct.pack("<I", 0) + _enc.value(title) + _enc.value(message) + _enc.value(action0) + _enc.value(action1) + _enc.value(cancel))
+
+def tx_push_entry(window, entry):
+    """Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation)."""
+    return record(TX_PUSH_ENTRY, struct.pack("<Q", window) + struct.pack("<Q", entry))
+
+def tx_pop_entry(window):
+    """Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch."""
+    return record(TX_POP_ENTRY, struct.pack("<Q", window))
+
+def tx_set_entry_prop(entry, prop, source):
+    """Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements."""
+    return record(TX_SET_ENTRY_PROP, struct.pack("<Q", entry) + struct.pack("<I", prop) + struct.pack("<I", source))
 
 
 def tx_set_text(widget_id, text):
@@ -405,6 +427,26 @@ def tx_bind_window_veto_close(window, signal_id):
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_VETO_CLOSE, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_entry_title(entry, title):
+    """set_entry_prop with a constant title value (str)."""
+    return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+
+
+def tx_bind_entry_title(entry, signal_id):
+    """set_entry_prop with a signal-bound title value."""
+    return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_TITLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_entry_intercept_back(entry, intercept_back):
+    """set_entry_prop with a constant intercept_back value (bool)."""
+    return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_INTERCEPT_BACK, SOURCE_CONST) + _enc.value(intercept_back))
+
+
+def tx_bind_entry_intercept_back(entry, signal_id):
+    """set_entry_prop with a signal-bound intercept_back value."""
+    return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_INTERCEPT_BACK, SOURCE_SIGNAL, signal_id))
+
+
 def parse_value(buf, at):
     """Decode one value; returns (python value, next offset)."""
     vtype, vlen = struct.unpack_from("<II", buf, at)
@@ -433,17 +475,17 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
         alert, choice = struct.unpack_from("<QI", buf, 8)
         return kind, alert, [], choice
-    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):
-        # Window lifecycle records carry the window id alone —
-        # no key path, no payload.
-        (window_id,) = struct.unpack_from("<Q", buf, 8)
-        return kind, window_id, [], None
+    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
+        # Surface lifecycle records carry the surface id alone —
+        # no key path, no payload (derived from the record shapes).
+        (surface_id,) = struct.unpack_from("<Q", buf, 8)
+        return kind, surface_id, [], None
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
     at = 24

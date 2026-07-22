@@ -193,6 +193,27 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    \"\"\"set_window_prop with a signal-bound {prop} value; window 0, the primary surface.\"\"\""));
         c.line(&format!("    return record(TX_SET_WINDOW_PROP, struct.pack(\"<QIIQ\", window, WPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (ty, expr) = match kind {
+            PropKind::Str => ("str", format!("_enc.value({prop})")),
+            PropKind::Bool => ("bool", format!("_enc.value({prop})")),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_entry_{prop}(entry, {prop}):"));
+        c.line(&format!("    \"\"\"set_entry_prop with a constant {prop} value ({ty}).\"\"\""));
+        c.line(&format!("    return record(TX_SET_ENTRY_PROP, struct.pack(\"<QII\", entry, EPROP_{up}, SOURCE_CONST) + {expr})"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_entry_{prop}(entry, signal_id):"));
+        c.line(&format!("    \"\"\"set_entry_prop with a signal-bound {prop} value.\"\"\""));
+        c.line(&format!("    return record(TX_SET_ENTRY_PROP, struct.pack(\"<QIIQ\", entry, EPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+    }
     c.line("");
     c.line("");
     c.line("def parse_value(buf, at):");
@@ -235,11 +256,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("        alert, choice = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("        return kind, alert, [], choice");
-        c.line("    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED):");
-    c.line("        # Window lifecycle records carry the window id alone —");
-    c.line("        # no key path, no payload.");
-    c.line("        (window_id,) = struct.unpack_from(\"<Q\", buf, 8)");
-    c.line("        return kind, window_id, [], None");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line(&format!("    if kind in ({id_only}):"));
+    c.line("        # Surface lifecycle records carry the surface id alone —");
+    c.line("        # no key path, no payload (derived from the record shapes).");
+    c.line("        (surface_id,) = struct.unpack_from(\"<Q\", buf, 8)");
+    c.line("        return kind, surface_id, [], None");
 c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
     c.line("    at = 24");

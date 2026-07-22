@@ -61,6 +61,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "window" => Some(include_str!("../../../tools/scenes/window.steps")),
         "panels" => Some(include_str!("../../../tools/scenes/panels.steps")),
         "confirm" => Some(include_str!("../../../tools/scenes/confirm.steps")),
+        "nav" => Some(include_str!("../../../tools/scenes/nav.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -170,6 +171,15 @@ pub enum Step {
     AlertChoose(u32),
     /// The number of live alerts (0 or 1 — one per process).
     ExpectAlerts(usize),
+    /// The window's navigation-stack depth (None = the implicit
+    /// primary; Some(n) prefixes the observation with `window#n `).
+    ExpectEntries(Option<u64>, usize),
+    /// Drive the window's REAL back affordance (the toolbar back
+    /// button's path, the predictive gesture's path): an armed
+    /// intercept_back entry emits back_requested and nothing pops; an
+    /// unarmed top pops and reports entry_popped. An action, silent
+    /// like click and close_window. None = the implicit primary.
+    Back(Option<u64>),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -275,6 +285,13 @@ pub trait Stage: Send + 'static {
     fn choose_alert(&self, choice: u32);
     /// The number of live alerts (0 or 1). No default.
     fn alert_count(&self) -> usize;
+    /// The window's navigation-stack depth — the observation
+    /// expect_entries verifies. No default: a backend that forgets it
+    /// must fail to compile rather than pass a navigation leg
+    /// vacuously.
+    fn entry_count(&self, window: u64) -> usize;
+    /// Drive the window's REAL back affordance. No default.
+    fn back(&self, window: u64);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -426,6 +443,22 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_alerts wants a count: {line:?}")
                 })?;
                 Step::ExpectAlerts(n)
+            }
+            "expect_entries" => {
+                let (window, rest) = parse_window_target(rest);
+                let n = rest.trim().parse::<usize>().map_err(|_| {
+                    format!("expect_entries wants a count: {line:?}")
+                })?;
+                Step::ExpectEntries(window, n)
+            }
+            "back" => {
+                let (window, rest) = parse_window_target(rest);
+                if !rest.trim().is_empty() {
+                    return Err(format!(
+                        "back takes at most one window#N target: {line:?}"
+                    ));
+                }
+                Step::Back(window)
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -745,6 +778,25 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     failures.push(format!("alerts {got}, wanted {n}"));
                 }
             }
+            Step::ExpectEntries(window, n) => {
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(w) => format!("window#{w} "),
+                    None => String::new(),
+                };
+                let got = stage.entry_count(id);
+                if got == *n {
+                    observed.push(format!("{prefix}entries {n}"));
+                } else {
+                    failures.push(format!("{prefix}entries {got}, wanted {n}"));
+                }
+            }
+            Step::Back(window) => {
+                // An action, silent like click: the observable is
+                // whether the stack popped (expect_entries) or the
+                // guest's back_requested reaction.
+                stage.back(window.unwrap_or(0));
+            }
             Step::ExpectFills(t) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     failures.push(format!("{t:?} is not a container target"));
@@ -963,6 +1015,10 @@ mod tests {
             (540.0, 330.0)
         }
         fn close_window(&self, _: u64) {}
+        fn entry_count(&self, _: u64) -> usize {
+            0
+        }
+        fn back(&self, _: u64) {}
         fn window_count(&self) -> usize {
             1
         }
@@ -1100,6 +1156,10 @@ mod tests {
             (540.0, 330.0)
         }
         fn close_window(&self, _: u64) {}
+        fn entry_count(&self, _: u64) -> usize {
+            0
+        }
+        fn back(&self, _: u64) {}
         fn window_count(&self) -> usize {
             1
         }
@@ -1195,6 +1255,10 @@ mod tests {
             (540.0, 330.0)
         }
         fn close_window(&self, _: u64) {}
+        fn entry_count(&self, _: u64) -> usize {
+            0
+        }
+        fn back(&self, _: u64) {}
         fn window_count(&self) -> usize {
             1
         }

@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::protocol::{
-    WindowProp,
+    EntryProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
@@ -46,6 +46,9 @@ pub const TX_SET_WINDOW_PROP: u16 = 18;
 pub const TX_CREATE_WINDOW: u16 = 19;
 pub const TX_DESTROY_WINDOW: u16 = 20;
 pub const TX_SHOW_ALERT: u16 = 21;
+pub const TX_PUSH_ENTRY: u16 = 22;
+pub const TX_POP_ENTRY: u16 = 23;
+pub const TX_SET_ENTRY_PROP: u16 = 24;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -59,6 +62,9 @@ pub const APPLY_SET_WINDOW_PROP: u16 = 8;
 pub const APPLY_CREATE_WINDOW: u16 = 9;
 pub const APPLY_DESTROY_WINDOW: u16 = 10;
 pub const APPLY_PRESENT_ALERT: u16 = 11;
+pub const APPLY_PUSH_ENTRY: u16 = 12;
+pub const APPLY_POP_ENTRY: u16 = 13;
+pub const APPLY_SET_ENTRY_PROP: u16 = 14;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -94,6 +100,12 @@ pub const WPROP_TITLE: u32 = 1;
 pub const WPROP_WIDTH: u32 = 2;
 pub const WPROP_HEIGHT: u32 = 3;
 pub const WPROP_VETO_CLOSE: u32 = 4;
+
+/// Navigation-entry property ids (spec::ENTRY_PROPS) — their own
+/// typed table, not WINDOW_PROPS with applicability checks (see
+/// DESIGN.md, Navigation).
+pub const EPROP_TITLE: u32 = 1;
+pub const EPROP_INTERCEPT_BACK: u32 = 2;
 
 /// The alert_choice enum's wire values (spec enum "alert_choice"):
 /// action indices, and the deliberately-not-an-index cancel sentinel
@@ -299,6 +311,21 @@ fn window_prop_raw(p: WindowProp) -> u32 {
     }
 }
 
+fn entry_prop(raw: u32) -> EntryProp {
+    match raw {
+        EPROP_TITLE => EntryProp::Title,
+        EPROP_INTERCEPT_BACK => EntryProp::InterceptBack,
+        other => panic!("kaya: unknown entry property {other}"),
+    }
+}
+
+fn entry_prop_raw(p: EntryProp) -> u32 {
+    match p {
+        EntryProp::Title => EPROP_TITLE,
+        EntryProp::InterceptBack => EPROP_INTERCEPT_BACK,
+    }
+}
+
 /// Decode a submitted transaction buffer with no blob context: any
 /// blob handle fails loudly. The scalar path for tests and callers
 /// that cannot see the registration table.
@@ -499,6 +526,31 @@ pub fn decode_transaction_with_blobs(
                     actions.push(action1);
                 }
                 TxOp::ShowAlert(AlertSpec { window, alert, title, message, actions, cancel })
+            }
+            TX_PUSH_ENTRY => TxOp::PushEntry {
+                window: WindowId(r.u64()),
+                entry: WindowId(r.u64()),
+            },
+            TX_POP_ENTRY => TxOp::PopEntry {
+                window: WindowId(r.u64()),
+            },
+            TX_SET_ENTRY_PROP => {
+                let entry = WindowId(r.u64());
+                let p = entry_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: entry properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetEntryProp {
+                    entry,
+                    prop: p,
+                    value,
+                }
             }
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
@@ -766,6 +818,21 @@ impl Writer {
                 b.extend_from_slice(&command_raw(*command).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            ApplyOp::PushEntry { window, entry } => self.record(APPLY_PUSH_ENTRY, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&entry.0.to_le_bytes());
+            }),
+            ApplyOp::PopEntry { window } => self.record(APPLY_POP_ENTRY, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
+            ApplyOp::SetEntryProp { entry, prop, value } => {
+                self.record(APPLY_SET_ENTRY_PROP, |b, blobs| {
+                    b.extend_from_slice(&entry.0.to_le_bytes());
+                    b.extend_from_slice(&entry_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
         }
     }
 
@@ -933,6 +1000,32 @@ impl Writer {
                     write_value(b, &Value::Str(s), blobs);
                 }
             }),
+            TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&entry.0.to_le_bytes());
+            }),
+            TxOp::PopEntry { window } => self.record(TX_POP_ENTRY, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
+            TxOp::SetEntryProp { entry, prop, value } => {
+                self.record(TX_SET_ENTRY_PROP, |b, blobs| {
+                    b.extend_from_slice(&entry.0.to_le_bytes());
+                    b.extend_from_slice(&entry_prop_raw(*prop).to_le_bytes());
+                    match value {
+                        PropValue::Const(v) => {
+                            b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                            write_value(b, v, blobs);
+                        }
+                        PropValue::Signal(id) => {
+                            b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                            b.extend_from_slice(&id.0.to_le_bytes());
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: entry properties cannot bind element sources")
+                        }
+                    }
+                })
+            }
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }
     }

@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, Key, Prop, PropValue, Record, SignalId, Transaction, TxOp,
-    Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
+    ApplyOp, CollectionId, CommandKind, EntryProp, Key, Prop, PropValue, Record, SignalId,
+    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -189,6 +189,15 @@ pub(crate) struct Scene {
     /// stay until the guest's destroy_window reconciles
     /// (window_closed is informational).
     windows: std::collections::HashSet<WindowId>,
+    /// Live navigation entries: entry surface id -> the window whose
+    /// stack holds it. Entries share the surface namespace with
+    /// windows (one guest allocator; mount targets either).
+    nav_entries: HashMap<WindowId, WindowId>,
+    /// Per-window navigation stacks, bottom to top. The core owns the
+    /// stack (DESIGN.md, Navigation): guest pops arrive as pop_entry,
+    /// user pops reconcile through `user_popped`.
+    nav_stacks: HashMap<WindowId, Vec<WindowId>>,
+    entry_bindings: HashMap<SignalId, Vec<(WindowId, EntryProp)>>,
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
@@ -275,6 +284,14 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
             );
         }
         (p, v) => panic!("kaya: window property {p:?} rejects value {v:?}"),
+    }
+}
+
+fn check_entry_prop_value(prop: EntryProp, value: &Value) {
+    match (prop, value) {
+        (EntryProp::Title, Value::Str(_)) => {}
+        (EntryProp::InterceptBack, Value::Bool(_)) => {}
+        (p, v) => panic!("kaya: entry property {p:?} rejects value {v:?}"),
     }
 }
 
@@ -547,6 +564,13 @@ impl Scene {
                     let existed = self.windows.remove(&window);
                     assert!(existed, "kaya: destroy of unknown window {window:?}");
                     self.mounted_windows.remove(&window);
+                    // A destroyed window takes its navigation stack
+                    // with it — the entries' views go wholesale with
+                    // the native window, no per-entry pops.
+                    for entry in self.nav_stacks.remove(&window).unwrap_or_default() {
+                        self.nav_entries.remove(&entry);
+                        self.mounted_windows.remove(&entry);
+                    }
                     out.push(ApplyOp::DestroyWindow { window });
                 }
                 TxOp::ShowAlert(spec) => {
@@ -582,6 +606,83 @@ impl Scene {
                     crate::capi::alert_shown(spec.alert);
                     out.push(ApplyOp::PresentAlert(spec));
                 }
+                TxOp::PushEntry { window, entry } => {
+                    // No capability gate — every host materializes a
+                    // serial stack natively (the deliberate contrast
+                    // with create_window; DESIGN.md, Navigation).
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: push_entry onto unknown window {window:?} — \
+                         create_window first (0 is the primary)"
+                    );
+                    assert!(
+                        entry.0 != 0,
+                        "kaya: surface id 0 is the primary window, not an entry"
+                    );
+                    assert!(
+                        entry.0 & INTERNAL_BIT == 0,
+                        "kaya: entry id {entry:?} uses the reserved internal bit"
+                    );
+                    // One surface namespace: an entry id must be fresh
+                    // among windows AND entries.
+                    assert!(
+                        !self.windows.contains(&entry) && !self.nav_entries.contains_key(&entry),
+                        "kaya: surface id {entry:?} already exists"
+                    );
+                    self.nav_entries.insert(entry, window);
+                    self.nav_stacks.entry(window).or_default().push(entry);
+                    out.push(ApplyOp::PushEntry { window, entry });
+                }
+                TxOp::PopEntry { window } => {
+                    let stack = self.nav_stacks.get_mut(&window);
+                    let entry = stack
+                        .and_then(|s| s.pop())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "kaya: pop_entry on window {window:?} with an \
+                                 empty navigation stack"
+                            )
+                        });
+                    self.nav_entries.remove(&entry);
+                    self.mounted_windows.remove(&entry);
+                    out.push(ApplyOp::PopEntry { window });
+                }
+                TxOp::SetEntryProp { entry, prop, value } => {
+                    assert!(
+                        self.nav_entries.contains_key(&entry),
+                        "kaya: entry prop on unknown entry {entry:?} — \
+                         push_entry first"
+                    );
+                    match value {
+                        PropValue::Const(v) => {
+                            check_entry_prop_value(prop, &v);
+                            out.push(ApplyOp::SetEntryProp { entry, prop, value: v })
+                        }
+                        PropValue::Signal(id) => {
+                            let current = self
+                                .signals
+                                .get(&id)
+                                .unwrap_or_else(|| {
+                                    panic!("kaya: binding to unknown signal {id:?}")
+                                })
+                                .clone();
+                            check_entry_prop_value(prop, &current);
+                            self.entry_bindings
+                                .entry(id)
+                                .or_default()
+                                .push((entry, prop));
+                            out.push(ApplyOp::SetEntryProp {
+                                entry,
+                                prop,
+                                value: current,
+                            });
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: entry properties cannot bind element sources")
+                        }
+                    }
+                }
                 TxOp::AddChild { parent, child } => {
                     assert!(
                         self.widgets.contains_key(&parent),
@@ -594,11 +695,15 @@ impl Scene {
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {
+                    // The target's domain is SURFACES: the primary, a
+                    // created window, or a pushed navigation entry
+                    // (generalize the TARGET of mount, not the tree).
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
-                            || self.windows.contains(&window),
-                        "kaya: mount into unknown window {window:?} — \
-                         create_window first (0 is the primary)"
+                            || self.windows.contains(&window)
+                            || self.nav_entries.contains_key(&window),
+                        "kaya: mount into unknown surface {window:?} — \
+                         create_window or push_entry first (0 is the primary)"
                     );
                     assert!(
                         self.widgets.contains_key(&root),
@@ -761,11 +866,47 @@ impl Scene {
                     });
                 }
             }
+            if let Some(bound) = self.entry_bindings.get(&id) {
+                for (entry, prop) in bound {
+                    out.push(ApplyOp::SetEntryProp {
+                        entry: *entry,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
+            }
             if let Value::Bool(on) = value {
                 self.toggle_whens(id, on, &mut out);
             }
         }
         out
+    }
+
+    /// The user's back affordance popped an entry natively (predictive
+    /// back, swipe-back, the desktop back button) — the backend informs
+    /// the core POST-FACT, and the core-owned stack reconciles here.
+    /// The counterpart of pop_entry with no ApplyOp: the platform
+    /// already animated the pop. A user pop always takes the visible
+    /// top; anything else is a backend bug and fails loudly.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "ios", target_os = "android")),
+        allow(dead_code)
+    )]
+    pub(crate) fn user_popped(&mut self, entry: WindowId) {
+        let window = self
+            .nav_entries
+            .remove(&entry)
+            .unwrap_or_else(|| panic!("kaya: user pop of unknown entry {entry:?}"));
+        let stack = self
+            .nav_stacks
+            .get_mut(&window)
+            .unwrap_or_else(|| panic!("kaya: user pop on window {window:?} with no stack"));
+        let top = stack.pop();
+        assert!(
+            top == Some(entry),
+            "kaya: user pop of {entry:?} but the top of {window:?}'s stack is {top:?}"
+        );
+        self.mounted_windows.remove(&entry);
     }
 
     /// One record of a template declaration. Creation records describe;
@@ -2747,5 +2888,166 @@ mod tests {
             key: v("quiet"),
         }]);
         assert!(ops.is_empty());
+    }
+
+    // --- Navigation: the serial stack (DESIGN.md, Navigation) ---
+
+    #[test]
+    fn push_mount_pop_lifecycle() {
+        use crate::protocol::EntryProp;
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::SetEntryProp {
+                entry: WindowId(5),
+                prop: EntryProp::Title,
+                value: PropValue::Const(v("detail")),
+            },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::Mount { window: WindowId(5), root: WidgetId(1) },
+        ]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!(
+                "{:?}",
+                vec![
+                    ApplyOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+                    ApplyOp::SetEntryProp {
+                        entry: WindowId(5),
+                        prop: EntryProp::Title,
+                        value: v("detail"),
+                    },
+                    ApplyOp::Create { id: WidgetId(1), kind: WidgetKind::Label, tag: None },
+                    ApplyOp::Mount { window: WindowId(5), root: WidgetId(1) },
+                ]
+            )
+        );
+        let ops = scene.apply(vec![TxOp::PopEntry { window: DEFAULT_WINDOW }]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!("{:?}", vec![ApplyOp::PopEntry { window: DEFAULT_WINDOW }])
+        );
+        // The popped surface is gone: a re-mount targets nothing.
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::Mount { window: WindowId(5), root: WidgetId(1) }]);
+        }));
+        assert!(err.is_err(), "mount into a popped entry must fail loudly");
+    }
+
+    #[test]
+    #[should_panic(expected = "empty navigation stack")]
+    fn pop_of_empty_stack_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::PopEntry { window: DEFAULT_WINDOW }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already exists")]
+    fn entry_id_collision_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "entry prop on unknown entry")]
+    fn entry_prop_on_unknown_entry_fails_loudly() {
+        use crate::protocol::EntryProp;
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetEntryProp {
+            entry: WindowId(5),
+            prop: EntryProp::Title,
+            value: PropValue::Const(v("ghost")),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn intercept_back_rejects_non_bool() {
+        use crate::protocol::EntryProp;
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::SetEntryProp {
+                entry: WindowId(5),
+                prop: EntryProp::InterceptBack,
+                value: PropValue::Const(v("yes")),
+            },
+        ]);
+    }
+
+    #[test]
+    fn user_pop_reconciles_the_stack() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(6) },
+        ]);
+        // The user's back affordance popped the top natively; the
+        // core reconciles post-fact with no ApplyOp.
+        scene.user_popped(WindowId(6));
+        // The remaining entry is now the top and pops normally.
+        let ops = scene.apply(vec![TxOp::PopEntry { window: DEFAULT_WINDOW }]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!("{:?}", vec![ApplyOp::PopEntry { window: DEFAULT_WINDOW }])
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "but the top of")]
+    fn user_pop_of_covered_entry_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(6) },
+        ]);
+        scene.user_popped(WindowId(5));
+    }
+
+    #[test]
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    fn destroyed_window_sweeps_its_stack() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(2) },
+            TxOp::PushEntry { window: WindowId(2), entry: WindowId(3) },
+            TxOp::DestroyWindow { window: WindowId(2) },
+        ]);
+        // The entry went with its window: its id no longer names a
+        // surface.
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![TxOp::PopEntry { window: WindowId(2) }]);
+        }));
+        assert!(err.is_err(), "the destroyed window's stack must be gone");
+    }
+
+    #[test]
+    fn signal_bound_entry_title_fans_out() {
+        use crate::protocol::EntryProp;
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: v("first") },
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(5) },
+            TxOp::SetEntryProp {
+                entry: WindowId(5),
+                prop: EntryProp::Title,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(1), value: v("second") }]);
+        assert_eq!(
+            format!("{ops:?}"),
+            format!(
+                "{:?}",
+                vec![ApplyOp::SetEntryProp {
+                    entry: WindowId(5),
+                    prop: EntryProp::Title,
+                    value: v("second"),
+                }]
+            )
+        );
     }
 }

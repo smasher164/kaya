@@ -32,6 +32,14 @@ object KayaPresent {
      * native dismissal. kaya_emit_alert_result's JNI spelling. */
     @JvmStatic external fun emitAlertResult(alert: Long, choice: Int)
 
+    /** The user's back gesture popped an entry natively (the core's
+     * stack reconciles inside this call, post-fact). */
+    @JvmStatic external fun emitEntryPopped(entry: Long)
+
+    /** Back on an intercept_back-armed entry: nothing popped; the app
+     * answers with pop_entry if it agrees. */
+    @JvmStatic external fun emitBackRequested(entry: Long)
+
     /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —

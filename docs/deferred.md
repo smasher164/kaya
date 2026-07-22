@@ -423,7 +423,28 @@ Landed history lives in git; this file only carries what is still open.
   action (the platform floor is ContentDialog's two-actions-plus-
   close; more means a custom row on WinUI — no longer the dressed
   floor).
-- ~~The panels-java aux-open flake on macOS~~ ROOT-CAUSED AND FIXED
+- Navigation BREADTH (the depth slice landed 2026-07-21: protocol
+  push_entry/pop_entry/set_entry_prop + ENTRY_PROPS/eprop +
+  entry_popped/back_requested, core-owned per-window stacks with
+  user_popped reconcile through capi's PRESENTATION_SCENE, SwiftUI
+  NavigationStack materialization with the path-binding interception
+  point, Compose model/BackHandler/JNI emits written (unproven on the
+  emulator), harness expect_entries/back in both interpreters, Rust
+  push_entry/pop_entry/EntryRef sugar, the nav scene rust-only on
+  mac). Still open, per language/platform: (1) the 7 remaining
+  languages' sugar + nav guests (then nav moves from DEPTH_SCENES
+  into SCENES and the four runner notes become legs); (2) GTK and
+  WinUI materializations (their apply arms and Stage entry_count/back
+  are explicit unimplemented!()s — a nav leg there dies loudly);
+  (3) live proof on Android (predictive back) and iOS (swipe-back;
+  NavigationStack path already drives it); (4) pop_to_root/pop(n)
+  sugar + the binding-side stack mirrors it needs (lowering ratified:
+  N pop_entry in ONE tx, backends animate the net change per batch);
+  (5) macOS `back` verb currently drives the path binding (the same
+  code path the toolbar button writes) — upgrading to a real-chrome
+  click on the NavigationStack toolbar button needs a stable way to
+  find the private toolbar item; (6) signal-bound entry titles have
+  wire + scene + fan-out but no binding sugar anywhere yet.
   2026-07-21: the planned diagnostic (state dump at retry time +
   os_log capture, under a loaded 8-wide repro harness) reproduced it
   on the first wave and OVERTURNED the working theory — the aux

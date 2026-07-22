@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x4da364d017f52b15;
+    public const ulong SpecHash = 0x833a2a32e4a52f92;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -40,6 +40,8 @@ static class KayaWire
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
     public const uint WpropVetoClose = 4;
+    public const uint EpropTitle = 1;
+    public const uint EpropInterceptBack = 2;
     public const uint AlertChoiceAction0 = 0;
     public const uint AlertChoiceAction1 = 1;
     public const uint AlertChoiceCancel = 4294967295;
@@ -79,6 +81,9 @@ static class KayaWire
     public const ushort TxKindCreateWindow = 19;
     public const ushort TxKindDestroyWindow = 20;
     public const ushort TxKindShowAlert = 21;
+    public const ushort TxKindPushEntry = 22;
+    public const ushort TxKindPopEntry = 23;
+    public const ushort TxKindSetEntryProp = 24;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -90,6 +95,9 @@ static class KayaWire
     public const ushort ApplyKindCreateWindow = 9;
     public const ushort ApplyKindDestroyWindow = 10;
     public const ushort ApplyKindPresentAlert = 11;
+    public const ushort ApplyKindPushEntry = 12;
+    public const ushort ApplyKindPopEntry = 13;
+    public const ushort ApplyKindSetEntryProp = 14;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -97,6 +105,8 @@ static class KayaWire
     public const ushort OccKindCloseRequested = 5;
     public const ushort OccKindWindowClosed = 6;
     public const ushort OccKindAlertResult = 7;
+    public const ushort OccKindEntryPopped = 8;
+    public const ushort OccKindBackRequested = 9;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -373,6 +383,33 @@ static class KayaWire
         EncodeValue(w, action1);
         EncodeValue(w, cancel);
         return Finish(stream, w, TxKindShowAlert);
+    }
+
+    /// Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation).
+    public static byte[] TxPushEntry(ulong window, ulong entry)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(entry);
+        return Finish(stream, w, TxKindPushEntry);
+    }
+
+    /// Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch.
+    public static byte[] TxPopEntry(ulong window)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        return Finish(stream, w, TxKindPopEntry);
+    }
+
+    /// Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
+    public static byte[] TxSetEntryProp(ulong entry, uint prop, uint source)
+    {
+        var w = Begin(out var stream);
+        w.Write(entry);
+        w.Write(prop);
+        w.Write(source);
+        return Finish(stream, w, TxKindSetEntryProp);
     }
 
     /// set_property with a constant text value.
@@ -668,6 +705,40 @@ static class KayaWire
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
+    /// set_entry_prop with a constant title value.
+    public static byte[] TxSetEntryTitle(ulong entry, string title)
+    {
+        var w = Begin(out var stream);
+        w.Write(entry); w.Write(EpropTitle); w.Write(SourceConst);
+        EncodeValue(w, title);
+        return Finish(stream, w, TxKindSetEntryProp);
+    }
+
+    /// set_entry_prop with a signal-bound title value.
+    public static byte[] TxBindEntryTitle(ulong entry, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(entry); w.Write(EpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetEntryProp);
+    }
+
+    /// set_entry_prop with a constant intercept_back value.
+    public static byte[] TxSetEntryInterceptBack(ulong entry, bool interceptBack)
+    {
+        var w = Begin(out var stream);
+        w.Write(entry); w.Write(EpropInterceptBack); w.Write(SourceConst);
+        EncodeValue(w, interceptBack);
+        return Finish(stream, w, TxKindSetEntryProp);
+    }
+
+    /// set_entry_prop with a signal-bound intercept_back value.
+    public static byte[] TxBindEntryInterceptBack(ulong entry, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(entry); w.Write(EpropInterceptBack); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetEntryProp);
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
@@ -679,17 +750,18 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
-        // Window lifecycle records carry the window id alone.
         if (kind == OccKindAlertResult)
         {
             // The alert's one answer: id + u32 choice (AlertChoice*).
             payload = BitConverter.ToUInt32(rec, 16);
             return true;
         }
-        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)
+        // Surface lifecycle records carry the surface id alone
+        // (derived from the record shapes).
+        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested)
             return true;
         uint pathLen = BitConverter.ToUInt32(rec, 16);
         int at = 24;

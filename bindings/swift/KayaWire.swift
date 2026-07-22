@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x4da364d017f52b15
+let kayaSpecHash: UInt64 = 0x833a2a32e4a52f92
 
 struct KayaTx {
     var bytes = Data()
@@ -272,6 +272,30 @@ struct KayaTx {
         self.value(action0)
         self.value(action1)
         self.value(cancel)
+        self.end(start)
+    }
+
+    /// Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation).
+    mutating func pushEntry(_ window: UInt64, _ entry: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_PUSH_ENTRY))
+        self.u64(window)
+        self.u64(entry)
+        self.end(start)
+    }
+
+    /// Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch.
+    mutating func popEntry(_ window: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_POP_ENTRY))
+        self.u64(window)
+        self.end(start)
+    }
+
+    /// Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
+    mutating func setEntryProp(_ entry: UInt64, _ prop: UInt32, _ source: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        self.u64(entry)
+        self.u32(prop)
+        self.u32(source)
         self.end(start)
     }
 
@@ -643,6 +667,46 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_entry_prop with a constant title value.
+    mutating func setEntryTitle(_ entry: UInt64, _ title: String) {
+        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        self.u64(entry)
+        self.u32(UInt32(KAYA_EPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(title))
+        self.end(start)
+    }
+
+    /// set_entry_prop with a signal-bound title value.
+    mutating func bindEntryTitle(_ entry: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        self.u64(entry)
+        self.u32(UInt32(KAYA_EPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_entry_prop with a constant intercept_back value.
+    mutating func setEntryInterceptBack(_ entry: UInt64, _ interceptBack: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        self.u64(entry)
+        self.u32(UInt32(KAYA_EPROP_INTERCEPT_BACK))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(interceptBack))
+        self.end(start)
+    }
+
+    /// set_entry_prop with a signal-bound intercept_back value.
+    mutating func bindEntryInterceptBack(_ entry: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        self.u64(entry)
+        self.u32(UInt32(KAYA_EPROP_INTERCEPT_BACK))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -668,16 +732,21 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
             || kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT)
+            || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
+            || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
-        // Window lifecycle records carry the window id alone.
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
             // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
             let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
             return (kind, id, [], .i64(Int64(choice)))
         }
+        // Surface lifecycle records carry the surface id alone
+        // (derived from the record shapes).
         if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)
+            || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
+            || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         {
             return (kind, id, [], nil)
         }

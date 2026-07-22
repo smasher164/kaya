@@ -24,6 +24,10 @@
 
 #define REC_ALERT_RESULT 7
 
+#define REC_ENTRY_POPPED 8
+
+#define REC_BACK_REQUESTED 9
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -68,6 +72,12 @@
 
 #define TX_SHOW_ALERT 21
 
+#define TX_PUSH_ENTRY 22
+
+#define TX_POP_ENTRY 23
+
+#define TX_SET_ENTRY_PROP 24
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -89,6 +99,12 @@
 #define APPLY_DESTROY_WINDOW 10
 
 #define APPLY_PRESENT_ALERT 11
+
+#define APPLY_PUSH_ENTRY 12
+
+#define APPLY_POP_ENTRY 13
+
+#define APPLY_SET_ENTRY_PROP 14
 
 #define VALUE_BOOL 1
 
@@ -147,6 +163,15 @@
 #define WPROP_VETO_CLOSE 4
 
 /**
+ * Navigation-entry property ids (spec::ENTRY_PROPS) — their own
+ * typed table, not WINDOW_PROPS with applicability checks (see
+ * DESIGN.md, Navigation).
+ */
+#define EPROP_TITLE 1
+
+#define EPROP_INTERCEPT_BACK 2
+
+/**
  * The alert_choice enum's wire values (spec enum "alert_choice"):
  * action indices, and the deliberately-not-an-index cancel sentinel
  * every platform-native dismissal resolves to.
@@ -202,6 +227,10 @@
 #define KAYA_OCCURRENCE_WINDOW_CLOSED 6
 
 #define KAYA_OCCURRENCE_ALERT_RESULT 7
+
+#define KAYA_OCCURRENCE_ENTRY_POPPED 8
+
+#define KAYA_OCCURRENCE_BACK_REQUESTED 9
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -282,6 +311,20 @@
 #define KAYA_TX_SHOW_ALERT 21
 
 /**
+ * PUSH_ENTRY: u64 window, u64 entry — push a navigation entry onto
+ * the window's stack (entry ids share the surface namespace with
+ * windows; mount targets either). POP_ENTRY: u64 window — pop the
+ * top entry; its tree is forgotten wholesale. SET_ENTRY_PROP: u64
+ * entry, u32 eprop, u32 source, then the SET_PROPERTY tail
+ * (element sources rejected).
+ */
+#define KAYA_TX_PUSH_ENTRY 22
+
+#define KAYA_TX_POP_ENTRY 23
+
+#define KAYA_TX_SET_ENTRY_PROP 24
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -339,6 +382,18 @@
  * via kaya_emit_alert_result.
  */
 #define KAYA_APPLY_PRESENT_ALERT 11
+
+/**
+ * PUSH_ENTRY: u64 window, u64 entry — materialize the entry hidden;
+ * a mount presents it. POP_ENTRY: u64 window — release the top
+ * entry's views; the batch's NET stack change animates as one
+ * transition. SET_ENTRY_PROP: u64 entry, u32 eprop, u32 pad, value.
+ */
+#define KAYA_APPLY_PUSH_ENTRY 12
+
+#define KAYA_APPLY_POP_ENTRY 13
+
+#define KAYA_APPLY_SET_ENTRY_PROP 14
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -413,6 +468,15 @@
 #define KAYA_WPROP_HEIGHT 3
 
 #define KAYA_WPROP_VETO_CLOSE 4
+
+/**
+ * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
+ * table (DESIGN.md, Navigation). `intercept_back` is the close-veto
+ * class transplanted to POP.
+ */
+#define KAYA_EPROP_TITLE 1
+
+#define KAYA_EPROP_INTERCEPT_BACK 2
 
 /**
  * Alert choices (the alert_result occurrence's `choice`): action
@@ -532,6 +596,14 @@ typedef struct KayaHostApi {
    * or the cancel sentinel). Retires the live alert id.
    */
   void (*emit_alert_result)(uint64_t, uint32_t);
+  /**
+   * Navigation lifecycle emits: entry_popped after the user's back
+   * affordance popped natively (the core's stack reconciles inside
+   * this call), back_requested when the top entry's intercept_back
+   * is armed and nothing popped.
+   */
+  void (*emit_entry_popped)(uint64_t);
+  void (*emit_back_requested)(uint64_t);
 } KayaHostApi;
 
 
@@ -626,6 +698,22 @@ void kaya_emit_close_requested(uint64_t window);
  * (informational and post-fact; destroy_window reconciles).
  */
 void kaya_emit_window_closed(uint64_t window);
+
+/**
+ * Presentation side: the user's back affordance popped a navigation
+ * entry natively (post-fact; the core's stack reconciles here).
+ * Exported on every platform (one C header, one export surface), but
+ * answerable only where a guest-language presentation layer exists —
+ * the kaya_emit_alert_result pattern.
+ */
+void kaya_emit_entry_popped(uint64_t entry);
+
+/**
+ * Presentation side: the user drove the back affordance on an entry
+ * whose intercept_back is armed. Nothing has popped; the app answers
+ * with pop_entry if it agrees (the close_requested veto class).
+ */
+void kaya_emit_back_requested(uint64_t entry);
 
 /**
  * Presentation side: the alert's one answer — an ALERT_CHOICE value

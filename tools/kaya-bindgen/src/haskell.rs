@@ -188,6 +188,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("  (word64LE window <> word32LE wprop{pc} <> word32LE sourceSignal"));
         c.line("    <> word64LE signalId)");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("-- set_entry_prop with a constant {prop} value."));
+        c.line(&format!("txSetEntry{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetEntry{pc} entry {p} = wireRecord txKindSetEntryProp"));
+        c.line(&format!("  (word64LE entry <> word32LE eprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line("");
+        c.line(&format!("-- set_entry_prop with a signal-bound {prop} value."));
+        c.line(&format!("txBindEntry{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBindEntry{pc} entry signalId = wireRecord txKindSetEntryProp"));
+        c.line(&format!("  (word64LE entry <> word32LE eprop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
+    }
     c.line("");
     c.line("-- Decode one value at offset `at` from the record base; returns the");
     c.line("-- value and the next offset.");
@@ -232,13 +255,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    then return Nothing");
     c.line("    else do");
     c.line("      ident <- peekByteOff rec 8 :: IO Word64");
-    c.line("      -- Window lifecycle records carry the window id alone.");
     c.line("      if kind == occKindAlertResult");
     c.line("        then do");
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
     c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))");
-    c.line("        else if kind == occKindCloseRequested || kind == occKindWindowClosed");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line("        -- Surface lifecycle records carry the surface id alone");
+    c.line("        -- (derived from the record shapes).");
+    c.line(&format!("        else if {id_only}"));
     c.line("          then return (Just (kind, ident, [], Nothing))");
     c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");

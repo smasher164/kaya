@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x4da364d017f52b15
+	SpecHash uint64 = 0x833a2a32e4a52f92
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -40,6 +40,8 @@ const (
 	WpropWidth = 2
 	WpropHeight = 3
 	WpropVetoClose = 4
+	EpropTitle = 1
+	EpropInterceptBack = 2
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
@@ -79,6 +81,9 @@ const (
 	txCreateWindow = 19
 	txDestroyWindow = 20
 	txShowAlert = 21
+	txPushEntry = 22
+	txPopEntry = 23
+	txSetEntryProp = 24
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -90,6 +95,9 @@ const (
 	applyCreateWindow = 9
 	applyDestroyWindow = 10
 	applyPresentAlert = 11
+	applyPushEntry = 12
+	applyPopEntry = 13
+	applySetEntryProp = 14
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -97,6 +105,8 @@ const (
 	occCloseRequested = 5
 	occWindowClosed = 6
 	occAlertResult = 7
+	occEntryPopped = 8
+	occBackRequested = 9
 )
 
 func pad8(b []byte) []byte {
@@ -359,6 +369,30 @@ func TxShowAlert(window uint64, alert uint64, actions uint32, title any, message
 	b = encodeValue(b, action0)
 	b = encodeValue(b, action1)
 	b = encodeValue(b, cancel)
+	return endRecord(b)
+}
+
+// TxPushEntry: Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation).
+func TxPushEntry(window uint64, entry uint64) []byte {
+	b := beginRecord(txPushEntry)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	return endRecord(b)
+}
+
+// TxPopEntry: Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch.
+func TxPopEntry(window uint64) []byte {
+	b := beginRecord(txPopEntry)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	return endRecord(b)
+}
+
+// TxSetEntryProp: Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
+func TxSetEntryProp(entry uint64, prop uint32, source uint32) []byte {
+	b := beginRecord(txSetEntryProp)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, source)
 	return endRecord(b)
 }
 
@@ -730,6 +764,46 @@ func TxBindWindowVetoClose(window uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetEntryTitle: set_entry_prop with a constant title value.
+func TxSetEntryTitle(entry uint64, title string) []byte {
+	b := beginRecord(txSetEntryProp)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, EpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, title)
+	return endRecord(b)
+}
+
+// TxBindEntryTitle: set_entry_prop with a signal-bound title value.
+func TxBindEntryTitle(entry uint64, signalID uint64) []byte {
+	b := beginRecord(txSetEntryProp)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, EpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetEntryInterceptBack: set_entry_prop with a constant intercept_back value.
+func TxSetEntryInterceptBack(entry uint64, interceptBack bool) []byte {
+	b := beginRecord(txSetEntryProp)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, EpropInterceptBack)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, interceptBack)
+	return endRecord(b)
+}
+
+// TxBindEntryInterceptBack: set_entry_prop with a signal-bound intercept_back value.
+func TxBindEntryInterceptBack(entry uint64, signalID uint64) []byte {
+	b := beginRecord(txSetEntryProp)
+	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, EpropInterceptBack)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
@@ -739,7 +813,7 @@ func TxBindWindowVetoClose(window uint64, signalID uint64) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -747,9 +821,9 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// The alert's one answer: id + u32 choice (AlertChoice*).
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}
-	if kind == occCloseRequested || kind == occWindowClosed {
-		// Window lifecycle records carry the window id alone —
-		// no key path, no payload.
+	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested {
+		// Surface lifecycle records carry the surface id alone —
+		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true
 	}
 	pathLen := binary.LittleEndian.Uint32(rec[16:])

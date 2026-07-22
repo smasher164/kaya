@@ -49,8 +49,12 @@ timing() {
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm"
+# Depth-slice scenes: a rust example + steps exist, the language sweep
+# has not landed yet — built and run rust-only until their guests
+# arrive, when they move into SCENES.
+DEPTH_SCENES="nav"
 BUILD_EXAMPLES=()
-for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
+for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
@@ -552,6 +556,14 @@ run panels-haskell-swiftui env KAYA_SELFTEST=panels "$(hs_bin panels)"
 run panels-swift-swiftui env KAYA_SELFTEST=panels target/swift-guests/panels
 run panels-java-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The nav scene: the serial navigation grammar — push/pop entries in
+# the primary surface, the REAL back affordance, the intercept_back
+# veto class. Rust depth; the language sweep rides the phase's next
+# slice (nav joins SCENES with its guests then).
+KAYA_SELFTEST_SCRIPT="$(scene_script nav)"
+export KAYA_SELFTEST_SCRIPT
+run nav-rust-swiftui env KAYA_SELFTEST=nav target/debug/examples/nav
 
 # The confirm scene: the modal-alert grammar — the REAL platform
 # dialog materialized, all three answer paths (action 0, action 1,

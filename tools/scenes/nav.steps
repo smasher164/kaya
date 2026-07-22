@@ -1,0 +1,29 @@
+# The nav scene: the serial navigation grammar — push/pop entries in
+# the primary surface, the user's back affordance driven for real, and
+# the intercept_back veto class (back_requested, then the guest's
+# pop_entry confirmation). The covered root is retained: label#0 takes
+# writes while covered and reads back after every pop; the settings
+# round's final status pins that a programmatic pop_entry does NOT
+# echo entry_popped.
+settle 1500
+expect_entries 0
+expect_title "nav"
+click button#0
+settle 800
+expect_entries 1
+expect_title "detail"
+expect label#last "detail pane"
+back
+settle 800
+expect_entries 0
+expect label#0 "popped detail"
+expect_title "nav"
+click button#1
+settle 800
+expect_entries 1
+expect_title "settings"
+back
+settle 800
+expect_entries 0
+expect label#0 "back requested"
+expect_title "nav"

@@ -50,6 +50,8 @@ pub const KAYA_OCCURRENCE_VALUE_CHANGED: u16 = 4;
 pub const KAYA_OCCURRENCE_CLOSE_REQUESTED: u16 = 5;
 pub const KAYA_OCCURRENCE_WINDOW_CLOSED: u16 = 6;
 pub const KAYA_OCCURRENCE_ALERT_RESULT: u16 = 7;
+pub const KAYA_OCCURRENCE_ENTRY_POPPED: u16 = 8;
+pub const KAYA_OCCURRENCE_BACK_REQUESTED: u16 = 9;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -59,6 +61,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_CLOSE_REQUESTED == ring::REC_CLOSE_REQUESTED
         && KAYA_OCCURRENCE_WINDOW_CLOSED == ring::REC_WINDOW_CLOSED
         && KAYA_OCCURRENCE_ALERT_RESULT == ring::REC_ALERT_RESULT
+        && KAYA_OCCURRENCE_ENTRY_POPPED == ring::REC_ENTRY_POPPED
+        && KAYA_OCCURRENCE_BACK_REQUESTED == ring::REC_BACK_REQUESTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -114,6 +118,15 @@ pub const KAYA_TX_DESTROY_WINDOW: u16 = 20;
 /// cancel (slots beyond `actions` ride empty). One alert may be live
 /// per process; the result retires the id.
 pub const KAYA_TX_SHOW_ALERT: u16 = 21;
+/// PUSH_ENTRY: u64 window, u64 entry — push a navigation entry onto
+/// the window's stack (entry ids share the surface namespace with
+/// windows; mount targets either). POP_ENTRY: u64 window — pop the
+/// top entry; its tree is forgotten wholesale. SET_ENTRY_PROP: u64
+/// entry, u32 eprop, u32 source, then the SET_PROPERTY tail
+/// (element sources rejected).
+pub const KAYA_TX_PUSH_ENTRY: u16 = 22;
+pub const KAYA_TX_POP_ENTRY: u16 = 23;
+pub const KAYA_TX_SET_ENTRY_PROP: u16 = 24;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -165,6 +178,9 @@ const _: () = assert!(
         && KAYA_TX_CREATE_WINDOW == wire::TX_CREATE_WINDOW
         && KAYA_TX_DESTROY_WINDOW == wire::TX_DESTROY_WINDOW
         && KAYA_TX_SHOW_ALERT == wire::TX_SHOW_ALERT
+        && KAYA_TX_PUSH_ENTRY == wire::TX_PUSH_ENTRY
+        && KAYA_TX_POP_ENTRY == wire::TX_POP_ENTRY
+        && KAYA_TX_SET_ENTRY_PROP == wire::TX_SET_ENTRY_PROP
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -203,6 +219,13 @@ pub const KAYA_APPLY_DESTROY_WINDOW: u16 = 10;
 /// Present the platform's real modal dialog and answer exactly once
 /// via kaya_emit_alert_result.
 pub const KAYA_APPLY_PRESENT_ALERT: u16 = 11;
+/// PUSH_ENTRY: u64 window, u64 entry — materialize the entry hidden;
+/// a mount presents it. POP_ENTRY: u64 window — release the top
+/// entry's views; the batch's NET stack change animates as one
+/// transition. SET_ENTRY_PROP: u64 entry, u32 eprop, u32 pad, value.
+pub const KAYA_APPLY_PUSH_ENTRY: u16 = 12;
+pub const KAYA_APPLY_POP_ENTRY: u16 = 13;
+pub const KAYA_APPLY_SET_ENTRY_PROP: u16 = 14;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -215,6 +238,9 @@ const _: () = assert!(
         && KAYA_APPLY_CREATE_WINDOW == wire::APPLY_CREATE_WINDOW
         && KAYA_APPLY_DESTROY_WINDOW == wire::APPLY_DESTROY_WINDOW
         && KAYA_APPLY_PRESENT_ALERT == wire::APPLY_PRESENT_ALERT
+        && KAYA_APPLY_PUSH_ENTRY == wire::APPLY_PUSH_ENTRY
+        && KAYA_APPLY_POP_ENTRY == wire::APPLY_POP_ENTRY
+        && KAYA_APPLY_SET_ENTRY_PROP == wire::APPLY_SET_ENTRY_PROP
 );
 
 /// One-shot commands (the widget_command tx record / COMMAND apply
@@ -278,6 +304,12 @@ pub const KAYA_WPROP_WIDTH: u32 = 2;
 pub const KAYA_WPROP_HEIGHT: u32 = 3;
 pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 
+/// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
+/// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
+/// class transplanted to POP.
+pub const KAYA_EPROP_TITLE: u32 = 1;
+pub const KAYA_EPROP_INTERCEPT_BACK: u32 = 2;
+
 /// Alert choices (the alert_result occurrence's `choice`): action
 /// indices, or the deliberately-not-an-index cancel sentinel every
 /// platform-native dismissal (Esc, back, outside tap) resolves to.
@@ -303,6 +335,8 @@ const _: () = assert!(
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
         && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
+        && KAYA_EPROP_TITLE == wire::EPROP_TITLE
+        && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
 
 /// The align enum's values (spec enum "align"); baseline is rows-only.
@@ -330,6 +364,11 @@ const _: () = assert!(
 const _: () = assert!(
     crate::spec::WINDOW_PROPS.len() == 4,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
+     this count"
+);
+const _: () = assert!(
+    crate::spec::ENTRY_PROPS.len() == 2,
+    "spec::ENTRY_PROPS grew: export the new KAYA_EPROP_* above, extend the pin, and bump \
      this count"
 );
 
@@ -641,6 +680,69 @@ pub extern "C" fn kaya_emit_window_closed(window: u64) {
         .push_record(ring::REC_WINDOW_CLOSED, &window.to_le_bytes());
 }
 
+/// Presentation side (interpreter platforms ONLY): the user's back
+/// affordance popped a navigation entry natively. Reconciles the
+/// core-owned stack (the scene lives in this module's singleton on
+/// these platforms), then forwards the post-fact occurrence. cfg'd
+/// OUT on the rust-native backend platforms like alert_resolved:
+/// their backends reconcile their own scene and emit on their own
+/// core OccSink.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+pub(crate) fn entry_user_popped(entry: u64) {
+    PRESENTATION_SCENE
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("kaya: entry popped before any transaction was applied")
+        .user_popped(crate::protocol::WindowId(entry));
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::EntryPopped {
+            entry: crate::protocol::WindowId(entry),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_ENTRY_POPPED, &entry.to_le_bytes());
+}
+
+/// Presentation side: the user's back affordance popped a navigation
+/// entry natively (post-fact; the core's stack reconciles here).
+/// Exported on every platform (one C header, one export surface), but
+/// answerable only where a guest-language presentation layer exists —
+/// the kaya_emit_alert_result pattern.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_entry_popped(entry: u64) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        entry_user_popped(entry);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = entry;
+        panic!(
+            "kaya: kaya_emit_entry_popped is the interpreter platforms' entry — \
+             this host's backend reconciles pops on its own sink"
+        );
+    }
+}
+
+/// Presentation side: the user drove the back affordance on an entry
+/// whose intercept_back is armed. Nothing has popped; the app answers
+/// with pop_entry if it agrees (the close_requested veto class).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_back_requested(entry: u64) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::BackRequested {
+            entry: crate::protocol::WindowId(entry),
+        });
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_BACK_REQUESTED, &entry.to_le_bytes());
+}
+
 // The live alert slot: ONE alert per process (the platform floor —
 // ContentDialog throws on a second per root). Process-global on
 // purpose: the scene sets it at show (apply side) and the result that
@@ -913,6 +1015,9 @@ mod tests {
             ("create_window", KAYA_TX_CREATE_WINDOW),
             ("destroy_window", KAYA_TX_DESTROY_WINDOW),
             ("show_alert", KAYA_TX_SHOW_ALERT),
+            ("push_entry", KAYA_TX_PUSH_ENTRY),
+            ("pop_entry", KAYA_TX_POP_ENTRY),
+            ("set_entry_prop", KAYA_TX_SET_ENTRY_PROP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -926,6 +1031,9 @@ mod tests {
             ("create_window", KAYA_APPLY_CREATE_WINDOW),
             ("destroy_window", KAYA_APPLY_DESTROY_WINDOW),
             ("present_alert", KAYA_APPLY_PRESENT_ALERT),
+            ("push_entry", KAYA_APPLY_PUSH_ENTRY),
+            ("pop_entry", KAYA_APPLY_POP_ENTRY),
+            ("set_entry_prop", KAYA_APPLY_SET_ENTRY_PROP),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

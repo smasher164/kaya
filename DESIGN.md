@@ -817,17 +817,113 @@ The modal tier splits in two, because the platforms' own dialogs do:
   context hosting an arbitrary scene root — come later, reusing the
   same mount-target machinery windows introduce.
 
-### Navigation (future, unscheduled)
+### Navigation (ratified 2026-07-21)
 
-A stack of scene roots inside the primary surface: push/pop as
-vocabulary, the back affordance materialized per platform — system
-gesture on Android, swipe-back on iOS, a toolbar back button on the
-desktops (the System Settings / AdwNavigationView / NavigationView
-pattern). Without it, mobile kaya apps are single-screen, so the gap
-is real; it stays out of phase 4 because it carries its own scene-tree
-questions (widget identity across a pop; whether the stack lives in
-the protocol or the guest) and bolting it onto windows would poison
-both grammars.
+A stack of scene roots inside one surface, exactly one visible; the
+lifecycle verb is POP. The two questions that kept this out of phase
+4 are answered:
+
+- **The stack lives in the protocol, core-owned.** Back-sovereignty
+  forces it: predictive back on Android means the SYSTEM drives the
+  pop, including rendering the covered screen mid-gesture, and a
+  guest-owned stack would put a guest round-trip in front of that
+  animation — the stall predictive back exists to eliminate. The core
+  owns per-window entry stacks; each backend hands its native
+  navigator real state (SwiftUI `NavigationStack(path:)`, the Compose
+  back dispatcher, a GTK/WinUI content stack) and reports the pop as
+  an occurrence after the fact. Bindings mirror the stack the way
+  they mirror mounted windows; guests carry no stack of their own.
+- **Entries are retained until popped.** A pushed-under root stays
+  alive — its widget ids remain valid, the guest can keep mutating a
+  covered root (a list screen updating behind its detail screen is
+  the canonical case), and predictive back has something real to
+  peek at. Pop destroys the popped entry's tree exactly as
+  destroy_window forgets its mounted tree: ids are never reused, so
+  stale targets fail loudly. Covered = retained, popped = gone — one
+  rule, both directions, no platform divergence.
+
+The vocabulary. Entries share the surface-id namespace with windows —
+one binding-side allocator, and `mount {window, root}` keeps its
+shape; the target's domain grows from "windows" to "surfaces"
+(generalize the TARGET of mount, not the tree):
+
+- `push_entry {window, entry}`: push a new entry onto `window`'s
+  stack (entry ids are guest-allocated in the shared surface
+  namespace, below the internal bit — the create_window discipline).
+  Materializes covered/incoming; mounting a root into it presents it
+  — the create-hidden/mount-presents grammar windows already have.
+- `pop_entry {window}`: programmatic pop of the top entry. Popping an
+  empty stack is a loud scene error.
+- `entry_popped {entry}`: the user's back affordance popped an entry
+  natively — informational and post-fact, the window_closed
+  precedent; the core's stack has already reconciled by the time it
+  fires. A programmatic pop_entry does not echo here: its caller
+  already knows (the destroy_window discipline — bindings fold their
+  mirror at the call site).
+- **Entry props are their own typed table** (`ENTRY_PROPS`: `title`,
+  `intercept_back`), with a set_entry_prop duo mirroring
+  set_window_prop — deliberately NOT the window-prop table plus
+  runtime applicability checks. The tables are spec facts and the
+  emitters' typed setters are the point: a wrong-surface prop dies at
+  compile time in every binding rather than at the scene. `title`
+  feeds the back affordance (the iOS back-button label, the desktop
+  headers).
+- **Back interception is the close-veto class transplanted.**
+  `intercept_back` (Bool, default off), per entry: off = the platform
+  pops natively with its full predictive animation; on = the back
+  affordance emits `back_requested {entry}` and nothing pops until
+  the app answers with pop_entry. This is Android's own model —
+  OnBackPressedCallback is declared-ahead enablement, not
+  veto-at-gesture-time — so an armed interception taking over the
+  gesture is the platform's semantics, not a kaya carve-out; iOS
+  spells armed as disarming the swipe recognizer, the desktops route
+  the back button's click to the occurrence. POP stays user-sovereign
+  except where the app explicitly armed the same opt-in class windows
+  use for close.
+- **No capability gate** — the deliberate contrast with aux_windows:
+  every host materializes a serial stack natively (Android's
+  predictive back, iOS swipe-back, and on the desktops the
+  header/toolbar back button — the System Settings /
+  AdwNavigationView / NavigationView pattern), so there is nothing to
+  advertise and nothing to reject.
+- **Window-scoped from day one; no nesting.** push_entry carries
+  `window`, so a stack inside a desktop auxiliary window costs
+  nothing extra (the System Settings shape); phones only have surface
+  0 anyway. One stack per window; entries cannot host stacks in v1.
+- **Multi-pop is binding sugar, and the batch is the animation.**
+  pop_to_root()/pop(n) lower to N pop_entry records in ONE
+  transaction — the bindings know the depth from their mirror, and
+  the transaction is already the protocol's atomic unit. The
+  materialization obligation, stated here so it is not rediscovered
+  as a bug: backends animate the NET stack change per applied batch,
+  never per op. The platforms' own pop-to-root APIs
+  (popToRootViewController, path.removeLast(k), popBackStack) exist
+  precisely so a multi-pop plays one transition; per-op animation
+  would be the observable divergence.
+
+Harness: expect_entries, a `back` action verb driving the real
+affordance per platform, and entry-targeted expect_title — all four
+layers in both interpreters from the start, per the
+interpreter-backend doctrine.
+
+### Sections (tabs) — a context in principle, unscheduled
+
+Tabs are a presentation context, not a widget: a fixed-ish,
+app-declared set of PEER roots inside one surface, user-switched, all
+retained — and the first grammar with no destruction semantics at
+all. Switching is SELECTION, not lifecycle (a tab_selected
+occurrence; nothing closes, nothing pops). On the phones the
+materialization is the tab bar; on the desktops it is each platform's
+section-switcher idiom — TabView's toolbar tabs on macOS, WinUI's
+NavigationView (the platform's actual affordance for app sections),
+GTK's header-bar ViewSwitcher over a GtkStack. Deliberately excluded:
+DOCUMENT tabs (browser/editor-style user-created, closable,
+reorderable tabs). Those are window management — their verb is CLOSE,
+their count is dynamic, they drag between windows — and belong to the
+windows grammar if kaya ever wants them; conflating them with
+sections would poison both grammars the way window-as-push would
+have poisoned navigation. Full design (declaration shape, selection
+prop vs occurrence, icons/labels) comes when sections are scheduled.
 
 ### Protocol shape
 
@@ -1746,9 +1842,12 @@ remains is implementation-scale:
    (ratified 2026-07-21). Windows, modal presentations, and navigation
    are three context types with three unmixed lifecycle grammars;
    phase 4 implements windows (primary props, capability-gated
-   auxiliaries, the close veto class), alerts follow, root-hosting
-   modals and navigation are recorded as future. Milestone 1's
-   reserved mount target 0 remains the implicit primary window.
+   auxiliaries, the close veto class), alerts landed next, and
+   navigation is ratified (core-owned stacks, retained-until-popped
+   entries, the intercept_back veto transplant — see the section);
+   root-hosting modals and sections (tabs-as-context) remain
+   recorded as future. Milestone 1's reserved mount target 0 remains
+   the implicit primary window.
 
 The v1 widget set and the gallery scene list are covered in "v1 scope and
 delivery process"; the scene list grows per widget admission.

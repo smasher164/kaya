@@ -102,6 +102,15 @@ pub enum Occurrence {
     /// The alert's one answer; the dialog is already gone when this
     /// fires, and the alert id retired with it.
     AlertResult { alert: AlertId, choice: AlertChoice },
+    /// The user's back affordance popped an entry natively —
+    /// informational and post-fact (the WindowClosed precedent); the
+    /// core's stack has already reconciled. A programmatic pop_entry
+    /// does not echo here: its caller already knows.
+    EntryPopped { entry: WindowId },
+    /// The user drove the back affordance on an entry whose
+    /// intercept_back is armed. Nothing has popped; the app answers
+    /// with pop_entry if it agrees — the CloseRequested veto class.
+    BackRequested { entry: WindowId },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; carries the
@@ -371,6 +380,26 @@ pub enum WindowProp {
     VetoClose,
 }
 
+/// Navigation-entry property keys — their own typed table (see
+/// spec::ENTRY_PROPS and DESIGN.md's Navigation): a wrong-surface
+/// prop dies at compile time in every binding rather than at the
+/// scene. Entries share the surface-id namespace with windows (one
+/// guest-side allocator; mount's target addresses either), so
+/// [`WindowId`] carries entry ids too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntryProp {
+    /// The entry's title (Str-valued): the back affordance's label
+    /// source — the iOS back button, the desktop headers.
+    Title,
+    /// The close-veto class transplanted to POP (Bool-valued; default
+    /// false). False: the platform pops natively with its full
+    /// predictive animation. True: the back affordance emits
+    /// back_requested and nothing pops until the app answers with
+    /// pop_entry — Android's own declared-ahead OnBackPressedCallback
+    /// model, not veto-at-gesture-time.
+    InterceptBack,
+}
+
 /// The one-shot command vocabulary: momentary verbs aimed at
 /// widget-owned state, the third arm of the ownership rule (app-owned
 /// state travels as props and deltas, widget-owned state comes back as
@@ -428,6 +457,20 @@ pub enum TxOp {
     /// answered by exactly one AlertResult (the request/result
     /// grammar). One alert may be live per process.
     ShowAlert(AlertSpec),
+    /// Push a navigation entry onto `window`'s stack (no capability
+    /// gate — every host materializes a serial stack natively).
+    /// Materializes covered/incoming; mounting a root into it
+    /// presents it. The covered root below stays alive: retained
+    /// until popped.
+    PushEntry { window: WindowId, entry: WindowId },
+    /// Pop the window's top entry and forget its mounted tree, the
+    /// destroy_window teardown discipline (ids never reused). Popping
+    /// an empty stack is a scene error. Multi-pop is binding sugar —
+    /// N of these in one transaction, one animated transition.
+    PopEntry { window: WindowId },
+    /// Bind a navigation-entry property. Element sources are rejected
+    /// at decode — entries are not collection elements.
+    SetEntryProp { entry: WindowId, prop: EntryProp, value: PropValue },
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -513,6 +556,14 @@ pub enum ApplyOp {
     /// validated the spec); answer exactly once with an AlertResult
     /// emission — an action index or the cancel sentinel.
     PresentAlert(AlertSpec),
+    /// Push a navigation entry onto the window's stack, hidden until
+    /// a mount presents it. The covered root stays alive.
+    PushEntry { window: WindowId, entry: WindowId },
+    /// Pop the window's top entry and release its views. The NET
+    /// stack change of the whole batch animates as one transition
+    /// (the multi-pop obligation; see DESIGN.md, Navigation).
+    PopEntry { window: WindowId },
+    SetEntryProp { entry: WindowId, prop: EntryProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
@@ -608,6 +659,12 @@ impl OccSink {
                         crate::ring::REC_ALERT_RESULT,
                         &crate::wire::alert_result_body(alert, choice),
                     );
+                }
+                Occurrence::EntryPopped { entry } => {
+                    ring.push_record(crate::ring::REC_ENTRY_POPPED, &entry.0.to_le_bytes());
+                }
+                Occurrence::BackRequested { entry } => {
+                    ring.push_record(crate::ring::REC_BACK_REQUESTED, &entry.0.to_le_bytes());
                 }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },

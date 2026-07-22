@@ -136,6 +136,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_alert_result as *mut _,
             },
             NativeMethod {
+                name: "emitEntryPopped".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_entry_popped as *mut _,
+            },
+            NativeMethod {
+                name: "emitBackRequested".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_back_requested as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -211,6 +221,18 @@ extern "system" fn present_emit_alert_result(
     choice: jint,
 ) {
     crate::capi::kaya_emit_alert_result(alert as u64, choice as u32);
+}
+
+/// KayaPresent.emitEntryPopped: the user's back gesture popped an
+/// entry natively — the core's stack reconciles inside this call.
+extern "system" fn present_emit_entry_popped(_env: JNIEnv, _class: JClass, entry: jlong) {
+    crate::capi::kaya_emit_entry_popped(entry as u64);
+}
+
+/// KayaPresent.emitBackRequested: back on an intercept_back-armed
+/// entry — nothing popped; the app answers with pop_entry.
+extern "system" fn present_emit_back_requested(_env: JNIEnv, _class: JClass, entry: jlong) {
+    crate::capi::kaya_emit_back_requested(entry as u64);
 }
 
 extern "system" fn present_emit_toggled(

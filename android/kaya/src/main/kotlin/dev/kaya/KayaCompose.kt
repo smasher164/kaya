@@ -159,6 +159,12 @@ object KayaSceneModel {
     var alertMessage: String = ""
     var alertActions: List<String> = emptyList()
     var alertCancel: String = ""
+    // The primary surface's navigation stack, bottom to top
+    // (DESIGN.md, Navigation): the core owns the stack; exactly one
+    // entry visible (the top; the root when empty). Android has one
+    // surface, so this is THE stack.
+    val navEntries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
+    val navIndex = HashMap<Long, KayaNavEntry>()
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -171,6 +177,15 @@ object KayaSceneModel {
     val rows = ArrayList<KayaNode>()
 }
 
+/** One navigation entry: a pushed scene root, retained while covered,
+ * destroyed at pop. interceptBack is the close-veto class transplanted
+ * to POP. */
+class KayaNavEntry(val id: Long) {
+    var root by mutableStateOf<KayaNode?>(null)
+    var title by mutableStateOf("")
+    var interceptBack by mutableStateOf(false)
+}
+
 object KayaCompose {
     // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
     // in kaya.h.
@@ -180,7 +195,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x4da364d017f52b15uL
+    private const val SPEC_HASH: ULong = 0x833a2a32e4a52f92uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -193,6 +208,9 @@ object KayaCompose {
     private const val APPLY_CREATE_WINDOW = 9
     private const val APPLY_DESTROY_WINDOW = 10
     private const val APPLY_PRESENT_ALERT = 11
+    private const val APPLY_PUSH_ENTRY = 12
+    private const val APPLY_POP_ENTRY = 13
+    private const val APPLY_SET_ENTRY_PROP = 14
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -205,6 +223,10 @@ object KayaCompose {
     private const val WPROP_WIDTH = 2
     private const val WPROP_HEIGHT = 3
     private const val WPROP_VETO_CLOSE = 4
+    // Navigation-entry properties: their own typed table;
+    // intercept_back is the close-veto class transplanted to POP.
+    private const val EPROP_TITLE = 1
+    private const val EPROP_INTERCEPT_BACK = 2
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     const val KIND_COLUMN = 1
@@ -419,6 +441,37 @@ object KayaCompose {
                     KayaSceneModel.alertCancel = cancel
                     KayaSceneModel.alertId = alert
                 }
+                APPLY_PUSH_ENTRY -> {
+                    // Materializes covered/incoming: on the stack now,
+                    // the mount fills it; the top of navEntries is the
+                    // visible screen and recomposition animates the
+                    // push.
+                    b.long // window: 0, the one surface on this host
+                    val eid = b.long
+                    val entry = KayaNavEntry(eid)
+                    KayaSceneModel.navIndex[eid] = entry
+                    KayaSceneModel.navEntries.add(entry)
+                }
+                APPLY_POP_ENTRY -> {
+                    // Programmatic pop: the core already reconciled;
+                    // the batch's NET stack change recomposes as one
+                    // transition (the multi-pop obligation).
+                    b.long // window
+                    val entry = KayaSceneModel.navEntries.removeAt(
+                        KayaSceneModel.navEntries.size - 1)
+                    KayaSceneModel.navIndex.remove(entry.id)
+                }
+                APPLY_SET_ENTRY_PROP -> {
+                    val eid = b.long
+                    val prop = b.int
+                    b.int // pad
+                    val entry = KayaSceneModel.navIndex[eid]!!
+                    when (prop) {
+                        EPROP_TITLE -> entry.title = readString(b)
+                        EPROP_INTERCEPT_BACK -> entry.interceptBack = readBool(b)
+                        else -> error("kaya: unknown entry prop $prop")
+                    }
+                }
                 APPLY_ADD_CHILD -> {
                     val parent = b.long
                     val child = b.long
@@ -427,9 +480,14 @@ object KayaCompose {
                     KayaSceneModel.parents[child] = parent
                 }
                 APPLY_MOUNT -> {
-                    b.long // window: the default until the window vocabulary
+                    // The target is a SURFACE: the primary (0) or a
+                    // pushed navigation entry (aux windows are
+                    // capability-rejected on this host).
+                    val wid = b.long
                     val root = b.long
-                    KayaSceneModel.root = KayaSceneModel.nodes[root]
+                    val entry = KayaSceneModel.navIndex[wid]
+                    if (entry != null) entry.root = KayaSceneModel.nodes[root]
+                    else KayaSceneModel.root = KayaSceneModel.nodes[root]
                 }
                 APPLY_MOVE_CHILD -> {
                     val parent = b.long
@@ -784,6 +842,30 @@ object KayaCompose {
                         } else {
                             failures.add("alerts $got, wanted $want")
                         }
+                    }
+                    "expect_entries" -> {
+                        // The navigation-stack depth (window#0 is the
+                        // one surface; the implicit form is the
+                        // canonical spelling here).
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val prefix = if (explicit) "$target " else ""
+                        val arg = if (explicit) parts.getOrNull(2) else parts.getOrNull(1)
+                        val want = arg?.toIntOrNull() ?: -1
+                        val got = onUi(activity) { KayaSceneModel.navEntries.size }
+                        if (got == want) {
+                            observed.add("${prefix}entries $want")
+                        } else {
+                            failures.add("${prefix}entries $got, wanted $want")
+                        }
+                    }
+                    "back" -> {
+                        // The user's back affordance: drive the SAME
+                        // path the system back dispatch runs (the
+                        // BackHandler's body), so interception and the
+                        // post-fact reconcile fire exactly as a real
+                        // gesture. Silent, like click.
+                        onUi(activity) { kayaUserBack() }
                     }
                     "expect_title" -> {
                         // The REAL materialized title (the Activity
@@ -1163,15 +1245,30 @@ fun KayaRoot() {
             .onGloballyPositioned { kayaAvailableSize = it.size },
         contentAlignment = Alignment.TopStart,
     ) {
-        KayaSceneModel.root?.let { root ->
-            // The wrapper hugs the mounted container, so its size IS
-            // the root's — what expect_root_fills compares against the
-            // offer recorded above.
-            Box(Modifier.onGloballyPositioned { kayaRootSize = it.size }) {
-                KayaRender(root, isRoot = true)
+        val topEntry = KayaSceneModel.navEntries.lastOrNull()
+        if (topEntry != null) {
+            // The stack's top is the one visible screen; the covered
+            // root below stays alive (retained-until-popped).
+            topEntry.root?.let { KayaRender(it, isRoot = true) }
+        } else {
+            KayaSceneModel.root?.let { root ->
+                // The wrapper hugs the mounted container, so its size IS
+                // the root's — what expect_root_fills compares against the
+                // offer recorded above.
+                Box(Modifier.onGloballyPositioned { kayaRootSize = it.size }) {
+                    KayaRender(root, isRoot = true)
+                }
             }
         }
     }
+
+    // The system back gesture, the user-sovereign POP: enabled only
+    // while the stack has entries (declared-ahead, the platform's own
+    // OnBackPressedCallback model — the root's back still leaves the
+    // app).
+    androidx.activity.compose.BackHandler(
+        enabled = KayaSceneModel.navEntries.isNotEmpty()
+    ) { kayaUserBack() }
 
     KayaSceneModel.alertId?.let { alert ->
         // The platform's REAL modal dialog: M3 AlertDialog. Every
@@ -1197,6 +1294,20 @@ fun KayaRoot() {
                 }
             },
         )
+    }
+}
+
+/// A user-driven back on the top entry: an intercept_back-armed top
+/// emits back_requested and nothing pops (the veto class); an unarmed
+/// top pops here and reconciles the core post-fact.
+fun kayaUserBack() {
+    val top = KayaSceneModel.navEntries.lastOrNull() ?: return
+    if (top.interceptBack) {
+        KayaPresent.emitBackRequested(top.id)
+    } else {
+        KayaSceneModel.navEntries.removeAt(KayaSceneModel.navEntries.size - 1)
+        KayaSceneModel.navIndex.remove(top.id)
+        KayaPresent.emitEntryPopped(top.id)
     }
 }
 

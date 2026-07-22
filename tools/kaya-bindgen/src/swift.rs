@@ -233,6 +233,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        self.end(start)");
         c.line("    }");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_entry_prop with a constant {prop} value."));
+        c.line(&format!("    mutating func setEntry{pc}(_ entry: UInt64, _ {p}: {ty}) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
+        c.line("        self.u64(entry)");
+        c.line(&format!("        self.u32(UInt32(KAYA_EPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value(.{ctor}({p}))"));
+        c.line("        self.end(start)");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_entry_prop with a signal-bound {prop} value."));
+        c.line(&format!("    mutating func bindEntry{pc}(_ entry: UInt64, _ signalId: UInt64) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
+        c.line("        self.u64(entry)");
+        c.line(&format!("        self.u32(UInt32(KAYA_EPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+        c.line("        self.u64(signalId)");
+        c.line("        self.end(start)");
+        c.line("    }");
+    }
     c.line("");
     c.line("    func submit() {");
     c.line("        bytes.withUnsafeBytes { raw in");
@@ -262,14 +294,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     }
     c.line("        else { return nil }");
     c.line("        let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)");
-    c.line("        // Window lifecycle records carry the window id alone.");
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
     c.line("            return (kind, id, [], .i64(Int64(choice)))");
     c.line("        }");
-    c.line("        if kind == UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED)");
-    c.line("            || kind == UInt16(KAYA_OCCURRENCE_WINDOW_CLOSED)");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    c.line("        // Surface lifecycle records carry the surface id alone");
+    c.line("        // (derived from the record shapes).");
+    c.line(&format!("        if {}", id_only[0]));
+    for cond in &id_only[1..] {
+        c.line(&format!("            || {cond}"));
+    }
     c.line("        {");
     c.line("            return (kind, id, [], nil)");
     c.line("        }");

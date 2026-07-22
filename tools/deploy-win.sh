@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# The nav scene is the navigation DEPTH slice: protocol + SwiftUI on
+# mac + the rust guest only for now. This runner's nav legs land with
+# the breadth slice (docs/deferred.md holds the item open).
 
 # Everything runs inside the dev shell: the flake pins every toolchain
 # (rust + cross targets, swiftc, ffmpeg, the android sdk). Running

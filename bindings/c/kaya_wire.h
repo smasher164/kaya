@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x4da364d017f52b15ULL
+#define KAYA_SPEC_HASH 0x833a2a32e4a52f92ULL
 
 
 /* Create a signal holding `initial`. */
@@ -322,6 +322,30 @@ static inline void kaya_tx_show_alert(KayaTx *tx, uint64_t window, uint64_t aler
     kaya_wire_value(tx, action0);
     kaya_wire_value(tx, action1);
     kaya_wire_value(tx, cancel);
+    kaya_wire_end(tx, start);
+}
+
+/* Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation). */
+static inline void kaya_tx_push_entry(KayaTx *tx, uint64_t window, uint64_t entry) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_PUSH_ENTRY);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, entry);
+    kaya_wire_end(tx, start);
+}
+
+/* Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch. */
+static inline void kaya_tx_pop_entry(KayaTx *tx, uint64_t window) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_POP_ENTRY);
+    kaya_wire_u64(tx, window);
+    kaya_wire_end(tx, start);
+}
+
+/* Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements. */
+static inline void kaya_tx_set_entry_prop(KayaTx *tx, uint64_t entry, uint32_t prop, uint32_t source) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_ENTRY_PROP);
+    kaya_wire_u64(tx, entry);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
     kaya_wire_end(tx, start);
 }
 

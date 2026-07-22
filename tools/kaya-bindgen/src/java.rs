@@ -230,6 +230,33 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return finish(b);");
         c.line("    }");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /** set_entry_prop with a constant {prop} value. */"));
+        c.line(&format!("    public static byte[] txSetEntry{pc}(long entry, {ty} {p}) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);");
+        c.line(&format!("        b.putLong(entry).putInt(EPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_entry_prop with a signal-bound {prop} value. */"));
+        c.line(&format!("    public static byte[] txBindEntry{pc}(long entry, long signalId) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);");
+        c.line(&format!("        b.putLong(entry).putInt(EPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
     c.line("");
     c.line("    /** Concatenate packed records into one transaction. */");
     c.line("    public static byte[] tx(byte[]... records) {");
@@ -278,13 +305,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            return null;");
     c.line("        }");
     c.line("        long id = b.getLong(8);");
-    c.line("        // Window lifecycle records carry the window id alone.");
     c.line("        if (kind == OCC_KIND_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*,");
     c.line("            // the cancel sentinel being -1 in java-int terms).");
     c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
     c.line("        }");
-    c.line("        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line("        // Surface lifecycle records carry the surface id alone");
+    c.line("        // (derived from the record shapes).");
+    c.line(&format!("        if ({id_only}) {{"));
     c.line("            return new Occ(kind, id, java.util.List.of(), null);");
     c.line("        }");
     c.line("        int pathLen = b.getInt(16);");

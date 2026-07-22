@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x4da364d017f52b15
+specHash = 0x833a2a32e4a52f92
 
 valueBool :: Word32
 valueBool = 1
@@ -78,6 +78,10 @@ wpropHeight :: Word32
 wpropHeight = 3
 wpropVetoClose :: Word32
 wpropVetoClose = 4
+epropTitle :: Word32
+epropTitle = 1
+epropInterceptBack :: Word32
+epropInterceptBack = 2
 alertChoiceAction0 :: Word32
 alertChoiceAction0 = 0
 alertChoiceAction1 :: Word32
@@ -156,6 +160,12 @@ txKindDestroyWindow :: Word16
 txKindDestroyWindow = 20
 txKindShowAlert :: Word16
 txKindShowAlert = 21
+txKindPushEntry :: Word16
+txKindPushEntry = 22
+txKindPopEntry :: Word16
+txKindPopEntry = 23
+txKindSetEntryProp :: Word16
+txKindSetEntryProp = 24
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -178,6 +188,12 @@ applyKindDestroyWindow :: Word16
 applyKindDestroyWindow = 10
 applyKindPresentAlert :: Word16
 applyKindPresentAlert = 11
+applyKindPushEntry :: Word16
+applyKindPushEntry = 12
+applyKindPopEntry :: Word16
+applyKindPopEntry = 13
+applyKindSetEntryProp :: Word16
+applyKindSetEntryProp = 14
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -192,6 +208,10 @@ occKindWindowClosed :: Word16
 occKindWindowClosed = 6
 occKindAlertResult :: Word16
 occKindAlertResult = 7
+occKindEntryPopped :: Word16
+occKindEntryPopped = 8
+occKindBackRequested :: Word16
+occKindBackRequested = 9
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -307,6 +327,18 @@ txDestroyWindow windowId = wireRecord txKindDestroyWindow (word64LE windowId)
 -- Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
 txShowAlert :: Word64 -> Word64 -> Word32 -> Value -> Value -> Value -> Value -> Value -> Builder
 txShowAlert window alert actions title message action0 action1 cancel = wireRecord txKindShowAlert (word64LE window <> word64LE alert <> word32LE actions <> word32LE 0 <> encodeValue title <> encodeValue message <> encodeValue action0 <> encodeValue action1 <> encodeValue cancel)
+
+-- Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation).
+txPushEntry :: Word64 -> Word64 -> Builder
+txPushEntry window entry = wireRecord txKindPushEntry (word64LE window <> word64LE entry)
+
+-- Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch.
+txPopEntry :: Word64 -> Builder
+txPopEntry window = wireRecord txKindPopEntry (word64LE window)
+
+-- Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
+txSetEntryProp :: Word64 -> Word32 -> Word32 -> Builder
+txSetEntryProp entry prop source = wireRecord txKindSetEntryProp (word64LE entry <> word32LE prop <> word32LE source)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -527,6 +559,30 @@ txBindWindowVetoClose window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropVetoClose <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_entry_prop with a constant title value.
+txSetEntryTitle :: Word64 -> String -> Builder
+txSetEntryTitle entry title = wireRecord txKindSetEntryProp
+  (word64LE entry <> word32LE epropTitle <> word32LE sourceConst
+    <> encodeValue (VStr title))
+
+-- set_entry_prop with a signal-bound title value.
+txBindEntryTitle :: Word64 -> Word64 -> Builder
+txBindEntryTitle entry signalId = wireRecord txKindSetEntryProp
+  (word64LE entry <> word32LE epropTitle <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_entry_prop with a constant intercept_back value.
+txSetEntryInterceptBack :: Word64 -> Bool -> Builder
+txSetEntryInterceptBack entry interceptBack = wireRecord txKindSetEntryProp
+  (word64LE entry <> word32LE epropInterceptBack <> word32LE sourceConst
+    <> encodeValue (VBool interceptBack))
+
+-- set_entry_prop with a signal-bound intercept_back value.
+txBindEntryInterceptBack :: Word64 -> Word64 -> Builder
+txBindEntryInterceptBack entry signalId = wireRecord txKindSetEntryProp
+  (word64LE entry <> word32LE epropInterceptBack <> word32LE sourceSignal
+    <> word64LE signalId)
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -561,17 +617,18 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
-      -- Window lifecycle records carry the window id alone.
       if kind == occKindAlertResult
         then do
           -- The alert's one answer: id + u32 choice (alertChoice*).
           choice <- peekByteOff rec 16 :: IO Word32
           return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))
-        else if kind == occKindCloseRequested || kind == occKindWindowClosed
+        -- Surface lifecycle records carry the surface id alone
+        -- (derived from the record shapes).
+        else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested
           then return (Just (kind, ident, [], Nothing))
           else do
           pathLen <- peekByteOff rec 16 :: IO Word32

@@ -47,6 +47,12 @@ pub struct KayaHostApi {
     /// The alert's one answer (an ALERT_CHOICE value: an action index
     /// or the cancel sentinel). Retires the live alert id.
     pub emit_alert_result: extern "C" fn(u64, u32),
+    /// Navigation lifecycle emits: entry_popped after the user's back
+    /// affordance popped natively (the core's stack reconciles inside
+    /// this call), back_requested when the top entry's intercept_back
+    /// is armed and nothing popped.
+    pub emit_entry_popped: extern "C" fn(u64),
+    pub emit_back_requested: extern "C" fn(u64),
 }
 
 unsafe extern "C" {
@@ -84,6 +90,8 @@ pub(crate) fn run() -> i32 {
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,
         emit_alert_result: crate::capi::kaya_emit_alert_result,
+        emit_entry_popped: crate::capi::kaya_emit_entry_popped,
+        emit_back_requested: crate::capi::kaya_emit_back_requested,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

@@ -139,6 +139,22 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("veto_close", 4, PropKind::Bool),
 ];
 
+/// Navigation-entry properties: their own typed table, deliberately
+/// not WINDOW_PROPS with applicability checks — the tables are spec
+/// facts and the emitters' typed setters are the point (a
+/// wrong-surface prop dies at compile time in every binding rather
+/// than at the scene). `title` feeds the back affordance (the iOS
+/// back-button label, the desktop headers). `intercept_back` is the
+/// close-veto class transplanted to POP: false (the default) = the
+/// platform pops natively with its full predictive animation; true =
+/// the back affordance emits back_requested and nothing pops until
+/// the app answers with pop_entry (Android's own declared-ahead
+/// OnBackPressedCallback model — see DESIGN.md, Navigation).
+pub const ENTRY_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("title", 1, PropKind::Str),
+    ("intercept_back", 2, PropKind::Bool),
+];
+
 /// The variable tail of SET_PROPERTY, after `source`: a value for
 /// SOURCE_CONST, a u64 signal id for SOURCE_SIGNAL, or u32 level + u32
 /// reserved for SOURCE_ELEMENT. The one record whose layout depends on
@@ -194,6 +210,12 @@ pub fn hash() -> u64 {
     }
     eat(b"window_props");
     for (name, id, kind) in WINDOW_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"entry_props");
+    for (name, id, kind) in ENTRY_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -459,6 +481,45 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   are guest-chosen; one alert may be live per process, and \
                   the id retires when its result fires.",
         },
+        Record {
+            kind: 22,
+            name: "push_entry",
+            fields: &[f("window", FieldTy::U64), f("entry", FieldTy::U64)],
+            payload: None,
+            doc: "Push a navigation entry onto `window`'s stack (0 = the \
+                  primary surface; no capability gate — every host \
+                  materializes a serial stack natively). Entry ids share \
+                  the surface namespace with windows: one guest-side \
+                  allocator, and mount's target field addresses either. \
+                  Materializes covered/incoming; mounting a root into it \
+                  presents it. The covered root below stays alive — \
+                  retained until popped (DESIGN.md, Navigation).",
+        },
+        Record {
+            kind: 23,
+            name: "pop_entry",
+            fields: &[f("window", FieldTy::U64)],
+            payload: None,
+            doc: "Pop the top navigation entry from `window`'s stack and \
+                  forget its mounted tree, exactly as destroy_window does \
+                  (ids are never reused, so stale targets fail loudly). \
+                  Popping an empty stack is a scene error. Multi-pop is \
+                  binding sugar: N of these in one transaction, animated \
+                  by backends as the NET stack change per batch.",
+        },
+        Record {
+            kind: 24,
+            name: "set_entry_prop",
+            fields: &[
+                f("entry", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a navigation-entry property (ENTRY_PROPS). Same tail \
+                  convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is \
+                  rejected — entries are not collection elements.",
+        },
     ],
     apply: &[
         Record {
@@ -581,6 +642,36 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   once — an action index, or the cancel sentinel for every \
                   platform-native dismissal.",
         },
+        Record {
+            kind: 12,
+            name: "push_entry",
+            fields: &[f("window", FieldTy::U64), f("entry", FieldTy::U64)],
+            payload: None,
+            doc: "Push a navigation entry onto the window's stack, hidden \
+                  until a mount presents it. The covered root stays alive.",
+        },
+        Record {
+            kind: 13,
+            name: "pop_entry",
+            fields: &[f("window", FieldTy::U64)],
+            payload: None,
+            doc: "Pop the window's top entry and release its views; the \
+                  net stack change of the whole batch animates as ONE \
+                  transition (the multi-pop obligation).",
+        },
+        Record {
+            kind: 14,
+            name: "set_entry_prop",
+            fields: &[
+                f("entry", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a navigation-entry property to an already-resolved \
+                  value.",
+        },
     ],
     occurrence: &[
         Record {
@@ -669,6 +760,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   cancel button itself). The alert id retires here; the \
                   dialog is already gone when this fires.",
         },
+        Record {
+            kind: 8,
+            name: "entry_popped",
+            fields: &[f("entry", FieldTy::U64)],
+            payload: None,
+            doc: "The user's back affordance popped an entry natively \
+                  (predictive back, swipe-back, the desktop back button) \
+                  — informational and post-fact, the window_closed \
+                  precedent; the core's stack has already reconciled. A \
+                  programmatic pop_entry does not echo here: its caller \
+                  already knows.",
+        },
+        Record {
+            kind: 9,
+            name: "back_requested",
+            fields: &[f("entry", FieldTy::U64)],
+            payload: None,
+            doc: "The user drove the back affordance on an entry whose \
+                  intercept_back is armed. Nothing has popped; the app \
+                  answers with pop_entry if it agrees — the veto class, \
+                  the close_requested precedent.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -710,6 +823,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("height", 3),
                 ("veto_close", 4),
             ],
+        },
+        EnumSpec {
+            name: "eprop",
+            variants: &[("title", 1), ("intercept_back", 2)],
         },
         EnumSpec {
             // The sentinel is deliberately not an index: any
@@ -884,6 +1001,9 @@ mod tests {
             ("create_window", wire::TX_CREATE_WINDOW),
             ("destroy_window", wire::TX_DESTROY_WINDOW),
             ("show_alert", wire::TX_SHOW_ALERT),
+            ("push_entry", wire::TX_PUSH_ENTRY),
+            ("pop_entry", wire::TX_POP_ENTRY),
+            ("set_entry_prop", wire::TX_SET_ENTRY_PROP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -908,6 +1028,9 @@ mod tests {
                 ("create_window", wire::APPLY_CREATE_WINDOW),
                 ("destroy_window", wire::APPLY_DESTROY_WINDOW),
                 ("present_alert", wire::APPLY_PRESENT_ALERT),
+                ("push_entry", wire::APPLY_PUSH_ENTRY),
+                ("pop_entry", wire::APPLY_POP_ENTRY),
+                ("set_entry_prop", wire::APPLY_SET_ENTRY_PROP),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -917,6 +1040,8 @@ mod tests {
         assert_eq!(SPEC.occurrence[4].kind, crate::ring::REC_CLOSE_REQUESTED);
         assert_eq!(SPEC.occurrence[5].kind, crate::ring::REC_WINDOW_CLOSED);
         assert_eq!(SPEC.occurrence[6].kind, crate::ring::REC_ALERT_RESULT);
+        assert_eq!(SPEC.occurrence[7].kind, crate::ring::REC_ENTRY_POPPED);
+        assert_eq!(SPEC.occurrence[8].kind, crate::ring::REC_BACK_REQUESTED);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -941,6 +1066,16 @@ mod tests {
             .expect("spec has a wprop enum");
         assert_eq!(WINDOW_PROPS.len(), wprop_enum.variants.len());
         for ((name, id, _), (ename, eid)) in WINDOW_PROPS.iter().zip(wprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
+        let eprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "eprop")
+            .expect("spec has an eprop enum");
+        assert_eq!(ENTRY_PROPS.len(), eprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in ENTRY_PROPS.iter().zip(eprop_enum.variants) {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
@@ -977,6 +1112,8 @@ mod tests {
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
+                    ("eprop", "title") => wire::EPROP_TITLE,
+                    ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
                     ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,
@@ -1081,6 +1218,23 @@ mod tests {
             ],
         );
 
+        w.record(tx_record("push_entry"), &[Arg::U64(0), Arg::U64(7)]);
+        // set_entry_prop carries the SET_PROPERTY variable tail after
+        // its fixed fields — spliced by hand, as a generated helper
+        // would (the set_property arm below is the same shape).
+        {
+            let start = w.buf.len();
+            w.buf.extend_from_slice(&[0u8; 8]);
+            w.buf.extend_from_slice(&7u64.to_le_bytes());
+            w.buf.extend_from_slice(&wire::EPROP_TITLE.to_le_bytes());
+            w.buf.extend_from_slice(&wire::SOURCE_CONST.to_le_bytes());
+            w.value(&Value::from("detail"));
+            let size = (w.buf.len() - start) as u32;
+            w.buf[start..start + 4].copy_from_slice(&size.to_le_bytes());
+            w.buf[start + 4..start + 6].copy_from_slice(&wire::TX_SET_ENTRY_PROP.to_le_bytes());
+        }
+        w.record(tx_record("pop_entry"), &[Arg::U64(0)]);
+
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
             TxOp::CreateSignal {
@@ -1140,6 +1294,18 @@ mod tests {
                 actions: vec!["Delete".into(), "Archive".into()],
                 cancel: "Keep".into(),
             }),
+            TxOp::PushEntry {
+                window: WindowId(0),
+                entry: WindowId(7),
+            },
+            TxOp::SetEntryProp {
+                entry: WindowId(7),
+                prop: crate::protocol::EntryProp::Title,
+                value: PropValue::Const(Value::from("detail")),
+            },
+            TxOp::PopEntry {
+                window: WindowId(0),
+            },
         ];
         assert_eq!(ops.len(), expected.len());
         for (a, b) in ops.iter().zip(expected.iter()) {

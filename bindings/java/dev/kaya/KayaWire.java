@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x4da364d017f52b15L;
+    public static final long SPEC_HASH = 0x833a2a32e4a52f92L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -41,6 +41,8 @@ public final class KayaWire {
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
     public static final int WPROP_VETO_CLOSE = 4;
+    public static final int EPROP_TITLE = 1;
+    public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int ALERT_CHOICE_ACTION0 = 0;
     public static final int ALERT_CHOICE_ACTION1 = 1;
     public static final int ALERT_CHOICE_CANCEL = -1;
@@ -80,6 +82,9 @@ public final class KayaWire {
     public static final short TX_KIND_CREATE_WINDOW = 19;
     public static final short TX_KIND_DESTROY_WINDOW = 20;
     public static final short TX_KIND_SHOW_ALERT = 21;
+    public static final short TX_KIND_PUSH_ENTRY = 22;
+    public static final short TX_KIND_POP_ENTRY = 23;
+    public static final short TX_KIND_SET_ENTRY_PROP = 24;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -91,6 +96,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_CREATE_WINDOW = 9;
     public static final short APPLY_KIND_DESTROY_WINDOW = 10;
     public static final short APPLY_KIND_PRESENT_ALERT = 11;
+    public static final short APPLY_KIND_PUSH_ENTRY = 12;
+    public static final short APPLY_KIND_POP_ENTRY = 13;
+    public static final short APPLY_KIND_SET_ENTRY_PROP = 14;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -98,6 +106,8 @@ public final class KayaWire {
     public static final short OCC_KIND_CLOSE_REQUESTED = 5;
     public static final short OCC_KIND_WINDOW_CLOSED = 6;
     public static final short OCC_KIND_ALERT_RESULT = 7;
+    public static final short OCC_KIND_ENTRY_POPPED = 8;
+    public static final short OCC_KIND_BACK_REQUESTED = 9;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -334,6 +344,30 @@ public final class KayaWire {
         encodeValue(b, action0);
         encodeValue(b, action1);
         encodeValue(b, cancel);
+        return finish(b);
+    }
+
+    /** Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation). */
+    public static byte[] txPushEntry(long window, long entry) {
+        ByteBuffer b = begin(TX_KIND_PUSH_ENTRY);
+        b.putLong(window);
+        b.putLong(entry);
+        return finish(b);
+    }
+
+    /** Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch. */
+    public static byte[] txPopEntry(long window) {
+        ByteBuffer b = begin(TX_KIND_POP_ENTRY);
+        b.putLong(window);
+        return finish(b);
+    }
+
+    /** Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements. */
+    public static byte[] txSetEntryProp(long entry, int prop, int source) {
+        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        b.putLong(entry);
+        b.putInt(prop);
+        b.putInt(source);
         return finish(b);
     }
 
@@ -604,6 +638,36 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_entry_prop with a constant title value. */
+    public static byte[] txSetEntryTitle(long entry, String title) {
+        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        b.putLong(entry).putInt(EPROP_TITLE).putInt(SOURCE_CONST);
+        encodeValue(b, title);
+        return finish(b);
+    }
+
+    /** set_entry_prop with a signal-bound title value. */
+    public static byte[] txBindEntryTitle(long entry, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        b.putLong(entry).putInt(EPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_entry_prop with a constant intercept_back value. */
+    public static byte[] txSetEntryInterceptBack(long entry, boolean interceptBack) {
+        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        b.putLong(entry).putInt(EPROP_INTERCEPT_BACK).putInt(SOURCE_CONST);
+        encodeValue(b, interceptBack);
+        return finish(b);
+    }
+
+    /** set_entry_prop with a signal-bound intercept_back value. */
+    public static byte[] txBindEntryInterceptBack(long entry, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
+        b.putLong(entry).putInt(EPROP_INTERCEPT_BACK).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     /** Concatenate packed records into one transaction. */
     public static byte[] tx(byte[]... records) {
         int len = 0;
@@ -642,17 +706,18 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED) {
             return null;
         }
         long id = b.getLong(8);
-        // Window lifecycle records carry the window id alone.
         if (kind == OCC_KIND_ALERT_RESULT) {
             // The alert's one answer: id + u32 choice (ALERT_CHOICE_*,
             // the cancel sentinel being -1 in java-int terms).
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));
         }
-        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED) {
+        // Surface lifecycle records carry the surface id alone
+        // (derived from the record shapes).
+        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED) {
             return new Occ(kind, id, java.util.List.of(), null);
         }
         int pathLen = b.getInt(16);

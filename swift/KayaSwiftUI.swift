@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x4da364d017f52b15
+let kayaSpecHash: UInt64 = 0x833a2a32e4a52f92
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -36,6 +36,9 @@ private let applySetWindowProp: UInt16 = 8
 private let applyCreateWindow: UInt16 = 9
 private let applyDestroyWindow: UInt16 = 10
 private let applyPresentAlert: UInt16 = 11
+private let applyPushEntry: UInt16 = 12
+private let applyPopEntry: UInt16 = 13
+private let applySetEntryProp: UInt16 = 14
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -45,6 +48,10 @@ private let wpropTitle: UInt32 = 1
 private let wpropWidth: UInt32 = 2
 private let wpropHeight: UInt32 = 3
 private let wpropVetoClose: UInt32 = 4
+/// Navigation-entry properties (their own typed table; intercept_back
+/// is the close-veto class transplanted to POP).
+private let epropTitle: UInt32 = 1
+private let epropInterceptBack: UInt32 = 2
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -129,10 +136,32 @@ final class KayaWindowModel: Identifiable {
     var height: Double?
     /// Who owns the chrome close — see WindowProp::VetoClose.
     var vetoClose = false
+    /// The window's navigation stack, bottom to top (DESIGN.md,
+    /// Navigation): pushed entries, exactly one visible (the top; the
+    /// window's own root when empty). NavigationStack's path derives
+    /// from this — the core-owned stack is the source of truth.
+    var entries: [KayaEntryModel] = []
 
     init(id: UInt64, title: String = "") {
         self.id = id
         self.title = title
+    }
+}
+
+/// One navigation entry: a pushed scene root inside a window's stack.
+/// Retained while covered (its widgets stay live); destroyed at pop.
+@Observable
+final class KayaEntryModel: Identifiable {
+    let id: UInt64
+    var root: KayaNode?
+    var title = ""
+    /// The close-veto class transplanted to POP: armed, the back
+    /// affordance emits back_requested and nothing pops until the
+    /// app answers with pop_entry.
+    var interceptBack = false
+
+    init(id: UInt64) {
+        self.id = id
     }
 }
 
@@ -146,6 +175,13 @@ final class KayaSceneModel {
 
     var nodes: [UInt64: KayaNode] = [:]  // main actor only
     var parents: [UInt64: UInt64] = [:]
+    /// Live navigation entries by surface id (they share the
+    /// surface namespace with windows; mount targets either).
+    /// `navEntries`, not `entries` — that name is the ENTRY-widget
+    /// registry below.
+    var navEntries: [UInt64: KayaEntryModel] = [:]
+    /// entry id -> the window whose stack holds it.
+    var entryWindow: [UInt64: UInt64] = [:]
     // The focus command's landing spot: the entry view's FocusState
     // mirrors it into SwiftUI, and expect_focused reads it back.
     var focusedId: UInt64?
@@ -408,6 +444,18 @@ enum KayaHost {
 
     static func emitAlertResult(_ alert: UInt64, _ choice: UInt32) {
         api.emit_alert_result(alert, choice)
+    }
+
+    /// The user's back affordance popped an entry natively — the
+    /// core's stack reconciles inside this call (post-fact).
+    static func emitEntryPopped(_ entry: UInt64) {
+        api.emit_entry_popped(entry)
+    }
+
+    /// The user drove back on an intercept_back-armed entry: nothing
+    /// popped; the app answers with pop_entry if it agrees.
+    static func emitBackRequested(_ entry: UInt64) {
+        api.emit_back_requested(entry)
     }
 
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
@@ -721,8 +769,17 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
                 kayaScene.parents[child] = parent
             case applyMount:
+                // The target is a SURFACE: the primary, an auxiliary
+                // window, or a pushed navigation entry.
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let root = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                if let entry = kayaScene.navEntries[wid] {
+                    // An entry presents in-window: the push already put
+                    // it on the stack; the mount fills it. No
+                    // openWindow — nothing new materializes.
+                    entry.root = kayaScene.nodes[root]
+                    break
+                }
                 kayaScene.windows[wid]?.root = kayaScene.nodes[root]
                 // Mounting presents: auxiliaries open here (the
                 // primary's window is the WindowGroup's own). A mount
@@ -773,6 +830,40 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.focusedId = id
                 default:
                     fatalError("kaya: unknown command \(command)")
+                }
+            case applyPushEntry:
+                // Materializes covered/incoming: on the stack now, the
+                // mount fills it. The path binding derives from the
+                // stack, so NavigationStack animates the push.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let eid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let entry = KayaEntryModel(id: eid)
+                kayaScene.navEntries[eid] = entry
+                kayaScene.entryWindow[eid] = wid
+                kayaScene.windows[wid]!.entries.append(entry)
+            case applyPopEntry:
+                // Programmatic pop: the core already reconciled its
+                // stack; drop the top model and let the derived path
+                // animate the NET change of the batch as one
+                // transition (the multi-pop obligation).
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let entry = kayaScene.windows[wid]!.entries.removeLast()
+                kayaScene.navEntries.removeValue(forKey: entry.id)
+                kayaScene.entryWindow.removeValue(forKey: entry.id)
+            case applySetEntryProp:
+                let eid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let evType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let entry = kayaScene.navEntries[eid]!
+                switch (prop, evType) {
+                case (epropTitle, valueStr):
+                    let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    entry.title = String(decoding: bytes, as: UTF8.self)
+                case (epropInterceptBack, valueBool):
+                    entry.interceptBack = raw[body + 24] != 0
+                default:
+                    fatalError("kaya: bad entry prop \(prop) value type \(evType)")
                 }
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
@@ -1104,6 +1195,31 @@ private func kayaRunScript(_ script: String) {
                     observed.append("windows \(want)")
                 } else {
                     failures.append("windows \(got), wanted \(want)")
+                }
+            case "expect_entries":
+                // The window's navigation-stack depth (implicit
+                // primary; window#N targets a stack elsewhere).
+                let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                let prefix = explicit ? "window#\(wid) " : ""
+                let want = Int(rest[0]) ?? -1
+                let got = DispatchQueue.main.sync {
+                    kayaScene.windows[wid]?.entries.count ?? -1
+                }
+                if got == want {
+                    observed.append("\(prefix)entries \(want)")
+                } else {
+                    failures.append("\(prefix)entries \(got), wanted \(want)")
+                }
+            case "back":
+                // The user's back affordance: drive the SAME
+                // path-shortening write the toolbar back button and
+                // swipe-back make, so interception and the post-fact
+                // reconcile run exactly as a user pop. Silent, like
+                // click.
+                let (wid, _, _) = kayaWindowTarget(Array(parts[1...]))
+                DispatchQueue.main.sync {
+                    let depth = kayaScene.windows[wid]?.entries.count ?? 0
+                    kayaUserPops(wid, to: max(0, depth - 1))
                 }
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's
@@ -1842,6 +1958,58 @@ struct KayaRender: View {
     }
 #endif
 
+/// The window's navigation path, DERIVED from the core-owned stack:
+/// the getter maps the model, and the setter is the user-pop
+/// interception point — SwiftUI writes a shorter path when the back
+/// affordance fires (the toolbar back button, swipe-back), and the
+/// model decides what actually pops.
+func kayaNavPath(_ wid: UInt64) -> Binding<[UInt64]> {
+    Binding(
+        get: { kayaScene.windows[wid]?.entries.map(\.id) ?? [] },
+        set: { newPath in kayaUserPops(wid, to: newPath.count) })
+}
+
+/// A user-driven pop down to `depth` entries: pop unarmed tops one at
+/// a time — each reconciling the core-owned stack post-fact through
+/// emitEntryPopped — and STOP at an intercept_back-armed entry:
+/// nothing pops there, back_requested fires instead, and the derived
+/// path snaps the view back to the retained stack (the veto class,
+/// materialized; the app answers with pop_entry if it agrees).
+func kayaUserPops(_ wid: UInt64, to depth: Int) {
+    guard let window = kayaScene.windows[wid] else { return }
+    while window.entries.count > depth, let top = window.entries.last {
+        if top.interceptBack {
+            KayaHost.emitBackRequested(top.id)
+            return
+        }
+        window.entries.removeLast()
+        kayaScene.navEntries.removeValue(forKey: top.id)
+        kayaScene.entryWindow.removeValue(forKey: top.id)
+        KayaHost.emitEntryPopped(top.id)
+    }
+}
+
+/// A navigation entry's content: the mounted root in the normalized
+/// frame (16-unit inset, top-leading, fill), titled from its model —
+/// navigationTitle inside a NavigationStack destination titles the
+/// bar (and the window, on macOS): the real title path the harness
+/// reads back.
+struct KayaEntryRoot: View {
+    let entryId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        Group {
+            if let entry = scene.navEntries[entryId], let root = entry.root {
+                KayaRender(node: root, isRoot: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationTitle(scene.navEntries[entryId]?.title ?? "")
+    }
+}
+
 /// An auxiliary surface's content: the mounted root in the same
 /// normalized frame the primary uses (16-unit inset, top-leading,
 /// fill), titled from its model. Presented via openWindow(value:)
@@ -1851,14 +2019,22 @@ struct KayaAuxRoot: View {
     @State private var scene = kayaScene
 
     var body: some View {
-        Group {
-            if let model = scene.windows[windowId], let root = model.root {
-                KayaRender(node: root, isRoot: true)
+        // The stack hosts the window's serial entries; the window's
+        // own root is the stack's base. The accessor rides OUTSIDE
+        // the stack so its view never detaches under a push.
+        NavigationStack(path: kayaNavPath(windowId)) {
+            Group {
+                if let model = scene.windows[windowId], let root = model.root {
+                    KayaRender(node: root, isRoot: true)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .navigationTitle(scene.windows[windowId]?.title ?? "")
+            .navigationDestination(for: UInt64.self) { eid in
+                KayaEntryRoot(entryId: eid)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationTitle(scene.windows[windowId]?.title ?? "")
         .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
         #if os(macOS)
             .background(KayaWindowAccessor(windowId: windowId))
@@ -1910,6 +2086,10 @@ struct KayaRoot: View {
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
+        // The primary surface's stack: pushed entries cover this root
+        // serially; the root is the stack's base and stays alive
+        // (retained-until-popped) underneath.
+        NavigationStack(path: kayaNavPath(0)) {
         // The outer GeometryReader IS the offer: it fills whatever the
         // window proposes inside the padding, and expect_root_fills
         // compares the root's rendered size against it. Both readings
@@ -1945,6 +2125,12 @@ struct KayaRoot: View {
         // titling path on macOS; harmless on iOS, where the switcher
         // label is stamped in the apply arm instead.
         .navigationTitle(scene.windowTitle)
+        .navigationDestination(for: UInt64.self) { eid in
+            KayaEntryRoot(entryId: eid)
+        }
+        }
+        // The accessor rides OUTSIDE the stack so its view never
+        // detaches under a push.
         #if os(macOS)
             .background(KayaWindowAccessor(windowId: 0))
         #endif

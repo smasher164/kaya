@@ -254,6 +254,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\treturn endRecord(b)");
         c.line("}");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let pc = camel(prop);
+        let (ty, expr) = match kind {
+            crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Bool => ("bool", format!("encodeValue(b, {})", param(prop))),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        let p = param(prop);
+        c.line("");
+        c.line(&format!("// TxSetEntry{pc}: set_entry_prop with a constant {prop} value."));
+        c.line(&format!("func TxSetEntry{pc}(entry uint64, {p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetEntryProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, entry)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Eprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBindEntry{pc}: set_entry_prop with a signal-bound {prop} value."));
+        c.line(&format!("func TxBindEntry{pc}(entry uint64, signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetEntryProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, entry)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Eprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
@@ -277,9 +309,14 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t// The alert's one answer: id + u32 choice (AlertChoice*).");
     c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
     c.line("\t}");
-    c.line("\tif kind == occCloseRequested || kind == occWindowClosed {");
-    c.line("\t\t// Window lifecycle records carry the window id alone —");
-    c.line("\t\t// no key path, no payload.");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line(&format!("\tif {id_only} {{"));
+    c.line("\t\t// Surface lifecycle records carry the surface id alone —");
+    c.line("\t\t// no key path, no payload (derived from the record shapes).");
     c.line("\t\treturn kind, id, nil, nil, true");
     c.line("\t}");
     c.line("\tpathLen := binary.LittleEndian.Uint32(rec[16:])");

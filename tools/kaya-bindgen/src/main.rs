@@ -137,11 +137,40 @@ pub(crate) fn window_prop_variants(
     kaya::spec::WINDOW_PROPS
 }
 
+/// Navigation-entry properties, driving the typed entry setters
+/// (title, intercept_back) — their own table, not WINDOW_PROPS with
+/// applicability checks (DESIGN.md, Navigation). Const + signal duos
+/// like windows: element sources are rejected by the wire.
+pub(crate) fn entry_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::ENTRY_PROPS
+}
+
 /// Occurrence records, split by whether they carry a trailing payload
 /// value after the key path — a spec fact (Record::payload), so the
 /// generated parsers' kind lists derive rather than drift.
 pub(crate) fn occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence.iter().map(|r| r.name).collect()
+}
+
+/// Surface-lifecycle occurrences: records whose whole body is one u64
+/// surface id (close_requested, window_closed, entry_popped,
+/// back_requested). DERIVED from the record shapes, because this list
+/// was once hand-copied per emitter and a click-shaped read misparsed
+/// the records it missed (the slice-3 window-shape trap) — a new
+/// id-only occurrence now reaches all 8 parsers with zero emitter
+/// edits.
+pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 1
+                && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
+        })
+        .map(|r| r.name)
+        .collect()
 }
 
 pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {

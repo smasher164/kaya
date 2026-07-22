@@ -184,6 +184,32 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
         c.line("      Buffer.add_int64_le b signal_id)");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::Bool => ("Bool", *prop),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("(* set_entry_prop with a constant {prop} value. *)"));
+        c.line(&format!("let tx_set_entry_{prop} entry {param} ="));
+        c.line("  finish tx_kind_set_entry_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b entry;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int eprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line("");
+        c.line(&format!("(* set_entry_prop with a signal-bound {prop} value. *)"));
+        c.line(&format!("let tx_bind_entry_{prop} entry signal_id ="));
+        c.line("  finish tx_kind_set_entry_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b entry;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int eprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
+    }
     c.line("");
     c.line("(* Reads assembled from a byte accessor (absolute offset -> byte);");
     c.line("   kaya v1 targets are all little-endian. *)");
@@ -229,12 +255,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  else begin");
     c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
     c.line("    let id = u32_at byte 8 in");
-    c.line("    (* Window lifecycle records carry the window id alone. *)");
     c.line("    if kind = occ_kind_alert_result");
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
     c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))");
-    c.line("    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line("    (* Surface lifecycle records carry the surface id alone");
+    c.line("       ( derived from the record shapes ). *)");
+    c.line(&format!("    else if {id_only}"));
     c.line("    then Some (kind, Int64.of_int id, [], None)");
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");

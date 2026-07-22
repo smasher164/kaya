@@ -20,8 +20,8 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
     AlertChoice, AlertId, AlertSpec,
-    CollectionId, CommandKind, DEFAULT_WINDOW, Occurrence, Path, Prop, PropValue, Record, SignalId,
-    WindowId, WindowProp,
+    CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, Occurrence, Path, Prop, PropValue,
+    Record, SignalId, WindowId, WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -897,6 +897,44 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::DestroyWindow { window });
     }
 
+    /// Push a navigation entry onto the primary surface's stack
+    /// (entry ids are guest-allocated in the shared surface
+    /// namespace, the create_window discipline). Materializes
+    /// covered/incoming; mounting a root into it presents it:
+    /// `let e = tx.push_entry(WindowId(7)).title("detail").id();
+    ///  tx.mount_in(e, root);`
+    pub fn push_entry(&mut self, entry: WindowId) -> EntryRef<'_, 'a> {
+        self.push_entry_in(DEFAULT_WINDOW, entry)
+    }
+
+    /// Push onto another window's stack (the System Settings shape:
+    /// a stack inside a desktop auxiliary).
+    pub fn push_entry_in(&mut self, window: WindowId, entry: WindowId) -> EntryRef<'_, 'a> {
+        self.ops.push(TxOp::PushEntry { window, entry });
+        EntryRef { tx: self, entry }
+    }
+
+    /// Pop the primary stack's top entry and forget its tree. Also
+    /// the back-veto grammar's confirmation: answer a back_requested
+    /// with this. Popping an empty stack is a scene error.
+    pub fn pop_entry(&mut self) {
+        self.pop_entry_in(DEFAULT_WINDOW);
+    }
+
+    pub fn pop_entry_in(&mut self, window: WindowId) {
+        self.ops.push(TxOp::PopEntry { window });
+    }
+
+    /// Set a navigation-entry property to a constant ([`EntryProp`];
+    /// the floor the [`EntryRef`] chain rides).
+    pub fn set_entry_prop(&mut self, entry: WindowId, prop: EntryProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetEntryProp {
+            entry,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
     /// Request a modal alert (the request/result grammar): a chain
     /// that ends in [`AlertRef::show`], which sends the one atomic
     /// record and returns the request's id —
@@ -1594,6 +1632,8 @@ pub struct Messages<M> {
     // close events are app-global grammar, not per-widget wiring.
     close_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
     window_closed: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    back_requested: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
+    entry_popped: RefCell<Option<Box<dyn Fn(WindowId) -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
 }
 
@@ -1612,6 +1652,8 @@ impl<M> Messages<M> {
             nodes: RefCell::new(HashMap::new()),
             close_requested: RefCell::new(None),
             window_closed: RefCell::new(None),
+            back_requested: RefCell::new(None),
+            entry_popped: RefCell::new(None),
             alerts: RefCell::new(HashMap::new()),
         }
     }
@@ -1722,6 +1764,20 @@ impl<M> Messages<M> {
         *self.window_closed.borrow_mut() = Some(Box::new(f));
     }
 
+    /// The user drove the back affordance on an entry whose
+    /// intercept_back is armed (the veto class: nothing has popped;
+    /// answer with pop_entry to agree).
+    pub fn on_back_requested(&self, f: impl Fn(WindowId) -> M + 'static) {
+        *self.back_requested.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// The user's back affordance popped an entry natively
+    /// (informational and post-fact; the core's stack and the
+    /// binding's mirror have already reconciled).
+    pub fn on_entry_popped(&self, f: impl Fn(WindowId) -> M + 'static) {
+        *self.entry_popped.borrow_mut() = Some(Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a REQUEST (the id
     /// [`AlertRef::show`] returned): an action index or Cancel (every
     /// platform-native dismissal). The registration retires with the
@@ -1760,6 +1816,12 @@ impl<M> Messages<M> {
                 Occurrence::AlertResult { alert, choice } => {
                     // One-shot: the registration retires with the result.
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
+                }
+                Occurrence::BackRequested { entry } => {
+                    self.back_requested.borrow().as_ref().map(|f| f(*entry))
+                }
+                Occurrence::EntryPopped { entry } => {
+                    self.entry_popped.borrow().as_ref().map(|f| f(*entry))
                 }
             };
             if let Some(m) = mapped {
@@ -1864,6 +1926,35 @@ impl WindowRef<'_, '_> {
 
     pub fn id(&self) -> WindowId {
         self.window
+    }
+}
+
+/// The prop proxy a push_entry chain rides:
+/// `tx.push_entry(WindowId(7)).title("detail").intercept_back(true)`.
+pub struct EntryRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    entry: WindowId,
+}
+
+impl EntryRef<'_, '_> {
+    /// The entry's title — the back affordance's label source (the
+    /// iOS back button, the desktop headers).
+    pub fn title(self, title: &str) -> Self {
+        self.tx.set_entry_prop(self.entry, EntryProp::Title, title);
+        self
+    }
+
+    /// The close-veto class transplanted to POP: armed, the back
+    /// affordance emits back_requested and nothing pops until the
+    /// app answers with pop_entry.
+    pub fn intercept_back(self, on: bool) -> Self {
+        self.tx
+            .set_entry_prop(self.entry, EntryProp::InterceptBack, on);
+        self
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.entry
     }
 }
 
@@ -2404,6 +2495,8 @@ mod tests {
                     | Occurrence::CloseRequested { .. }
                     | Occurrence::WindowClosed { .. }
                     | Occurrence::AlertResult { .. }
+                    | Occurrence::EntryPopped { .. }
+                    | Occurrence::BackRequested { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. } => {}
                     Occurrence::Shutdown => break,

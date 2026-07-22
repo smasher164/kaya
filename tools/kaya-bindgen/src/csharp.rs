@@ -271,6 +271,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return Finish(stream, w, TxKindSetWindowProp);");
         c.line("    }");
     }
+
+    // The entry-prop duos (const + signal), the window shape on the
+    // navigation-entry table (DESIGN.md, Navigation).
+    for (prop, _, kind) in crate::entry_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "bool", format!("EncodeValue(w, {});", camel(prop))),
+            other => unreachable!("no entry prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_entry_prop with a constant {prop} value."));
+        c.line(&format!("    public static byte[] TxSetEntry{pc}(ulong entry, {ty} {p})"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(entry); w.Write(Eprop{pc}); w.Write(SourceConst);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return Finish(stream, w, TxKindSetEntryProp);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_entry_prop with a signal-bound {prop} value."));
+        c.line(&format!("    public static byte[] TxBindEntry{pc}(ulong entry, ulong signalId)"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(entry); w.Write(Eprop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
+        c.line("        return Finish(stream, w, TxKindSetEntryProp);");
+        c.line("    }");
+    }
     c.line("");
     c.line("    /// Decode one occurrence record (header included). Returns false");
     c.line("    /// for non-click records. keys is empty for a click on a");
@@ -291,14 +319,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("        if ({accepted})"));
     c.line("            return false;");
     c.line("        id = BitConverter.ToUInt64(rec, 8);");
-    c.line("        // Window lifecycle records carry the window id alone.");
     c.line("        if (kind == OccKindAlertResult)");
     c.line("        {");
     c.line("            // The alert's one answer: id + u32 choice (AlertChoice*).");
     c.line("            payload = BitConverter.ToUInt32(rec, 16);");
     c.line("            return true;");
     c.line("        }");
-    c.line("        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed)");
+    let id_only = crate::id_only_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    c.line("        // Surface lifecycle records carry the surface id alone");
+    c.line("        // (derived from the record shapes).");
+    c.line(&format!("        if ({id_only})"));
     c.line("            return true;");
     c.line("        uint pathLen = BitConverter.ToUInt32(rec, 16);");
     c.line("        int at = 24;");

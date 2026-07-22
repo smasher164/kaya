@@ -866,6 +866,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             core.tearing_down.remove(&window.0);
         }
+        // Navigation is not yet materialized on this backend
+        // (depth = SwiftUI on mac; this fan-out is ledgered) —
+        // the first nav scene here must fail loudly, never
+        // silently skip the stack.
+        ApplyOp::PushEntry { .. } | ApplyOp::PopEntry { .. } | ApplyOp::SetEntryProp { .. } => {
+            unimplemented!("kaya: navigation is not yet materialized on this backend")
+        }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
             // slots ARE the vocabulary (two actions + close). The
@@ -2044,6 +2051,17 @@ impl crate::harness::Stage for WinUiStage {
             }
             Ok(())
         })
+    }
+
+    fn entry_count(&self, _window: u64) -> usize {
+        // Navigation is not yet materialized here (ledgered
+        // fan-out); the apply arm above dies before any leg
+        // could read a vacuous depth.
+        unimplemented!("kaya: navigation is not yet materialized on this backend")
+    }
+
+    fn back(&self, _window: u64) {
+        unimplemented!("kaya: navigation is not yet materialized on this backend")
     }
 
     fn alert_count(&self) -> usize {
