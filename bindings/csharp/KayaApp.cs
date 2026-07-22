@@ -798,6 +798,13 @@ sealed class Tx
         Action body, double? grow = null, double? spacing = null, Align? align = null) =>
         ContainerOf(KayaWire.KindRow, body, grow, spacing, align);
 
+    /// A vertical scroll viewport over EXACTLY ONE child (declare it
+    /// in the body; the scene rejects a second). Pass grow: so the
+    /// enclosing track CONSTRAINS it — an unconstrained viewport hugs
+    /// its content and nothing overflows.
+    public Widget Scroll(Action body, double? grow = null) =>
+        ContainerOf(KayaWire.KindScroll, body, grow, null, null);
+
     Widget ContainerOf(
         uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null)
     {

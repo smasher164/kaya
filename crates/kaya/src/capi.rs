@@ -275,6 +275,7 @@ pub const KAYA_KIND_ROW: u32 = 5;
 pub const KAYA_KIND_CHECKBOX: u32 = 6;
 pub const KAYA_KIND_SLIDER: u32 = 7;
 pub const KAYA_KIND_IMAGE: u32 = 8;
+pub const KAYA_KIND_SCROLL: u32 = 9;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -284,6 +285,7 @@ const _: () = assert!(
         && KAYA_KIND_CHECKBOX == wire::KIND_CHECKBOX
         && KAYA_KIND_SLIDER == wire::KIND_SLIDER
         && KAYA_KIND_IMAGE == wire::KIND_IMAGE
+        && KAYA_KIND_SCROLL == wire::KIND_SCROLL
 );
 
 /// Property keys.

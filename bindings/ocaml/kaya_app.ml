@@ -460,6 +460,13 @@ let container ?grow ?spacing ?align kind children tx =
 let column ?grow ?spacing ?align children tx =
   container ?grow ?spacing ?align Kaya_wire.kind_column children tx
 
+(* A vertical scroll viewport over EXACTLY ONE child (the signature
+   says so; the scene enforces it too). Pass [~grow] so the enclosing
+   track CONSTRAINS it — an unconstrained viewport hugs its content
+   and nothing overflows. *)
+let scroll ?grow child tx =
+  container ?grow Kaya_wire.kind_scroll [ child ] tx
+
 let row ?grow ?spacing ?align children tx =
   container ?grow ?spacing ?align Kaya_wire.kind_row children tx
 

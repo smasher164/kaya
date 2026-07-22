@@ -799,6 +799,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("checkbox", 6),
                 ("slider", 7),
                 ("image", 8),
+                ("scroll", 9),
             ],
         },
         EnumSpec {
@@ -1099,6 +1100,7 @@ mod tests {
                     ("kind", "checkbox") => wire::KIND_CHECKBOX,
                     ("kind", "slider") => wire::KIND_SLIDER,
                     ("kind", "image") => wire::KIND_IMAGE,
+                    ("kind", "scroll") => wire::KIND_SCROLL,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,

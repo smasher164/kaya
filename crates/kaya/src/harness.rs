@@ -62,6 +62,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "panels" => Some(include_str!("../../../tools/scenes/panels.steps")),
         "confirm" => Some(include_str!("../../../tools/scenes/confirm.steps")),
         "nav" => Some(include_str!("../../../tools/scenes/nav.steps")),
+        "scroll" => Some(include_str!("../../../tools/scenes/scroll.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -91,6 +92,10 @@ pub enum TargetKind {
     /// only columns would have passed the whole matrix.
     Row,
     Image,
+    /// Scroll viewports are targetable under the same convention as
+    /// columns: only index 0, only in a scene that keeps exactly one
+    /// scroll (tools/check-steps.sh holds the line).
+    Scroll,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -180,6 +185,18 @@ pub enum Step {
     /// unarmed top pops and reports entry_popped. An action, silent
     /// like click and close_window. None = the implicit primary.
     Back(Option<u64>),
+    /// Expect the scroll viewport's content to exceed its visible
+    /// extent — the observation that pins "there is something to
+    /// scroll" (both readings are geometry from the toolkit).
+    ExpectOverflow(Target),
+    /// Drive the viewport to its end through the toolkit's REAL
+    /// scrolling API. An action, silent like click.
+    ScrollEnd(Target),
+    /// Expect the content's end edge to coincide with the viewport's
+    /// (within two device units) — the observation scroll_end is
+    /// verified by: position actually moved, read back from the
+    /// toolkit, never a model copy.
+    ExpectAtEnd(Target),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -292,6 +309,19 @@ pub trait Stage: Send + 'static {
     fn entry_count(&self, window: u64) -> usize;
     /// Drive the window's REAL back affordance. No default.
     fn back(&self, window: u64);
+    /// The scroll viewport's overflow, read from the toolkit after
+    /// forcing pending layout: the empty string when the content
+    /// exceeds the viewport, otherwise a short platform-flavored
+    /// description of the two extents (failure text only). No
+    /// default: a backend that forgets it must fail to compile.
+    fn scroll_overflow(&self, target: Target) -> String;
+    /// Drive the viewport to its end through the toolkit's REAL
+    /// scrolling API. No default.
+    fn scroll_end(&self, target: Target);
+    /// Whether the content's end edge coincides with the viewport's
+    /// (within two device units): the empty string when it does,
+    /// otherwise a description (failure text only). No default.
+    fn scroll_at_end(&self, target: Target) -> String;
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -460,6 +490,9 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::Back(window)
             }
+            "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
+            "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
+            "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -495,6 +528,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "column" => TargetKind::Column,
         "row" => TargetKind::Row,
         "image" => TargetKind::Image,
+        "scroll" => TargetKind::Scroll,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -797,6 +831,39 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 // guest's back_requested reaction.
                 stage.back(window.unwrap_or(0));
             }
+            Step::ExpectOverflow(t) => {
+                if t.kind != TargetKind::Scroll {
+                    failures.push(format!("{t:?} is not a scroll target"));
+                    continue;
+                }
+                let slack = stage.scroll_overflow(*t);
+                if slack.is_empty() {
+                    observed.push(format!("{} overflows", target_spec(t)));
+                } else {
+                    failures.push(format!("{} fits ({slack})", target_spec(t)));
+                }
+            }
+            Step::ScrollEnd(t) => {
+                if t.kind != TargetKind::Scroll {
+                    failures.push(format!("{t:?} is not a scroll target"));
+                    continue;
+                }
+                // An action, silent like click: expect_at_end is the
+                // observable.
+                stage.scroll_end(*t);
+            }
+            Step::ExpectAtEnd(t) => {
+                if t.kind != TargetKind::Scroll {
+                    failures.push(format!("{t:?} is not a scroll target"));
+                    continue;
+                }
+                let off = stage.scroll_at_end(*t);
+                if off.is_empty() {
+                    observed.push(format!("{} at end", target_spec(t)));
+                } else {
+                    failures.push(format!("{} short of end ({off})", target_spec(t)));
+                }
+            }
             Step::ExpectFills(t) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
                     failures.push(format!("{t:?} is not a container target"));
@@ -858,6 +925,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Column => "column",
         TargetKind::Row => "row",
         TargetKind::Image => "image",
+        TargetKind::Scroll => "scroll",
     };
     if t.index < 0 {
         format!("{kind}#last")
@@ -1019,6 +1087,13 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn scroll_overflow(&self, _: Target) -> String {
+            String::new()
+        }
+        fn scroll_end(&self, _: Target) {}
+        fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
         fn window_count(&self) -> usize {
             1
         }
@@ -1160,6 +1235,13 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn scroll_overflow(&self, _: Target) -> String {
+            String::new()
+        }
+        fn scroll_end(&self, _: Target) {}
+        fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
         fn window_count(&self) -> usize {
             1
         }
@@ -1259,6 +1341,13 @@ mod tests {
             0
         }
         fn back(&self, _: u64) {}
+        fn scroll_overflow(&self, _: Target) -> String {
+            String::new()
+        }
+        fn scroll_end(&self, _: Target) {}
+        fn scroll_at_end(&self, _: Target) -> String {
+            String::new()
+        }
         fn window_count(&self) -> usize {
             1
         }

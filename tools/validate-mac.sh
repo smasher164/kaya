@@ -52,7 +52,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
-DEPTH_SCENES=""
+DEPTH_SCENES="scroll"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -574,6 +574,15 @@ run nav-haskell-swiftui env KAYA_SELFTEST=nav "$(hs_bin nav)"
 run nav-swift-swiftui env KAYA_SELFTEST=nav target/swift-guests/nav
 run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The scroll scene: the scroll viewport's contract — overflow,
+# scroll_end through the REAL scrolling API, at-end read back, and a
+# live click on the scrolled-to button. Rust depth; the language
+# sweep rides the phase's next slice (scroll joins SCENES with its
+# guests then).
+KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
+export KAYA_SELFTEST_SCRIPT
+run scroll-rust-swiftui env KAYA_SELFTEST=scroll target/debug/examples/scroll
 
 # The confirm scene: the modal-alert grammar — the REAL platform
 # dialog materialized, all three answer paths (action 0, action 1,

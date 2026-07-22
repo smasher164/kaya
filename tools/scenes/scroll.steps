@@ -1,0 +1,15 @@
+# The scroll scene: the scroll viewport's contract — content
+# overflows the visible extent (both readings geometry), scroll_end
+# drives the toolkit's REAL scrolling API, expect_at_end reads the
+# content's end edge back, and the trailing click proves the
+# scrolled-to content is live (the bottom button writes the status
+# label at the top).
+settle 1500
+expect_overflow scroll#0
+expect label#0 "at top"
+scroll_end scroll#0
+settle 800
+expect_at_end scroll#0
+click button#0
+settle 500
+expect label#0 "bottom clicked"

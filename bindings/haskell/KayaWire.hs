@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x833a2a32e4a52f92
+specHash = 0xcf648f6cbf430f8e
 
 valueBool :: Word32
 valueBool = 1
@@ -52,6 +52,8 @@ kindSlider :: Word32
 kindSlider = 7
 kindImage :: Word32
 kindImage = 8
+kindScroll :: Word32
+kindScroll = 9
 propText :: Word32
 propText = 1
 propChecked :: Word32

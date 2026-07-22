@@ -1058,6 +1058,13 @@ impl<'a> Tx<'a> {
         self.container_of(WidgetKind::Row, body)
     }
 
+    /// A vertical scroll viewport over EXACTLY ONE child — declare
+    /// the content container inside the body (the scene rejects a
+    /// second child at the root). Vertical-only in v1.
+    pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
+        self.container_of(WidgetKind::Scroll, body)
+    }
+
     fn container_of<R>(
         &mut self,
         kind: WidgetKind,

@@ -691,6 +691,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
+                // Scroll is not yet materialized on this backend (depth =
+                // SwiftUI on mac; the fan-out is ledgered) — the first
+                // scroll scene here must fail loudly.
+                WidgetKind::Scroll => {
+                    unimplemented!("kaya: scroll is not yet materialized on this backend")
+                }
                 WidgetKind::Image => {
                     // Display-only, like Label: no tag, no signal. The
                     // source arrives as a SetProp blob and decodes
@@ -1624,6 +1630,18 @@ impl crate::harness::Stage for GtkStage {
                 });
             }
         })
+    }
+
+    fn scroll_overflow(&self, _target: crate::harness::Target) -> String {
+        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    }
+
+    fn scroll_end(&self, _target: crate::harness::Target) {
+        unimplemented!("kaya: scroll is not yet materialized on this backend")
+    }
+
+    fn scroll_at_end(&self, _target: crate::harness::Target) -> String {
+        unimplemented!("kaya: scroll is not yet materialized on this backend")
     }
 
     fn alert_count(&self) -> usize {

@@ -309,6 +309,15 @@ pub enum WidgetKind {
     /// for the content-buffer path (DESIGN: "Image covers content
     /// buffers").
     Image,
+    /// A vertical scroll viewport over EXACTLY ONE child (usually a
+    /// column) — the ScrolledWindow/SingleChildScrollView shape; the
+    /// scene rejects a second child. Vertical-only in v1 (an axis
+    /// enum is a later relaxation, the slider-step precedent). No
+    /// occurrence: the position is widget-owned state, and no props
+    /// of its own — Spacing/Align are container-of-many concerns and
+    /// do not apply. Virtualization is explicitly out (ledgered; a
+    /// For inside a scroll renders unvirtualized).
+    Scroll,
 }
 
 /// Property keys; grows with widgets.

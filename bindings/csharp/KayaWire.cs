@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x833a2a32e4a52f92;
+    public const ulong SpecHash = 0xcf648f6cbf430f8e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -27,6 +27,7 @@ static class KayaWire
     public const uint KindCheckbox = 6;
     public const uint KindSlider = 7;
     public const uint KindImage = 8;
+    public const uint KindScroll = 9;
     public const uint PropText = 1;
     public const uint PropChecked = 2;
     public const uint PropValue = 3;

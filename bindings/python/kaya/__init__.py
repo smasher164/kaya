@@ -1046,6 +1046,16 @@ def _set_grow(handle, grow):
         _records().append(wire.tx_set_grow(handle.id, float(grow)))
 
 
+def scroll(grow=None):
+    """A vertical scroll viewport: `with kaya.scroll():` parents its
+    EXACTLY ONE child (usually a column; the scene rejects a second).
+    Give it `grow` so the enclosing track CONSTRAINS it — an
+    unconstrained viewport hugs its content and nothing overflows."""
+    handle = _widget(wire.KIND_SCROLL)
+    _set_grow(handle, grow)
+    return _Container(handle)
+
+
 def column(grow=None, spacing=None, align=None):
     """A column container: `with kaya.column():` parents everything
     declared inside it. `grow` is its flex weight within the enclosing

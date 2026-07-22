@@ -565,6 +565,14 @@ func (tx *Tx) Row(body func()) Widget {
 	return tx.containerOf(KindRow, body)
 }
 
+// Scroll is a vertical scroll viewport over EXACTLY ONE child
+// (declare it in the body; the scene rejects a second). Chain
+// .Grow(1) so the enclosing track CONSTRAINS it — an unconstrained
+// viewport hugs its content and nothing overflows.
+func (tx *Tx) Scroll(body func()) Widget {
+	return tx.containerOf(KindScroll, body)
+}
+
 func (tx *Tx) containerOf(kind uint32, body func()) Widget {
 	parent := tx.Widget(kind)
 	tx.app.parents = append(tx.app.parents, parent.id)

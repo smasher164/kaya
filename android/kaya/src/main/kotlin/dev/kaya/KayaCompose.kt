@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
+import kotlinx.coroutines.launch
 
 /**
  * KayaCompose: the Kotlin half of the Compose backend, the Android
@@ -71,6 +72,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // ("0x0" before a source lands or after a failed decode).
     var imageBitmap by mutableStateOf<ImageBitmap?>(null)
     var imageSize by mutableStateOf("0x0")
+    // The scroll viewport's REAL state (scroll nodes only): the
+    // toolkit's own ScrollState is both the observation source
+    // (maxValue > 0 = overflow; value == maxValue = at end) and the
+    // API scroll_end drives.
+    val scrollState = androidx.compose.foundation.ScrollState(0)
     /**
      * This child's flex weight within its enclosing row/column. 0 is
      * natural size; positive weights divide the leftover main-axis space
@@ -175,6 +181,7 @@ object KayaSceneModel {
     val images = ArrayList<KayaNode>()
     val columns = ArrayList<KayaNode>()
     val rows = ArrayList<KayaNode>()
+    val scrolls = ArrayList<KayaNode>()
 }
 
 /** One navigation entry: a pushed scene root, retained while covered,
@@ -195,7 +202,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x833a2a32e4a52f92uL
+    private const val SPEC_HASH: ULong = 0xcf648f6cbf430f8euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -237,6 +244,7 @@ object KayaCompose {
     const val KIND_CHECKBOX = 6
     const val KIND_SLIDER = 7
     const val KIND_IMAGE = 8
+    const val KIND_SCROLL = 9
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -358,6 +366,7 @@ object KayaCompose {
                         KIND_IMAGE -> KayaSceneModel.images.add(node)
                         KIND_COLUMN -> KayaSceneModel.columns.add(node)
                         KIND_ROW -> KayaSceneModel.rows.add(node)
+                        KIND_SCROLL -> KayaSceneModel.scrolls.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -882,6 +891,43 @@ object KayaCompose {
                         // gesture. Silent, like click.
                         onUi(activity) { kayaUserBack() }
                     }
+                    "expect_overflow" -> {
+                        // The toolkit's own ScrollState: maxValue > 0
+                        // IS overflow.
+                        val target = parts.getOrNull(1) ?: ""
+                        val st = onUi(activity) { scrollTarget(target)?.scrollState }
+                        if (st == null) {
+                            failures.add("no such target $target")
+                        } else if (st.maxValue > 0) {
+                            observed.add("$target overflows")
+                        } else {
+                            failures.add("$target fits (maxValue 0)")
+                        }
+                    }
+                    "scroll_end" -> {
+                        // The REAL scrolling API, driven to its end.
+                        // Silent, like click.
+                        val target = parts.getOrNull(1) ?: ""
+                        onUi(activity) {
+                            scrollTarget(target)?.scrollState?.let { st ->
+                                kotlinx.coroutines.MainScope().launch {
+                                    st.scrollTo(st.maxValue)
+                                }
+                            }
+                        }
+                    }
+                    "expect_at_end" -> {
+                        val target = parts.getOrNull(1) ?: ""
+                        val st = onUi(activity) { scrollTarget(target)?.scrollState }
+                        if (st == null) {
+                            failures.add("no such target $target")
+                        } else if (st.maxValue - st.value <= 2) {
+                            observed.add("$target at end")
+                        } else {
+                            failures.add(
+                                "$target short of end (${st.value} of ${st.maxValue})")
+                        }
+                    }
                     "expect_title" -> {
                         // The REAL materialized title (the Activity
                         // label), never only the model's copy — a
@@ -1094,6 +1140,16 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
     // everywhere else.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
     when (node.kind) {
+        KayaCompose.KIND_SCROLL ->
+            // The vertical scroll viewport over its ONE child (the
+            // scene enforces the count): verticalScroll over the
+            // node's own ScrollState — the toolkit's real scrolling
+            // machinery, which the runner's verbs read and drive.
+            Box(
+                rootFill.verticalScroll(node.scrollState)
+            ) {
+                node.children.firstOrNull()?.let { KayaRender(it) }
+            }
         KayaCompose.KIND_COLUMN ->
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
@@ -1315,6 +1371,15 @@ fun KayaRoot() {
 /// A user-driven back on the top entry: an intercept_back-armed top
 /// emits back_requested and nothing pops (the veto class); an unarmed
 /// top pops here and reconciles the core post-fact.
+/** Resolve a `scroll#i` target against the creation-order registry. */
+internal fun scrollTarget(spec: String): KayaNode? {
+    val bits = spec.split("#")
+    if (bits.size != 2 || bits[0] != "scroll") return null
+    if (bits[1] == "last") return KayaSceneModel.scrolls.lastOrNull()
+    val i = bits[1].toIntOrNull() ?: return null
+    return KayaSceneModel.scrolls.getOrNull(i)
+}
+
 fun kayaUserBack() {
     val top = KayaSceneModel.navEntries.lastOrNull() ?: return
     if (top.interceptBack) {

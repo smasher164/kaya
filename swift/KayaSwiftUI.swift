@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x833a2a32e4a52f92
+let kayaSpecHash: UInt64 = 0xcf648f6cbf430f8e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -62,6 +62,7 @@ private let kindRow: UInt32 = 5
 private let kindCheckbox: UInt32 = 6
 private let kindSlider: UInt32 = 7
 private let kindImage: UInt32 = 8
+private let kindScroll: UInt32 = 9
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propValue: UInt32 = 3
@@ -104,6 +105,13 @@ final class KayaNode: Identifiable {
     // ("0x0" before a source lands or after a failed decode).
     var image: KayaPlatformImage?
     var imageSize = "0x0"
+    // The scroll observations (scroll viewports only): the visible
+    // extent, the content's extent, and the content's bottom edge in
+    // the viewport's space — all geometry, recorded by the render's
+    // readers, never a model copy.
+    var scrollViewportH = 0.0
+    var scrollContentH = 0.0
+    var scrollContentMaxY = 0.0
     /// This child's flex weight within its enclosing row/column. 0 is
     /// natural size; positive weights divide the leftover main-axis
     /// space in proportion. See Prop::Grow in protocol.rs.
@@ -195,6 +203,7 @@ final class KayaSceneModel {
     var images: [KayaNode] = []
     var columns: [KayaNode] = []
     var rows: [KayaNode] = []
+    var scrolls: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -223,6 +232,9 @@ extension KayaSceneModel {
 /// side (main actor only). The apply arms drive them imperatively.
 var kayaOpenWindow: ((UInt64) -> Void)?
 var kayaDismissWindow: ((UInt64) -> Void)?
+/// The live ScrollViewReader proxies by scroll node id (main actor):
+/// how scroll_end drives the REAL scrolling API.
+var kayaScrollProxies: [UInt64: ScrollViewProxy] = [:]
 /// Mounts that arrived before the environment actions were stashed
 /// (a batch can apply before the first view appears): drained by
 /// KayaRoot's onAppear.
@@ -581,6 +593,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindImage: kayaScene.images.append(node)
                 case kindColumn: kayaScene.columns.append(node)
                 case kindRow: kayaScene.rows.append(node)
+                case kindScroll: kayaScene.scrolls.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -1229,6 +1242,54 @@ private func kayaRunScript(_ script: String) {
                 DispatchQueue.main.sync {
                     let depth = kayaScene.windows[wid]?.entries.count ?? 0
                     kayaUserPops(wid, to: max(0, depth - 1))
+                }
+            case "expect_overflow":
+                // Content exceeds the viewport — both readings are
+                // geometry recorded by the render's readers.
+                let got = DispatchQueue.main.sync { () -> (Double, Double)? in
+                    kayaDiag(
+                        "scroll geom viewport=\(kayaTarget(parts[1], "scroll", kayaScene.scrolls)?.scrollViewportH ?? -1) "
+                        + "content=\(kayaTarget(parts[1], "scroll", kayaScene.scrolls)?.scrollContentH ?? -1) "
+                        + "available=\(kayaAvailableSize) root=\(kayaRootSize)")
+                    return kayaTarget(parts[1], "scroll", kayaScene.scrolls)
+                        .map { ($0.scrollContentH, $0.scrollViewportH) }
+                }
+                if let (content, viewport) = got {
+                    if content > viewport + 2 {
+                        observed.append("\(parts[1]) overflows")
+                    } else {
+                        failures.append(
+                            "\(parts[1]) fits (content \(Int(content)) in viewport \(Int(viewport)))")
+                    }
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
+            case "scroll_end":
+                // The REAL scrolling API: the reader proxy animates to
+                // the content's bottom anchor. Silent, like click.
+                DispatchQueue.main.sync {
+                    guard let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
+                        let proxy = kayaScrollProxies[node.id]
+                    else { return }
+                    proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: .bottom)
+                }
+            case "expect_at_end":
+                // The content's bottom edge coincides with the
+                // viewport's (within two units) — read back from the
+                // viewport-space frame, never a model copy.
+                let got = DispatchQueue.main.sync { () -> (Double, Double)? in
+                    kayaTarget(parts[1], "scroll", kayaScene.scrolls)
+                        .map { ($0.scrollContentMaxY, $0.scrollViewportH) }
+                }
+                if let (maxY, viewport) = got {
+                    if abs(maxY - viewport) <= 2 {
+                        observed.append("\(parts[1]) at end")
+                    } else {
+                        failures.append(
+                            "\(parts[1]) short of end (content bottom \(Int(maxY)) vs viewport \(Int(viewport)))")
+                    }
+                } else {
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's
@@ -1900,6 +1961,48 @@ struct KayaRender: View {
             .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindEntry:
             KayaEntry(node: node)
+        case kindScroll:
+            // The vertical scroll viewport over its ONE child (the
+            // scene enforces the count). ScrollViewReader's proxy is
+            // the REAL scrolling API scroll_end drives; the geometry
+            // readers record viewport, content, and the content's
+            // bottom edge in the viewport's space — the overflow and
+            // at-end observations.
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    if let content = node.children.first {
+                        KayaRender(node: content)
+                            .background(
+                                GeometryReader { g in
+                                    Color.clear
+                                        .onAppear {
+                                            node.scrollContentH = g.size.height
+                                            node.scrollContentMaxY =
+                                                g.frame(in: .named("kaya-scroll-\(node.id)")).maxY
+                                        }
+                                        .onChange(of: g.frame(in: .named("kaya-scroll-\(node.id)"))) { _, f in
+                                            node.scrollContentH = f.height
+                                            node.scrollContentMaxY = f.maxY
+                                        }
+                                }
+                            )
+                            .id("kaya-scroll-content-\(node.id)")
+                    }
+                }
+                .coordinateSpace(name: "kaya-scroll-\(node.id)")
+                .background(
+                    GeometryReader { g in
+                        Color.clear
+                            .onAppear {
+                                node.scrollViewportH = g.size.height
+                                kayaScrollProxies[node.id] = proxy
+                            }
+                            .onChange(of: g.size) { _, size in
+                                node.scrollViewportH = size.height
+                            }
+                    }
+                )
+            }
         case kindImage:
             // Fixed to the decoded image's intrinsic size (no
             // .resizable()), matching the harness's size observation;

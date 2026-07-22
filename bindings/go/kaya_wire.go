@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x833a2a32e4a52f92
+	SpecHash uint64 = 0xcf648f6cbf430f8e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -27,6 +27,7 @@ const (
 	KindCheckbox = 6
 	KindSlider = 7
 	KindImage = 8
+	KindScroll = 9
 	PropText = 1
 	PropChecked = 2
 	PropValue = 3

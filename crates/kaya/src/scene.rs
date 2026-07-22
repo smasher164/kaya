@@ -209,6 +209,10 @@ pub(crate) struct Scene {
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     mounted_windows: std::collections::HashSet<WindowId>,
+    /// Scroll viewports that already hold their one child: a scroll
+    /// takes EXACTLY ONE (the ScrolledWindow shape) and a second
+    /// add_child fails loudly here, at the root.
+    filled_scrolls: std::collections::HashSet<WidgetId>,
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
@@ -692,6 +696,13 @@ impl Scene {
                         self.widgets.contains_key(&child),
                         "kaya: add_child of unknown child {child:?}"
                     );
+                    if self.widgets[&parent] == WidgetKind::Scroll {
+                        let fresh = self.filled_scrolls.insert(parent);
+                        assert!(
+                            fresh,
+                            "kaya: scroll {parent:?} already holds its one                              child — a scroll viewport takes exactly one                              (wrap the content in a column)"
+                        );
+                    }
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {

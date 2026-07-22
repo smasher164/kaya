@@ -41,12 +41,13 @@ bad = []
 for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
-    for kind, index in re.findall(r"\b(row|column)#(\d+)\b", line):
-        # Index 0 of either container kind is the blessed pattern, on
-        # one convention: the scene keeps exactly one widget of that
+    for kind, index in re.findall(r"\b(row|column|scroll)#(\d+)\b", line):
+        # Index 0 of a container kind is the blessed pattern, on one
+        # convention: the scene keeps exactly one widget of that
         # kind, so creation order cannot enter. column#0 is the For
         # container in milestone2 (root-is-a-row keeps it unique);
-        # row#0 carries the horizontal grow contract in the grow scene.
+        # row#0 carries the horizontal grow contract in the grow
+        # scene; scroll#0 the one scroll viewport in the scroll scene.
         if index == "0":
             continue
         bad.append(f"{path}:{lineno}: {kind}#{index}")

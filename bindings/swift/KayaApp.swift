@@ -956,6 +956,17 @@ final class KayaAppTx {
             UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing, align: align)
     }
 
+    /// A vertical scroll viewport over EXACTLY ONE child (declare it
+    /// in the builder; the scene rejects a second). Pass grow: so the
+    /// enclosing track CONSTRAINS it — an unconstrained viewport hugs
+    /// its content and nothing overflows.
+    func scroll(
+        grow: Double? = nil, @KayaChildren _ children: () -> Void
+    ) -> KayaWidget {
+        containerOf(
+            UInt32(KAYA_KIND_SCROLL), children, grow: grow, spacing: nil, align: nil)
+    }
+
     func row(
         grow: Double? = nil, spacing: Double? = nil, align: KayaAlign? = nil,
         @KayaChildren _ children: () -> Void

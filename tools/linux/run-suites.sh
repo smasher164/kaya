@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
+# mac + the rust guest only for now. This runner's scroll legs land
+# with the breadth slice (docs/deferred.md holds the item open).
 # Runs inside the container (see tools/validate-linux.sh): builds kaya
 # against the container's GTK and runs the milestone-0 validations under
 # both display protocols — X11 (Xvfb) and Wayland (headless Weston). The

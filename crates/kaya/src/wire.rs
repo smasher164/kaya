@@ -82,6 +82,7 @@ pub const KIND_ROW: u32 = 5;
 pub const KIND_CHECKBOX: u32 = 6;
 pub const KIND_SLIDER: u32 = 7;
 pub const KIND_IMAGE: u32 = 8;
+pub const KIND_SCROLL: u32 = 9;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -273,6 +274,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_CHECKBOX => WidgetKind::Checkbox,
         KIND_SLIDER => WidgetKind::Slider,
         KIND_IMAGE => WidgetKind::Image,
+        KIND_SCROLL => WidgetKind::Scroll,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -1060,6 +1062,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Checkbox => KIND_CHECKBOX,
         WidgetKind::Slider => KIND_SLIDER,
         WidgetKind::Image => KIND_IMAGE,
+        WidgetKind::Scroll => KIND_SCROLL,
     }
 }
 

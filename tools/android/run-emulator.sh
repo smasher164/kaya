@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# The scroll scene is the scroll DEPTH slice: protocol + SwiftUI on
+# mac + the rust guest only for now. This runner's scroll legs land
+# with the breadth slice (docs/deferred.md holds the item open).
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no

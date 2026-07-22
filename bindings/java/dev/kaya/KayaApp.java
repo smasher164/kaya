@@ -790,6 +790,14 @@ public final class KayaApp {
             return containerOf(KayaWire.KIND_ROW, body);
         }
 
+        /** A vertical scroll viewport over EXACTLY ONE child (declare
+         * it in the body; the scene rejects a second). Chain .grow(1)
+         * so the enclosing track CONSTRAINS it — an unconstrained
+         * viewport hugs its content and nothing overflows. */
+        public Widget scroll(Runnable body) {
+            return containerOf(KayaWire.KIND_SCROLL, body);
+        }
+
         private Widget containerOf(int kind, Runnable body) {
             Widget parent = widget(kind);
             parents.add(parent.id);

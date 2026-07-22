@@ -85,6 +85,7 @@ module KayaApp
     LeafArgs,
     row,
     column,
+    scroll,
     bindTextElement,
     KayaFieldType (..),
     KayaRecord (..),
@@ -820,6 +821,13 @@ row = rowish W.kindRow
 
 column :: (RowCol a r) => [a] -> r
 column = rowish W.kindColumn
+
+-- | A vertical scroll viewport over EXACTLY ONE child — the signature
+-- says so (the scene enforces it too): @scroll [Grow 1] (column
+-- [...])@. Give it 'Grow' so the enclosing track CONSTRAINS it — an
+-- unconstrained viewport hugs its content and nothing overflows.
+scroll :: [Attr 'BoxW] -> Build Widget -> Build Widget
+scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
 
 -- The leaf half of the same idiom: every leaf constructor's result is
 -- either the widget or a function awaiting its attr list —

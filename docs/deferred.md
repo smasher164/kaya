@@ -423,6 +423,26 @@ Landed history lives in git; this file only carries what is still open.
   action (the platform floor is ContentDialog's two-actions-plus-
   close; more means a custom row on WinUI — no longer the dressed
   floor).
+- Scroll BREADTH (the depth slice landed 2026-07-22: KIND_SCROLL=9,
+  a SINGLE-CHILD vertical viewport — the scene rejects a second
+  add_child at the root; no props of its own, no occurrence
+  (position is widget-owned); SwiftUI ScrollView+ScrollViewReader
+  materialization with geometry readers; harness
+  expect_overflow/scroll_end/expect_at_end in both interpreters
+  (Compose rides the node's own ScrollState, unproven on the
+  emulator); scroll#0 joined check-steps' unique-container rule;
+  live-zone constructors in ALL 8 bindings — check-sugar-surface
+  forced that during depth, unlike nav; the scroll scene rust-only
+  via DEPTH_SCENES). Still open: (1) the 7 remaining languages'
+  scroll guests + SCENES promotion + the four platform runners'
+  legs (GTK ScrolledWindow and WinUI ScrollViewer arms are explicit
+  unimplemented!()s); (2) horizontal axis (an axis enum prop — the
+  slider-step precedent: decide when a scene needs it); (3)
+  virtualization stays in the protocol backlog (a For inside a
+  scroll renders unvirtualized). Lesson the scene caught first run:
+  an UNCONSTRAINED viewport hugs its content and nothing overflows
+  — the scene's viewport must GROW so the enclosing track constrains
+  it; recorded in every binding's scroll constructor doc.
 - ~~Navigation BREADTH~~ LANDED 2026-07-22 (uncommitted): all 8
   languages' sugar + nav guests byte-identical (nav in SCENES on every
   desktop runner); GTK materialization (header-bar back button — the

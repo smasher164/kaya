@@ -132,6 +132,8 @@
 
 #define KIND_IMAGE 8
 
+#define KIND_SCROLL 9
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -435,6 +437,8 @@
 #define KAYA_KIND_SLIDER 7
 
 #define KAYA_KIND_IMAGE 8
+
+#define KAYA_KIND_SCROLL 9
 
 /**
  * Property keys.
