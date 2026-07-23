@@ -11,7 +11,7 @@ final class Progress {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("progress");
+            tx.window(0).title("progress");
             tx.mount(tx.column(() -> {
                 tx.progress(0.25); // progress#0
                 tx.progressIndeterminate(); // progress#1

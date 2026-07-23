@@ -16,7 +16,7 @@ let () =
 
   let status = ref None in
   build app
-    (let* () = window_title "confirm" in
+    (let* () = window ~title:"confirm" () in
      let* s = signal (Str "no decision") in
      status := Some s;
      (* The result handler rides the request and retires with its

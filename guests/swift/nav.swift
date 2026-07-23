@@ -17,7 +17,7 @@ let app = KayaApp()
 var status: KayaSignal!
 
 app.build { tx in
-    tx.windowTitle("nav")
+    tx.window(title: "nav")
     status = tx.signal(.str("at root"))
     let root = tx.column {
         tx.label(bind: status)  // label#0

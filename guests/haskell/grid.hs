@@ -6,7 +6,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    windowTitle "grid"
+    window 0 [WTitle "grid"]
     root <-
       column
         []

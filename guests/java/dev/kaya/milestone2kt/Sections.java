@@ -23,11 +23,13 @@ final class Sections {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("sections");
-            // The ADVISORY hint, exercised on the wire: `bar` is each
+            // One construct carries the window's attributes (the
+            // unification rule). The hint is ADVISORY: `bar` is each
             // desktop's horizontal spelling and the phones' physics
             // regardless — no observable rides on it.
-            tx.sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
+            tx.window(0)
+                    .title("sections")
+                    .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
             KayaApp.Signal<String> visits = tx.signal("archive: 0 visits");
 
             long feed = tx.addSection(FEED).title("Feed").id();

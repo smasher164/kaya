@@ -21,7 +21,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
-        tx.window_title("panels");
+        tx.window(kaya::DEFAULT_WINDOW).title("panels");
         let status = tx.signal("two panels");
 
         let root = tx

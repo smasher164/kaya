@@ -14,7 +14,7 @@ static class TextareaScene
 
         app.Build(tx =>
         {
-            tx.WindowTitle("textarea");
+            tx.Window(title: "textarea");
             var lines = tx.Signal("0 lines");
 
             tx.Mount(tx.Column(() =>

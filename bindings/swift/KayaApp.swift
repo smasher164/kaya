@@ -1334,23 +1334,6 @@ final class KayaAppTx {
         return app.instanceEntries(c.id, c.path).count
     }
 
-    /// Mount into the default window; per-window targets arrive with
-    /// the window vocabulary.
-    /// Set the primary surface's title (the title bar on the
-    /// desktops, the switcher label on iOS, the task label on
-    /// Android).
-    func windowTitle(_ title: String) {
-        tx.setWindowTitle(0, title)
-    }
-
-    /// Request the primary surface's content size in DIP — ADVISORY
-    /// on every platform: honored where the window manager permits,
-    /// recorded only where the system owns geometry.
-    func windowSize(_ width: Double, _ height: Double) {
-        tx.setWindowWidth(0, width)
-        tx.setWindowHeight(0, height)
-    }
-
     /// Request a modal alert (the request/result grammar), named
     /// arguments as the Swift spelling:
     /// `tx.showAlert(title: "delete item?", message: "…",
@@ -1397,14 +1380,37 @@ final class KayaAppTx {
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil,
+        sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil
     ) {
         tx.createWindow(id)
+        window(
+            id, title: title, width: width, height: height,
+            vetoClose: vetoClose, sectionsPresentation: sectionsPresentation,
+            onCloseRequested: onCloseRequested, onClosed: onClosed)
+    }
+
+    /// Set a window's attributes in one construct — the attribute set
+    /// is EXACTLY createWindow's (a window's attributes ride its
+    /// window construct; the primary differs only in having no
+    /// creation moment — the process owns it):
+    /// tx.window(title: "sections", sectionsPresentation:
+    /// Int64(KAYA_SECTIONS_PRESENTATION_BAR)).
+    func window(
+        _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
+        height: Double? = nil, vetoClose: Bool? = nil,
+        sectionsPresentation: Int64? = nil,
+        onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
+        onClosed: ((KayaAppTx) throws -> Void)? = nil
+    ) {
         if let title { tx.setWindowTitle(id, title) }
         if let width { tx.setWindowWidth(id, width) }
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
+        if let sectionsPresentation {
+            tx.setWindowSectionsPresentation(id, sectionsPresentation)
+        }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
     }
@@ -1472,13 +1478,6 @@ final class KayaAppTx {
     /// onSelected (the echo doctrine).
     func selectSection(_ id: UInt64, window: UInt64 = 0) {
         tx.selectSection(window, id)
-    }
-
-    /// The window's ADVISORY presentation hint
-    /// (KAYA_SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
-    /// width/height precedent; the phones ignore it by physics).
-    func sectionsPresentation(_ hint: Int64, window: UInt64 = 0) {
-        tx.setWindowSectionsPresentation(window, hint)
     }
 
     /// Mount a root into a specific window; mounting presents an

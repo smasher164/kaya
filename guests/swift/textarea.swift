@@ -10,7 +10,7 @@ func count(_ text: String) -> String {
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("textarea")
+    tx.window(title: "textarea")
     let lines = tx.signal(.str("0 lines"))
 
     let root = tx.column {

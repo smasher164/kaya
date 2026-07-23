@@ -10,7 +10,7 @@ options = ["Red", "Green", "Blue"]
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    windowTitle "select"
+    window 0 [WTitle "select"]
     picked <- signal (VStr "picked: Red")
 
     let onPick index =

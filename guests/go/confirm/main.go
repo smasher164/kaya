@@ -25,7 +25,7 @@ func main() {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("confirm")
+		tx.Window(0).Title("confirm")
 		status = tx.Signal("no decision")
 
 		tx.Mount(tx.Column(func() {

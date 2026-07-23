@@ -31,11 +31,11 @@ func main() {
 	visitCount := 0
 	var visits kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("sections")
-		// The ADVISORY hint, exercised on the wire: `bar` is each
+		// One construct carries the window's attributes (the
+		// unification rule). The hint is ADVISORY: `bar` is each
 		// desktop's horizontal spelling and the phones' physics
 		// regardless — no observable rides on it.
-		tx.SectionsPresentation(kaya.SectionsPresentationBar)
+		tx.Window(0).Title("sections").SectionsPresentation(kaya.SectionsPresentationBar)
 		visits = tx.Signal("archive: 0 visits")
 
 		feedSection := tx.AddSection(feed).Title("Feed").Id()

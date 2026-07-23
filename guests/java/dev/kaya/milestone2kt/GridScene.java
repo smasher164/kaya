@@ -11,7 +11,7 @@ final class GridScene {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("grid");
+            tx.window(0).title("grid");
             tx.mount(tx.column(() -> {
                 tx.grid(2, () -> {
                     tx.label("Name:"); // label#0

@@ -17,7 +17,7 @@ func main() {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("progress")
+		tx.Window(0).Title("progress")
 		tx.Mount(tx.Column(func() {
 			tx.Progress(0.25)                // progress#0
 			tx.Progress(0).Indeterminate()   // progress#1

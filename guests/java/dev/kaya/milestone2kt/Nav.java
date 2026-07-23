@@ -20,7 +20,7 @@ final class Nav {
         KayaApp app = new KayaApp();
 
         KayaApp.Signal<String> status = app.build(tx -> {
-            tx.windowTitle("nav");
+            tx.window(0).title("nav");
             KayaApp.Signal<String> s = tx.signal("at root");
             tx.mount(tx.column(() -> {
                 tx.label(s); // label#0

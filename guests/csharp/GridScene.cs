@@ -9,7 +9,7 @@ static class GridScene
 
         app.Build(tx =>
         {
-            tx.WindowTitle("grid");
+            tx.Window(title: "grid");
             tx.Mount(tx.Column(() =>
             {
                 tx.Grid(2, () =>

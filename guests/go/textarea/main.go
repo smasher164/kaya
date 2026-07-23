@@ -27,7 +27,7 @@ func main() {
 
 	var lines kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("textarea")
+		tx.Window(0).Title("textarea")
 		lines = tx.Signal("0 lines")
 
 		tx.Mount(tx.Column(func() {

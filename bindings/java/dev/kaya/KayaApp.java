@@ -305,6 +305,14 @@ public final class KayaApp {
             return this;
         }
 
+        /** The window's ADVISORY sections hint
+         * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
+         * width/height precedent; phones ignore it by physics). */
+        public WindowRef sectionsPresentation(long hint) {
+            tx.records.add(KayaWire.txSetWindowSectionsPresentation(id, hint));
+            return this;
+        }
+
         /** The window id, for mountIn. */
         public long id() {
             return id;
@@ -1446,13 +1454,6 @@ public final class KayaApp {
             records.add(KayaWire.txSelectSection(window, id));
         }
 
-        /** The window's ADVISORY presentation hint
-         * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
-         * width/height precedent; phones ignore it by physics). */
-        public void sectionsPresentation(long hint) {
-            records.add(KayaWire.txSetWindowSectionsPresentation(0, hint));
-        }
-
         /**
          * Set the primary surface's title (the title bar on the
          * desktops, the switcher label on iOS, the task label on
@@ -1462,16 +1463,6 @@ public final class KayaApp {
             records.add(KayaWire.txSetWindowTitle(0, title));
         }
 
-        /**
-         * Request the primary surface's content size in DIP —
-         * ADVISORY on every platform: honored where the window
-         * manager permits, recorded only where the system owns
-         * geometry.
-         */
-        public void windowSize(double width, double height) {
-            records.add(KayaWire.txSetWindowWidth(0, width));
-            records.add(KayaWire.txSetWindowHeight(0, height));
-        }
     }
 
     /**

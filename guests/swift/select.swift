@@ -8,7 +8,7 @@ let options = ["Red", "Green", "Blue"]
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("select")
+    tx.window(title: "select")
     let picked = tx.signal(.str("picked: Red"))
 
     let root = tx.column {

@@ -12,7 +12,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let size = ctx.apply(|tx| {
-        tx.window_title("radio");
+        tx.window(kaya::DEFAULT_WINDOW).title("radio");
         let size = tx.signal("size: Small");
         let root = tx
             .column(|tx| {

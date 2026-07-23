@@ -6,7 +6,7 @@ import Foundation
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("progress")
+    tx.window(title: "progress")
     let root = tx.column {
         tx.progress(value: 0.25)  // progress#0
         tx.progress(indeterminate: true)  // progress#1

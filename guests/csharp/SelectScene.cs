@@ -11,7 +11,7 @@ static class SelectScene
 
         app.Build(tx =>
         {
-            tx.WindowTitle("select");
+            tx.Window(title: "select");
             var picked = tx.Signal("picked: Red");
 
             tx.Mount(tx.Column(() =>

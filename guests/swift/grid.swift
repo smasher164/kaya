@@ -6,7 +6,7 @@ import Foundation
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("grid")
+    tx.window(title: "grid")
     let root = tx.column {
         tx.grid(columns: 2) {
             tx.label("Name:")  // label#0

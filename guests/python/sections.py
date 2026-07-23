@@ -32,13 +32,13 @@ def go_archive():
     kaya.select_section(ARCHIVE)
 
 
-# No window() scope: with sections the window has no root of its own
-# — the switcher IS the window content. app.build() carries the
-# title, the ADVISORY hint (`bar`: each desktop's horizontal
-# spelling; the phones' physics regardless), and the shared signal.
-with app.build():
-    kaya.window_title("sections")
-    kaya.sections_presentation(kaya.SECTIONS_BAR)
+# The window's attributes ride the window construct (the unification
+# rule). With sections the window has no root of its own — the
+# switcher IS the window content — so the scope's body carries only
+# props and the shared signal, and nothing mounts. The hint is
+# ADVISORY (`bar`: each desktop's horizontal spelling; the phones'
+# physics regardless).
+with app.window(title="sections", sections_presentation=kaya.SECTIONS_BAR):
     visits = kaya.signal("archive: 0 visits")
 
 with app.add_section(FEED, title="Feed"):

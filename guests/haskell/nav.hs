@@ -19,7 +19,7 @@ settingsId = 8
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    windowTitle "nav"
+    window 0 [WTitle "nav"]
     s <- signal (VStr "at root")
     root <-
       column

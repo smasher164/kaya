@@ -11,7 +11,7 @@ static class PanelsScene
         Signal status = default;
         app.Build(tx =>
         {
-            tx.WindowTitle("panels");
+            tx.Window(title: "panels");
             status = tx.Signal("two panels");
 
             tx.Mount(tx.Column(() =>

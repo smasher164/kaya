@@ -13,7 +13,7 @@ final class Select {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("select");
+            tx.window(0).title("select");
             KayaApp.Signal<String> picked = tx.signal("picked: Red");
 
             tx.mount(tx.column(() -> {

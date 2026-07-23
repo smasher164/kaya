@@ -19,7 +19,7 @@ final class Panels {
         KayaApp app = new KayaApp();
 
         KayaApp.Signal<String> status = app.build(tx -> {
-            tx.windowTitle("panels");
+            tx.window(0).title("panels");
             KayaApp.Signal<String> s = tx.signal("two panels");
             tx.mount(tx.column(() -> {
                 tx.label(s); // label#0

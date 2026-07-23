@@ -10,8 +10,7 @@ import KayaWire (Value (..))
 main :: IO ()
 main = kayaMain $ \app -> do
   buildTx app $ do
-    windowTitle "window probe"
-    windowSize 640 400
+    window 0 [WTitle "window probe", WSize 640 400]
     probe <- signal (VStr "window probe")
 
     root <-

@@ -20,7 +20,7 @@ func main() {
 
 	var picked kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("select")
+		tx.Window(0).Title("select")
 		picked = tx.Signal("picked: Red")
 
 		tx.Mount(tx.Column(func() {

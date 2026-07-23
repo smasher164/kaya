@@ -10,7 +10,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app
-    (let* () = window_title "radio" in
+    (let* () = window ~title:"radio" () in
      let* size = signal (Str "size: Small") in
 
      let on_pick index =

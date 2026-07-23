@@ -6,7 +6,7 @@ import KayaApp
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    windowTitle "progress"
+    window 0 [WTitle "progress"]
     root <-
       column
         []

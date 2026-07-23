@@ -982,22 +982,6 @@ func (tx *Tx) Len(c Collection) int {
 	return 0
 }
 
-// Mount mounts into the default window; per-window targets arrive with
-// the window vocabulary.
-// WindowTitle sets the primary surface's title (the title bar on the
-// desktops, the switcher label on iOS, the task label on Android).
-func (tx *Tx) WindowTitle(title string) {
-	tx.records = append(tx.records, TxSetWindowTitle(0, title))
-}
-
-// WindowSize requests the primary surface's content size in DIP —
-// ADVISORY on every platform: honored where the window manager
-// permits, recorded only where the system owns geometry.
-func (tx *Tx) WindowSize(width, height float64) {
-	tx.records = append(tx.records, TxSetWindowWidth(0, width))
-	tx.records = append(tx.records, TxSetWindowHeight(0, height))
-}
-
 // CreateWindow creates an auxiliary window (capability-gated: phone
 // hosts reject at the root); it materializes hidden and a MountIn
 // presents it. Returns the prop chain:
@@ -1078,13 +1062,6 @@ func (tx *Tx) SelectSection(id uint64) {
 
 func (tx *Tx) SelectSectionIn(window, id uint64) {
 	tx.records = append(tx.records, TxSelectSection(window, id))
-}
-
-// SectionsPresentation sets the window's ADVISORY presentation hint
-// (SectionsPresentationAuto/Bar/Sidebar — the width/height
-// precedent; the phones ignore it by physics).
-func (tx *Tx) SectionsPresentation(hint int64) {
-	tx.records = append(tx.records, TxSetWindowSectionsPresentation(0, hint))
 }
 
 // ShowAlert requests a modal alert (the request/result grammar): a
@@ -1199,6 +1176,14 @@ func (w WindowRef) Size(width, height float64) WindowRef {
 
 // VetoClose arms the veto class: the close button emits
 // close_requested and nothing closes until DestroyWindow agrees.
+// SectionsPresentation sets the window's ADVISORY sections hint
+// (SectionsPresentationAuto/Bar/Sidebar — the width/height
+// precedent; the phones ignore it by physics).
+func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
+	w.tx.records = append(w.tx.records, TxSetWindowSectionsPresentation(w.id, hint))
+	return w
+}
+
 func (w WindowRef) VetoClose(on bool) WindowRef {
 	w.tx.records = append(w.tx.records, TxSetWindowVetoClose(w.id, on))
 	return w

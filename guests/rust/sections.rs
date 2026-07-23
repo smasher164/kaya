@@ -20,11 +20,12 @@ const ARCHIVE: WindowId = WindowId(8);
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let visits_label = ctx.apply(|tx| {
-        tx.window_title("sections");
-        // The ADVISORY hint, exercised on the wire: `bar` is each
+        // One construct carries the window's attributes (the
+        // unification rule). The hint is ADVISORY: `bar` is each
         // desktop's horizontal spelling and the phones' physics
         // regardless — no observable rides on it.
         tx.window(kaya::DEFAULT_WINDOW)
+            .title("sections")
             .sections_presentation(kaya::SectionsPresentation::Bar);
         let feed = tx.add_section(FEED).title("Feed").id();
         let archive = tx.add_section(ARCHIVE).title("Archive").id();

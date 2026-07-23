@@ -10,7 +10,7 @@ options = ["Small", "Medium", "Large"]
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    windowTitle "radio"
+    window 0 [WTitle "radio"]
     size <- signal (VStr "size: Small")
 
     let onPick index =

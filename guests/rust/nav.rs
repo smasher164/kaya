@@ -29,7 +29,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
-        tx.window_title("nav");
+        tx.window(kaya::DEFAULT_WINDOW).title("nav");
         let status = tx.signal("at root");
         let root = tx
             .column(|tx| {

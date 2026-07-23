@@ -29,7 +29,7 @@ func main() {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("nav")
+		tx.Window(0).Title("nav")
 		status = tx.Signal("at root")
 
 		tx.Mount(tx.Column(func() {

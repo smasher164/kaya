@@ -17,7 +17,7 @@ static class ConfirmScene
         Signal status = default;
         app.Build(tx =>
         {
-            tx.WindowTitle("confirm");
+            tx.Window(title: "confirm");
             status = tx.Signal("no decision");
 
             tx.Mount(tx.Column(() =>

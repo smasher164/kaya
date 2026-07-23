@@ -19,7 +19,7 @@ func main() {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("panels")
+		tx.Window(0).Title("panels")
 		status = tx.Signal("two panels")
 
 		tx.Mount(tx.Column(func() {

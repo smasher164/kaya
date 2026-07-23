@@ -6,7 +6,7 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
-        tx.window_title("progress");
+        tx.window(kaya::DEFAULT_WINDOW).title("progress");
         let root = tx
             .column(|tx| {
                 tx.progress(0.25); // progress#0

@@ -22,7 +22,7 @@ func main() {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("scroll")
+		tx.Window(0).Title("scroll")
 		status = tx.Signal("at top")
 
 		tx.Mount(tx.Column(func() {

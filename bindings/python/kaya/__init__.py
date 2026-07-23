@@ -902,7 +902,7 @@ def _widget(kind):
 def create_window(window_id):
     """Create an auxiliary window (capability-gated: a phone host
     rejects it at the root). Materializes hidden; mounting presents.
-    The declarative spelling is `with app.aux_window(...)`."""
+    The declarative spelling is `with app.create_window(...)`."""
     _records().append(wire.tx_create_window(int(window_id)))
 
 
@@ -924,14 +924,6 @@ def select_section(section_id, window=0):
     on_selected (the echo doctrine). The section must already be
     added."""
     _records().append(wire.tx_select_section(int(window), int(section_id)))
-
-
-def sections_presentation(hint, window=0):
-    """How the window presents its sections — ADVISORY (the
-    width/height precedent): kaya.SECTIONS_AUTO, kaya.SECTIONS_BAR, or
-    kaya.SECTIONS_SIDEBAR; the phones ignore it by physics."""
-    _records().append(
-        wire.tx_set_window_sections_presentation(int(window), int(hint)))
 
 
 # The presentation hint's closed set, spelled for guests.
@@ -974,13 +966,6 @@ def show_alert(title="", message="", actions=(), cancel=None,
         int(window), alert_id, len(actions), title, message,
         action0, action1, cancel))
     return alert_id
-
-
-def window_title(title):
-    """Set the primary surface's title. Uniform semantics with
-    per-platform materialization: the title bar on the desktops, the
-    app switcher's label on iOS, the task label on Android."""
-    _records().append(wire.tx_set_window_title(0, str(title)))
 
 
 def window_size(width, height):
@@ -1348,7 +1333,8 @@ def when(sig):
 
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
-                 window=0, create=False, veto_close=None, push=False,
+                 window=0, create=False, veto_close=None,
+                 sections_presentation=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None):
         self._app = app
@@ -1359,6 +1345,7 @@ class _TxScope:
         self._window = int(window)
         self._create = create
         self._veto_close = veto_close
+        self._sections_presentation = sections_presentation
         self._push = push
         self._intercept_back = intercept_back
         self._on_popped = on_popped
@@ -1436,6 +1423,9 @@ class _TxScope:
         if self._veto_close is not None:
             _records().append(
                 wire.tx_set_window_veto_close(self._window, bool(self._veto_close)))
+        if self._sections_presentation is not None:
+            _records().append(wire.tx_set_window_sections_presentation(
+                self._window, int(self._sections_presentation)))
         if self._width is not None or self._height is not None:
             if self._width is None or self._height is None:
                 raise ValueError("kaya: window width and height travel together")
@@ -1490,9 +1480,10 @@ class _TxScope:
                 "loop body must run to completion (no break/return); "
                 "conditional rendering is kaya.when"
             )
-        if self._mount:
-            if _pending_root is None:
-                raise RuntimeError("kaya: window() body declared no root container")
+        if self._mount and _pending_root is not None:
+            # A props-only body is legal (the sections shape: the
+            # switcher IS the window content, the window has no root
+            # of its own) — nothing mounts, nothing errors.
             records.append(wire.tx_mount(self._window, _pending_root.id))
         if records:
             runtime.submit(*records)
@@ -1530,8 +1521,9 @@ class App:
         else:
             self._widget_handlers[(kind, handle.id)] = fn
 
-    def aux_window(self, window_id, title=None, width=None, height=None,
-                   veto_close=None, on_close_requested=None, on_closed=None):
+    def create_window(self, window_id, title=None, width=None, height=None,
+                      veto_close=None, sections_presentation=None,
+                      on_close_requested=None, on_closed=None):
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO
         IT on exit. Capability-gated — a phone host rejects at the
@@ -1550,17 +1542,28 @@ class App:
             self._window_closed[int(window_id)] = on_closed
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
-            title=title, width=width, height=height, veto_close=veto_close)
+            title=title, width=width, height=height, veto_close=veto_close,
+            sections_presentation=sections_presentation)
 
-    def window(self, title=None, width=None, height=None):
+    def window(self, title=None, width=None, height=None, veto_close=None,
+               sections_presentation=None,
+               on_close_requested=None, on_closed=None):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
-        `title` names the primary surface (title bar / switcher label
-        / task label); `width`/`height` request its content size in
-        DIP — advisory on every platform. Per-window targets arrive
-        with the aux-window vocabulary."""
+        The attribute set is EXACTLY create_window's — a window's
+        attributes ride its window construct, and the primary differs
+        only in having no creation moment (the process owns it).
+        `title` names the surface; `width`/`height` request content
+        size in DIP (advisory); `veto_close` arms the close-veto
+        class; `sections_presentation` is the ADVISORY sections hint
+        (kaya.SECTIONS_AUTO/BAR/SIDEBAR)."""
+        if on_close_requested is not None:
+            self._close_requested[0] = on_close_requested
+        if on_closed is not None:
+            self._window_closed[0] = on_closed
         return _TxScope(
-            self, mount_on_exit=True, title=title, width=width, height=height)
+            self, mount_on_exit=True, title=title, width=width, height=height,
+            veto_close=veto_close, sections_presentation=sections_presentation)
 
     def build(self):
         """An ambient transaction without the mount — for mutations

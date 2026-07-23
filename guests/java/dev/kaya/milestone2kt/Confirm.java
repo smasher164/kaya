@@ -20,7 +20,7 @@ final class Confirm {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("confirm");
+            tx.window(0).title("confirm");
             KayaApp.Signal<String> status = tx.signal("no decision");
             tx.mount(tx.column(() -> {
                 tx.label(status); // label#0

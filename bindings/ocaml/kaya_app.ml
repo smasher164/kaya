@@ -811,27 +811,21 @@ let derive rc compute tx =
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)
-(* The primary surface's title: the title bar on the desktops, the
-   switcher label on iOS, the task label on Android. *)
-let window_title title tx = emit tx (Kaya_wire.tx_set_window_title 0L title)
-
-(* Request the primary surface's content size in DIP — ADVISORY on
-   every platform: honored where the window manager permits, recorded
-   only where the system owns geometry. *)
-let window_size width height tx =
-  emit tx (Kaya_wire.tx_set_window_width 0L width);
-  emit tx (Kaya_wire.tx_set_window_height 0L height)
-
-(* Create an auxiliary window (capability-gated: phone hosts reject
-   at the root); materializes hidden, [mount_in] presents. Labeled
-   optional arguments are the OCaml spelling. *)
-let create_window ?title ?width ?height ?veto_close ?on_close_requested
-    ?on_closed id tx =
-  emit tx (Kaya_wire.tx_create_window id);
+(* Set a window's attributes in one construct — the attribute set is
+   EXACTLY [create_window]'s (a window's attributes ride its window
+   construct; the primary differs only in having no creation moment —
+   the process owns it): [window ~title:"sections"
+   ~sections_presentation:(Int64.of_int
+   Kaya_wire.sections_presentation_bar) ()]. *)
+let window ?title ?width ?height ?veto_close ?sections_presentation
+    ?on_close_requested ?on_closed ?(id = 0L) () tx =
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
+  Option.iter
+    (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
+    sections_presentation;
   (* The handlers ride the declaration (per-window — handlers scope
      to the thing that creates them): [~on_close_requested] fires per
      chrome close while veto_close is armed (answer with
@@ -841,6 +835,16 @@ let create_window ?title ?width ?height ?veto_close ?on_close_requested
     (fun f -> Hashtbl.replace tx.app.close_requested id f)
     on_close_requested;
   Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed
+
+(* Create an auxiliary window (capability-gated: phone hosts reject
+   at the root); materializes hidden, [mount_in] presents. Labeled
+   optional arguments are the OCaml spelling — the same set [window]
+   takes. *)
+let create_window ?title ?width ?height ?veto_close ?sections_presentation
+    ?on_close_requested ?on_closed id tx =
+  emit tx (Kaya_wire.tx_create_window id);
+  window ?title ?width ?height ?veto_close ?sections_presentation
+    ?on_close_requested ?on_closed ~id () tx
 
 (* Close and forget an auxiliary window — also the veto grammar's
    confirmation and the reconciliation after a chrome close. *)
@@ -895,12 +899,6 @@ let add_section ?(window = 0L) ?title ?on_selected id tx =
    [~on_selected] (the echo doctrine). *)
 let select_section ?(window = 0L) id tx =
   emit tx (Kaya_wire.tx_select_section window id)
-
-(* The window's ADVISORY presentation hint
-   (Kaya_wire.sections_presentation_auto/bar/sidebar — the
-   width/height precedent; the phones ignore it by physics). *)
-let sections_presentation ?(window = 0L) hint tx =
-  emit tx (Kaya_wire.tx_set_window_sections_presentation window hint)
 
 (* Pop the window's top navigation entry and forget its tree — also
    the back-veto grammar's confirmation after [on_back_requested].

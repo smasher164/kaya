@@ -261,6 +261,20 @@ verbosity is the binding's job.
 
 ## Binding conventions
 
+**Window attributes ride the window construct.** Every binding has
+one construct for a window's attributes — a prop chain (`tx.window(0)
+.title(...)`), a named-argument call (`tx.Window(title: ...)`), a
+labeled function, a config list, or a scope, per the language's idiom
+— and the PRIMARY window's construct accepts exactly the
+created-window construct's attribute set (title, width/height,
+veto_close, sections_presentation, the close handlers). The one
+asymmetry left is semantic: the primary has no creation or
+destruction moment, because the process owns it. No window attribute
+lives as a loose function outside the construct — there are no
+shortcuts (`window_title` retired 2026-07-22; ratified). A
+props-only primary construct is legal and mounts nothing — the
+sections shape, where the switcher IS the window content.
+
 **Line separators.** Guest-visible text uses LF (`\n`) as its line
 separator on every platform — occurrence payloads, harness reads, and
 scene output strings are compared byte-for-byte across all languages,

@@ -10,8 +10,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app
-    (let* () = window_title "window probe" in
-     let* () = window_size 640.0 400.0 in
+    (let* () = window ~title:"window probe" ~width:640.0 ~height:400.0 () in
      let* probe = signal (Str "window probe") in
 
      let* root = column [ label ~bind:probe () (* label#0 *) ] in

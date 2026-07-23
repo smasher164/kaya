@@ -64,7 +64,7 @@ module KayaApp
     pushEntry,
     addSection,
     selectSection,
-    sectionsPresentation,
+    window,
     SectionAttr (..),
     popEntry,
     EntryAttr (..),
@@ -72,8 +72,6 @@ module KayaApp
     WindowAttr (..),
     AlertAttr (..),
     showAlert,
-    windowTitle,
-    windowSize,
     clearWidget,
     focusWidget,
     bindText,
@@ -579,19 +577,6 @@ count c = length <$> items c
 
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.
--- | The primary surface's title: the title bar on the desktops, the
--- switcher label on iOS, the task label on Android.
-windowTitle :: String -> Build ()
-windowTitle t = emitB (W.txSetWindowTitle 0 t)
-
--- | Request the primary surface's content size in DIP — ADVISORY on
--- every platform: honored where the window manager permits, recorded
--- only where the system owns geometry.
-windowSize :: Double -> Double -> Build ()
-windowSize w h = do
-  emitB (W.txSetWindowWidth 0 w)
-  emitB (W.txSetWindowHeight 0 h)
-
 -- | Window construction attributes — the config-list spelling. The
 -- handler attrs ride the declaration (per-window — handlers scope to
 -- the thing that creates them): 'WOnCloseRequested' fires per chrome
@@ -602,8 +587,26 @@ data WindowAttr
   = WTitle String
   | WSize Double Double
   | WVetoClose Bool
+  | WSectionsPresentation Int64
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
+
+-- | Set a window's attributes in one construct — the attribute set
+-- is EXACTLY 'createWindow''s (a window's attributes ride its window
+-- construct; the primary differs only in having no creation moment —
+-- the process owns it): @window 0 [WTitle "sections",
+-- WSectionsPresentation 1]@.
+window :: Word64 -> [WindowAttr] -> Build ()
+window n = mapM_ apply
+  where
+    apply (WTitle t) = emitB (W.txSetWindowTitle n t)
+    apply (WSize w h) = do
+      emitB (W.txSetWindowWidth n w)
+      emitB (W.txSetWindowHeight n h)
+    apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
+    apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
+    apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
+    apply (WOnClosed handler) = pendB (PWindowClosed n handler)
 
 -- | Create an auxiliary window (capability-gated: phone hosts reject
 -- at the root); materializes hidden, 'mountIn' presents:
@@ -611,15 +614,7 @@ data WindowAttr
 createWindow :: Word64 -> [WindowAttr] -> Build ()
 createWindow n attrs = do
   emitB (W.txCreateWindow n)
-  mapM_ apply attrs
-  where
-    apply (WTitle t) = emitB (W.txSetWindowTitle n t)
-    apply (WSize w h) = do
-      emitB (W.txSetWindowWidth n w)
-      emitB (W.txSetWindowHeight n h)
-    apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
-    apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
-    apply (WOnClosed handler) = pendB (PWindowClosed n handler)
+  window n attrs
 
 -- | Close and forget an auxiliary window — also the veto grammar's
 -- confirmation and the reconciliation after a chrome close.
@@ -692,11 +687,6 @@ addSection n attrs = do
 -- 'SOnSelected' (the echo doctrine).
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
-
--- | The window's ADVISORY presentation hint (0 auto / 1 bar /
--- 2 sidebar — the width/height precedent; phones ignore it).
-sectionsPresentation :: Int64 -> Build ()
-sectionsPresentation hint = emitB (W.txSetWindowSectionsPresentation 0 hint)
 
 
 

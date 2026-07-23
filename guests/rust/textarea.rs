@@ -22,7 +22,7 @@ fn count(text: &str) -> String {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let (lines, editor) = ctx.apply(|tx| {
-        tx.window_title("textarea");
+        tx.window(kaya::DEFAULT_WINDOW).title("textarea");
         let lines = tx.signal("0 lines");
         let (root, editor) = tx
             .column(|tx| {

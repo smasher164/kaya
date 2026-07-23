@@ -11,8 +11,7 @@ import Foundation
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("window probe")
-    tx.windowSize(640.0, 400.0)
+    tx.window(title: "window probe", width: 640.0, height: 400.0)
     let probe = tx.signal(.str("window probe"))
     let root = tx.column {
         tx.label(bind: probe)  // label#0

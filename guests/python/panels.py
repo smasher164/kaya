@@ -1,6 +1,6 @@
 """The panels conformance scene, Python port — the north-star
 spelling for the auxiliary-window grammar: the inspector is one
-`aux_window` scope, its veto class one handler. See
+`create_window` scope, its veto class one handler. See
 guests/rust/panels.rs and tools/scenes/panels.steps."""
 
 import sys
@@ -26,7 +26,7 @@ def close_asked():
         kaya.destroy_window(INSPECTOR)
 
 
-with app.aux_window(INSPECTOR, title="inspector", width=480, height=320,
+with app.create_window(INSPECTOR, title="inspector", width=480, height=320,
                     veto_close=True, on_close_requested=close_asked):
     caption = kaya.signal("inspector pane")
     with kaya.column():

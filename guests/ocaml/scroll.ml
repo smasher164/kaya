@@ -12,7 +12,7 @@ let () =
 
   let status = ref None in
   build app
-    (let* () = window_title "scroll" in
+    (let* () = window ~title:"scroll" () in
      let* s = signal (Str "at top") in
      status := Some s;
      let on_bottom tx = write s (Str "bottom clicked") tx in

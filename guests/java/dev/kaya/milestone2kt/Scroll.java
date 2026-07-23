@@ -14,7 +14,7 @@ final class Scroll {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("scroll");
+            tx.window(0).title("scroll");
             KayaApp.Signal<String> status = tx.signal("at top");
             tx.mount(tx.column(() -> {
                 tx.label(status); // label#0

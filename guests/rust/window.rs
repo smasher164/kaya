@@ -10,8 +10,9 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
-        tx.window_title("window probe");
-        tx.window_size(640.0, 400.0);
+        tx.window(kaya::DEFAULT_WINDOW)
+            .title("window probe")
+            .size(640.0, 400.0);
         let probe = tx.signal("window probe");
         let root = tx
             .column(|tx| {

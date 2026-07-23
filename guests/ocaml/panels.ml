@@ -10,7 +10,7 @@ let () =
 
   let status = ref None in
   build app
-    (let* () = window_title "panels" in
+    (let* () = window ~title:"panels" () in
      let* s = signal (Str "two panels") in
      status := Some s;
 

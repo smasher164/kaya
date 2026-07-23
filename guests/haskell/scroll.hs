@@ -10,7 +10,7 @@ import KayaWire (Value (..))
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    windowTitle "scroll"
+    window 0 [WTitle "scroll"]
     s <- signal (VStr "at top")
     let mkRow i = do
           caption <- signal (VStr ("row " <> show (i :: Int)))

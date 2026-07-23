@@ -8,7 +8,7 @@ let options = ["Small", "Medium", "Large"]
 let app = KayaApp()
 
 app.build { tx in
-    tx.windowTitle("radio")
+    tx.window(title: "radio")
     let size = tx.signal(.str("size: Small"))
 
     let root = tx.column {

@@ -10,7 +10,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app
-    (let* () = window_title "select" in
+    (let* () = window ~title:"select" () in
      let* picked = signal (Str "picked: Red") in
 
      let on_pick index =

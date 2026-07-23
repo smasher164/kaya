@@ -14,7 +14,7 @@ let () =
   let lines, editor =
     build app
       (let* lines = signal (Str "0 lines") in
-       let* () = window_title "textarea" in
+       let* () = window ~title:"textarea" () in
 
        let* column = widget kind_column in
        let* editor = widget kind_textarea in

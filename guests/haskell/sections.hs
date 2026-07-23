@@ -20,11 +20,11 @@ main :: IO ()
 main = kayaMain $ \app -> do
   visitTally <- newIORef (0 :: Int)
   _ <- buildTx app $ do
-    windowTitle "sections"
-    -- The ADVISORY hint, exercised on the wire: `bar` is each
-    -- desktop's horizontal spelling and the phones' physics
-    -- regardless — no observable rides on it.
-    sectionsPresentation 1
+    -- One construct carries the window's attributes (the unification
+    -- rule). The hint is ADVISORY: `bar` is each desktop's horizontal
+    -- spelling and the phones' physics regardless — no observable
+    -- rides on it.
+    window 0 [WTitle "sections", WSectionsPresentation 1]
     visits <- signal (VStr "archive: 0 visits")
     addSection feedId [STitle "Feed"]
     addSection

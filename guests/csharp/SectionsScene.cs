@@ -20,11 +20,12 @@ static class SectionsScene
         Signal visits = default;
         app.Build(tx =>
         {
-            tx.WindowTitle("sections");
-            // The ADVISORY hint, exercised on the wire: `bar` is each
+            // One construct carries the window's attributes (the
+            // unification rule). The hint is ADVISORY: `bar` is each
             // desktop's horizontal spelling and the phones' physics
             // regardless — no observable rides on it.
-            tx.SectionsPresentation(KayaWire.SectionsPresentationBar);
+            tx.Window(title: "sections",
+                sectionsPresentation: KayaWire.SectionsPresentationBar);
             visits = tx.Signal("archive: 0 visits");
 
             tx.AddSection(Feed, title: "Feed");

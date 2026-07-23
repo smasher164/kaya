@@ -25,7 +25,7 @@ final class TextareaScene {
         KayaApp app = new KayaApp();
 
         Scene scene = app.build(tx -> {
-            tx.windowTitle("textarea");
+            tx.window(0).title("textarea");
             KayaApp.Signal<String> lines = tx.signal("0 lines");
 
             KayaApp.Widget editor;

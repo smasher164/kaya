@@ -14,7 +14,7 @@ import KayaWire (Value (..), alertChoiceCancel)
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    windowTitle "confirm"
+    window 0 [WTitle "confirm"]
     s <- signal (VStr "no decision")
     root <-
       column

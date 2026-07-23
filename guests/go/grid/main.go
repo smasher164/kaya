@@ -17,7 +17,7 @@ func main() {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("grid")
+		tx.Window(0).Title("grid")
 		tx.Mount(tx.Column(func() {
 			tx.Grid(2, func() {
 				tx.LabelText("Name:")             // label#0

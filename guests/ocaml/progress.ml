@@ -7,7 +7,7 @@ let () =
   let app = Kaya_app.create () in
 
   build app
-    (let* () = window_title "progress" in
+    (let* () = window ~title:"progress" () in
      let* root =
        column
          [

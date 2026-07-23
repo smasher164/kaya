@@ -16,8 +16,7 @@ final class Window {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("window probe");
-            tx.windowSize(640.0, 400.0);
+            tx.window(0).title("window probe").size(640.0, 400.0);
             KayaApp.Signal<String> probe = tx.signal("window probe");
             tx.mount(tx.column(() -> {
                 tx.label(probe); // label#0

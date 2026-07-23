@@ -19,7 +19,7 @@ let () =
 
   let status = ref None in
   build app
-    (let* () = window_title "nav" in
+    (let* () = window ~title:"nav" () in
      let* s = signal (Str "at root") in
      status := Some s;
      let on_detail tx =

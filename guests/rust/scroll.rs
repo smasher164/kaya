@@ -15,7 +15,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
-        tx.window_title("scroll");
+        tx.window(kaya::DEFAULT_WINDOW).title("scroll");
         let status = tx.signal("at top");
         let root = tx
             .column(|tx| {

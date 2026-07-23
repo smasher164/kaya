@@ -20,7 +20,7 @@ func main() {
 
 	var size kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("radio")
+		tx.Window(0).Title("radio")
 		size = tx.Signal("size: Small")
 
 		tx.Mount(tx.Column(func() {

@@ -19,8 +19,7 @@ func main() {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		tx.WindowTitle("window probe")
-		tx.WindowSize(640, 400)
+		tx.Window(0).Title("window probe").Size(640, 400)
 		probe := tx.Signal("window probe")
 
 		tx.Mount(tx.Column(func() {

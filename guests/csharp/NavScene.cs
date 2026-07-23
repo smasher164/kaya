@@ -19,7 +19,7 @@ static class NavScene
         Signal status = default;
         app.Build(tx =>
         {
-            tx.WindowTitle("nav");
+            tx.Window(title: "nav");
             status = tx.Signal("at root");
 
             tx.Mount(tx.Column(() =>

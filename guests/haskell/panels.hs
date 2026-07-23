@@ -8,7 +8,7 @@ import KayaWire (Value (..))
 main :: IO ()
 main = kayaMain $ \app -> do
   status <- buildTx app $ do
-    windowTitle "panels"
+    window 0 [WTitle "panels"]
     s <- signal (VStr "two panels")
 
     root <- column [] [labelBound s] -- label#0

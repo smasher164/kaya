@@ -18,15 +18,15 @@ let () =
 
   let visit_count = ref 0 in
   build app
-    (let* () = window_title "sections" in
-     (* The ADVISORY hint, exercised on the wire: `bar` is each
+    ((* One construct carries the window's attributes (the
+        unification rule). The hint is ADVISORY: `bar` is each
         desktop's horizontal spelling and the phones' physics
         regardless — no observable rides on it. *)
      let* () =
-       fun tx ->
-        sections_presentation
-          (Int64.of_int Kaya_wire.sections_presentation_bar)
-          tx
+       window ~title:"sections"
+         ~sections_presentation:
+           (Int64.of_int Kaya_wire.sections_presentation_bar)
+         ()
      in
      let* visits = signal (Str "archive: 0 visits") in
      let on_archive_shown tx =

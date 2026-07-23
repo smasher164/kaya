@@ -13,7 +13,7 @@ static class ScrollScene
         Signal status = default;
         app.Build(tx =>
         {
-            tx.WindowTitle("scroll");
+            tx.Window(title: "scroll");
             status = tx.Signal("at top");
 
             tx.Mount(tx.Column(() =>

@@ -15,7 +15,7 @@ let app = KayaApp()
 var status: KayaSignal!
 
 app.build { tx in
-    tx.windowTitle("confirm")
+    tx.window(title: "confirm")
     status = tx.signal(.str("no decision"))
     let root = tx.column {
         tx.label(bind: status)  // label#0

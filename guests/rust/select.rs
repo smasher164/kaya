@@ -14,7 +14,7 @@ enum Msg {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let picked = ctx.apply(|tx| {
-        tx.window_title("select");
+        tx.window(kaya::DEFAULT_WINDOW).title("select");
         let picked = tx.signal("picked: Red");
         let root = tx
             .column(|tx| {

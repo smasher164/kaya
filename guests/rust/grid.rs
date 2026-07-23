@@ -7,7 +7,7 @@
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
-        tx.window_title("grid");
+        tx.window(kaya::DEFAULT_WINDOW).title("grid");
         let root = tx
             .column(|tx| {
                 tx.grid(2, |tx| {

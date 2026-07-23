@@ -871,11 +871,6 @@ impl<'a> Tx<'a> {
 
     /// The primary surface's title. Uniform semantics, per-platform
     /// materialization: the title bar on the desktops, the app
-    /// switcher's label on iOS, the task label on Android.
-    pub fn window_title(&mut self, title: &str) {
-        self.set_window(WindowProp::Title, title);
-    }
-
     /// Create an auxiliary window (capability-gated: a phone host
     /// rejects it at the root). Materializes hidden; mounting a root
     /// presents it. Returns a proxy for its props:
@@ -1019,12 +1014,6 @@ impl<'a> Tx<'a> {
     /// honored where the window manager permits (the desktops,
     /// outside tiling WMs), recorded only where the system owns
     /// geometry (the phones). A request, never a guarantee — see
-    /// DESIGN.md, Presentation contexts.
-    pub fn window_size(&mut self, width: f64, height: f64) {
-        self.set_window(WindowProp::Width, width);
-        self.set_window(WindowProp::Height, height);
-    }
-
     pub fn bind(&mut self, widget: WidgetId, prop: Prop, signal: SignalId) {
         self.ops.push(TxOp::SetProperty {
             widget,

@@ -13,7 +13,7 @@ final class Radio {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.windowTitle("radio");
+            tx.window(0).title("radio");
             KayaApp.Signal<String> size = tx.signal("size: Small");
 
             tx.mount(tx.column(() -> {

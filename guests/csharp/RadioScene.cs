@@ -11,7 +11,7 @@ static class RadioScene
 
         app.Build(tx =>
         {
-            tx.WindowTitle("radio");
+            tx.Window(title: "radio");
             var size = tx.Signal("size: Small");
 
             tx.Mount(tx.Column(() =>

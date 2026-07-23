@@ -11,7 +11,7 @@ let app = KayaApp()
 var status: KayaSignal!
 
 app.build { tx in
-    tx.windowTitle("scroll")
+    tx.window(title: "scroll")
     status = tx.signal(.str("at top"))
     let root = tx.column {
         tx.label(bind: status)  // label#0

@@ -18,11 +18,13 @@ var visitCount = 0
 var visits: KayaSignal!
 
 app.build { tx in
-    tx.windowTitle("sections")
-    // The ADVISORY hint, exercised on the wire: `bar` is each
-    // desktop's horizontal spelling and the phones' physics
-    // regardless — no observable rides on it.
-    tx.sectionsPresentation(Int64(KAYA_SECTIONS_PRESENTATION_BAR))
+    // One construct carries the window's attributes (the unification
+    // rule). The hint is ADVISORY: `bar` is each desktop's horizontal
+    // spelling and the phones' physics regardless — no observable
+    // rides on it.
+    tx.window(
+        title: "sections",
+        sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_BAR))
     visits = tx.signal(.str("archive: 0 visits"))
 
     tx.addSection(FEED, title: "Feed")

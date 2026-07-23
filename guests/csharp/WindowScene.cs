@@ -11,8 +11,7 @@ static class WindowScene
 
         app.Build(tx =>
         {
-            tx.WindowTitle("window probe");
-            tx.WindowSize(640, 400);
+            tx.Window(title: "window probe", width: 640, height: 400);
             var probe = tx.Signal("window probe");
 
             tx.Mount(tx.Column(() =>

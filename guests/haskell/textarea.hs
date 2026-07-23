@@ -11,7 +11,7 @@ lineTally text = show (length (lines text)) ++ " lines"
 main :: IO ()
 main = kayaMain $ \app -> do
   (lineCount, editor, clearBtn) <- buildTx app $ do
-    windowTitle "textarea"
+    window 0 [WTitle "textarea"]
     lineCount <- signal (VStr "0 lines")
 
     column <- widget kindColumn
