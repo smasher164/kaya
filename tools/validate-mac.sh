@@ -67,6 +67,7 @@ python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks
 # breakage here, in seconds, not on an emulator or VM.
 tools/check-targets.sh || exit 1
 tools/check-shell.sh || exit 1
+tools/check-mirror.sh || exit 1
 tools/check-sugar-surface.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1

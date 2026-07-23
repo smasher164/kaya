@@ -68,26 +68,45 @@ in docs/deferred.md.
    git HEAD — cannot pass pre-commit if generated files changed; prove
    idempotence instead and commit generators together with outputs),
    `tools/check-steps.sh`, `tools/check-shell.sh`,
+   `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
+   modulo the line-3 comment — they drifted once, silently, for two
+   milestones),
    `tools/check-targets.sh` (cross-compiles every cfg'd backend),
    `tools/check-sugar-surface.sh` (every widget kind has a live-zone
    constructor in all 8 bindings), `tools/check-abort.sh` (uniform abort
    semantics, all languages), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends),
+   `tools/check-stubs.sh` (no runner wires a scene's legs while its
+   backend still stubs the feature — depth-slice stubs compile, so
+   only this cross-check sees the combination),
+   `tools/check-compose.sh` (KayaCompose.kt actually compiles — the
+   swift-typecheck sibling; the emulator must never be the first
+   compiler to see the Kotlin layer),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
-3. `tools/validate-mac.sh` — every scene × every language × AppKit and
-   SwiftUI (opens windows briefly; needs a logged-in GUI session).
+   One gate sits outside validate-mac because it needs docker:
+   `tools/check-gtk.sh` compile-checks the GTK backend, which
+   check-targets structurally cannot (gtk-sys needs the distro's
+   pkg-config world). Run it after any gtk.rs change — a green
+   check-targets does NOT mean every backend compiles.
+3. `tools/validate-mac.sh` — every scene × every language on the
+   SwiftUI interpreter, the one macOS backend (opens windows briefly;
+   needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
-   `tools/validate-linux.sh` (docker; GTK on X11+Wayland),
+   `tools/validate-all.sh` — ALL FIVE lanes concurrently by default
+   (bounded by the slowest lane, ~1 minute warm; ratified
+   2026-07-22). `--serial` for the special cases: single-lane
+   benchmarking, debugging under contention, recording mode. The
+   lanes remain individually runnable (`tools/validate-linux.sh`,
    `tools/ios/run-sim.sh`, `tools/android/run-emulator.sh`,
-   `tools/deploy-win.sh akhil@192.168.64.2 all` (the UTM VM;
-   deploy-win auto-starts it; `tools/probe-env.sh` checks all
-   environments). Fix-forward if a platform fails.
+   `tools/deploy-win.sh akhil@192.168.64.2 all`;
+   `tools/probe-env.sh` checks all environments). Fix-forward if a
+   platform fails.
 
 ## Sequencing pattern for features
 
-Depth then breadth: land the protocol + one backend (AppKit) + one
-binding (Rust) + the scene, get it green on mac, then fan out backends
-and bindings in parallel, then run the full matrix. Between-phase gates
+Depth then breadth: land the protocol + one backend (SwiftUI on mac)
++ one binding (Rust) + the scene, get it green on mac, then fan out
+backends and bindings in parallel, then run the full matrix. Between-phase gates
 keep half-landed states honest — some gates (check-verbs,
 check-sugar-surface) are DESIGNED to stay red mid-milestone, holding the
 remaining work open; that is not a regression.

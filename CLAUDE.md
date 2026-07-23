@@ -68,6 +68,9 @@ in docs/deferred.md.
    git HEAD — cannot pass pre-commit if generated files changed; prove
    idempotence instead and commit generators together with outputs),
    `tools/check-steps.sh`, `tools/check-shell.sh`,
+   `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
+   modulo the line-3 comment — they drifted once, silently, for two
+   milestones),
    `tools/check-targets.sh` (cross-compiles every cfg'd backend),
    `tools/check-sugar-surface.sh` (every widget kind has a live-zone
    constructor in all 8 bindings), `tools/check-abort.sh` (uniform abort

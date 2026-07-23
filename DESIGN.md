@@ -1,6 +1,14 @@
 # kaya design notes
 
-Status: the architecture is settled; there is no implementation yet.
+Status (2026-07-23): the architecture is settled and implemented — eight
+guest-language bindings over the C floor, one backend per platform
+(SwiftUI on macOS and iOS, Compose on Android, GTK4 on Linux, WinUI 3 on
+Windows; ratified 2026-07-20), and a shared scene suite validated
+concurrently across the five-platform matrix. This document records
+decisions as they were made, so some passages describe backends that were
+later deleted (AppKit, UIKit, Android Views); their lessons stand, and the
+current roster is stated where it was ratified (the "One backend per
+platform" bullet in the threading section) and below.
 
 kaya is a cross-platform GUI library that wraps each platform's native
 widgets behind a single API. This document records the architectural
@@ -11,9 +19,9 @@ explains what it was tested against.
 ## Premise and constraints
 
 1. Native widgets, not custom drawing. kaya creates and manages real
-   platform widgets (`NSView`, WinUI controls, `GtkWidget`, Android views).
-   Flutter, egui, and Slint make the opposite bet and draw every pixel
-   themselves.
+   platform widgets (SwiftUI views, WinUI controls, `GtkWidget`, Compose
+   nodes). Flutter, egui, and Slint make the opposite bet and draw every
+   pixel themselves.
 2. Multi-language bindings are a primary requirement. The stable API is a
    C ABI, and bindings (Python, JS, Go, JVM, and so on) must be thin and
    mechanical. This constraint drives more of the architecture than any
@@ -29,13 +37,24 @@ explains what it was tested against.
 
 ## Platform backends
 
+The current roster is one backend per platform (ratified 2026-07-20): the
+SwiftUI interpreter on macOS and iOS (one Swift file serves both), Compose
+on Android, GTK4 on Linux, WinUI 3 on Windows. The native AppKit, UIKit,
+and Android Views backends were built and validated first and then
+deleted; where SwiftUI/Compose cannot express a semantic, the interpreter
+drops down per widget through the platform's sanctioned interop
+(NSViewRepresentable / UIViewRepresentable / AndroidView), intersection-
+first, each drop-down recorded with its conformance scene. The table
+below keeps each platform's bring-up record, including the deleted
+backends, because the lessons in it still pay.
+
 | Platform | Backend | Notes |
 |----------|---------|-------|
-| macOS    | AppKit; plus the SwiftUI backend (shared with iOS, see the iOS row) as a first-class leg. | First backend, since it has the fastest iteration loop for development. |
-| iOS      | UIKit and SwiftUI, both first-class backends validated from milestone 0 onward. | SwiftUI exposes no object model — views are compile-time generic value types — so unlike Android's JNI route a SwiftUI backend is an interpreter written in Swift mapping kaya's scene onto SwiftUI declarations. The alignment is unusually good: kaya signal maps to an @Observable property, `When` to `if`, `For` to `ForEach`, templates to view builders, and SwiftUI's source-of-truth model is exactly kaya's core-owned signals, so the shim is closer to transliteration than translation (SwiftUI's own diff is what native apps pay anyway). The payoff is the SwiftUI-only surface: WidgetKit, the current design language, each year's newest controls. The friction is at the imperative edges — `focus()` via @FocusState, `scrollTo()` via ScrollViewReader, ref handles in a value-typed world, UIViewRepresentable escapes for the IME contract — each mappable, each bespoke. The SwiftUI backend (tools/swiftui) is a milestone-0 leg validated alongside everything else: the scene as SwiftUI speaking the protocol over the presentation-side C API — kaya_emit_* for occurrences out of action closures, and a blocking kaya_next_commands pump (the mirror of kaya_next_occurrence; no polling, no callbacks) hopping to the main actor to write @Observable state, with SwiftUI's invalidation as the render path. It passes the self-test in the iOS Simulator and natively on macOS from the same Swift file — one presentation layer serves both Apple platforms. Critically, the validated composition is the product scenario: the unchanged milestone-0 examples drive it via runtime backend selection — all four guest languages on macOS, and on iOS the Rust example's own main is the bundle executable with the SwiftUI dylib loaded from inside the bundle (the rust-swiftui leg). No app logic is written in Swift anywhere; app developers shipping on Apple platforms do not write Swift. This also establishes the guest-language-backend contract in miniature: the presentation-side C API is the same protocol with the roles swapped, exclusive with kaya_run per process. The imperative edges (focus, scrollTo, ref handles) get measured as real widgets arrive, per feature, breadth-first like every other backend. A backend written in Swift is fine — the Android backend will carry Kotlin/Java shim components regardless; backends may be thick, bindings must stay thin. The general pattern stands: every platform has a language-locked declarative layer (SwiftUI, Compose) over an object-model layer (UIKit, Android Views); kaya v1 validates both layers on Apple platforms (UIKit/AppKit and SwiftUI), and the object-model layer elsewhere. The milestone-0 skeleton passes in the simulator, validated from Rust and from Swift over the C ABI (swiftc imports kaya.h directly via -import-objc-header — zero re-declarations; Swift's C interop is free, so the function floor is already optimal and the direct-ring tier buys nothing there). iOS specifics: UIApplicationMain never returns, the delegate reaches its channel ends through a slot, the self-test exits the process (legitimate: on iOS kaya is the process), sendActionsForControlEvents drives the real action path, and simulator builds are unsigned — tools/ios/run-sim.sh boots, installs, launches with SIMCTL_CHILD_ env, and screenshots via simctl. It shares most of the AppKit bridge layer and has the same protocols where it matters: `UITextInput` for IME, UIKit accessibility, Core Animation compositing, and pull-based `UITableView` virtualization. The platform-specific wrinkle is the suspension lifecycle ("save state now"), which falls into the occurrence-plus-deadline class. Building and deploying to a device from a Linux host is feasible with xtool-style SwiftPM cross-compilation; the Simulator still requires macOS. |
+| macOS    | SwiftUI interpreter (shared with iOS, see the iOS row). AppKit was the original first backend — fastest iteration loop for development — and is deleted; the interpreter's NSButton bridge is the standing per-widget drop-down. | First platform brought up. |
+| iOS      | SwiftUI (the one Apple backend). UIKit was a first-class backend from milestone 0 through the roster ratification (2026-07-20) and is deleted. | SwiftUI exposes no object model — views are compile-time generic value types — so unlike Android's JNI route a SwiftUI backend is an interpreter written in Swift mapping kaya's scene onto SwiftUI declarations. The alignment is unusually good: kaya signal maps to an @Observable property, `When` to `if`, `For` to `ForEach`, templates to view builders, and SwiftUI's source-of-truth model is exactly kaya's core-owned signals, so the shim is closer to transliteration than translation (SwiftUI's own diff is what native apps pay anyway). The payoff is the SwiftUI-only surface: WidgetKit, the current design language, each year's newest controls. The friction is at the imperative edges — `focus()` via @FocusState, `scrollTo()` via ScrollViewReader, ref handles in a value-typed world, UIViewRepresentable escapes for the IME contract — each mappable, each bespoke. The SwiftUI backend (tools/swiftui) is a milestone-0 leg validated alongside everything else: the scene as SwiftUI speaking the protocol over the presentation-side C API — kaya_emit_* for occurrences out of action closures, and a blocking kaya_next_commands pump (the mirror of kaya_next_occurrence; no polling, no callbacks) hopping to the main actor to write @Observable state, with SwiftUI's invalidation as the render path. It passes the self-test in the iOS Simulator and natively on macOS from the same Swift file — one presentation layer serves both Apple platforms. Critically, the validated composition is the product scenario: the unchanged milestone-0 examples drive it via runtime backend selection — all four guest languages on macOS, and on iOS the Rust example's own main is the bundle executable with the SwiftUI dylib loaded from inside the bundle (the rust-swiftui leg). No app logic is written in Swift anywhere; app developers shipping on Apple platforms do not write Swift. This also establishes the guest-language-backend contract in miniature: the presentation-side C API is the same protocol with the roles swapped, exclusive with kaya_run per process. The imperative edges (focus, scrollTo, ref handles) get measured as real widgets arrive, per feature, breadth-first like every other backend. A backend written in Swift is fine — the Android backend will carry Kotlin/Java shim components regardless; backends may be thick, bindings must stay thin. The general pattern stands: every platform has a language-locked declarative layer (SwiftUI, Compose) over an object-model layer (UIKit, Android Views); kaya v1 validates both layers on Apple platforms (UIKit/AppKit and SwiftUI), and the object-model layer elsewhere. The milestone-0 skeleton passes in the simulator, validated from Rust and from Swift over the C ABI (swiftc imports kaya.h directly via -import-objc-header — zero re-declarations; Swift's C interop is free, so the function floor is already optimal and the direct-ring tier buys nothing there). iOS specifics: UIApplicationMain never returns, the delegate reaches its channel ends through a slot, the self-test exits the process (legitimate: on iOS kaya is the process), sendActionsForControlEvents drives the real action path, and simulator builds are unsigned — tools/ios/run-sim.sh boots, installs, launches with SIMCTL_CHILD_ env, and screenshots via simctl. It shares most of the AppKit bridge layer and has the same protocols where it matters: `UITextInput` for IME, UIKit accessibility, Core Animation compositing, and pull-based `UITableView` virtualization. The platform-specific wrinkle is the suspension lifecycle ("save state now"), which falls into the occurrence-plus-deadline class. Building and deploying to a device from a Linux host is feasible with xtool-style SwiftPM cross-compilation; the Simulator still requires macOS. |
 | Windows  | WinUI 3 via `windows-rs`/COM, with no bridge language needed. The bet is validated: the milestone-0 skeleton (window, button, label, ring round trip) runs on Windows 11 ARM from pure Rust. Bindings are generated by windows-bindgen from the App SDK winmd (tools/winui-bindgen); a plain `Application` with no subclass suffices, with the scene built from a deferred dispatcher callback; `DispatcherQueue::TryEnqueue` is the doorbell; the bootstrap DLL is loaded dynamically (`MddBootstrapInitialize2`). All milestone-0 validations pass in the VM with clean exit codes: Rust exe, Python over the function floor, and two direct-ring consumers — Go (llvm-mingw cgo against the msvc-ABI dll) and C# (P/Invoke for the calls, `Volatile.Read`/`Write` on the ring), which together validate the exposed ring layout from both an unmanaged-FFI and a managed runtime. Shutdown lessons, learned the hard way: exit goes through `Application::Exit`; after `Start` returns, XAML COM references must be leaked rather than dropped (Rust TLS destructors run during process exit on Windows and releasing into the dead apartment is an access violation); `MddBootstrapShutdown` must be called while the process is healthy or `Microsoft.UI.Xaml.dll` crashes during `DLL_PROCESS_DETACH` in hosted processes; and `kaya_run` returns the exit code rather than exiting, because a library must not tear down its host process — hosts join their app thread before exiting (a daemon thread re-entering CPython during finalization crashes). WinUI requires an interactive desktop session, so SSH-driven runs go through a `schtasks /it` task, which matters for CI later. Win32 common controls remain the fallback but are no longer expected to be needed. WPF is possible later through hostfxr and a C# shim. |
 | Linux    | GTK4 via gtk4-rs. Linux has no OS-native toolkit; GTK is the conventional stand-in. The milestone-0 skeleton runs the same architecture: `glib::idle_add` (g_idle_add) is the doorbell, the clicked signal feeds the occurrence sink, and the self-test drives the real signal path via `emit_clicked`. GTK teardown is orderly (none of WinUI's exit ceremony); the process exit code flows through `run_core` like the other backends. The backend contains no display-protocol-specific code; GTK4's GDK backends provide both X11 and Wayland, and validation exercises both — seven language suites (the usual four, plus C itself over the function floor, plus OCaml and Haskell on the direct ring) run under Xvfb (X11) and under headless Weston (Wayland) in a Debian container (tools/validate-linux.sh), unattended, since Linux has no interactive-session constraint. |
-| Android  | Platform views over a JNI bridge (jni-rs), plus a Jetpack Compose backend as the SwiftUI sibling, both validated at milestone 0. | Hosting is fully inverted — stricter than iOS, which at least requires a native executable: Zygote forks the process, ActivityThread owns main, and code enters at Activity.onCreate. So the milestone-0 packaging is a cdylib, not a bin: `kaya::android_main!(app)` exports the one JNI entry (`dev.kaya.Kaya.attach` — every Android app is the attach shape, and the shell spells it out), a minimal Kotlin Activity loads the library and calls `Kaya.attach(this)` on the UI thread, and the native side builds the scene, spawns the app thread, and returns the thread to the Looper. The same app logic file serves the bin platforms and this leg (examples/milestone2_android.rs is a two-line repackaging of milestone2.rs). The backend drives android.widget through JNI; its Kotlin half is three small classes (the entry declaration plus click-listener and Runnable shims) whose natives are registered with RegisterNatives rather than resolved by name, so the guest library's only name-based export is the entry. The doorbell is a posted no-data Runnable through runOnUiThread; kaya's env-based switches keep one spelling because the Activity maps KAYA_* intent extras to environment variables (`am start --ez KAYA_SELFTEST true` is this platform's `KAYA_SELFTEST=1 ./app`). Lessons that cost a debugging session each: never hold a lock across a JNI call that can dispatch back into native code (performClick reaches the click handler synchronously on the same thread — the handler uses its own clone of the occurrence sink, the same shape as a GTK signal closure); and exit through `_exit`, because libc exit runs atexit handlers that destroy HWUI's mutexes while its render threads still run. The Compose backend mirrors the SwiftUI one move for move — kaya signal to snapshot state (`mutableStateOf`, recomposition renders), occurrences out of onClick, commands through a blocking kaya_next_commands pump hopping to the UI thread — over the same presentation-side C API, reached through registered JNI natives (KayaPresent) since Kotlin cannot call C directly; it is the one Android backend, driving the unchanged Rust example as the guest, exactly like the SwiftUI leg on Apple. The JVM is the platform's direct-ring validation, and it surfaced two ART bugs the hard way: ART's byte-buffer-view VarHandle path truncates a direct buffer's native address to 32 bits in the interpreter (var_handle.cc casts the address through uint32_t), so the canonical VarHandle-over-NewDirectByteBuffer idiom faults on any real heap address; and ART's Unsafe (Object, long) volatile accessors are heap-field-only — a null base goes through a 32-bit MemberOffset and faults — so the OpenJDK null-base absolute-address idiom does not exist either. The formulation that works, and the one the Java guest ships: Unsafe absolute plain loads/stores plus explicit loadFence/storeFence (documented in libcore as the C11 atomic_thread_fence equivalents), bound once as MethodHandles (Unsafe is absent from the SDK stubs) and invoked through invokeExact so the per-record path stays free of boxing and reflection. When ART fixes the VarHandle truncation, the fence formulation can be swapped for acquire/release views (API 33+); the fence formulation itself only needs MethodHandles, API 26+. Either way the tier is the same as desktop Go and C#: direct reads on the data path, functions only for waiting and for commands. Validation runs headless in the emulator (tools/android/run-emulator.sh): SDK, NDK, emulator, JDK, and Gradle all come from nix (androidenv, license accepted declaratively), three suites — rust (Views), jvm (Java over the ring), compose — with verdicts read from logcat (stdout goes nowhere in an app process; android_logger + log-panics route Rust output there) and screenshots via screencap. Python and Go guests are deferred to the packaging milestone: interpreted and compiled guests on Android need binding bootstrap (briefcase, gomobile), which is its own subject. |
+| Android  | Jetpack Compose (the SwiftUI sibling and the one Android backend). The platform-views-over-JNI backend (jni-rs) was validated alongside it from milestone 0 and is deleted; the JNI hosting shape below is unchanged. | Hosting is fully inverted — stricter than iOS, which at least requires a native executable: Zygote forks the process, ActivityThread owns main, and code enters at Activity.onCreate. So the milestone-0 packaging is a cdylib, not a bin: `kaya::android_main!(app)` exports the one JNI entry (`dev.kaya.Kaya.attach` — every Android app is the attach shape, and the shell spells it out), a minimal Kotlin Activity loads the library and calls `Kaya.attach(this)` on the UI thread, and the native side builds the scene, spawns the app thread, and returns the thread to the Looper. The same app logic file serves the bin platforms and this leg (examples/milestone2_android.rs is a two-line repackaging of milestone2.rs). The backend drives android.widget through JNI; its Kotlin half is three small classes (the entry declaration plus click-listener and Runnable shims) whose natives are registered with RegisterNatives rather than resolved by name, so the guest library's only name-based export is the entry. The doorbell is a posted no-data Runnable through runOnUiThread; kaya's env-based switches keep one spelling because the Activity maps KAYA_* intent extras to environment variables (`am start --ez KAYA_SELFTEST true` is this platform's `KAYA_SELFTEST=1 ./app`). Lessons that cost a debugging session each: never hold a lock across a JNI call that can dispatch back into native code (performClick reaches the click handler synchronously on the same thread — the handler uses its own clone of the occurrence sink, the same shape as a GTK signal closure); and exit through `_exit`, because libc exit runs atexit handlers that destroy HWUI's mutexes while its render threads still run. The Compose backend mirrors the SwiftUI one move for move — kaya signal to snapshot state (`mutableStateOf`, recomposition renders), occurrences out of onClick, commands through a blocking kaya_next_commands pump hopping to the UI thread — over the same presentation-side C API, reached through registered JNI natives (KayaPresent) since Kotlin cannot call C directly; it is the one Android backend, driving the unchanged Rust example as the guest, exactly like the SwiftUI leg on Apple. The JVM is the platform's direct-ring validation, and it surfaced two ART bugs the hard way: ART's byte-buffer-view VarHandle path truncates a direct buffer's native address to 32 bits in the interpreter (var_handle.cc casts the address through uint32_t), so the canonical VarHandle-over-NewDirectByteBuffer idiom faults on any real heap address; and ART's Unsafe (Object, long) volatile accessors are heap-field-only — a null base goes through a 32-bit MemberOffset and faults — so the OpenJDK null-base absolute-address idiom does not exist either. The formulation that works, and the one the Java guest ships: Unsafe absolute plain loads/stores plus explicit loadFence/storeFence (documented in libcore as the C11 atomic_thread_fence equivalents), bound once as MethodHandles (Unsafe is absent from the SDK stubs) and invoked through invokeExact so the per-record path stays free of boxing and reflection. When ART fixes the VarHandle truncation, the fence formulation can be swapped for acquire/release views (API 33+); the fence formulation itself only needs MethodHandles, API 26+. Either way the tier is the same as desktop Go and C#: direct reads on the data path, functions only for waiting and for commands. Validation runs headless in the emulator (tools/android/run-emulator.sh): SDK, NDK, emulator, JDK, and Gradle all come from nix (androidenv, license accepted declaratively), three suites — rust (Views), jvm (Java over the ring), compose — with verdicts read from logcat (stdout goes nowhere in an app process; android_logger + log-panics route Rust output there) and screenshots via screencap. Python and Go guests are deferred to the packaging milestone: interpreted and compiled guests on Android need binding bootstrap (briefcase, gomobile), which is its own subject. |
 
 Raw Win32 common controls have no layout system at all (`WM_SIZE` and
 manual pixel placement). That is an additional argument for WinUI, because
@@ -45,7 +64,9 @@ engine.
 ## Core object model
 
 - The core owns a retained tree of widget records. Each record owns its
-  native handle (`NSView *`, WinUI element, `GtkWidget *`).
+  native handle (`GtkWidget *`, a WinUI element; on the interpreter
+  backends the native node lives interpreter-side and the record is its
+  authority).
 - Widgets are identified by slotmap-style generational ids (slot index plus
   generation), never by pointers. Generations exist to catch the ABA
   problem: a stale id whose slot was reused must be detectably dead rather
@@ -338,9 +359,40 @@ rules so far:
   (`row ~grow:2.0 ~spacing:12.0 [ ... ] ()`, the lablgtk idiom — every
   constructor takes `?grow`, containers add `?spacing`, and the
   trailing `()` is the realization marker: apply it to create the
-  widget where you stand, omit it to hand the partial application to
-  a container as a child; scenes run direct-style over an ambient
-  transaction, no binding operators);
+  widget where you stand, omit it and the partial application is a
+  pure `unit -> widget` thunk, the child form containers take in
+  lists. The taste the scenes settled into: a creator with any
+  argument applied sits bare in a child list —
+  `button ~text:"Add" ~on_click:on_add` — because applying a labeled
+  argument commits the optionals and leaves exactly `unit -> widget`,
+  so the thunking is invisible in the common case; a creator with NO
+  argument applied is expectation-dependent — OCaml discards leading
+  optionals only where the expected type is already known, so a bare
+  `spacer` typechecks inline in a container's list literal but the
+  same list factored into a `let` fails ("the first argument is
+  labeled ?grow, but an unlabeled argument was expected") — so the
+  scenes spell it `spacer ~grow:1.0`: apply an argument or eta-wrap,
+  the expectation-independent forms (see docs/traps.md); and a
+  widget realized early because handlers need its
+  handle (`let field = entry ~on_change:h ()`, then `clear field` /
+  `focus field` in the add handler) re-enters a child list through
+  `w`, the inert-thunk wrapper (`let w wid () = wid`) — the container
+  merely attaches it. For/When ride the same convention: `each c
+  body` is the child form for a body that keeps no handles — the
+  common case once handlers co-located at their constructors — while
+  `for_each c body ()` forces in place when the body's result
+  carries handles out (a per-copy collection, a template button),
+  the live For slotting back in via `w`; and a template body
+  realizes its root for effect even when nothing keeps the handle
+  (`let _ = column [ ... ] () in`). The Tpl submodule repeats the
+  whole convention over `unit -> node` thunks with its own `w`.
+  Scenes run direct-style over an ambient transaction, no binding
+  operators — the let*/decl reader is deleted, and the eager-children
+  first cut was rejected because OCaml evaluates list literals
+  right-to-left: thunked lists only allocate closures, and the
+  container realizes them itself, left to right, `List.iter`'s
+  SPECIFIED order — so document order is structural, never
+  evaluation-order trivia; see docs/traps.md);
   **attr lists over a closed GADT** in Haskell
   (`row [Grow 2, Spacing 12] [ ... ]`, `labelBound probe [Grow 1]` —
   one name for both arities via lucid's Term idiom:
@@ -1971,9 +2023,9 @@ remains is implementation-scale:
    auxiliaries, the close veto class), alerts landed next, and
    navigation is ratified (core-owned stacks, retained-until-popped
    entries, the intercept_back veto transplant — see the section);
-   root-hosting modals and sections (tabs-as-context) remain
-   recorded as future. Milestone 1's reserved mount target 0 remains
-   the implicit primary window.
+   sections landed too (ratified 2026-07-22, see "Sections (tabs)");
+   root-hosting modals remain recorded as future. Milestone 1's
+   reserved mount target 0 remains the implicit primary window.
 
 The v1 widget set and the gallery scene list are covered in "v1 scope and
 delivery process"; the scene list grows per widget admission.
@@ -2095,8 +2147,9 @@ derived-signal helpers are binding-side and invisible below the ABI.
   (cgo's C compiler, per the clang-everywhere policy) are one-time winget
   or unzip installs, listed in the script header.
 - macOS development needs no Xcode, either the GUI or `xcodebuild`. The
-  AppKit backend links via `objc2` against the SDK from the Command Line
-  Tools or nixpkgs' apple-sdk, and `cargo run` launches unbundled AppKit
+  macOS build links via `objc2` against the SDK from the Command Line
+  Tools or nixpkgs' apple-sdk, the SwiftUI interpreter dylib compiles
+  with the toolchain's plain `swiftc`, and `cargo run` launches unbundled
   binaries directly, which is sufficient for the conformance gallery. A
   minimal `.app` bundle (scripted, or via `cargo-bundle`) is needed only
   for bundle-identity features: the app-menu name, `Info.plist` behaviors,

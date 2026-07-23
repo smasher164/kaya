@@ -831,8 +831,14 @@ that unit leaves a pure [unit -> widget] partial application, so a
 child list literal only allocates closures — the container realizes
 them itself with [List.iter], whose left-to-right order IS specified.
 Corollaries: [w] wraps an already-realized widget for a child slot,
-a zero-argument creator cannot sit bare in a list (OCaml does not
-erase leading optionals in value position — apply an argument or
-eta-wrap), and an add_child for a For/When must land AFTER its
+a creator with NO argument applied is expectation-dependent — OCaml
+discards its leading optionals only where the expected type is
+already known when the expression is checked (tested on 5.4.1: bare
+[spacer] typechecks INLINE in a container's list literal, but the
+identical list factored into a [let] fails with "the first argument
+is labeled ?grow, but an unlabeled argument was expected") — so
+scenes apply an argument ([spacer ~grow:1.0]) or eta-wrap, the
+expectation-independent spellings that survive refactors, and an
+add_child for a For/When must land AFTER its
 template_end (inside the scope it reads as blueprint content and the
 scene rejects it).
