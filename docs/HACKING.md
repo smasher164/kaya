@@ -114,9 +114,11 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 - Windows: `tools/deploy-win.sh <user@host> [rust|python|go|all]` — the
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
-- Scene selection everywhere: KAYA_SELFTEST=<scene>; backend selection:
-  the SwiftUI/Compose interpreters with their dylib env vars — see
-  validate-mac.sh for the exact patterns.
+- Scene selection everywhere: KAYA_SELFTEST=<scene>. There is no
+  backend selection — the roster is one backend per platform
+  (KAYA_BACKEND is gone); what remains is locating the SwiftUI
+  interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.sh for the
+  exact pattern).
 
 ## Layout forensics (when a share assertion fails)
 
@@ -138,9 +140,10 @@ touching layout code:
       uiautomator dump /sdcard/kaya-dump.xml"
   adb -s $S pull /sdcard/kaya-dump.xml
   ```
-  The one-shell `&&` chain matters: the selftest exits the app ~2.3s
-  after launch (settle 1500 + verdict + the recording linger), and a
-  host-side round trip plus a ~1.5s dump loses the race. Node bounds
+  The one-shell `&&` chain matters: the selftest exits the app within
+  a couple of seconds of launch — tighter still since bounded-retry
+  expects replaced the settle floors — and a host-side round trip
+  plus a ~1.5s dump loses the race. Node bounds
   in the XML are the allocated tracks. `text=` precedes `class=` in
   the dump's attribute order.
 - **iOS/macOS**: the pixel measurement above, or expect_shares against

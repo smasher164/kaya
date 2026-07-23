@@ -211,9 +211,11 @@ moved to git history; their traps live in docs/traps.md.)
   legs at runtime); an executed-suite manifest compared against the
   expected tuple set is the missing gate.
   Packaging notes for whoever adds the next scene: iOS needs a bundle
-  per example in run-sim.sh; Android has ONE apk whose guest
-  (guests/rust/milestone2_android.rs) is a scene selector keyed on
-  KAYA_SELFTEST, so a new scene needs a `mod` + match arm there;
+  per example in run-sim.sh; Android has one apk PER GUEST TIER, each
+  a scene selector keyed on KAYA_SELFTEST — milestone2 (the Rust
+  guest: a new scene needs a `mod` + match arm in
+  guests/rust/milestone2_android.rs) and milestone2kt (the JVM guest:
+  its MainActivity needs the matching arm);
   Windows needs a tools/guest/run_<scene>_<lang>.cmd plus
   build/scp/verify/kill entries in deploy-win.sh.
 - Per-binding EMISSION checks (kaya_app_checks.py-style — assert the

@@ -42,7 +42,7 @@ Settled conventions (seeding the versioned style guide the design
 promises):
 
 - Handlers receive their transaction — explicitly (`func(*Tx)`,
-  `Action<Tx>`, `tx ->`) or ambiently (Python). Either way the
+  `Action<Tx>`, `tx ->`) or ambiently (Python, OCaml). Either way the
   semantics are the protocol's: a handler is a transaction, submitted
   when it returns; a handler that raises abandons its records, and the
   binding's mirrors roll back with them.
@@ -117,7 +117,7 @@ Per-language status:
 
 | Language | L1 generated | L2 runtime | L3 core | Notes |
 |---|---|---|---|---|
-| Python  | kaya_wire.py | kaya.py (function floor) | kaya_app.py | first tier-1 sugar target (ambient tx, auto-parenting, co-located handlers) |
+| Python  | kaya/wire.py | kaya/runtime.py (function floor) | kaya/__init__.py | first tier-1 sugar target (ambient tx, auto-parenting, co-located handlers) |
 | Haskell | KayaWire.hs | KayaRuntime.hs (peeks + stubs) | KayaApp.hs (Build/Tpl monads) | the monad-sugar experiment, realized |
 | Go      | kaya_wire.go | runtime.go (atomics ring) | app.go | handlers take *Tx per convention |
 | C#      | KayaWire.cs | Kaya.cs (Volatile ring) | KayaApp.cs | |
@@ -134,8 +134,10 @@ Backends: the full roster — SwiftUI (macOS + iOS), GTK4, WinUI (a
 code-only WinUI app must be composed with IXamlMetadataProvider
 delegating to XamlControlsXamlMetaDataProvider — see KayaApplication
 in winui/mod.rs — and ship an exe-adjacent resources.pri), and
-Compose (TextField). On Android one APK hosts all scenes; the
-selftest script doubles as the scene selector.
+Compose (TextField). On Android there is one APK per guest tier —
+milestone2 (the Rust guest) and milestone2kt (the JVM guest) — and
+each is a scene selector: the selftest script doubles as the scene
+key.
 
 The north star for what layer 3 grows into is DESIGN.md's appendix
 ("the shape of an app"); the tier-1 sugar there (container
