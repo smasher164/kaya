@@ -21,9 +21,9 @@ deferred.md packaging notes for adding a scene.
 - Navigation answers *where am I* — serial stacks; chrome derived.
 - Sections answer *which peer area* — selection; chrome derived.
 - Menus answer *what can I do right now* — VERBS, never places. A
-  menu item fires an occurrence and the menu closes. Menu items never
-  host content, never hold a stack, never participate in layout.
-  Submenus are grouping, not navigation.
+  leaf command fires exactly one occurrence and the menu closes. Menu
+  items never host content, never hold a stack, never participate in
+  layout. Submenus are grouping, not navigation.
 - A context menu is the same verbs scoped to a NOUN — "what can I do
   to this thing." Same item vocabulary, different anchor.
 
@@ -31,23 +31,43 @@ One item vocabulary, two anchors:
 
 - **Window anchor** (the menubar): the window's command catalog.
   Rides the window construct like every window attribute
-  (the window-attribute unification rule). macOS materializes the
-  focused kaya window's bar as the global bar; Windows/Linux put it
+  (the window-attribute unification rule). macOS materializes the key
+  kaya window's bar as the global bar; Windows/Linux put it
   in that window's chrome; phones fold it into the top bar's
   overflow. The mac application menu (About/Quit) and the standard
   Edit menu remain DRESS — backend-provided, zero API (this is also
   what keeps cmd+C alive in native text controls; the Electron trap).
+  Settings/Preferences is NOT dress and has no native-placement role
+  in v1: an app may author an ordinary "Settings…" item in its own
+  catalog, but kaya declares no SwiftUI Settings scene and no phantom
+  native Settings item appears.
 - **Widget/node anchor** (the context menu): right-click on desktop,
   long-press on phones — each platform's own gesture. No shortcuts on
   context items (a shortcut needs a catalog home to exist in native
-  dispatch). v1 rejects attachment to text-bearing controls (entry,
+  dispatch). v1 rejects attachment to editable text controls (entry,
   textarea): their native context menus are dress.
 
 ### The item vocabulary
 
-Kinds: `menu` (a submenu node; top-level menus are this kind appended
-to the bar), `action`, `toggle`, `radio_group`, `radio_option`,
-`separator`.
+Kinds: `menu`, `action`, `toggle`, `radio_group`, `radio_option`,
+`separator`. `menu` and `radio_group` are the grouping nodes;
+`radio_group` is admissible in every anchor or menu-child slot that
+admits `menu`, including at the bar level. A bar-level `radio_group`
+materializes as a top-level menu whose options use the platform's
+checkmark idiom; nested inside a menu it materializes inline. Its
+option paths follow the group directly: `"Sort>Date"` addresses option
+`Date` in group `Sort`, and `"Sort"` addresses the group's value.
+
+The parent/child grammar is closed:
+
+- the window bar accepts `menu` and `radio_group`;
+- a context anchor accepts a root `menu`, `radio_group`, `action`,
+  `toggle`, or `separator`;
+- `menu` accepts `menu`, `radio_group`, `action`, `toggle`, or
+  `separator` children;
+- `radio_group` accepts only `radio_option` children; and
+- `action`, `toggle`, `radio_option`, and `separator` accept no
+  children.
 
 Props (MENU_PROPS table, the SECTION_PROPS/ENTRY_PROPS precedent):
 
@@ -67,20 +87,37 @@ Bool. Echo doctrine applies unchanged: user activation emits;
 programmatic checked/value writes are QUIET; enabled writes never
 emit anything.
 
-Handlers scope to their creator: `on_activate` rides the item
+Handlers scope to their creator: `on_activate` rides the action
 declaration, `on_toggle` rides the toggle, `on_select` rides the
 radio group. No app-global menu dispatcher exists in any language.
 
 ### Shortcuts and the policy rules
 
-Spelling: `primary`, `shift`, `alt` modifiers plus a key — a
-printable character or a named key (enter, escape, delete, f1..f12,
-arrows). `primary` = cmd on Apple platforms, ctrl elsewhere (GTK's
+Spelling: `primary`, `shift`, `alt` modifiers plus a key. The strict
+key floor is one ASCII alphanumeric (`a`..`z`, `0`..`9`) or exactly
+one of `enter`, `escape`, `delete`, `f1`..`f12`, `left`, `right`,
+`up`, `down`.
+`primary` = cmd on Apple platforms, ctrl elsewhere (GTK's
 `<Primary>` accelerator and Electron's CmdOrCtrl are the precedent;
-we adopt GTK's name). Canonical wire form: lowercase,
-`primary+shift+s` ordering (primary, shift, alt, key). The parser
-lives in ONE place per binding (generated layer 1), not per call
-site.
+we adopt GTK's name). `shift` is valid only when `primary` or `alt`
+is also present. An alphanumeric key requires `primary` or `alt`, so
+both bare `s` and `shift+s` are invalid. Named keys may be unmodified,
+but the same modifier rule rejects `shift+enter`. `escape` is a
+recognized spelling but is rejected whether unmodified or combined
+with any modifiers because it is the platforms' universal dismiss
+key.
+
+The binding parser accepts ASCII case variants and any ordering of
+the modifiers before the final key, then canonicalizes to lowercase
+`primary`, `shift`, `alt`, key order (`primary+shift+s`). It rejects
+whitespace, repeated modifiers, modifier aliases (`ctrl`, `cmd`,
+`option`), and multiple or missing keys. The parser lives in ONE
+place per binding (generated layer 1), not per call site. The core is
+the canonical-wire guard: it validates and REJECTS any non-canonical
+wire spelling rather than rewriting it. The C floor therefore
+documents and emits the exact canonical form and receives the same
+root errors as every other guest. This is a deliberately strict,
+later-relaxable floor.
 
 Policy validation at the root (scene.rs), all deterministic scene
 errors with the domain-check spelling:
@@ -88,30 +125,46 @@ errors with the domain-check spelling:
 - duplicate shortcut within a window's catalog;
 - reserved floor (the strict UNION across platforms, uniform
   everywhere): `primary+q`, `alt+f4`. ESCALATE before widening.
+- a non-canonical wire spelling at the core boundary;
+- any key outside `a`..`z`, `0`..`9`, and the closed named-key set;
+- an alphanumeric key without `primary` or `alt` (including bare and
+  shift-only spellings);
+- `shift` without `primary` or `alt`, including on a named key;
+- `escape`, whether unmodified or combined with any modifiers;
 - `shortcut` on anything but a menubar-anchored action;
 - `primary` on anything but an action;
-- tree depth beyond bar > menu > submenu > leaf (context: root items
-  + one submenu level);
+- any anchor or parent/child edge outside the closed kind grammar;
+- tree depth beyond bar > grouping node > one nested grouping node >
+  leaf (context: root items + one grouping-node level). Thus
+  bar > radio_group > option and bar > menu > radio_group > option
+  are legal; adding another grouping node is not;
 - an item anchored or appended twice (items are single-parent; no
   shared nodes — every platform forbids them);
-- `context_menu` on a text-bearing kind.
+- `context_menu` on an editable text kind (entry, textarea).
 
 ### Overflow and `primary`
 
 Default (nothing specified): desktops show the full catalog in a real
 bar; phones put the ENTIRE catalog in the top bar's overflow (⋮ /
-More). Top-level menus become labeled groups in the overflow (inline
-sections with headers on iOS, headers + dividers in the M3 dropdown);
-one submenu level survives as a real cascade/drill-in.
+More). Top-level grouping nodes become labeled groups in the overflow
+(inline sections with headers on iOS, headers + dividers in the M3
+dropdown). A nested `menu` survives as a real cascade/drill-in; a
+nested `radio_group` remains inline with the platform's checkmark
+idiom.
 
 `primary: true` promotes an action out of overflow into the top bar
 as a real bar action (TopAppBar action / trailing UIBarButtonItem).
-The platform promotes the first k primaries in declaration order — k
-is the platform's own idiom, never computed by kaya — and the rest
-fall back to overflow. Advisory, like initial window size. Inert on
-desktop: no desktop toolbar materialization exists or is planned;
-that is the line that keeps this one bit from becoming a toolbar
-grammar.
+The platform promotes the first k primaries in CATALOG PREORDER —
+top-level grouping nodes in menubar-append order, then each node's
+children in append order, depth-first. Creation time is irrelevant. k
+is the platform's own idiom, never computed by kaya, and the rest fall
+back to overflow. The promoted set recomputes on every catalog
+mutation, including a structural append or `primary` prop change; a
+later append under an earlier node may therefore displace an item
+deterministically. Advisory, like initial window size. Inert on
+desktop: no desktop toolbar
+materialization exists or is planned; that is the line that keeps this
+one bit from becoming a toolbar grammar.
 
 ### Ids and occurrences
 
@@ -164,6 +217,9 @@ the cuts, and the deferred follow-ons with their triggers:
   UIKit edit menu);
 - GTK hamburger as a presentation hint value;
 - item removal; context-item shortcuts; role-based standard items;
+- punctuation shortcut keys — trigger: an artifact needs a
+  layout-sensitive chord, with zoom's `primary+plus` /
+  `primary+minus` the expected first ask;
 - a toolbar grammar: explicitly NEVER unless an artifact demands it.
 
 Replace docs/deferred.md's "Menus/MenuBar design pass" entry with a
@@ -180,7 +236,8 @@ New records (names normative, numbers assigned by spec.rs):
 
 - tx `menu_item_create(item, kind)`
 - tx `menu_item_append(parent_item, child_item)`
-- tx `menubar_append(window, item)` — top-level `menu` items only
+- tx `menubar_append(window, item)` — top-level grouping nodes
+  (`menu` or `radio_group`) only
 - tx `context_attach(widget, item)` / the node-anchored variant for
   the Tpl zone
 - tx `set_menu_prop(item, mprop, value)` + the signal-source tail
@@ -288,8 +345,10 @@ slice and never re-spelled (propose to Akhil with the slice; scene
 strings are his call like commit messages).
 
 Unit tests: parser/grammar for the new steps verbs; spec round-trips;
-scene validation should_panics; shortcut-spelling normalization
-table.
+scene validation should_panics (including bare alphanumeric,
+shift-only alphanumeric, shift-only named, and every `escape` form);
+shortcut-spelling normalization table (binding acceptance and
+canonical output, plus core rejection of every non-canonical class).
 
 ## 5. Phase 4 — backend fan-out (parallelizable per backend)
 

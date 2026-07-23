@@ -307,7 +307,10 @@ destruction moment, because the process owns it. No window attribute
 lives as a loose function outside the construct — there are no
 shortcuts (`window_title` retired 2026-07-22; ratified). A
 props-only primary construct is legal and mounts nothing — the
-sections shape, where the switcher IS the window content.
+sections shape, where the switcher IS the window content. Window-owned
+child declarations follow the same ownership: sections and the command
+catalog begin from that window construct, never from app-global state
+or API.
 
 **Line separators.** Guest-visible text uses LF (`\n`) as its line
 separator on every platform — occurrence payloads, harness reads, and
@@ -1124,6 +1127,236 @@ mount, not the tree: the spec grows presentation-context objects and
 their lifecycle events, additively. The widget vocabulary, the eight
 bindings' scene construction, and the geometry gates do not move.
 
+## Menus and the command vocabulary (ratified 2026-07-23)
+
+Navigation answers WHERE AM I: serial stacks whose chrome follows the
+active place. Sections answer WHICH PEER AREA: retained roots selected
+through platform tab/section chrome. Menus answer WHAT CAN I DO RIGHT
+NOW: VERBS, never places. Activating a leaf command fires exactly one
+occurrence and closes the menu. An item never hosts content, owns a
+stack, or participates in layout; a submenu only groups verbs. A
+context menu is the same command vocabulary scoped to a NOUN — what
+can I do to this thing — with a different anchor, not a second kind of
+menu.
+
+One item vocabulary has two anchors:
+
+- **The window anchor** is that window's command catalog. It rides the
+  window construct under the window-attribute unification rule; it is
+  not a widget in the scene root. Each desktop exposes the full
+  catalog through native menu chrome. Phones adapt the same catalog
+  into their existing top chrome, so there is no menu capability and
+  no unsupported-host branch.
+- **The widget/node anchor** attaches a context catalog to a live
+  widget or a stamped template node. The platform supplies its own
+  gesture — right-click on desktops, long-press on phones — and
+  stamped node activations carry the copy's key path, because those
+  keys identify the noun. Context items have no shortcuts: a shortcut
+  requires a window catalog as its native dispatch home. Entry and
+  TextArea, the editable text controls, reject context attachment in
+  v1; their native edit menus remain backend dress.
+
+The window lowering is deliberately platform-shaped:
+
+| Host | Native lowering |
+|------|-----------------|
+| macOS | The key Kaya window's catalog occupies the process-global menu bar; changing key Kaya windows changes the presented catalog and shortcut target. |
+| Windows | The catalog is a real in-window `MenuBar` in window chrome. |
+| Linux | The catalog is a real window menu bar backed by the platform menu/action model. |
+| iOS | The entire catalog is available from an adaptive trailing More/ellipsis menu in the existing top/navigation bar; promoted actions become trailing bar actions. |
+| Android | The entire catalog is available from the top app bar's overflow; promoted actions become app-bar actions. |
+
+The glyph, exact capacity, grouping chrome, and whether a nested menu
+cascades or drills in are dress. In compact presentation, top-level
+grouping nodes become labeled groups in overflow; one nested `menu`
+level survives, while a nested `radio_group` remains inline with the
+platform's checkmark idiom. The declaration does not prescribe
+Android's vertical ellipsis on iOS or otherwise style the trigger.
+
+macOS's About and Quit entries and the standard Edit menu are also
+dress: the backend supplies them with zero Kaya API, preserving native
+responder behavior such as Command-C in text controls. Kaya declares
+no SwiftUI Settings scene, so no phantom native Settings item appears.
+Settings/Preferences has no placement role in v1. An app may author an
+ordinary `Settings…` action in its own catalog, but native
+Settings-menu placement waits for the role vocabulary below.
+
+### Items, properties, ids, and occurrences
+
+Menu items have their own guest-allocated id space and counter
+(`c_menu_item`) and a distinct handle type in every binding that can
+express one. They are not widget, node, or surface ids. Handler tables
+are keyed by item id and remain separate from the other dispatch
+tables. The kinds are:
+
+| Kind | Meaning |
+|------|---------|
+| `menu` | A neutral grouping node, at bar level or nested as a submenu. |
+| `action` | A leaf command emitting `menu_activated`. |
+| `toggle` | A stateful leaf reusing the Checkbox contract. |
+| `radio_group` | A grouping node and Choice-contract state owner; its selected option is an integral index. |
+| `radio_option` | A labeled option belonging to a radio group. |
+| `separator` | Native grouping chrome with no label or handler. |
+
+A `radio_group` is admissible in every anchor or menu-child slot that
+admits a `menu` grouping node. Every top-level window entry is
+therefore a grouping node (`menu` or `radio_group`). At bar level a
+radio group materializes as a top-level menu whose options use the
+platform's checkmark idiom. Nested inside a menu it materializes
+inline — a Picker, action-target group, RadioMenuFlyoutItem group, or
+radio rows according to the host. Paths follow the semantic tree
+directly: `"Sort>Date"` addresses option `Date` in group `Sort`, and
+`"Sort"` addresses that group's `value`.
+
+The allowed edges are closed. A window bar accepts `menu` and
+`radio_group`. A context anchor accepts a root `menu`, `radio_group`,
+`action`, `toggle`, or `separator`. A `menu` accepts those same five
+kinds as children; a `radio_group` accepts only `radio_option`
+children. Actions, toggles, radio options, and separators accept no
+children. Every other anchor or parent/child edge is a root error.
+
+`MENU_PROPS`, separate from widget, window, entry, and section props,
+is:
+
+| Prop | Wire kind | Contract |
+|------|-----------|----------|
+| `label` | Str | Required except on separators; constant or signal-bound. |
+| `enabled` | Bool | Defaults true; constant or signal-bound. |
+| `checked` | Bool | Toggle only; signal-bound in both directions under the Checkbox contract. |
+| `value` | F64, integral | Radio group only; the selected option index under the Choice contract. |
+| `icon` | Blob | Optional; available to phone promotion and ignored where native menu dress has no icon. |
+| `primary` | Bool | Defaults false; action only; a phone-promotion hint and inert on desktops. |
+| `shortcut` | Str | A normalized shortcut spelling; window-anchored action only. |
+
+State follows the echo doctrine without a new exception. User
+activation emits; programmatic `checked` and `value` writes are
+configuration and remain QUIET; `enabled` and label writes emit
+nothing. `menu_activated(item)` represents either selecting an action
+or invoking its shortcut — the affordances share one occurrence and
+one dispatch path. `menu_toggled(item, bool)` carries the new toggle
+state, and `menu_value_changed(group, index)` carries the selected
+radio option. Node-anchored context versions additionally carry the
+stamped key path using the `on_click_node` encoding.
+
+Handlers scope to their creator. `on_activate` rides an action,
+`on_toggle` a toggle, and `on_select` a radio group; no binding exposes
+an app-global menu dispatcher. One menu item is one command identity
+in v1. Items cannot be shared between anchors or parents, and there is
+no reusable `Action`/command object behind them.
+
+Topology is append-only and live: items may be created and appended at
+any time, while all applicable props remain mutable. An item may
+acquire exactly one parent or anchor and ids are never reused. There
+is no removal operation in v1.
+
+### Shortcuts and root policy
+
+A shortcut is a normalized string parsed in exactly one place in each
+binding's generated layer, never at individual call sites. The
+portable modifiers are `primary`, `shift`, and `alt`; `primary` means
+Command on Apple hosts and Control elsewhere. The strict key floor is
+one ASCII alphanumeric (`a` through `z`, `0` through `9`) or one member
+of the closed named set: `enter`, `escape`, `delete`, `f1` through
+`f12`, `left`, `right`, `up`, `down`.
+
+The binding parser accepts ASCII case variants and any ordering of the
+modifiers before the final key, then emits lowercase canonical wire
+spelling with modifiers ordered `primary`, `shift`, `alt`, key — for
+example `primary+shift+s`. Whitespace, repeated modifiers, aliases
+such as `ctrl`/`cmd`/`option`, and multiple or missing keys are
+invalid. The core validates that the wire spelling is already
+canonical and rejects it otherwise; it never rewrites guest data. The
+C floor therefore documents and emits the canonical wire form and
+receives the same root errors as every generated binding.
+
+The intentionally strict, later-relaxable floor protects ordinary
+typing and native dismissal:
+
+- `shift` is valid only when `primary` or `alt` is also present;
+- an ASCII alphanumeric key requires `primary` or `alt`, so bare `s` and
+  `shift+s` are invalid;
+- named keys may be unmodified, but `shift+enter` is invalid under the
+  same modifier rule; and
+- `escape` is a recognized spelling but is invalid whether unmodified
+  or combined with any modifiers because it is the platforms'
+  universal dismiss key.
+
+Scene construction rejects every malformed or inapplicable item at
+the root, before a backend can choose its own behavior. The policy
+also rejects:
+
+- duplicate normalized shortcuts inside one window catalog (the same
+  chord in separate windows is valid);
+- the strict cross-platform reserved union `primary+q` and `alt+f4`;
+- a non-canonical wire spelling or a key outside the closed floor;
+- a shortcut anywhere except a window-anchored action;
+- `primary` on a non-action;
+- an anchor or parent/child edge outside the closed kind grammar;
+- depth beyond bar > grouping node > one nested grouping node > leaf;
+  a context anchor may hold root items plus at most one grouping-node
+  depth. Thus `bar > radio_group > radio_option` and
+  `bar > menu > radio_group > radio_option` are legal, while another
+  grouping node is not;
+- a second parent or anchor for an item; and
+- context attachment to an editable text control (`Entry` or
+  `TextArea`).
+
+Each rejection is a deterministic scene error with a `#[should_panic]`
+test. The reserved union does not grow, and the modifier floor does
+not loosen, by implementation accident.
+
+### Compact overflow and `primary`
+
+With no hint, desktops render the full catalog and phones place the
+entire catalog in overflow. `primary: true` asks the phone host to
+promote an action into its top bar as a real native action. The host
+promotes the first *k* primary actions in catalog preorder: top-level
+grouping nodes in menubar-append order, then each node's children in
+append order, depth-first. Creation time is irrelevant. *k* is the
+platform's own idiomatic capacity, and the rest remain in overflow.
+The promoted set recomputes on every catalog mutation, including a
+structural append or `primary` prop change. A later append under an
+earlier node may therefore displace an item, deterministically on
+every host. This is advisory like initial window size: the catalog and
+every command remain reachable regardless of capacity.
+
+`primary` is inert on desktop. It does not create a desktop toolbar,
+and no toolbar materialization is planned. This one bit is an adaptive
+menu hint, not the seed of a toolbar grammar.
+
+### Deliberate cuts and admission triggers
+
+- **Shared command identity across anchors** waits for an artifact
+  needing one command's enablement shared between its window and context
+  placements. That is the responder-chain/target problem; v1 does not
+  pre-solve it.
+- **For-stamped menu items** wait for a dynamic command collection
+  such as Recent Files.
+- **`bind_field` labels on context items** wait for a stamped row whose
+  command label must derive from row data.
+- **Merging authored items into native text-control menus** — GTK
+  extra-menu and UIKit edit-menu APIs — waits for an app that needs
+  both its own command and the native editing commands on one control.
+- **A GTK hamburger presentation hint** waits for an artifact showing
+  that the default bar is the wrong Linux idiom; if admitted, it is a
+  presentation value, not a separate menu grammar.
+- **Item removal** waits for a command lifetime shorter than its
+  owning window/widget; **context-item shortcuts** wait for a portable
+  native dispatch home.
+- **Role-based standard items** (including native
+  Settings/Preferences placement, close-window, and responder-chain
+  edit roles) wait for an artifact needing their placement and
+  lifecycle semantics. About, Quit, and the standard Edit menu remain
+  dress meanwhile.
+- **Punctuation shortcut keys** wait for an artifact needing a
+  layout-sensitive chord. The expected first trigger is zoom's
+  `primary+plus` / `primary+minus` pair; until then the alphanumeric
+  floor avoids physical-key ambiguity such as plus versus equals
+  across keyboard layouts.
+- **A toolbar grammar is not on the roadmap.** It is admitted only if
+  an artifact demands semantics that adaptive menu promotion cannot
+  express.
+
 ## Threading model and protocol
 
 - The invariant, uniform across platforms: exactly one UI thread runs all
@@ -1629,23 +1862,24 @@ architecture.
 
 ## v1 scope and delivery process
 
-The widget set is minimal by policy, 15 items:
+The original v1 feature roster is minimal by policy, 15 entries:
 
-- Structure: Window, VStack, HStack, Spacer, ScrollView
+- Layout structure: VStack, HStack, Spacer, ScrollView
 - Display: Label, Image
 - Controls: Button, Checkbox, Entry (single-line, uncontrolled), Slider,
   Dropdown (select-only)
 - Collections: List (virtualized, `For`-driven; the widget the protocol
   machinery exists to serve)
-- Chrome: MenuBar (carries the declarative shortcut policy), Alert
+- Presentation/commands: Window, MenuBar (the roster's historical name
+  for the window-owned command vocabulary above), Alert
 
 Selection criteria: (a) needed by the archetype apps, meaning a todo-class
-app, a settings dialog, and a data browser; (b) a native peer exists on
-every v1 platform; (c) machinery coverage, meaning every protocol subsystem
-is validated by at least one widget. List covers the row window and demand;
-Image covers content buffers; MenuBar covers policies; Slider and Entry
-cover state slots and uncontrolled state; Button and Checkbox cover
-occurrences; the containers cover native layout.
+app, a settings dialog, and a data browser; (b) a native semantic lowering
+exists on every v1 platform; (c) machinery coverage, meaning every protocol
+subsystem is validated by at least one roster member. List covers the row
+window and demand; Image covers content buffers; MenuBar covers policies;
+Slider and Entry cover state slots and uncontrolled state; Button and
+Checkbox cover occurrences; the containers cover native layout.
 
 Two decisions inside the set: item-holding widgets (Dropdown, later
 RadioGroup) hold items plus a selection signal and never expose child
@@ -1661,10 +1895,12 @@ a plain property. (Half this queue was pulled forward and landed in v1
 during the 2026-07-22 widget run: Grid, TextArea, Tabs — as sections,
 a presentation context rather than a widget — RadioGroup as radio,
 ProgressBar, plus Select and Spacer which never sat in the queue.
-Still ahead: Canvas, ContextMenu, file dialogs, Separator, Splitter,
-Table, Tree, date/time pickers.) Not core: webview (a separate crate, if ever), rich text
-(after display lists), and the audio implementation (designed above,
-scheduled when an app needs it).
+ContextMenu has since joined the MenuBar milestone as its second
+anchor rather than a separate widget admission. Still ahead: Canvas,
+the menu/context command vocabulary, file dialogs, Separator, Splitter,
+Table, Tree, date/time pickers.) Not core: webview (a separate crate, if
+ever), rich text (after display lists), and the audio implementation
+(designed above, scheduled when an app needs it).
 
 Delivery is breadth-first by policy: every widget or feature is validated
 on all v1 platforms before the next one begins, so parity is enforced per

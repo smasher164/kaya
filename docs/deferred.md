@@ -36,27 +36,22 @@ moved to git history; their traps live in docs/traps.md.)
     go/analysis; ErrorProne — never load-bearing, the runtime guards
     are the floor);
   - whatever the guide ratifies for multi-window ergonomics.
-- **Menus/MenuBar design pass** (ratified 2026-07-23 — it was in the
-  widget sequencing before the style guide and fell out of the
-  checkpoint). Load-bearing beyond the widget: the v1 scope says
-  "MenuBar covers policies" — it is the widget that proves the
-  declarative shortcut-policy vocabulary, and nothing else exercises
-  that subsystem. The OS variance is the sections problem again:
-  global menu bar (mac), in-window MenuBar control (WinUI 3), GMenu
-  hamburger/popover convention (GTK), and NO menu bar on phones — so
-  it wants the sections shape: one declaration, per-platform
-  presentation idiom — and the design pass (2026-07-23, settled with
-  Akhil) found NO capability gate is needed: phones lower the catalog
-  to the top bar's overflow, with a `primary` hint promoting chosen
-  actions to bar icons (inert on desktop). The full design and the
-  phase-by-phase execution plan live in docs/menus-plan.md — the
-  carve (menus are VERBS, never places; context menu = the same item
-  vocabulary anchored to a noun), the item vocabulary, shortcut
-  policy validation, per-backend lowerings, harness verbs, and the
-  ESCALATE list. Phase 0 (archaeology of prior OS-specific
-  discussions) reconciles before any spec edit. ContextMenu ships
-  inside this milestone; Portal remains what menus eventually want
-  underneath.
+- **Menus and the command vocabulary implementation.** The design is
+  ratified in DESIGN.md's "Menus and the command vocabulary"; the
+  phase-by-phase implementation contract is docs/menus-plan.md.
+  Context menus ship in the same milestone as the window catalog,
+  using the same item vocabulary with a second anchor. Open,
+  trigger-gated follow-ons are: shared command identity across
+  anchors (an artifact needs shared enablement); For-stamped
+  items (a dynamic catalog such as Recent Files); `bind_field`
+  context labels; merging authored items into native text-control
+  menus; a GTK hamburger presentation hint; item removal;
+  context-item shortcuts; role-based standard items, including native
+  Settings/Preferences placement; punctuation shortcut keys when an
+  artifact needs layout-sensitive chords (zoom's
+  `primary+plus` / `primary+minus` is the expected first trigger); and
+  a toolbar grammar only if an artifact demonstrates that adaptive
+  menu promotion cannot express its semantics.
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
   beyond the primary set (utility panels, always-on-top).
