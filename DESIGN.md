@@ -335,8 +335,12 @@ rules so far:
   **named/labeled arguments** where the language has them — Swift
   (`row(grow: 2, spacing: 12)`), Python (`row(grow=2, spacing=12)`),
   C# (`Row(..., spacing: 12)`), OCaml
-  (`row ~grow:2.0 ~spacing:12.0 [ ... ]`, the lablgtk idiom — every
-  constructor takes `?grow`, containers add `?spacing`);
+  (`row ~grow:2.0 ~spacing:12.0 [ ... ] ()`, the lablgtk idiom — every
+  constructor takes `?grow`, containers add `?spacing`, and the
+  trailing `()` is the realization marker: apply it to create the
+  widget where you stand, omit it to hand the partial application to
+  a container as a child; scenes run direct-style over an ambient
+  transaction, no binding operators);
   **attr lists over a closed GADT** in Haskell
   (`row [Grow 2, Spacing 12] [ ... ]`, `labelBound probe [Grow 1]` —
   one name for both arities via lucid's Term idiom:
@@ -379,7 +383,12 @@ rules so far:
   construction is parent-first (Python, Swift, Go, C#, Java, and Rust
   — whose containers are the egui shape, `tx.column(|tx| { … })`, the
   &mut reborrow standing in for the ambient statics the GC languages
-  need) and expression trees are children-first (OCaml, Haskell —
+  need), OCaml is parent-first too (its child lists hold PARTIALLY
+  APPLIED creators — every creator ends in `()`, and omitting that
+  unit leaves a pure `unit -> widget` thunk the container realizes
+  left to right after creating itself; eager child lists were
+  rejected because OCaml evaluates list literals right-to-left, see
+  docs/traps.md), and expression trees are children-first (Haskell —
   arguments evaluate before the call). The shared .steps scripts may
   therefore target containers only through the blessed column#0 (the
   For container the root-is-a-row convention keeps unique) —

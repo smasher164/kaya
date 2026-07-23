@@ -256,12 +256,17 @@ Landed history lives in git; this file only carries what is still open.
   recorded during layout, and on SwiftUI only the custom `Layout` path
   records them — so the verb is meaningful on containers that actually
   grow something, which is what a conformance scene always is.
-- **Window vocabulary** (DESIGN open question #4): create_window,
-  per-window mount targets, lifecycle (CloseRequested + veto default,
-  Present, Close), sizing/titles, dialogs/modality, mobile capability
-  story. Mount target 0 is reserved so the wire doesn't break. `close()`
-  joins the command enum here. Unlocks the appendix's
-  `app.window(title=...)` as real protocol.
+- **Window vocabulary** (DESIGN open question #4): LARGELY LANDED
+  through the window/panels/confirm/nav/sections scenes —
+  create_window, per-window mounts, CloseRequested + veto,
+  destroy_window, titles/sizing, modal alerts (show_alert), serial
+  navigation, sections with the window-scoped presentation hint, and
+  the unified window-attribute spelling (2026-07-22: the window
+  construct carries EXACTLY create-window's prop set in every
+  binding; the window_title/window_size shortcuts are retired).
+  Still open: presentation styles beyond the primary set (utility
+  panels, always-on-top), and whatever the style guide ratifies for
+  multi-window ergonomics.
 - **The versioned binding style guide** (DESIGN open question #1):
   ~~construction-prop spellings~~ RATIFIED 2026-07-20 after the
   ecosystem survey (chains: Rust/Go/Java; named args:
@@ -269,7 +274,12 @@ Landed history lives in git; this file only carries what is still open.
   conventions; Rust's chain rides an ephemeral borrow-checked proxy,
   OCaml's combinators became ?grow/?spacing labels, Haskell's became
   _-variants over Cfg/BoxCfg lists). Still open here:
-  ratify per-language tiers; ambient-transaction spellings; the
+  ratify per-language tiers; ambient-transaction spellings (OCaml's
+  is RATIFIED 2026-07-22 — direct style over an ambient tx ref, plus
+  curried children: creators end in (), the omitted unit is the child
+  form, containers realize lists left-to-right; the let*/decl reader
+  is deleted — see DESIGN's Binding conventions and docs/traps.md's
+  right-to-left entry); the
   eq/ne/fmt derived-signal vocabulary beyond Python; blob-signal
   ergonomics parity (Go has typed Signal[[]byte]; others wrap handles
   manually); decision gate for deleting the probe/reflection selector
