@@ -684,3 +684,86 @@ the same patterns return through interpreter drop-downs
   (2026-07-22). The general rule for mounted-tree builds: an
   incremental build that shares sources with a concurrent writer
   must assert output freshness itself.
+
+## The wedged-VM class: "started" is not "reachable"
+
+2026-07-22, textarea matrix: the UTM Windows guest OS hung mid-suite
+(cause unknown — four legs in flight). UTM kept reporting `started`,
+so nothing restarted it, while the suite poll loops' try-bounded
+deadlines ran against SSH's default TCP timeout (~75s per poll
+instead of ~1s) — a 300-try bound became hours, and the lane looked
+"slow" rather than dead. Two guards now hold:
+
+- `ConnectTimeout=5` rides SSH_MUX (every run_ssh/scp/poll), so a
+  dead guest fails polls fast and try-bounds mean minutes again.
+- deploy-win's boot block distinguishes stopped from wedged: if the
+  host is unreachable but utmctl says started, it force-kills the VM
+  and boots it fresh (`utmctl start` on a started VM is a no-op — the
+  old loop waited five minutes and gave up).
+
+The general lesson pairs with the materialization class: liveness is
+proven by the layer you actually talk to (sshd), never by the
+supervisor's state word.
+
+## Container linker OOM scales with the example count
+
+Same day: the linux lane died with `ld terminated with signal 9`
+linking the 18th example — the pooled builds' parallel example links
+crossed the docker container's memory ceiling, and the kernel chose
+ld. aarch64 BFD ld's footprint is dominated by debuginfo, so
+run-suites now builds with `CARGO_PROFILE_DEV_DEBUG=0` (nothing in
+the container asserts on symbols). If it ever recurs despite that,
+bound the link parallelism (`cargo build -j`), not the example count.
+
+## WinUI TextBox speaks CR, everything else speaks LF
+
+The textarea scene's first Windows run failed byte-for-byte: text SET
+with `\n` read back with `\r` — WinUI's TextBox stores every line
+break as a bare CR (its Rich Edit heritage). Guest-visible strings
+are compared identically across all languages, so the backend
+normalizes CR to LF at every boundary where TextBox text escapes
+(occurrence payloads, harness reads) or is compared against guest
+text (the quiet-set and set_text guards — an unnormalized compare
+never matches multi-line text and re-sets on every write). The `lf()`
+helper in winui/mod.rs is that boundary; any new TextBox read goes
+through it.
+
+## Shared build directories cannot be built per-leg
+
+entry_csharp flaked CS2012 ("kaya-guests.dll locked by VBCSCompiler")
+when four-wide suites had every C# leg run `dotnet build`/`dotnet
+run` in the shared C:\kaya\cs — and the five pri-adjacency legs all
+built into the SAME C:\kaya\cs-out. Latent since KAYA_WIN_JOBS=4.
+The fix is the javac precedent: deploy builds ONCE (both outputs:
+bin\Debug for plain legs, cs-out with resources.pri beside the
+apphost for the pri legs) and legs only execute. Legs run the APPHOST
+exe, not `dotnet exec`, so the process name stays kaya-guests.exe for
+the kill sweep. The class: any per-leg build step in a directory two
+legs share is a race; builds belong to the deploy phase.
+
+## Swift graphemes: CRLF is one Character, and it does not "contain" CR
+
+The LF-contract negative test failed ONLY on SwiftUI, with a failure
+message whose "reads" and "wanted" printed identically — the
+difference was invisible bytes. Swift's `String.contains("\r")` walks
+grapheme clusters, and CRLF is a SINGLE cluster that is not equal to
+CR, so a cheap-out guard `s.contains("\r")` skips exactly the CRLF
+input the normalization exists for. Check `s.unicodeScalars.contains`
+(or drop the guard); `replacingOccurrences` is UTF-16-literal and
+unaffected. Kotlin (Char = UTF-16 unit) and Rust (bytes) do not have
+this trap — which is why three backends passed and one failed a test
+whose two printed strings looked identical.
+
+## An unchecked interpreter build degrades to yesterday's dylib
+
+validate-mac invoked `tools/swiftui/build-dylib.sh >/dev/null` with no
+status check. When a type error landed in KayaSwiftUI.swift, swiftc
+failed, the failure vanished into the lane log, and all 152 mac legs
+ran — and PASSED — against the previous green dylib sitting at
+target/swiftui/libkaya_swiftui.dylib. The false PASS surfaced only
+because the iOS lane compiles the same file and checks its build.
+The fix: the dylib build's exit status kills the lane. The class
+(same family as the dune-staleness trap): every build a validation
+script runs must fail the run when IT fails — a build whose output
+path already holds yesterday's artifact fails SILENT by default,
+because the legs it feeds still find something to load.

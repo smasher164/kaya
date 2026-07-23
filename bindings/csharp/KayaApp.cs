@@ -738,6 +738,16 @@ sealed class Tx
         return w;
     }
 
+    /// A multi-line text editor: the entry's uncontrolled contract
+    /// over the platform's real multi-line editor.
+    public Widget Textarea(Action<Tx, string> onChange = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindTextarea);
+        if (onChange != null) App.OnChange(w, onChange);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     public Widget Label(string text = null, Signal? bind = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindLabel);

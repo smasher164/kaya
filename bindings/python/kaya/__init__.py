@@ -1244,6 +1244,20 @@ def entry(text=None, on_change=None, grow=None):
     return handle
 
 
+def textarea(text=None, on_change=None, grow=None):
+    """A multi-line text editor: the entry's uncontrolled contract
+    (the widget owns its text, `on_change` receives each edit, the
+    clear/focus commands apply) over the platform's real multi-line
+    editor."""
+    handle = _widget(wire.KIND_TEXTAREA)
+    if text is not None:
+        _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
+    if on_change is not None:
+        _app._register(handle, wire.OCC_TEXT_CHANGED, on_change)
+    _set_grow(handle, grow)
+    return handle
+
+
 def label(text=None, bind=None, grow=None):
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed)."""

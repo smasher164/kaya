@@ -969,6 +969,13 @@ public final class KayaApp {
             return widget(KayaWire.KIND_ENTRY);
         }
 
+        /** A multi-line text editor: the entry's uncontrolled
+         * contract over the platform's real multi-line editor;
+         * register its handler with app.onChange. */
+        public Widget textarea() {
+            return widget(KayaWire.KIND_TEXTAREA);
+        }
+
         /** A text field with its change handler. */
         public Widget entry(BiConsumer<Tx, String> onChange) {
             Widget w = entry();

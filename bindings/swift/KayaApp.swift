@@ -893,6 +893,18 @@ final class KayaAppTx {
         return w
     }
 
+    /// A multi-line text editor: the entry's uncontrolled contract
+    /// over the platform's real multi-line editor.
+    func textarea(
+        onChange: ((KayaAppTx, String) throws -> Void)? = nil,
+        grow: Double? = nil
+    ) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_TEXTAREA))
+        if let onChange { app.onChange(w, onChange) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     func label(
         _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
     ) -> KayaWidget {

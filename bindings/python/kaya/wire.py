@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x73d2b60a639054ba
+SPEC_HASH = 0x4605672632603270
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -30,6 +30,7 @@ KIND_PROGRESS = 10
 KIND_SELECT = 11
 KIND_RADIO = 12
 KIND_GRID = 13
+KIND_TEXTAREA = 14
 PROP_TEXT = 1
 PROP_CHECKED = 2
 PROP_VALUE = 3

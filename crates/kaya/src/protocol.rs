@@ -319,6 +319,10 @@ pub enum WidgetKind {
     Select,
     Radio,
     Grid,
+    /// The multi-line entry: same uncontrolled text contract, same
+    /// text_changed occurrence, same clear/focus commands — the
+    /// platform's real multi-line editor.
+    Textarea,
     /// A vertical scroll viewport over EXACTLY ONE child (usually a
     /// column) — the ScrolledWindow/SingleChildScrollView shape; the
     /// scene rejects a second child. Vertical-only in v1 (an axis

@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -87,7 +87,13 @@ cp guests/csharp/*.cs guests/csharp/kaya-guests.csproj bindings/csharp/*.cs /tmp
 run_build csharp build_csharp
 run_build java build_java
 
-cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
+# Debuginfo off: at 18 examples the container's parallel example
+# links crossed its memory ceiling and the kernel OOM-killed ld
+# ("signal 9" mid-link, 2026-07-22) — aarch64 BFD ld's footprint is
+# dominated by debuginfo, and nothing in the container asserts on
+# symbols. This removes the pressure at its source instead of racing
+# the example count against the container's RAM.
+CARGO_PROFILE_DEV_DEBUG=0 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
 timing core-build
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
@@ -479,6 +485,17 @@ for proto in x11 wayland; do
     run "$proto" grid-ocaml env KAYA_SELFTEST=grid KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grid.exe
     run "$proto" grid-haskell env KAYA_SELFTEST=grid "$(hs_bin grid)"
     run "$proto" grid-java env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The textarea scene: GtkTextView, the entry contract multi-line.
+    run "$proto" textarea-rust env KAYA_SELFTEST=textarea "$CARGO_TARGET_DIR/debug/examples/textarea"
+    run "$proto" textarea-python env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
+        python3 guests/python/textarea.py
+    run "$proto" textarea-go env KAYA_SELFTEST=textarea /tmp/go-guests/textarea
+    run "$proto" textarea-csharp env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" textarea-ocaml env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/textarea.exe
+    run "$proto" textarea-haskell env KAYA_SELFTEST=textarea "$(hs_bin textarea)"
+    run "$proto" textarea-java env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

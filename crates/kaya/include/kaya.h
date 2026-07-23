@@ -142,6 +142,8 @@
 
 #define KIND_GRID 13
 
+#define KIND_TEXTAREA 14
+
 #define PROP_TEXT 1
 
 #define PROP_CHECKED 2
@@ -459,6 +461,8 @@
 #define KAYA_KIND_RADIO 12
 
 #define KAYA_KIND_GRID 13
+
+#define KAYA_KIND_TEXTAREA 14
 
 /**
  * Property keys.

@@ -280,6 +280,7 @@ pub const KAYA_KIND_PROGRESS: u32 = 10;
 pub const KAYA_KIND_SELECT: u32 = 11;
 pub const KAYA_KIND_RADIO: u32 = 12;
 pub const KAYA_KIND_GRID: u32 = 13;
+pub const KAYA_KIND_TEXTAREA: u32 = 14;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -294,6 +295,7 @@ const _: () = assert!(
         && KAYA_KIND_SELECT == wire::KIND_SELECT
         && KAYA_KIND_RADIO == wire::KIND_RADIO
         && KAYA_KIND_GRID == wire::KIND_GRID
+        && KAYA_KIND_TEXTAREA == wire::KIND_TEXTAREA
 );
 // Completeness, not just agreement (the PROPS count guard's sibling
 // — this exact gap recurred: KIND_PROGRESS shipped to every
@@ -313,7 +315,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 13,
+        kinds == 14,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };

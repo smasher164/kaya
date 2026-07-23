@@ -69,6 +69,7 @@ enum NativeWidget {
     /// The 2D grid widget (KIND_GRID) — a WinUI Grid with Auto
     /// tracks, distinct from Column/Row's star-sized Grids.
     Grid2D(Grid),
+    Textarea(TextBox),
 }
 
 impl NativeWidget {
@@ -88,6 +89,7 @@ impl NativeWidget {
             NativeWidget::Select(combo) => combo.cast(),
             NativeWidget::Radio(group) => group.cast(),
             NativeWidget::Grid2D(grid) => grid.cast(),
+            NativeWidget::Textarea(field) => field.cast(),
         }
     }
 }
@@ -143,6 +145,8 @@ struct CoreState {
     selects: Vec<ComboBox>,
     radios: Vec<RadioButtons>,
     grids: Vec<Grid>,
+    textareas: Vec<TextBox>,
+    textarea_ids: Vec<u64>,
     /// Grid layout state: ordered children + column count; both the
     /// adds and the columns prop re-flow the attach positions
     /// (children-first sugars emit adds before the prop).
@@ -848,6 +852,22 @@ fn mount_entry(
     Ok(())
 }
 
+/// WinUI's TextBox stores every line break as a bare CR (its Rich Edit
+/// heritage): text SET with LF reads back with CR. The wire and every
+/// other backend speak LF, and guest-visible strings are compared
+/// byte-for-byte across languages, so CR is normalized to LF at every
+/// point where TextBox text escapes toward the guest (occurrence
+/// payloads, harness reads) or is compared against guest text (the
+/// quiet-set and set_text guards — an unnormalized compare never
+/// matches multi-line text and re-sets on every write).
+fn lf(s: String) -> String {
+    if s.contains('\r') {
+        s.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        s
+    }
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -897,7 +917,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         {
                             return Ok(());
                         }
-                        let text = field_for_handler.Text()?.to_string();
+                        let text = lf(field_for_handler.Text()?.to_string());
                         sink.send_text_tag(&handler_tag, &text);
                         Ok(())
                     });
@@ -1045,6 +1065,46 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
                 }
+                WidgetKind::Textarea => {
+                    // The multi-line editor: a TextBox with
+                    // AcceptsReturn — the entry's exact contract,
+                    // including the swallow counters (TextChanged is
+                    // raised async; entry_swallow/entry_tags are
+                    // id-keyed and kind-agnostic, so the plumbing is
+                    // shared).
+                    let field = TextBox::new()?;
+                    field.SetAcceptsReturn(true)?;
+                    field.SetMinWidth(240.0)?;
+                    field.SetMinHeight(96.0)?;
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("textareas carry a tag");
+                    let handler_tag = tag.clone();
+                    let field_for_handler = field.clone();
+                    let swallow =
+                        std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                    let handler_swallow = swallow.clone();
+                    let handler = TextChangedEventHandler::new(move |_, _| {
+                        if handler_swallow
+                            .fetch_update(
+                                std::sync::atomic::Ordering::Relaxed,
+                                std::sync::atomic::Ordering::Relaxed,
+                                |n| n.checked_sub(1),
+                            )
+                            .is_ok()
+                        {
+                            return Ok(());
+                        }
+                        let text = lf(field_for_handler.Text()?.to_string());
+                        sink.send_text_tag(&handler_tag, &text);
+                        Ok(())
+                    });
+                    field.TextChanged(&handler)?;
+                    core.textareas.push(field.clone());
+                    core.textarea_ids.push(id.0);
+                    core.entry_swallow.insert(id.0, swallow);
+                    core.entry_tags.insert(id.0, tag);
+                    NativeWidget::Textarea(field)
+                }
                 WidgetKind::Grid => {
                     // The 2D layout contract on WinUI's own Grid with
                     // Auto tracks: columns take their natural width,
@@ -1173,6 +1233,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     NativeWidget::Grid2D(grid) => {
                         windows_core::Interface::cast(grid).expect("grid is a UIElement")
+                    }
+                    NativeWidget::Textarea(field) => {
+                        windows_core::Interface::cast(field).expect("textarea is a UIElement")
                     }
                 }
             };
@@ -1488,11 +1551,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             .SetAt(*row, &PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
                 }
-                (NativeWidget::Entry(field), Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Entry(field), Prop::Text, Value::Str(s))
+                | (NativeWidget::Textarea(field), Prop::Text, Value::Str(s)) => {
                     // Quiet: a property write is configuration, not a
                     // user edit — and TextChanged is raised async, so
                     // the flag is a counter (see entry_swallow).
-                    if field.Text()?.to_string() != s {
+                    if lf(field.Text()?.to_string()) != s {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
@@ -1702,6 +1766,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 NativeWidget::Select(combo) => children.Append(combo)?,
                 NativeWidget::Radio(group) => children.Append(group)?,
                 NativeWidget::Grid2D(grid) => children.Append(grid)?,
+                NativeWidget::Textarea(field) => children.Append(field)?,
             }
             core.parents.insert(child, panel);
             core.child_order.entry(parent).or_default().push(child);
@@ -1770,8 +1835,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match command {
                 CommandKind::Clear => {
-                    let NativeWidget::Entry(field) = widget else {
-                        panic!("kaya: clear on a non-entry (scene validates kinds)")
+                    let field = match widget {
+                        NativeWidget::Entry(field) | NativeWidget::Textarea(field) => field,
+                        _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
                     };
                     // A command ACTS LIKE THE USER, and its echo must
                     // stay ORDERED with what follows — TextChanged is
@@ -2293,6 +2359,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selects: Vec::new(),
             radios: Vec::new(),
             grids: Vec::new(),
+            textareas: Vec::new(),
+            textarea_ids: Vec::new(),
             grid_children: HashMap::new(),
             grid_cols: HashMap::new(),
             radio_options: HashMap::new(),
@@ -2404,19 +2472,28 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn set_text(&self, t: crate::harness::Target, text: &str) {
-        let text = text.to_owned();
+        // Normalized on the way IN: the synthesized occurrence below
+        // forwards this string to the guest, and CR-bearing input
+        // (the harness's \r escape stands in for a paste) must reach
+        // guests as LF like every other path.
+        let text = lf(text.to_owned());
         Self::on_ui(move |core| {
             // The user path, ordered: TextChanged is raised async, so
             // the occurrence is emitted here synchronously and the
             // late raise swallowed — a following click can never
             // overtake the edit (see entry_swallow).
-            let i = crate::harness::resolve(t.index, core.entries.len());
-            if core.entries[i].Text()?.to_string() != text {
-                let id = core.entry_ids[i];
+            let (field, id) = if t.kind == crate::harness::TargetKind::Textarea {
+                let i = crate::harness::resolve(t.index, core.textareas.len());
+                (&core.textareas[i], core.textarea_ids[i])
+            } else {
+                let i = crate::harness::resolve(t.index, core.entries.len());
+                (&core.entries[i], core.entry_ids[i])
+            };
+            if lf(field.Text()?.to_string()) != text {
                 if let Some(swallow) = core.entry_swallow.get(&id) {
                     swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                core.entries[i].SetText(&HSTRING::from(&text))?;
+                field.SetText(&HSTRING::from(&text))?;
                 if let Some(tag) = core.entry_tags.get(&id) {
                     core.occurrences.send_text_tag(tag, &text);
                 }
@@ -2437,10 +2514,17 @@ impl crate::harness::Stage for WinUiStage {
 
     fn read_text(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
+            if t.kind == crate::harness::TargetKind::Textarea {
+                let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len())
+                else {
+                    return Ok("<no such target>".to_string());
+                };
+                return Ok(lf(core.textareas[i].Text()?.to_string()));
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return Ok("<no such target>".to_string());
             };
-            Ok(core.entries[i].Text()?.to_string())
+            Ok(lf(core.entries[i].Text()?.to_string()))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -2479,6 +2563,13 @@ impl crate::harness::Stage for WinUiStage {
                         return Ok(false);
                     };
                     Ok(core.entries[i].FocusState()? != FocusState::Unfocused)
+                }
+                crate::harness::TargetKind::Textarea => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len())
+                    else {
+                        return Ok(false);
+                    };
+                    Ok(core.textareas[i].FocusState()? != FocusState::Unfocused)
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on winui"),
             }

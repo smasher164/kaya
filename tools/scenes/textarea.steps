@@ -1,0 +1,20 @@
+# The textarea scene: the multi-line entry — the entry's uncontrolled
+# round trip (type through the control's own change path, fold, clear
+# command, focus) with the ONE observable that separates it from the
+# entry: a newline rides the text both ways (the \n escape is the
+# grammar's, unescaped identically by every interpreter).
+expect label#0 "0 lines"
+set_text textarea#0 "first line\nsecond line"
+expect textarea#0 "first line\nsecond line"
+expect label#0 "2 lines"
+click button#0
+expect textarea#0 ""
+expect label#0 "0 lines"
+expect_focused textarea#0
+# The LF contract's negative test: CR-bearing input (the \r escape
+# stands in for a paste) must read back as LF on every platform.
+# WinUI's TextBox stores CR natively, the others store what they are
+# given; neither private convention may escape to the guest.
+set_text textarea#0 "alpha\r\nbeta"
+expect textarea#0 "alpha\nbeta"
+expect label#0 "2 lines"

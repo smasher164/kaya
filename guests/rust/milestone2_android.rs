@@ -53,6 +53,8 @@ mod select;
 mod radio;
 #[path = "grid.rs"]
 mod grid;
+#[path = "textarea.rs"]
+mod textarea;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -78,6 +80,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("select") => select::app(ctx),
         Ok("radio") => radio::app(ctx),
         Ok("grid") => grid::app(ctx),
+        Ok("textarea") => textarea::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

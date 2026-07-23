@@ -80,6 +80,9 @@ public final class Main {
             case "grid":
                 app = GridScene::app;
                 break;
+            case "textarea":
+                app = TextareaScene::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

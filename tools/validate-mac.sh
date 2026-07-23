@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -481,7 +481,15 @@ timing guest-builds+bench
 # Every guest against the SwiftUI backend — the one macOS backend
 # (one backend per platform; AppKit was deleted when the roster was
 # ratified). kaya::run hosts the interpreter dylib unconditionally.
-tools/swiftui/build-dylib.sh >/dev/null
+# The build's exit status is load-bearing: unchecked, a swiftc failure
+# left the PREVIOUS dylib in place and 152 legs false-PASSed against
+# stale code (2026-07-22; iOS caught the same source because its lane
+# checks its compile). A failed build must kill the lane, not degrade
+# it to yesterday's interpreter.
+tools/swiftui/build-dylib.sh >/dev/null || {
+    echo "validate-mac: SwiftUI interpreter dylib build FAILED" >&2
+    exit 1
+}
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 # The Swift interpreter reads the scene script from the environment
 # (the Rust backends embed theirs at build time). Comments stripped:
@@ -725,6 +733,23 @@ run grid-ocaml-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libka
 run grid-haskell-swiftui env KAYA_SELFTEST=grid "$(hs_bin grid)"
 run grid-swift-swiftui env KAYA_SELFTEST=grid target/swift-guests/grid
 run grid-java-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The textarea scene: the multi-line entry — the newline riding the
+# text both ways is the observable that separates it from the entry.
+# All eight languages.
+KAYA_SELFTEST_SCRIPT="$(scene_script textarea)"
+export KAYA_SELFTEST_SCRIPT
+run textarea-rust-swiftui env KAYA_SELFTEST=textarea target/debug/examples/textarea
+run textarea-python-swiftui env KAYA_SELFTEST=textarea python3 guests/python/textarea.py
+run textarea-go-swiftui env KAYA_SELFTEST=textarea target/go-guests/textarea
+run textarea-csharp-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run textarea-ocaml-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/textarea.exe
+run textarea-haskell-swiftui env KAYA_SELFTEST=textarea "$(hs_bin textarea)"
+run textarea-swift-swiftui env KAYA_SELFTEST=textarea target/swift-guests/textarea
+run textarea-java-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

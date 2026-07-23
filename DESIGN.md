@@ -261,6 +261,30 @@ verbosity is the binding's job.
 
 ## Binding conventions
 
+**Line separators.** Guest-visible text uses LF (`\n`) as its line
+separator on every platform — occurrence payloads, harness reads, and
+scene output strings are compared byte-for-byte across all languages,
+so a backend's private convention must never escape. WinUI's TextBox
+stores every break as a bare CR (its Rich Edit heritage); GTK's views
+store pasted CR/CRLF verbatim; SwiftUI and Compose own their model
+text outright. Each backend therefore normalizes at its natural
+boundary: WinUI and GTK wherever widget text escapes toward the guest,
+SwiftUI and Compose wherever text is written into the model. The
+steps grammar's `\r` escape exists to prove this — the textarea scene
+drives CR-bearing text through the user path and asserts LF comes
+back, on every platform.
+
+**String comparison.** String observations compare Unicode scalar
+sequences — implemented as code-unit equality in each comparator's
+native encoding, with both operands of any one comparison always in
+the same encoding. The wire is well-formed UTF-8, so every
+implementation computes the same predicate. No normalization, no
+canonical equivalence, no locale collation, anywhere: Swift is the
+one language whose default `==` adds canonical equivalence, so its
+interpreter compares `utf8` views (kayaBytesEqual). Ill-formed
+platform text (a lone surrogate in a UTF-16 language) cannot reach a
+comparison — the FFI boundary repairs it before it exists to kaya.
+
 A cross-language style guide is a versioned deliverable due before v1. The
 rules that keep bindings mutually recognizable have to be written down
 somewhere; Wayland ships protocol conventions for the same reason. Settled
@@ -945,24 +969,64 @@ affordance per platform, and entry-targeted expect_title — all four
 layers in both interpreters from the start, per the
 interpreter-backend doctrine.
 
-### Sections (tabs) — a context in principle, unscheduled
+### Sections (tabs) — ratified 2026-07-22
 
 Tabs are a presentation context, not a widget: a fixed-ish,
 app-declared set of PEER roots inside one surface, user-switched, all
 retained — and the first grammar with no destruction semantics at
-all. Switching is SELECTION, not lifecycle (a tab_selected
-occurrence; nothing closes, nothing pops). On the phones the
-materialization is the tab bar; on the desktops it is each platform's
-section-switcher idiom — TabView's toolbar tabs on macOS, WinUI's
-NavigationView (the platform's actual affordance for app sections),
-GTK's header-bar ViewSwitcher over a GtkStack. Deliberately excluded:
-DOCUMENT tabs (browser/editor-style user-created, closable,
-reorderable tabs). Those are window management — their verb is CLOSE,
-their count is dynamic, they drag between windows — and belong to the
-windows grammar if kaya ever wants them; conflating them with
-sections would poison both grammars the way window-as-push would
-have poisoned navigation. Full design (declaration shape, selection
-prop vs occurrence, icons/labels) comes when sections are scheduled.
+all. Switching is SELECTION, not lifecycle.
+
+The ratified shape:
+
+- **Sections are surfaces.** `add_section(window, section)` declares a
+  section into a window; section ids share the guest-allocated
+  surface namespace with windows and navigation entries, and `mount`
+  targets them like any surface. The set is append-only (the
+  select-options precedent): nothing removes a section, because this
+  grammar has no destruction verbs by design. Every section's root is
+  retained while covered — a signal write to a hidden section is
+  observable on switch-back.
+- **Selection follows the echo doctrine.** The user's switch emits
+  `section_selected(section)`; a programmatic `select_section` is
+  configuration and never echoes. Bindings register the handler
+  per-section at declaration (`on_selected` riding `add_section`) —
+  handlers scope to their creator.
+- **SECTION_PROPS** (the ENTRY_PROPS pattern): `title` (Str) and
+  `icon` (Blob, the blob channel — a tab bar without icons is not the
+  platform's real thing).
+- **Presentation is a WINDOW prop**, `sections_presentation`
+  (enum: `auto | bar | sidebar`), declared beside the sections it
+  presents — scoped to the hosting window (the GROUP is the unit; no
+  platform mixes per-section presentations), never app-global, and
+  ADVISORY per the width/height precedent: honored where the platform
+  has the idiom, resolved to the nearest thing otherwise, ignored on
+  the phones where physics decides (bottom bar regardless).
+  `auto` resolves to each platform's dominant sections idiom:
+  the bottom tab bar on iOS (TabView) and Android (M3 NavigationBar),
+  toolbar tabs on macOS (TabView), NavigationView left on Windows,
+  the header-bar switcher on GTK (GtkStackSwitcher over GtkStack).
+  `bar` resolves to the horizontal spelling (macOS toolbar tabs,
+  NavigationView top mode, header switcher); `sidebar` to
+  NavigationSplitView / NavigationView left / GtkStackSidebar.
+- **Navigation stacks become per-surface.** Sections are surfaces and
+  push_entry targets a surface, so pushing INTO a section falls out
+  of the same generalization mount made; each section carries its own
+  stack, and the back affordance routes to the ACTIVE section's
+  stack. Back never switches sections — at stack-empty it does the
+  platform default.
+- **Observations**: `expect_sections N` (count from the real
+  control), `expect_section "title"` (the ACTIVE section's title from
+  the platform's own selection state), `select_section` driven
+  through the real switcher, and a retention assertion (write to a
+  covered section, switch, observe). No capability gate — every
+  platform has a sections idiom.
+
+Deliberately excluded, reaffirmed: DOCUMENT tabs (browser/editor
+user-created, closable, reorderable tabs). Those are window
+management — their verb is CLOSE, their count is dynamic, they drag
+between windows — and belong to the windows grammar if kaya ever
+wants them; conflating them with sections would poison both grammars
+the way window-as-push would have poisoned navigation.
 
 ### Protocol shape
 

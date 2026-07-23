@@ -28,6 +28,20 @@ use crate::scene::Scene;
 /// f64 we need with none of that, and lives and dies with the widget.
 const GROW_KEY: &str = "kaya-grow";
 
+/// Guest-visible text uses LF as its line separator on every platform
+/// (strings are compared byte-for-byte across languages). GTK's
+/// Entry/TextView store pasted text verbatim — CR or CRLF from a paste
+/// would ride into occurrence payloads and harness reads — so text is
+/// normalized wherever it escapes toward the guest, the same boundary
+/// discipline as WinUI's `lf` (whose TextBox speaks CR natively).
+fn lf(s: String) -> String {
+    if s.contains('\r') {
+        s.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        s
+    }
+}
+
 fn grow_weight(widget: &gtk4::Widget) -> f64 {
     // SAFETY: the key is private to this module and only ever set to an
     // f64 by set_grow_weight below.
@@ -358,6 +372,7 @@ enum NativeWidget {
     Select(gtk4::DropDown),
     Radio(gtk4::Box),
     Grid(gtk4::Grid),
+    Textarea(gtk4::TextView),
 }
 
 impl NativeWidget {
@@ -376,6 +391,7 @@ impl NativeWidget {
             NativeWidget::Select(w) => w.clone().upcast(),
             NativeWidget::Radio(w) => w.clone().upcast(),
             NativeWidget::Grid(w) => w.clone().upcast(),
+            NativeWidget::Textarea(w) => w.clone().upcast(),
         }
     }
 }
@@ -410,6 +426,7 @@ struct CoreState {
     selects: Vec<gtk4::DropDown>,
     radios: Vec<gtk4::Box>,
     grids: Vec<gtk4::Grid>,
+    textareas: Vec<gtk4::TextView>,
     /// Grid layout state: ordered children + column count. Children
     /// can arrive BEFORE the columns prop (children-first sugars),
     /// so both paths re-flow the attach positions.
@@ -691,7 +708,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let quiet = core.apply_quiet.clone();
                     entry.connect_changed(move |e| {
                         if !quiet.get() {
-                            sink.send_text_tag(&tag, e.text().as_str());
+                            sink.send_text_tag(&tag, &lf(e.text().to_string()));
                         }
                     });
                     core.entries.push(entry.clone());
@@ -797,6 +814,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let bar = gtk4::ProgressBar::new();
                     core.progresses.push(bar.clone());
                     NativeWidget::Progress(bar)
+                }
+                WidgetKind::Textarea => {
+                    // The multi-line editor: GtkTextView, the entry's
+                    // exact contract — the buffer's `changed` fires
+                    // for programmatic set_text too, so the
+                    // USER/programmatic split rides apply_quiet.
+                    let view = gtk4::TextView::new();
+                    view.set_size_request(240, 96);
+                    let sink = core.occurrences.clone();
+                    let tag = tag.expect("textareas carry a tag");
+                    let quiet = core.apply_quiet.clone();
+                    let buffer = view.buffer();
+                    buffer.connect_changed(move |b| {
+                        if !quiet.get() {
+                            let text =
+                                lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
+                            sink.send_text_tag(&tag, &text);
+                        }
+                    });
+                    core.textareas.push(view.clone());
+                    NativeWidget::Textarea(view)
                 }
                 WidgetKind::Grid => {
                     // The 2D layout contract on GTK's own Grid:
@@ -1105,6 +1143,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // user edit (see apply_quiet).
                     core.apply_quiet.set(true);
                     entry.set_text(&s);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Textarea(view), Prop::Text, Value::Str(s)) => {
+                    core.apply_quiet.set(true);
+                    view.buffer().set_text(&s);
                     core.apply_quiet.set(false);
                 }
                 (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {
@@ -1430,15 +1473,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match command {
                 CommandKind::Clear => {
-                    let NativeWidget::Entry(entry) = widget else {
-                        panic!("kaya: clear on a non-entry (scene validates kinds)")
-                    };
                     // A command ACTS LIKE THE USER (unlike a property
                     // write): apply_quiet stays off here on purpose, so
                     // GTK's `changed` carries the empty edit to the app
-                    // through the entry's own path — the entry scene's
-                    // second-add round depends on exactly this echo.
-                    entry.set_text("");
+                    // through the widget's own path — the entry
+                    // scene's second-add round depends on exactly
+                    // this echo.
+                    match widget {
+                        NativeWidget::Entry(entry) => entry.set_text(""),
+                        NativeWidget::Textarea(view) => view.buffer().set_text(""),
+                        _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
+                    }
                 }
                 CommandKind::Focus => {
                     // grab_focus is per-window (the toplevel's focus
@@ -1574,6 +1619,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 selects: Vec::new(),
                 radios: Vec::new(),
                 grids: Vec::new(),
+                textareas: Vec::new(),
                 grid_children: HashMap::new(),
                 grid_cols: HashMap::new(),
                 radio_options: HashMap::new(),
@@ -1653,6 +1699,13 @@ impl crate::harness::Stage for GtkStage {
     fn set_text(&self, t: crate::harness::Target, text: &str) {
         let text = text.to_owned();
         Self::on_main(move |core| {
+            // The user path per kind: the buffer/entry change signal
+            // fires and emits (the quiet guard is off).
+            if t.kind == crate::harness::TargetKind::Textarea {
+                let i = crate::harness::resolve(t.index, core.textareas.len());
+                core.textareas[i].buffer().set_text(&text);
+                return;
+            }
             let i = crate::harness::resolve(t.index, core.entries.len());
             core.entries[i].set_text(&text);
         });
@@ -1669,10 +1722,17 @@ impl crate::harness::Stage for GtkStage {
 
     fn read_text(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
+            if t.kind == crate::harness::TargetKind::Textarea {
+                let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                    return "<no such target>".to_string();
+                };
+                let b = core.textareas[i].buffer();
+                return lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
+            }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return "<no such target>".to_string();
             };
-            core.entries[i].text().to_string()
+            lf(core.entries[i].text().to_string())
         })
     }
 
@@ -1707,6 +1767,15 @@ impl crate::harness::Stage for GtkStage {
                         return false;
                     };
                     core.entries[i]
+                        .state_flags()
+                        .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
+                }
+                crate::harness::TargetKind::Textarea => {
+                    let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len())
+                    else {
+                        return false;
+                    };
+                    core.textareas[i]
                         .state_flags()
                         .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
                 }

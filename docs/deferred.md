@@ -473,6 +473,19 @@ Landed history lives in git; this file only carries what is still open.
   load. The class fix is structural; the missing gate is a scene (or
   an entry-scene opening step) that focuses at mount and asserts
   expect_focused, proving the deferral on all platforms.
+- TextArea — RATIFIED-WANT (Akhil, 2026-07-22): the multi-line
+  entry. Near-free under current machinery: a kind reusing
+  text_changed, the uncontrolled contract, and the clear/focus
+  commands; native editors everywhere (TextEditor, multiline M3
+  TextField, GtkTextView, multiline WinUI TextBox). Slot before the
+  sections/menus design passes.
+- resize_window harness verb (Akhil asked 2026-07-22): backends
+  reflow natively on user resize but the matrix never drives one —
+  add a verb that resizes the REAL window then re-asserts
+  root_fills/shares/fills, making reflow-under-resize a matrix fact.
+  Also the place to watch WinUI's known interactive-resize flicker
+  (platform-level; we already avoid the transparent-background worst
+  case — keep WinAppSDK current).
 - Select follow-ons, each waiting on a REAL need: a template
   (For-body) select only gets the stateless index checks — the
   option-count upper bound is live-widget-only (the count map keys

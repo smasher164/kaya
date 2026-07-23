@@ -234,7 +234,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
     let ok = match prop {
         Prop::Text => matches!(
             kind,
-            WidgetKind::Button | WidgetKind::Label | WidgetKind::Entry | WidgetKind::Checkbox
+            WidgetKind::Button
+                | WidgetKind::Label
+                | WidgetKind::Entry
+                | WidgetKind::Checkbox
+                | WidgetKind::Textarea
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
         // Value is the slider's position AND the progress bar's
@@ -275,10 +279,14 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
 /// rebuild; a live id only vanishes by the guest's own hand.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
-        CommandKind::Clear => matches!(kind, WidgetKind::Entry),
+        CommandKind::Clear => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
         CommandKind::Focus => matches!(
             kind,
-            WidgetKind::Entry | WidgetKind::Button | WidgetKind::Checkbox | WidgetKind::Slider
+            WidgetKind::Entry
+                | WidgetKind::Button
+                | WidgetKind::Checkbox
+                | WidgetKind::Slider
+                | WidgetKind::Textarea
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
@@ -496,6 +504,7 @@ impl Scene {
                     let tag = match kind {
                         WidgetKind::Button
                         | WidgetKind::Entry
+                        | WidgetKind::Textarea
                         | WidgetKind::Checkbox
                         | WidgetKind::Slider
                         | WidgetKind::Select

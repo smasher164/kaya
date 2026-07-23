@@ -67,6 +67,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "select" => Some(include_str!("../../../tools/scenes/select.steps")),
         "radio" => Some(include_str!("../../../tools/scenes/radio.steps")),
         "grid" => Some(include_str!("../../../tools/scenes/grid.steps")),
+        "textarea" => Some(include_str!("../../../tools/scenes/textarea.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -109,6 +110,9 @@ pub enum TargetKind {
     /// index 0, only in a scene that keeps exactly one grid
     /// (tools/check-steps.sh holds the line).
     Grid,
+    /// The multi-line entry: same set_text/read_text/focus verbs as
+    /// the entry, its own registry.
+    Textarea,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -603,6 +607,7 @@ fn parse_target(spec: &str) -> Result<Target, String> {
         "select" => TargetKind::Select,
         "radio" => TargetKind::Radio,
         "grid" => TargetKind::Grid,
+        "textarea" => TargetKind::Textarea,
         other => return Err(format!("unknown target kind {other:?}")),
     };
     let index = if index == "last" {
@@ -621,7 +626,31 @@ fn parse_string(spec: &str) -> Result<String, String> {
         .strip_prefix('"')
         .and_then(|s| s.strip_suffix('"'))
         .ok_or_else(|| format!("wanted a quoted string, got {spec:?}"))?;
-    Ok(inner.to_owned())
+    // The escapes the line-oriented grammar needs: a literal newline
+    // cannot ride a script line, and a textarea's whole distinguishing
+    // observable is accepting one. `\\n` -> newline, `\\r` -> carriage
+    // return (the paste stand-in: set_text with CR-bearing text proves
+    // the backends' LF normalization), `\\\\` -> backslash; all three
+    // interpreters unescape identically.
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Ok(out)
 }
 
 /// Run the scene's script on its own thread against a backend's stage.
@@ -806,13 +835,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 // silently read a different widget (the interpreters
                 // already reject these loudly).
                 TargetKind::Entry
+                | TargetKind::Textarea
                 | TargetKind::Image
                 | TargetKind::Label
                 | TargetKind::Progress
                 | TargetKind::Select
                 | TargetKind::Radio => poll(|| {
                     let got = match t.kind {
-                        TargetKind::Entry => stage.read_text(*t),
+                        TargetKind::Entry | TargetKind::Textarea => stage.read_text(*t),
                         TargetKind::Image => stage.image_size(*t),
                         TargetKind::Label => stage.read_label(*t),
                         TargetKind::Progress => stage.progress_state(*t),
@@ -1077,6 +1107,7 @@ fn target_spec(t: &Target) -> String {
         TargetKind::Select => "select",
         TargetKind::Radio => "radio",
         TargetKind::Grid => "grid",
+        TargetKind::Textarea => "textarea",
     };
     if t.index < 0 {
         format!("{kind}#last")
@@ -1185,6 +1216,18 @@ mod tests {
         assert!(parse("warp reality#0").is_err());
         assert_eq!(resolve(-1, 3), 2);
         assert_eq!(resolve(1, 3), 1);
+        // The quoted-string escapes, byte-exact: `\n` (a textarea's
+        // newline must ride a line-oriented script), `\r` (the paste
+        // stand-in that proves the backends' LF normalization), `\\`
+        // (the escape's own spelling), and unknown escapes pass
+        // through verbatim. All three interpreters must match this.
+        assert_eq!(
+            parse(r#"set_text textarea#0 "a\r\nb\nc\\d\qe""#).unwrap()[0],
+            Step::SetText(
+                Target { kind: TargetKind::Textarea, index: 0 },
+                "a\r\nb\nc\\d\\qe".into()
+            )
+        );
         assert_eq!(
             parse("expect_shares column#1 \"25,75\"").unwrap()[0],
             Step::ExpectShares(

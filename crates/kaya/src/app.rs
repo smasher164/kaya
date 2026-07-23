@@ -1122,6 +1122,14 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A multi-line text editor; the entry's uncontrolled contract
+    /// (edits arrive in the occurrence loop, clear/focus commands
+    /// apply) over the platform's real multi-line editor.
+    pub fn textarea(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Textarea);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A labeled checkbox; toggles arrive in the occurrence loop.
     pub fn checkbox(&mut self, text: &str) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Checkbox);

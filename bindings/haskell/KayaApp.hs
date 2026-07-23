@@ -110,6 +110,7 @@ module KayaApp
     bindSourceField,
     buttonOn,
     entryOn,
+    textareaOn,
     labelText,
     labelBound,
     checkboxOn,
@@ -910,6 +911,15 @@ entryOn handler = leafish $ do
   return w
 
 -- | A labeled checkbox with its toggle handler co-located.
+-- | A multi-line text editor with its change handler co-located:
+-- the entry's uncontrolled contract over the platform's real
+-- multi-line editor.
+textareaOn :: (LeafArgs r) => (String -> IO ()) -> r
+textareaOn handler = leafish $ do
+  w@(Widget n) <- widget W.kindTextarea
+  pendB (PChange n handler)
+  return w
+
 checkboxOn :: (LeafArgs r) => String -> (Bool -> IO ()) -> r
 checkboxOn text handler = leafish $ do
   w@(Widget n) <- widget W.kindCheckbox

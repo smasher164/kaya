@@ -616,6 +616,17 @@ func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
 	return w
 }
 
+// Textarea creates a multi-line text editor with its change handler
+// (nil for none): the entry's uncontrolled contract over the
+// platform's real multi-line editor.
+func (tx *Tx) Textarea(onChange func(*Tx, string)) Widget {
+	w := tx.Widget(KindTextarea)
+	if onChange != nil {
+		tx.app.OnChange(w, onChange)
+	}
+	return w
+}
+
 // LabelText creates a label with constant text (Label is the
 // signal-bound flavor) — the const-label sugar every other binding
 // already had.

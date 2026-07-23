@@ -87,6 +87,7 @@ pub const KIND_PROGRESS: u32 = 10;
 pub const KIND_SELECT: u32 = 11;
 pub const KIND_RADIO: u32 = 12;
 pub const KIND_GRID: u32 = 13;
+pub const KIND_TEXTAREA: u32 = 14;
 
 // Property keys.
 pub const PROP_TEXT: u32 = 1;
@@ -285,6 +286,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_SELECT => WidgetKind::Select,
         KIND_RADIO => WidgetKind::Radio,
         KIND_GRID => WidgetKind::Grid,
+        KIND_TEXTAREA => WidgetKind::Textarea,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -1079,6 +1081,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Select => KIND_SELECT,
         WidgetKind::Radio => KIND_RADIO,
         WidgetKind::Grid => KIND_GRID,
+        WidgetKind::Textarea => KIND_TEXTAREA,
     }
 }
 

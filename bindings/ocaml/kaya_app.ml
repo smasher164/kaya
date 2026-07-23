@@ -386,6 +386,18 @@ let button ?grow ?text ?on_click () tx =
   | None -> ());
   w
 
+(* A multi-line text editor: the entry's uncontrolled contract over
+   the platform's real multi-line editor. *)
+let textarea ?grow ?on_change () tx =
+  let w = widget Kaya_wire.kind_textarea tx in
+  Option.iter (fun g -> set_grow w g tx) grow;
+  (match on_change with
+  | Some handler ->
+      let (Widget id) = w in
+      Hashtbl.replace tx.app.widget_changes id handler
+  | None -> ());
+  w
+
 let label ?grow ?text ?bind () tx =
   let w = widget Kaya_wire.kind_label tx in
   Option.iter (fun g -> set_grow w g tx) grow;

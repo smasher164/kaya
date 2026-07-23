@@ -817,6 +817,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("select", 11),
                 ("radio", 12),
                 ("grid", 13),
+                ("textarea", 14),
             ],
         },
         EnumSpec {
@@ -1124,6 +1125,7 @@ mod tests {
                     ("kind", "select") => wire::KIND_SELECT,
                     ("kind", "radio") => wire::KIND_RADIO,
                     ("kind", "grid") => wire::KIND_GRID,
+                    ("kind", "textarea") => wire::KIND_TEXTAREA,
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
                     ("prop", "value") => wire::PROP_VALUE,

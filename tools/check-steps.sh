@@ -112,6 +112,79 @@ for f in tools/scenes/*.steps; do
     }
 done
 
+# Raw CR bytes: the scripts are LF files by contract. The Swift
+# interpreter splits script text on "\n", and Swift's grapheme-based
+# split sees CRLF as ONE cluster — a CRLF-ended script would parse as
+# a single giant line there while parsing fine everywhere else
+# (docs/traps.md, the grapheme family). CR as DATA rides the \r
+# escape, never a raw byte.
+cr_lint() {
+    python3 -c '
+import sys
+
+path = sys.argv[1]
+data = sys.stdin.buffer.read() if path == "-" else open(path, "rb").read()
+if b"\r" in data:
+    print(f"{path}: raw CR byte — steps files are LF-only "
+          "(use the \\r escape for CR as data)")
+    sys.exit(1)
+' "$1"
+}
+
+# The guard guards itself.
+if printf 'expect label#0 "x"\r\n' | cr_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (CRLF sample passed)" >&2
+    exit 1
+fi
+
+for f in tools/scenes/*.steps; do
+    out="$(cr_lint "$f")" || {
+        echo "check-steps: $f contains a raw CR byte:" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
+# Entries are single-line controls: what a platform does with an
+# embedded line break in one is platform-defined input behavior
+# (WinUI strips, GTK filters, others vary), so a scene asserting it
+# would pin one platform's behavior against the rest. The multi-line
+# round trip belongs to the textarea. set_text into an entry must not
+# carry \n or \r.
+entry_newline_lint() {
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+for lineno, line in enumerate(text.splitlines(), 1):
+    if line.lstrip().startswith("#"):
+        continue
+    for step in line.split(";"):
+        s = step.strip()
+        if re.match(r"set_text\s+entry#", s) and re.search(r"\\[nr]", s):
+            bad.append(f"{path}:{lineno}: {s}")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself.
+if printf 'set_text entry#0 "a\\nb"\n' | entry_newline_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (entry-newline sample passed)" >&2
+    exit 1
+fi
+
+for f in tools/scenes/*.steps; do
+    out="$(entry_newline_lint "$f")" || {
+        echo "check-steps: $f drives a line break into a single-line entry (platform-defined; textarea owns the multi-line contract):" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
 # Every scene script must be reachable by name from harness::script.
 # That match ends in a catch-all returning the milestone2 script, so an
 # unregistered scene does not fail — it silently runs a DIFFERENT

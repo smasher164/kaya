@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x73d2b60a639054ba
+let kayaSpecHash: UInt64 = 0x4605672632603270
 
 struct KayaTx {
     var bytes = Data()

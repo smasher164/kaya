@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x73d2b60a639054ba
+let kayaSpecHash: UInt64 = 0x4605672632603270
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -67,6 +67,7 @@ private let kindProgress: UInt32 = 10
 private let kindSelect: UInt32 = 11
 private let kindRadio: UInt32 = 12
 private let kindGrid: UInt32 = 13
+private let kindTextarea: UInt32 = 14
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -219,6 +220,7 @@ final class KayaSceneModel {
     var selects: [KayaNode] = []
     var radios: [KayaNode] = []
     var grids: [KayaNode] = []
+    var textareas: [KayaNode] = []
 }
 
 // The single-window spellings, forwarding to the primary surface.
@@ -618,6 +620,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindSelect: kayaScene.selects.append(node)
                 case kindRadio: kayaScene.radios.append(node)
                 case kindGrid: kayaScene.grids.append(node)
+                case kindTextarea: kayaScene.textareas.append(node)
                 default: break
                 }
             case applySetWindowProp:
@@ -760,7 +763,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 switch (prop, valueType) {
                 case (propText, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
-                    kayaScene.nodes[id]!.text = String(decoding: bytes, as: UTF8.self)
+                    kayaScene.nodes[id]!.text = kayaLF(String(decoding: bytes, as: UTF8.self))
                 case (propChecked, valueBool):
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
                 case (propValue, valueF64):
@@ -1000,9 +1003,58 @@ func kayaWindowTarget(_ parts: [Substring]) -> (UInt64, Bool, [Substring]) {
     }
 #endif
 
+/// The observation contract compares Unicode SCALAR SEQUENCES —
+/// byte-for-byte, the predicate every other interpreter computes.
+/// Swift's `==` alone adds canonical equivalence (a precomposed é
+/// equals its decomposed spelling), so an expect could pass here and
+/// fail on every other platform for byte-identical inputs. The utf8
+/// views compare code units, restoring the shared predicate.
+private func kayaBytesEqual(_ a: String, _ b: String) -> Bool {
+    a.utf8.elementsEqual(b.utf8)
+}
+
+/// Guest-visible text uses LF as its line separator on every platform
+/// (strings are compared byte-for-byte across languages). The model
+/// owns this backend's text, so normalization happens at every WRITE
+/// into it — user edits and pastes through the bindings, the wire's
+/// property write, the harness's set_text — and reads need none.
+/// The cheap-out guard checks UNICODE SCALARS, not characters: Swift's
+/// grapheme-based `String.contains("\r")` sees CRLF as one cluster
+/// that does not "contain" CR, and would skip exactly the input this
+/// function exists for. (The replacements below are UTF-16 literal
+/// matches and are not affected.)
+private func kayaLF(_ s: String) -> String {
+    s.unicodeScalars.contains("\r")
+        ? s.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        : s
+}
+
 private func kayaQuoted(_ rest: [Substring]) -> String {
     let joined = rest.joined(separator: " ")
-    return String(joined.dropFirst().dropLast())
+    let inner = String(joined.dropFirst().dropLast())
+    // The grammar's escapes (harness.rs is the norm): \\n -> newline,
+    // \\r -> carriage return (the paste stand-in for the LF-contract
+    // proof), \\\\ -> backslash — a textarea's newline must ride a
+    // line-oriented script.
+    var out = ""
+    var chars = inner.makeIterator()
+    while let c = chars.next() {
+        if c == "\\" {
+            switch chars.next() {
+            case "n": out.append("\n")
+            case "r": out.append("\r")
+            case "\\": out.append("\\")
+            case let other?:
+                out.append("\\")
+                out.append(other)
+            case nil: out.append("\\")
+            }
+        } else {
+            out.append(c)
+        }
+    }
+    return out
 }
 
 private func kayaRunScript(_ script: String) {
@@ -1093,10 +1145,14 @@ private func kayaRunScript(_ script: String) {
                 if !ok { failures.append("no such target \(parts[1])") }
             case "set_text":
                 let ok = DispatchQueue.main.sync { () -> Bool in
-                    guard let node = kayaTarget(parts[1], "entry", kayaScene.entries) else {
+                    let node =
+                        parts[1].hasPrefix("textarea")
+                        ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
+                        : kayaTarget(parts[1], "entry", kayaScene.entries)
+                    guard let node else {
                         return false
                     }
-                    node.text = kayaQuoted(Array(parts[2...]))
+                    node.text = kayaLF(kayaQuoted(Array(parts[2...])))
                     KayaHost.emitText(node.tag, node.text)
                     return true
                 }
@@ -1108,7 +1164,9 @@ private func kayaRunScript(_ script: String) {
                 // size ("WxH"/"0x0"), everything else reads label text
                 // — harness.rs's routing.
                 let got = DispatchQueue.main.sync { () -> String? in
-                    parts[1].hasPrefix("entry")
+                    parts[1].hasPrefix("textarea")
+                        ? kayaTarget(parts[1], "textarea", kayaScene.textareas)?.text
+                        : parts[1].hasPrefix("entry")
                         ? kayaTarget(parts[1], "entry", kayaScene.entries)?.text
                         : parts[1].hasPrefix("image")
                             ? kayaTarget(parts[1], "image", kayaScene.images)?.imageSize
@@ -1133,7 +1191,7 @@ private func kayaRunScript(_ script: String) {
                                         }
                                     : kayaTarget(parts[1], "label", kayaScene.labels)?.text
                 }
-                if let got, got == want {
+                if let got, kayaBytesEqual(got, want) {
                     observed.append(got)
                 } else if let got {
                     failures.append("\(parts[1]) reads \"\(got)\", wanted \"\(want)\"")
@@ -1146,7 +1204,11 @@ private func kayaRunScript(_ script: String) {
                 // it into SwiftUI). Counts as an expect for the
                 // zero-expect rule, exactly as in harness.rs.
                 let focused = DispatchQueue.main.sync { () -> Bool? in
-                    guard let node = kayaTarget(parts[1], "entry", kayaScene.entries) else {
+                    let node =
+                        parts[1].hasPrefix("textarea")
+                        ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
+                        : kayaTarget(parts[1], "entry", kayaScene.entries)
+                    guard let node else {
                         return nil
                     }
                     return kayaScene.focusedId == node.id
@@ -1176,7 +1238,7 @@ private func kayaRunScript(_ script: String) {
                         .map { $0.text }
                         .joined(separator: "|")
                 }
-                if let got, got == want {
+                if let got, kayaBytesEqual(got, want) {
                     observed.append(got)
                 } else if let got {
                     failures.append("\(parts[1]) ordered \"\(got)\", wanted \"\(want)\"")
@@ -1206,7 +1268,7 @@ private func kayaRunScript(_ script: String) {
                         .map { String(Int((($0 / total) * 100).rounded())) }
                         .joined(separator: ",")
                 }
-                if let got, got == want {
+                if let got, kayaBytesEqual(got, want) {
                     observed.append(got)
                 } else if let got {
                     failures.append("\(parts[1]) splits \"\(got)\", wanted \"\(want)\"")
@@ -1248,7 +1310,7 @@ private func kayaRunScript(_ script: String) {
                         return kayaScene.windows[wid]?.title ?? ""
                     #endif
                 }
-                if got == want {
+                if kayaBytesEqual(got, want) {
                     observed.append("\(prefix)title \"\(want)\"")
                 } else {
                     failures.append("\(prefix)title \"\(got)\", wanted \"\(want)\"")
@@ -1430,7 +1492,7 @@ private func kayaRunScript(_ script: String) {
                         return kayaLiveAlertController?.title ?? ""
                     #endif
                 }
-                if let got, got == want {
+                if let got, kayaBytesEqual(got, want) {
                     observed.append("\(prefix)alert \"\(want)\"")
                 } else if let got {
                     failures.append("\(prefix)alert \"\(got)\", wanted \"\(want)\"")
@@ -2092,6 +2154,8 @@ struct KayaRender: View {
             .frame(maxWidth: node.grow > 0 ? .infinity : 200)
         case kindEntry:
             KayaEntry(node: node)
+        case kindTextarea:
+            KayaTextarea(node: node)
         case kindSelect:
             // The dressed floor: SwiftUI's own Picker in its menu
             // presentation — the platform dropdown. The node's label
@@ -2398,12 +2462,46 @@ struct KayaEntry: View {
             text: Binding(
                 get: { node.text },
                 set: { newValue in
-                    node.text = newValue
-                    KayaHost.emitText(node.tag, newValue)
+                    let value = kayaLF(newValue)
+                    node.text = value
+                    KayaHost.emitText(node.tag, value)
                 })
         )
         .textFieldStyle(.roundedBorder)
         .frame(maxWidth: 200)
+        .focused($focused)
+        .onAppear { focused = kayaScene.focusedId == node.id }
+        .onChange(of: kayaScene.focusedId) { _, newValue in
+            focused = newValue == node.id
+        }
+        .onChange(of: focused) { _, newValue in
+            if newValue {
+                kayaScene.focusedId = node.id
+            } else if kayaScene.focusedId == node.id {
+                kayaScene.focusedId = nil
+            }
+        }
+    }
+}
+
+/// The multi-line editor: KayaEntry's exact contract (uncontrolled
+/// binding, identity-tag emits, model-driven focus) over TextEditor.
+struct KayaTextarea: View {
+    let node: KayaNode
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextEditor(
+            text: Binding(
+                get: { node.text },
+                set: { newValue in
+                    let value = kayaLF(newValue)
+                    node.text = value
+                    KayaHost.emitText(node.tag, value)
+                })
+        )
+        .frame(width: 240, height: 96)
+        .border(Color.gray.opacity(0.4))
         .focused($focused)
         .onAppear { focused = kayaScene.focusedId == node.id }
         .onChange(of: kayaScene.focusedId) { _, newValue in

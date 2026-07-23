@@ -81,6 +81,7 @@ for arg in "$@"; do
         select_rust|select_python|select_go|select_csharp|select_java) SUITE="$arg" ;;
         radio_rust|radio_python|radio_go|radio_csharp|radio_java) SUITE="$arg" ;;
         grid_rust|grid_python|grid_go|grid_csharp|grid_java) SUITE="$arg" ;;
+        textarea_rust|textarea_python|textarea_go|textarea_csharp|textarea_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -98,7 +99,12 @@ BOOTSTRAP="$SDK/Microsoft.WindowsAppSDK.Foundation-2.1.0/extracted/runtimes/win-
 # suites phase alone makes hundreds of schtasks/type calls). The
 # socket lives in the repo's target/ and persists briefly past the
 # run so back-to-back invocations reuse it.
-SSH_MUX=(-o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
+# ConnectTimeout rides every call: when the guest OS wedges mid-run
+# (observed 2026-07-22 — UTM "started", sshd gone), each poll would
+# otherwise hang the full TCP timeout (~75s) and stretch the suite
+# poll loops' try-bounded deadlines toward hours. With it, a dead VM
+# fails the run in minutes.
+SSH_MUX=(-o ConnectTimeout=5 -o ControlMaster=auto -o "ControlPath=$ROOT/target/.ssh-mux-%r@%h" -o ControlPersist=120)
 run_ssh() { ssh -n -o BatchMode=yes "${SSH_MUX[@]}" "$HOST" "$@"; }
 scp() { command scp "${SSH_MUX[@]}" "$@"; }
 
@@ -111,6 +117,23 @@ utmctl_bin() {
     command -v utmctl 2>/dev/null || echo /Applications/UTM.app/Contents/MacOS/utmctl
 }
 if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
+    # Unreachable can mean stopped OR wedged: a guest whose OS hung
+    # mid-run leaves UTM reporting "started" while sshd is gone, and
+    # `utmctl start` on a started VM is a no-op — the old loop waited
+    # five minutes and gave up. Force the wedged case down first.
+    if "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; then
+        echo "== $HOST unreachable but VM \"$VM_NAME\" reports started; force-restarting =="
+        "$(utmctl_bin)" stop --kill "$VM_NAME" || true
+        tries=0
+        while "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; do
+            tries=$((tries + 1))
+            if [ "$tries" -gt 12 ]; then
+                echo "VM \"$VM_NAME\" would not stop" >&2
+                exit 1
+            fi
+            sleep 5
+        done
+    fi
     echo "== $HOST unreachable; starting VM \"$VM_NAME\" =="
     "$(utmctl_bin)" start "$VM_NAME"
     tries=0
@@ -134,7 +157,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -279,6 +302,23 @@ else
     scp -q "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
         "$ROOT"/bindings/csharp/*.cs \
         "$HOST:C:/kaya/cs/"
+    # Built ONCE here (the javac precedent below); the legs run
+    # `dotnet exec` on the produced dll. When every leg ran `dotnet
+    # run`, four-wide suites raced the shared obj/bin and VBCSCompiler
+    # held kaya-guests.dll against a concurrent rebuild (CS2012,
+    # observed 2026-07-22).
+    run_ssh 'cmd /c "cd /d C:\kaya\cs && dotnet build -v q --nologo"' || {
+        echo "dotnet build failed on the VM" >&2
+        exit 1
+    }
+    # Second output for the pri-adjacency legs: the apphost exe with
+    # resources.pri beside it (ms-appx resolves against the PROCESS
+    # exe's directory). Also built once here — the five pri legs used
+    # to each build into the SAME cs-out and raced.
+    run_ssh 'cmd /c "cd /d C:\kaya\cs && dotnet build -v q --nologo -o C:\kaya\cs-out && copy /y C:\kaya\resources.pri C:\kaya\cs-out\resources.pri >nul"' || {
+        echo "dotnet build (cs-out) failed on the VM" >&2
+        exit 1
+    }
     # The java guests: sources shipped flat (every basename is unique and
     # javac takes explicit files, so package-dir layout is classpath
     # business, not source business) and compiled IN PLACE — the C#
@@ -741,6 +781,13 @@ case "$SUITE" in
         run_suite grid_go
         run_suite grid_csharp
         run_suite grid_java
+        # The textarea scene: AcceptsReturn TextBox, entry contract
+        # multi-line (the swallow counters ride along).
+        run_suite textarea_rust
+        run_suite textarea_python
+        run_suite textarea_go
+        run_suite textarea_csharp
+        run_suite textarea_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

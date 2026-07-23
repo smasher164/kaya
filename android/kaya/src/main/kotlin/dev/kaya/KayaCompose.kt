@@ -193,6 +193,7 @@ object KayaSceneModel {
     val selects = ArrayList<KayaNode>()
     val radios = ArrayList<KayaNode>()
     val grids = ArrayList<KayaNode>()
+    val textareas = ArrayList<KayaNode>()
     // Grid cell leading edges by child node id, grid-local (recorded
     // at place time): the expect_grid_columns observation clusters
     // these — geometry, never the model's columns copy.
@@ -217,7 +218,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x73d2b60a639054bauL
+    private const val SPEC_HASH: ULong = 0x4605672632603270uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -264,6 +265,7 @@ object KayaCompose {
     const val KIND_SELECT = 11
     const val KIND_RADIO = 12
     const val KIND_GRID = 13
+    const val KIND_TEXTAREA = 14
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -392,6 +394,7 @@ object KayaCompose {
                         KIND_SELECT -> KayaSceneModel.selects.add(node)
                         KIND_RADIO -> KayaSceneModel.radios.add(node)
                         KIND_GRID -> KayaSceneModel.grids.add(node)
+                        KIND_TEXTAREA -> KayaSceneModel.textareas.add(node)
                     }
                 }
                 APPLY_SET_PROP -> {
@@ -399,7 +402,7 @@ object KayaCompose {
                     val prop = b.int
                     b.int // pad
                     when (prop) {
-                        PROP_TEXT -> KayaSceneModel.nodes[id]!!.text = readString(b)
+                        PROP_TEXT -> KayaSceneModel.nodes[id]!!.text = kayaLf(readString(b))
                         PROP_CHECKED -> KayaSceneModel.nodes[id]!!.checked = readBool(b)
                         PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
@@ -689,8 +692,29 @@ object KayaCompose {
         return registry.getOrNull(i)
     }
 
-    private fun quoted(parts: List<String>): String =
-        parts.joinToString(" ").removeSurrounding("\"")
+    private fun quoted(parts: List<String>): String {
+        val inner = parts.joinToString(" ").removeSurrounding("\"")
+        // The grammar's escapes (harness.rs is the norm): \\n ->
+        // newline, \\r -> carriage return (the paste stand-in for the
+        // LF-contract proof), \\\\ -> backslash.
+        val out = StringBuilder(inner.length)
+        var i = 0
+        while (i < inner.length) {
+            val c = inner[i]
+            if (c == '\\' && i + 1 < inner.length) {
+                when (inner[i + 1]) {
+                    'n' -> { out.append('\n'); i += 2 }
+                    'r' -> { out.append('\r'); i += 2 }
+                    '\\' -> { out.append('\\'); i += 2 }
+                    else -> { out.append(c); i += 1 }
+                }
+            } else {
+                out.append(c)
+                i += 1
+            }
+        }
+        return out.toString()
+    }
 
     private fun runScript(activity: ComponentActivity, script: String) {
         val observed = ArrayList<String>()
@@ -766,9 +790,13 @@ object KayaCompose {
                     }
                     "set_text" -> {
                         val ok = onUi(activity) {
-                            target(parts[1], "entry", KayaSceneModel.entries)?.also { node ->
-                                node.text = quoted(parts.drop(2))
-                                KayaPresent.emitTextChanged(node.tag, node.text)
+                            val node =
+                                if (parts[1].startsWith("textarea"))
+                                    target(parts[1], "textarea", KayaSceneModel.textareas)
+                                else target(parts[1], "entry", KayaSceneModel.entries)
+                            node?.also {
+                                it.text = kayaLf(quoted(parts.drop(2)))
+                                KayaPresent.emitTextChanged(it.tag, it.text)
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -781,7 +809,9 @@ object KayaCompose {
                         // everything else reads label text —
                         // harness.rs's routing.
                         val got = onUi(activity) {
-                            if (parts[1].startsWith("entry"))
+                            if (parts[1].startsWith("textarea"))
+                                target(parts[1], "textarea", KayaSceneModel.textareas)?.text
+                            else if (parts[1].startsWith("entry"))
                                 target(parts[1], "entry", KayaSceneModel.entries)?.text
                             else if (parts[1].startsWith("image"))
                                 target(parts[1], "image", KayaSceneModel.images)?.imageSize
@@ -814,7 +844,9 @@ object KayaCompose {
                         // Counts as an expect for the zero-expect
                         // rule, exactly as in harness.rs.
                         val focused = onUi(activity) {
-                            target(parts[1], "entry", KayaSceneModel.entries)
+                            (if (parts[1].startsWith("textarea"))
+                                target(parts[1], "textarea", KayaSceneModel.textareas)
+                            else target(parts[1], "entry", KayaSceneModel.entries))
                                 ?.let { KayaSceneModel.focusedId == it.id }
                         }
                         when (focused) {
@@ -1255,6 +1287,16 @@ object KayaCompose {
 /** The interpreter's render: the node tree as Compose declarations. */
 // The exposed-dropdown family (the select's dressed floor) is still
 // behind M3's experimental gate.
+/**
+ * Guest-visible text uses LF as its line separator on every platform
+ * (strings are compared byte-for-byte across languages). The model
+ * owns this backend's text, so normalization happens at every WRITE
+ * into it — user edits and pastes through onValueChange, the wire's
+ * property write, the harness's set_text — and reads need none.
+ */
+private fun kayaLf(s: String): String =
+    if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
@@ -1502,6 +1544,30 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             node.imageBitmap?.let { bitmap ->
                 Image(bitmap = bitmap, contentDescription = null)
             }
+        KayaCompose.KIND_TEXTAREA -> {
+            // The multi-line editor: the entry's exact contract
+            // (uncontrolled state, identity-tag emits, model-driven
+            // focus) over a multiline M3 TextField.
+            val focusRequester = remember { FocusRequester() }
+            TextField(
+                value = node.text,
+                onValueChange = { newValue ->
+                    val value = kayaLf(newValue)
+                    node.text = value
+                    KayaPresent.emitTextChanged(node.tag, value)
+                },
+                singleLine = false,
+                minLines = 3,
+                modifier = Modifier
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { state ->
+                        if (state.isFocused) KayaSceneModel.focusedId = node.id
+                    },
+            )
+            LaunchedEffect(KayaSceneModel.focusedId) {
+                if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
+            }
+        }
         KayaCompose.KIND_ENTRY -> {
             // Uncontrolled toward the app: the node mirrors what the
             // user types (Compose needs the state), and every edit is
@@ -1515,8 +1581,9 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             TextField(
                 value = node.text,
                 onValueChange = { newValue ->
-                    node.text = newValue
-                    KayaPresent.emitTextChanged(node.tag, newValue)
+                    val value = kayaLf(newValue)
+                    node.text = value
+                    KayaPresent.emitTextChanged(node.tag, value)
                 },
                 modifier = Modifier
                     .focusRequester(focusRequester)
