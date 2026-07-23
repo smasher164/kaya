@@ -812,3 +812,27 @@ Two sub-traps from the same session:
   If a native selection control ever returns here, the guard must be
   the entry_swallow COUNTER, incremented only on real moves (a no-op
   set raises nothing and would leave the counter armed).
+
+## OCaml evaluates list literals right-to-left
+
+The first direct-style OCaml cut kept containers as
+`column [ label ...; button ... ]` with eagerly-evaluated children.
+OCaml's evaluation order for constructor arguments (and therefore
+list literals) is right-to-left, so children were CREATED in reverse
+document order — every index-based harness registry shifted, and
+half the scenes failed with swapped labels. The reader-era binding
+was immune (the list held closures; List.map applied left-to-right).
+(Array literals happen to evaluate left-to-right today, but the
+manual calls the order unspecified — building the API on it would
+mean a toolchain bump could scramble every scene.) An interim fix
+used statement-shaped bodies with an ambient parent stack; the final
+shape is CURRIED CHILDREN: every creator ends in [()], and omitting
+that unit leaves a pure [unit -> widget] partial application, so a
+child list literal only allocates closures — the container realizes
+them itself with [List.iter], whose left-to-right order IS specified.
+Corollaries: [w] wraps an already-realized widget for a child slot,
+a zero-argument creator cannot sit bare in a list (OCaml does not
+erase leading optionals in value position — apply an argument or
+eta-wrap), and an add_child for a For/When must land AFTER its
+template_end (inside the scope it reads as blueprint content and the
+scene rejects it).

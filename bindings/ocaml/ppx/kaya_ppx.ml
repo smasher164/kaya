@@ -14,7 +14,7 @@
      val todo_done_ : (todo, bool) Kaya_app.field
      val todo_patch :
        ?title:string -> ?done_:bool ->
-       todo Kaya_app.record_collection -> Kaya_wire.value -> tx -> unit
+       todo Kaya_app.record_collection -> Kaya_wire.value -> unit
 
    Each supplied argument records one update_field — a patch is
    recorded writes, never a diff. The schema, both conversions, the
@@ -39,8 +39,8 @@
    an entry that no longer holds Todo), and the eliminator
 
      val post_each : post Kaya_app.sum_collection ->
-       note:unit Kaya_app.Tpl.decl -> todo:unit Kaya_app.Tpl.decl ->
-       Kaya_app.widget Kaya_app.decl
+       note:(unit -> 'a) -> todo:(unit -> 'a) ->
+       unit -> Kaya_app.widget
 
    whose labelled arguments are required — template totality is a
    compile error here, and the scene checks it again. *)
@@ -182,7 +182,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                   [%e Ast_builder.Default.eint ~loc i]])
           fields
       in
-      (* <t>_patch ?f1 ?f2 rc key tx: each supplied argument is one
+      (* <t>_patch ?f1 ?f2 rc key: each supplied argument is one
          update_field. Internal names carry the __kaya_ prefix so a
          field named rc/key/tx cannot capture them. *)
       let patch =
@@ -192,7 +192,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | Some __kaya_v ->
                 Kaya_app.update_field __kaya_rc __kaya_key
                   [%e evar (tname ^ "_" ^ name)]
-                  __kaya_v __kaya_tx
+                  __kaya_v
             | None -> ()]
         in
         let body =
@@ -203,7 +203,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                 (fun acc e -> Ast_builder.Default.pexp_sequence ~loc acc e)
                 first rest
         in
-        let inner = [%expr fun __kaya_rc __kaya_key __kaya_tx -> [%e body]] in
+        let inner = [%expr fun __kaya_rc __kaya_key -> [%e body]] in
         let with_optionals =
           List.fold_right
             (fun (name, _) acc ->
@@ -374,7 +374,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
           variants
       in
       (* Refined patches per constructor: post_todo_patch ?title
-         ?done_ sc key tx — each supplied argument is one witnessed
+         ?done_ sc key — each supplied argument is one witnessed
          update_field, and the model refuses a drifted entry. *)
       let patches =
         List.mapi
@@ -386,7 +386,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                     Kaya_app.sum_update_field __kaya_sc __kaya_key
                       ~variant:[%e Ast_builder.Default.eint ~loc vi]
                       [%e evar (tname ^ "_" ^ arm_label ctor ^ "_" ^ name)]
-                      __kaya_v __kaya_tx
+                      __kaya_v
                 | None -> ()]
             in
             let body =
@@ -398,7 +398,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                     first rest
             in
             let inner =
-              [%expr fun __kaya_sc __kaya_key __kaya_tx -> [%e body]]
+              [%expr fun __kaya_sc __kaya_key -> [%e body]]
             in
             let with_optionals =
               List.fold_right

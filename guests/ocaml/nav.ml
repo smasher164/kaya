@@ -18,47 +18,48 @@ let () =
   let app = Kaya_app.create () in
 
   let status = ref None in
-  build app
-    (let* () = window ~title:"nav" () in
-     let* s = signal (Str "at root") in
+  build app (fun () ->
+     window ~title:"nav" ();
+     let s = signal (Str "at root") in
      status := Some s;
-     let on_detail tx =
+     let on_detail () =
        (* The popped handler rides the push (per-entry, the
           ~on_result precedent): it can only ever mean the detail
           screen popped, and it retires with the one pop. *)
        push_entry ~title:"detail"
-         ~on_popped:(fun tx -> write s (Str "popped detail") tx)
-         detail tx;
-       (let* caption = signal (Str "detail pane") in
-        let* pane = column [ label ~bind:caption () ] in
-        let* () = mount_in detail pane in
+         ~on_popped:(fun () -> write s (Str "popped detail"))
+         detail;
+       (let caption = signal (Str "detail pane") in
+        let pane = column [ label ~bind:caption ] () in
+        mount_in detail pane;
         (* The covered root keeps taking writes — retention,
            observable after the pop. *)
         write s (Str "pushed detail"))
-         tx
+        
      in
-     let on_settings tx =
+     let on_settings () =
        (* The veto class: nothing has popped; agree and confirm. No
           entry_popped will fire — the write is the round's final
           status. *)
        push_entry ~title:"settings" ~intercept_back:true
-         ~on_back_requested:(fun tx ->
-           write s (Str "back requested") tx;
-           pop_entry () tx)
-         settings tx;
-       (let* caption = signal (Str "settings pane") in
-        let* pane = column [ label ~bind:caption () ] in
-        let* () = mount_in settings pane in
+         ~on_back_requested:(fun () ->
+           write s (Str "back requested");
+           pop_entry ())
+         settings;
+       (let caption = signal (Str "settings pane") in
+        let pane = column [ label ~bind:caption ] () in
+        mount_in settings pane;
         write s (Str "pushed settings"))
-         tx
+        
      in
-     let* root =
+     let root =
        column
          [
-           label ~bind:s () (* label#0 *);
-           button ~text:"open detail" ~on_click:on_detail ();
-           button ~text:"open settings" ~on_click:on_settings ();
+           label ~bind:s (* label#0 *);
+           button ~text:"open detail" ~on_click:on_detail;
+           button ~text:"open settings" ~on_click:on_settings;
          ]
+         ()
      in
      mount root);
 

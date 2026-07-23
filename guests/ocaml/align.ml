@@ -25,22 +25,23 @@ let tall_png =
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* probe = signal (Str "align probe") in
-     let* base = signal (Str "base") in
+  build app (fun () ->
+     let probe = signal (Str "align probe") in
+     let base = signal (Str "base") in
 
-     let* root =
+     let root =
        column ~align:Center
          [
-           label ~bind:probe () (* label#0 *);
-           button ~text:"mid" ();
+           label ~bind:probe (* label#0 *);
+           button ~text:"mid";
            row ~align:Baseline
              [
-               label ~bind:base () (* label#1 *);
-               button ~text:"tick" ();
-               image ~source:tall_png ();
+               label ~bind:base (* label#1 *);
+               button ~text:"tick";
+               image ~source:tall_png;
              ];
          ]
+         ()
      in
      mount root);
 

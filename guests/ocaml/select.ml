@@ -9,20 +9,21 @@ let options = [ "Red"; "Green"; "Blue" ]
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* () = window ~title:"select" () in
-     let* picked = signal (Str "picked: Red") in
+  build app (fun () ->
+     window ~title:"select" ();
+     let picked = signal (Str "picked: Red") in
 
      let on_pick index =
        write picked (Str ("picked: " ^ List.nth options index))
      in
 
-     let* root =
+     let root =
        column
          [
-           select ~selected:0 ~on_select:on_pick options ();
-           label ~bind:picked () (* label#0 *);
+           select ~selected:0 ~on_select:on_pick options;
+           label ~bind:picked (* label#0 *);
          ]
+         ()
      in
      mount root);
 

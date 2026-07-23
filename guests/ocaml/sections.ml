@@ -17,45 +17,43 @@ let () =
   let app = Kaya_app.create () in
 
   let visit_count = ref 0 in
-  build app
-    ((* One construct carries the window's attributes (the
+  build app (fun () ->
+     (* One construct carries the window's attributes (the
         unification rule). The hint is ADVISORY: `bar` is each
         desktop's horizontal spelling and the phones' physics
         regardless — no observable rides on it. *)
-     let* () =
+     let () =
        window ~title:"sections"
          ~sections_presentation:
            (Int64.of_int Kaya_wire.sections_presentation_bar)
          ()
      in
-     let* visits = signal (Str "archive: 0 visits") in
-     let on_archive_shown tx =
+     let visits = signal (Str "archive: 0 visits") in
+     let on_archive_shown () =
        incr visit_count;
        write visits
          (Str (Printf.sprintf "archive: %d visits" !visit_count))
-         tx
+        
      in
-     let* () =
-      fun tx ->
-       add_section ~title:"Feed" feed tx;
-       add_section ~title:"Archive" ~on_selected:on_archive_shown archive tx
-     in
-     let go_archive tx =
+     add_section ~title:"Feed" feed;
+     add_section ~title:"Archive" ~on_selected:on_archive_shown archive;
+     let go_archive () =
        (* Programmatic selection: configuration, no echo —
           [~on_selected] must NOT fire (the scene asserts the count
           holds). *)
-       select_section archive tx
+       select_section archive
      in
-     let* feed_root =
+     let ready = signal (Str "feed ready") in
+     let feed_root =
        column
          [
-           (let* ready = signal (Str "feed ready") in
-            label ~bind:ready () (* label#0 *));
-           button ~text:"to archive" ~on_click:go_archive () (* button#0 *);
+           label ~bind:ready (* label#0 *);
+           button ~text:"to archive" ~on_click:go_archive (* button#0 *);
          ]
+         ()
      in
-     let* () = mount_in feed feed_root in
-     let* archive_root = column [ label ~bind:visits () (* label#1 *) ] in
+     mount_in feed feed_root;
+     let archive_root = column [ label ~bind:visits (* label#1 *) ] () in
      mount_in archive archive_root);
 
   exit (run app)

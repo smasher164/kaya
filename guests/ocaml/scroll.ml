@@ -11,24 +11,27 @@ let () =
   let app = Kaya_app.create () in
 
   let status = ref None in
-  build app
-    (let* () = window ~title:"scroll" () in
-     let* s = signal (Str "at top") in
+  build app (fun () ->
+     window ~title:"scroll" ();
+     let s = signal (Str "at top") in
      status := Some s;
-     let on_bottom tx = write s (Str "bottom clicked") tx in
-     let row i =
-       let* caption = signal (Str (Printf.sprintf "row %d" i)) in
+     let on_bottom () = write s (Str "bottom clicked") in
+     let row i () =
+       let caption = signal (Str (Printf.sprintf "row %d" i)) in
        label ~bind:caption ()
      in
-     let* root =
+     let root =
        column
          [
-           label ~bind:s () (* label#0 *);
+           label ~bind:s (* label#0 *);
            scroll ~grow:1.0
-             (column
-                (List.init 29 (fun i -> row (i + 1))
-                @ [ button ~text:"bottom" ~on_click:on_bottom () (* button#0 *) ]));
+             [
+               column
+                 (List.init 29 (fun i -> row (i + 1))
+                 @ [ button ~text:"bottom" ~on_click:on_bottom (* button#0 *) ]);
+             ];
          ]
+         ()
      in
      mount root);
 

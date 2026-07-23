@@ -9,20 +9,21 @@ let options = [ "Small"; "Medium"; "Large" ]
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* () = window ~title:"radio" () in
-     let* size = signal (Str "size: Small") in
+  build app (fun () ->
+     window ~title:"radio" ();
+     let size = signal (Str "size: Small") in
 
      let on_pick index =
        write size (Str ("size: " ^ List.nth options index))
      in
 
-     let* root =
+     let root =
        column
          [
-           radio ~selected:0 ~on_select:on_pick options ();
-           label ~bind:size () (* label#0 *);
+           radio ~selected:0 ~on_select:on_pick options;
+           label ~bind:size (* label#0 *);
          ]
+         ()
      in
      mount root);
 

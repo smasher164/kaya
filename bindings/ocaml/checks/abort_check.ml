@@ -19,9 +19,7 @@ let show_key = function
   | Blob h -> Printf.sprintf "blob:%Ld" h
 
 let entry_keys app todos =
-  build app
-    (let+ entries = items todos in
-     List.map fst entries)
+  build app (fun () -> List.map fst (items todos))
 
 let expect app todos want what =
   let got = entry_keys app todos in
@@ -52,9 +50,10 @@ let () =
   let app = create () in
   let todos =
     build app
-      (let* todos = collection in
-       let* () = insert todos (Str "a") (Str "one") in
-       let+ () = insert todos (Str "b") (Str "two") in
+      (fun () ->
+       let todos = collection () in
+       insert todos (Str "a") (Str "one");
+       insert todos (Str "b") (Str "two");
        todos)
   in
 
@@ -62,10 +61,10 @@ let () =
      the mirror and re-raise (rollback + propagate is the tx
      boundary's contract; surviving is the dispatch loop's). *)
   (match
-     build app
-       (let* () = insert todos (Str "c") (Str "three") in
-        let* () = remove todos (Str "a") in
-        fun _tx -> raise Handler_bug)
+     build app (fun () ->
+         insert todos (Str "c") (Str "three");
+         remove todos (Str "a");
+         raise Handler_bug)
    with
   | () -> fail "build swallowed the exception — the tx boundary must propagate"
   | exception Handler_bug -> ());
@@ -74,24 +73,23 @@ let () =
   (* The dispatch discipline: a raising handler is logged and the loop
      continues — the next transaction works and sees the restored
      model. *)
-  dispatch app
-    (let* () = insert todos (Str "d") (Str "four") in
-     fun _tx -> raise Handler_bug);
+  dispatch app (fun () ->
+      insert todos (Str "d") (Str "four");
+      raise Handler_bug);
   expect app todos [ "a"; "b" ] "dispatch abort leaked into the mirror";
-  build app (insert todos (Str "c") (Str "three"));
+  build app (fun () -> insert todos (Str "c") (Str "three"));
   expect app todos [ "a"; "b"; "c" ] "post-abort commit broken";
 
   (* An aborted transaction abandons its derived registrations with
      its records: the pending list promotes only on submit. *)
   let rc_cid = ref 0L in
-  dispatch app
-    (let* rc = collection_of check_todo_rt in
-     let* _count =
-       derive rc (fun entries -> I64 (Int64.of_int (List.length entries)))
-     in
-     fun _tx ->
-       rc_cid := (record_handle rc).cid;
-       raise Handler_bug);
+  dispatch app (fun () ->
+      let rc = collection_of check_todo_rt in
+      let _count =
+        derive rc (fun entries -> I64 (Int64.of_int (List.length entries)))
+      in
+      rc_cid := (record_handle rc).cid;
+      raise Handler_bug);
   (match Hashtbl.find_opt app.derived !rc_cid with
   | None | Some [] -> ()
   | Some fns -> fail "aborted tx leaked %d derived registrations" (List.length fns));
@@ -101,15 +99,15 @@ let () =
      insert and update_field each register a fresh copy with the core
      at encode time (headless-safe: registration only copies into the
      pending table, drained by the next submit). *)
-  let pics = build app (collection_of check_todo_rt) in
+  let pics = build app (fun () -> collection_of check_todo_rt) in
   let png = Bytes.of_string "not really a png" in
-  build app (insert_record pics (Str "p") { ct_title = "pic"; ct_pic = png });
-  (match build app (record_items pics) with
+  build app (fun () -> insert_record pics (Str "p") { ct_title = "pic"; ct_pic = png });
+  (match build app (fun () -> record_items pics) with
   | [ (Str "p", { ct_title = "pic"; ct_pic }) ] when ct_pic = png -> ()
   | _ -> fail "blob field did not round-trip through the model");
   let png2 = Bytes.of_string "different bytes" in
-  build app (update_field pics (Str "p") check_todo_ct_pic png2);
-  (match build app (record_items pics) with
+  build app (fun () -> update_field pics (Str "p") check_todo_ct_pic png2);
+  (match build app (fun () -> record_items pics) with
   | [ (_, { ct_pic; _ }) ] when ct_pic = png2 -> ()
   | _ -> fail "blob update_field did not update the model's copy");
 
@@ -119,19 +117,19 @@ let () =
      same read in a build tx, or after the scope closes, stays legal
      (the entry_keys reads above pin the build-tx side). *)
   (match
-     build app
-       (let+ _ = for_each todos (fun t -> items todos t.tpl_tx) in
-        ())
+     build app (fun () ->
+         let _ = for_each todos (fun () -> items todos) () in
+         ())
    with
   | () -> fail "For-body mirror read did not raise"
   | exception Failure _ -> ());
   expect app todos [ "a"; "b"; "c" ] "For-body read abort leaked into the mirror";
 
-  let visible = build app (signal (Bool false)) in
+  let visible = build app (fun () -> signal (Bool false)) in
   (match
-     build app
-       (let+ _ = when_ visible (fun t -> count todos t.tpl_tx) in
-        ())
+     build app (fun () ->
+         let _ = when_ visible (fun () -> count todos) () in
+         ())
    with
   | () -> fail "When-body mirror read did not raise"
   | exception Failure _ -> ());
@@ -140,7 +138,8 @@ let () =
      transaction that declared it. *)
   let n =
     build app
-      (let* _ = for_each todos (fun _ -> ()) in
+      (fun () ->
+       let _ = for_each todos (fun _ -> ()) () in
        count todos)
   in
   if n <> 3 then fail "post-scope read broken: %d" n;

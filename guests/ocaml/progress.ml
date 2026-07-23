@@ -6,14 +6,15 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* () = window ~title:"progress" () in
-     let* root =
+  build app (fun () ->
+     window ~title:"progress" ();
+     let root =
        column
          [
-           progress ~value:0.25 () (* progress#0 *);
-           progress ~indeterminate:true () (* progress#1 *);
+           progress ~value:0.25 (* progress#0 *);
+           progress ~indeterminate:true (* progress#1 *);
          ]
+         ()
      in
      mount root);
 

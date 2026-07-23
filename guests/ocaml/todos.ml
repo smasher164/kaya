@@ -1,4 +1,4 @@
-(* The todos scene from OCaml, on the let* surface with the
+(* The todos scene from OCaml, on the let surface with the
    construction sugar: the record declaration is the schema
    ([@@deriving kaya_gen]), constructors carry their props and handlers,
    containers take their children, and the tree reads as a tree. The
@@ -20,29 +20,32 @@ let () =
   let draft = ref "" in
   let next_key = ref 0 in
 
-  build app
-    (let* todos = collection_of todo_record in
+  build app (fun () ->
+     let todos = collection_of todo_record in
      (* The items-left label is a derived signal: the binding
         recomputes it from the collection after every mutation, so no
         handler mentions it. *)
-     let* items_left =
+     let items_left =
        derive todos (fun entries ->
            let n = List.length (List.filter (fun (_, t) -> not t.done_) entries) in
            Str (if n = 1 then "1 item left" else Printf.sprintf "%d items left" n))
      in
-     let* field = entry ~on_change:(fun text -> io (fun () -> draft := text)) () in
-     let on_add =
-       let* d = io (fun () -> !draft) in
+     (* The field realizes here because the handlers below need its
+        handle; [w field] slots the existing widget into the child
+        list, where the column merely attaches it. *)
+     let field = entry ~on_change:(fun text -> draft := text) () in
+     let on_add () =
+       let d = !draft in
        (* The empty-draft guard every real form has: nothing to insert,
           nothing to command. *)
-       if d = "" then return ()
+       if d = "" then ()
        else
-         let* key = io (fun () -> incr next_key; Printf.sprintf "t%d" !next_key) in
-         let* () = insert_record todos (Str key) { title = d; done_ = false } in
+         let key = (incr next_key; Printf.sprintf "t%d" !next_key) in
+         insert_record todos (Str key) { title = d; done_ = false };
          (* Finish the form: the field empties on screen and reports
             text_changed "" through its normal edit path (the fold
             empties the draft), and the cursor lands back in it. *)
-         let* () = clear field in
+         clear field;
          focus field
      in
      let on_toggle keys checked =
@@ -52,23 +55,22 @@ let () =
        todo_patch ~done_:checked todos (List.hd keys)
      in
 
-     let* root =
+     let root =
        column
          [
-           return field;
-           button ~text:"Add" ~on_click:on_add ();
-           label ~bind:items_left ();
-           each (record_handle todos)
-             Tpl.(
-               let+ _ =
+           w field;
+           button ~text:"Add" ~on_click:on_add;
+           label ~bind:items_left;
+           each (record_handle todos) (fun () ->
+               Tpl.(
                  row
                    [
-                     checkbox ~checked_field:todo_done_ ~on_toggle ();
-                     label ~bind_field:todo_title ();
+                     checkbox ~checked_field:todo_done_ ~on_toggle;
+                     label ~bind_field:todo_title;
                    ]
-               in
-               ());
+                   ()));
          ]
+         ()
      in
      mount root);
 

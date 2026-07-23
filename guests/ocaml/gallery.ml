@@ -1,4 +1,4 @@
-(* The gallery scene from OCaml, on the let* surface with the
+(* The gallery scene from OCaml, on the let surface with the
    construction sugar: a row with a checkbox and its status label, and
    a row with a slider and its volume label. Constructors carry their
    handlers, containers take their children, and the tree reads as a
@@ -24,10 +24,10 @@ let test_png =
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* status = signal (Str "urgent: false") in
-     let* volume = signal (Str "volume: 50%") in
-     let* pos = signal (F64 0.5) in
+  build app (fun () ->
+     let status = signal (Str "urgent: false") in
+     let volume = signal (Str "volume: 50%") in
+     let pos = signal (F64 0.5) in
 
      let on_urgent checked =
        write status (Str (Printf.sprintf "urgent: %b" checked))
@@ -40,17 +40,17 @@ let () =
      in
      (* The programmatic write: fans out to the control and must NOT
         come back as an on_volume occurrence. *)
-     let on_quarter = write pos (F64 0.25) in
+     let on_quarter () = write pos (F64 0.25) in
 
-     let* root =
+     let root =
        column
          [
-           row [ checkbox ~text:"urgent" ~on_toggle:on_urgent (); label ~bind:status () ];
+           row [ checkbox ~text:"urgent" ~on_toggle:on_urgent; label ~bind:status ];
            row
              [
-               slider ~min:0.0 ~max:1.0 ~bind:pos ~on_change:on_volume ();
-               label ~bind:volume ();
-               button ~text:"quarter" ~on_click:on_quarter ();
+               slider ~min:0.0 ~max:1.0 ~bind:pos ~on_change:on_volume;
+               label ~bind:volume;
+               button ~text:"quarter" ~on_click:on_quarter;
              ];
            (* The content-buffer row: a valid 2x2 PNG decodes and
               reports its size, and deliberately invalid bytes read
@@ -58,10 +58,11 @@ let () =
               crash, on every backend. *)
            row
              [
-               image ~source:test_png ();
-               image ~source:(Bytes.of_string "not an image") ();
+               image ~source:test_png;
+               image ~source:(Bytes.of_string "not an image");
              ];
          ]
+         ()
      in
      mount root);
 

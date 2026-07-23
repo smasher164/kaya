@@ -15,21 +15,22 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  build app
-    (let* probe = signal (Str "grow probe") in
-     let* one = signal (Str "one") in
+  build app (fun () ->
+     let probe = signal (Str "grow probe") in
+     let one = signal (Str "one") in
 
-     let* root =
+     let root =
        column
          [
-           label ~grow:1.0 ~bind:probe () (* label#0 *);
-           button ~grow:1.0 ~text:"quarter" ();
+           label ~grow:1.0 ~bind:probe (* label#0 *);
+           button ~grow:1.0 ~text:"quarter";
            row ~grow:2.0 ~spacing:12.0
              [
-               label ~grow:1.0 ~bind:one () (* label#1 *);
-               button ~grow:3.0 ~text:"three" ();
+               label ~grow:1.0 ~bind:one (* label#1 *);
+               button ~grow:3.0 ~text:"three";
              ];
          ]
+         ()
      in
      mount root);
 

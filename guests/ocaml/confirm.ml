@@ -15,14 +15,14 @@ let () =
   let app = Kaya_app.create () in
 
   let status = ref None in
-  build app
-    (let* () = window ~title:"confirm" () in
-     let* s = signal (Str "no decision") in
+  build app (fun () ->
+     window ~title:"confirm" ();
+     let s = signal (Str "no decision") in
      status := Some s;
      (* The result handler rides the request and retires with its
         one answer; ids are binding-allocated — no counter
         plumbing. *)
-     let delete_answered choice tx =
+     let delete_answered choice =
        match !status with
        | Some s ->
            let text =
@@ -30,36 +30,37 @@ let () =
              else if choice = 1 then "archived"
              else "deleted"
            in
-           write s (Str text) tx
+           write s (Str text)
        | None -> ()
      in
      (* A different dialog, a different handler: the association is
         the registration itself. *)
-     let eject_answered choice tx =
+     let eject_answered choice =
        match !status with
        | Some s ->
-           write s (Str (if choice = alert_cancel then "held" else "ejected")) tx
+           write s (Str (if choice = alert_cancel then "held" else "ejected"))
        | None -> ()
      in
-     let on_delete tx =
+     let on_delete () =
        ignore
          (show_alert ~title:"delete item?"
             ~message:"this cannot be undone"
             ~actions:[ "Delete"; "Archive" ] ~cancel:"Keep"
-            ~on_result:delete_answered tx)
+            ~on_result:delete_answered ())
      in
-     let on_eject tx =
+     let on_eject () =
        ignore
          (show_alert ~title:"eject disk?" ~message:"it is still mounted"
-            ~actions:[ "Eject" ] ~cancel:"Hold" ~on_result:eject_answered tx)
+            ~actions:[ "Eject" ] ~cancel:"Hold" ~on_result:eject_answered ())
      in
-     let* root =
+     let root =
        column
          [
-           label ~bind:s () (* label#0 *);
-           button ~text:"delete" ~on_click:on_delete ();
-           button ~text:"eject" ~on_click:on_eject ();
+           label ~bind:s (* label#0 *);
+           button ~text:"delete" ~on_click:on_delete;
+           button ~text:"eject" ~on_click:on_eject;
          ]
+         ()
      in
      mount root);
 
