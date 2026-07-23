@@ -45,10 +45,18 @@ moved to git history; their traps live in docs/traps.md.)
   global menu bar (mac), in-window MenuBar control (WinUI 3), GMenu
   hamburger/popover convention (GTK), and NO menu bar on phones — so
   it wants the sections shape: one declaration, per-platform
-  presentation idiom, capability-gated where a platform has none.
-  Prior OS-specific discussion is being mined from earlier sessions
-  before the design pass. ContextMenu is the recorded follow-on, and
-  Portal is what menus eventually want underneath.
+  presentation idiom — and the design pass (2026-07-23, settled with
+  Akhil) found NO capability gate is needed: phones lower the catalog
+  to the top bar's overflow, with a `primary` hint promoting chosen
+  actions to bar icons (inert on desktop). The full design and the
+  phase-by-phase execution plan live in docs/menus-plan.md — the
+  carve (menus are VERBS, never places; context menu = the same item
+  vocabulary anchored to a noun), the item vocabulary, shortcut
+  policy validation, per-backend lowerings, harness verbs, and the
+  ESCALATE list. Phase 0 (archaeology of prior OS-specific
+  discussions) reconciles before any spec edit. ContextMenu ships
+  inside this milestone; Portal remains what menus eventually want
+  underneath.
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
   beyond the primary set (utility panels, always-on-top).
