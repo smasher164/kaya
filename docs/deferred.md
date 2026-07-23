@@ -36,9 +36,49 @@ moved to git history; their traps live in docs/traps.md.)
     go/analysis; ErrorProne — never load-bearing, the runtime guards
     are the floor);
   - whatever the guide ratifies for multi-window ergonomics.
+- **Menus/MenuBar design pass** (ratified 2026-07-23 — it was in the
+  widget sequencing before the style guide and fell out of the
+  checkpoint). Load-bearing beyond the widget: the v1 scope says
+  "MenuBar covers policies" — it is the widget that proves the
+  declarative shortcut-policy vocabulary, and nothing else exercises
+  that subsystem. The OS variance is the sections problem again:
+  global menu bar (mac), in-window MenuBar control (WinUI 3), GMenu
+  hamburger/popover convention (GTK), and NO menu bar on phones — so
+  it wants the sections shape: one declaration, per-platform
+  presentation idiom, capability-gated where a platform has none.
+  Prior OS-specific discussion is being mined from earlier sessions
+  before the design pass. ContextMenu is the recorded follow-on, and
+  Portal is what menus eventually want underneath.
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
   beyond the primary set (utility panels, always-on-top).
+- **App-developer capability decisions** (raised 2026-07-23; each
+  wants a design pass or an explicit v2 verdict, none is speculative
+  protocol work):
+  - **Styling tier 1**: the v1 stance is zero styling API (the
+    dressed floor; DESIGN's Zen Garden passage) — but the stance has
+    no successor decision. The design-safe first tier is SEMANTIC
+    ROLES, not raw values — destructive/primary on buttons,
+    header/caption levels on labels — which map to a native idiom on
+    every platform without breaking each-platform-flows-like-itself.
+    Decide at the styling decision point, not by drift.
+  - **Accessibility surfacing**: the architecture carries it for free
+    (native widgets ARE the accessibility tree, DESIGN's
+    Accessibility passage) but nothing PROVES it and apps cannot
+    author it: wants an accessibility label/hint prop (the sibling of
+    test_id, which is already framed as the accessibility
+    identifier) and a harness verb that reads the REAL platform
+    accessibility tree (VoiceOver/UIA/AT-SPI) — the gate the claim
+    deserves. Rides naturally with the test_id milestone.
+  - **Video widget**: unexamined — DESIGN has the surface-handle
+    transport (the Canvas zero-copy arm) but no media-playback
+    story. The wrap-native bet suggests a Video widget over each
+    platform's native player (AVPlayerView / MediaPlayerElement /
+    Media3 / GStreamer) before any frame-pushing pipeline.
+    Trigger-gated on an artifact app.
+  - Audio is NOT listed here: it is designed (core-owned RT callback
+    + sample ring + node-graph vocabulary, DESIGN's Audio passage)
+    and stays admission-gated on an app that needs it.
 - The stock stacks' nil-frames are re-proposers too, in theory. A
   constraint-less `.frame` around a stock stack's child still places
   by re-proposing the child's fitted size; today every stock-branch
