@@ -131,9 +131,9 @@ touching layout code:
 - **Any platform with stills**: measure the recording still against the
   arithmetic — a pixel run at exactly `share × extent + gap` proves the
   tracks; the drawn control hugging inside its track is normal.
-- **Android, live bounds**: uiautomator inside the settle window —
+- **Android, live bounds**: uiautomator before the selftest exits —
   ```
-  S=emulator-5554   # adb -s: two emulators run in the pool
+  S=emulator-5554   # adb -s: the pool runs KAYA_ANDROID_EMUS (default 3) emulators
   adb -s $S shell am force-stop dev.kaya.milestone2
   adb -s $S shell "am start -n dev.kaya.milestone2/.MainActivity \
       --es KAYA_SELFTEST grow && sleep 0.3 && \
@@ -152,8 +152,8 @@ touching layout code:
 
 ## Multi-agent work
 
-The breadth phases (same change across 8 bindings or 7 backends)
-parallelize well: give each agent a disjoint file tree, the green
+The breadth phases (same change across 8 bindings, or across the 4
+backends' 5 platform lanes) parallelize well: give each agent a disjoint file tree, the green
 reference implementation to study, exact verification commands with
 expected verbatim output, and the constraint list of files it must not
 touch. The gate layer catches what an agent misses — that is what it is
