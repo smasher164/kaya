@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::protocol::{
-    EntryProp, WindowProp,
+    EntryProp, SectionProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
@@ -49,6 +49,9 @@ pub const TX_SHOW_ALERT: u16 = 21;
 pub const TX_PUSH_ENTRY: u16 = 22;
 pub const TX_POP_ENTRY: u16 = 23;
 pub const TX_SET_ENTRY_PROP: u16 = 24;
+pub const TX_ADD_SECTION: u16 = 25;
+pub const TX_SELECT_SECTION: u16 = 26;
+pub const TX_SET_SECTION_PROP: u16 = 27;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -65,6 +68,9 @@ pub const APPLY_PRESENT_ALERT: u16 = 11;
 pub const APPLY_PUSH_ENTRY: u16 = 12;
 pub const APPLY_POP_ENTRY: u16 = 13;
 pub const APPLY_SET_ENTRY_PROP: u16 = 14;
+pub const APPLY_ADD_SECTION: u16 = 15;
+pub const APPLY_SELECT_SECTION: u16 = 16;
+pub const APPLY_SET_SECTION_PROP: u16 = 17;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -108,6 +114,18 @@ pub const WPROP_TITLE: u32 = 1;
 pub const WPROP_WIDTH: u32 = 2;
 pub const WPROP_HEIGHT: u32 = 3;
 pub const WPROP_VETO_CLOSE: u32 = 4;
+pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
+
+/// Section property ids (spec::SECTION_PROPS) — the third typed
+/// surface table (see DESIGN.md, Sections).
+pub const SPROP_TITLE: u32 = 1;
+pub const SPROP_ICON: u32 = 2;
+
+/// The sections_presentation enum's wire values (spec enum
+/// "sections_presentation"): ADVISORY, the width/height precedent.
+pub const SECTIONS_PRESENTATION_AUTO: u32 = 0;
+pub const SECTIONS_PRESENTATION_BAR: u32 = 1;
+pub const SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
 
 /// Navigation-entry property ids (spec::ENTRY_PROPS) — their own
 /// typed table, not WINDOW_PROPS with applicability checks (see
@@ -314,6 +332,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_WIDTH => WindowProp::Width,
         WPROP_HEIGHT => WindowProp::Height,
         WPROP_VETO_CLOSE => WindowProp::VetoClose,
+        WPROP_SECTIONS_PRESENTATION => WindowProp::SectionsPresentation,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -324,6 +343,22 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Width => WPROP_WIDTH,
         WindowProp::Height => WPROP_HEIGHT,
         WindowProp::VetoClose => WPROP_VETO_CLOSE,
+        WindowProp::SectionsPresentation => WPROP_SECTIONS_PRESENTATION,
+    }
+}
+
+fn section_prop(raw: u32) -> SectionProp {
+    match raw {
+        SPROP_TITLE => SectionProp::Title,
+        SPROP_ICON => SectionProp::Icon,
+        other => panic!("kaya: unknown section property {other}"),
+    }
+}
+
+fn section_prop_raw(p: SectionProp) -> u32 {
+    match p {
+        SectionProp::Title => SPROP_TITLE,
+        SectionProp::Icon => SPROP_ICON,
     }
 }
 
@@ -564,6 +599,32 @@ pub fn decode_transaction_with_blobs(
                 };
                 TxOp::SetEntryProp {
                     entry,
+                    prop: p,
+                    value,
+                }
+            }
+            TX_ADD_SECTION => TxOp::AddSection {
+                window: WindowId(r.u64()),
+                section: WindowId(r.u64()),
+            },
+            TX_SELECT_SECTION => TxOp::SelectSection {
+                window: WindowId(r.u64()),
+                section: WindowId(r.u64()),
+            },
+            TX_SET_SECTION_PROP => {
+                let section = WindowId(r.u64());
+                let p = section_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: section properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetSectionProp {
+                    section,
                     prop: p,
                     value,
                 }
@@ -849,6 +910,26 @@ impl Writer {
                     write_value(b, value, blobs);
                 })
             }
+            ApplyOp::AddSection { window, section } => {
+                self.record(APPLY_ADD_SECTION, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&section.0.to_le_bytes());
+                })
+            }
+            ApplyOp::SelectSection { window, section } => {
+                self.record(APPLY_SELECT_SECTION, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&section.0.to_le_bytes());
+                })
+            }
+            ApplyOp::SetSectionProp { section, prop, value } => {
+                self.record(APPLY_SET_SECTION_PROP, |b, blobs| {
+                    b.extend_from_slice(&section.0.to_le_bytes());
+                    b.extend_from_slice(&section_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
         }
     }
 
@@ -1038,6 +1119,35 @@ impl Writer {
                         }
                         PropValue::Element { .. } => {
                             panic!("kaya: entry properties cannot bind element sources")
+                        }
+                    }
+                })
+            }
+            TxOp::AddSection { window, section } => self.record(TX_ADD_SECTION, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&section.0.to_le_bytes());
+            }),
+            TxOp::SelectSection { window, section } => {
+                self.record(TX_SELECT_SECTION, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&section.0.to_le_bytes());
+                })
+            }
+            TxOp::SetSectionProp { section, prop, value } => {
+                self.record(TX_SET_SECTION_PROP, |b, blobs| {
+                    b.extend_from_slice(&section.0.to_le_bytes());
+                    b.extend_from_slice(&section_prop_raw(*prop).to_le_bytes());
+                    match value {
+                        PropValue::Const(v) => {
+                            b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                            write_value(b, v, blobs);
+                        }
+                        PropValue::Signal(id) => {
+                            b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                            b.extend_from_slice(&id.0.to_le_bytes());
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: section properties cannot bind element sources")
                         }
                     }
                 })

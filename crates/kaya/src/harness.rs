@@ -68,6 +68,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "radio" => Some(include_str!("../../../tools/scenes/radio.steps")),
         "grid" => Some(include_str!("../../../tools/scenes/grid.steps")),
         "textarea" => Some(include_str!("../../../tools/scenes/textarea.steps")),
+        "sections" => Some(include_str!("../../../tools/scenes/sections.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -177,6 +178,15 @@ pub enum Step {
     /// single-window spelling; Some(n) prefixes the observation with
     /// `window#n `.
     ExpectTitle(Option<u64>, String),
+    /// The primary window's section count, from the REAL switcher.
+    ExpectSections(usize),
+    /// The ACTIVE section's title, from the platform's own selection
+    /// state — never the scene model's copy.
+    ExpectSection(String),
+    /// Drive the switcher to the section at `index` (add order),
+    /// through the platform's real switching path — emits
+    /// section_selected like a user's switch.
+    SelectSection(usize),
     ExpectWindowSize(Option<u64>, f64, f64),
     /// Drive the window's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — the veto grammar's trigger.
@@ -373,6 +383,19 @@ pub trait Stage: Send + 'static {
     /// (within two device units): the empty string when it does,
     /// otherwise a description (failure text only). No default.
     fn scroll_at_end(&self, target: Target) -> String;
+    /// The primary window's section count, read from the REAL
+    /// switcher control (tab bar items, stack pages), never the scene
+    /// model. No default: a backend that forgets it must fail to
+    /// compile.
+    fn section_count(&self) -> usize;
+    /// The ACTIVE section's title, from the platform's own selection
+    /// state. No default.
+    fn active_section_title(&self) -> String;
+    /// Drive the switcher to the section at `index` (add order)
+    /// through the platform's real switching path — the user's route,
+    /// so it emits section_selected (choose/toggle precedent). No
+    /// default.
+    fn select_section(&self, index: usize);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -471,6 +494,17 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let (window, rest) = parse_window_target(rest);
                 Step::ExpectTitle(window, parse_string(rest)?)
             }
+            "expect_sections" => Step::ExpectSections(
+                rest.trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("expect_sections wants a count: {line:?}"))?,
+            ),
+            "expect_section" => Step::ExpectSection(parse_string(rest)?),
+            "select_section" => Step::SelectSection(
+                rest.trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("select_section wants an index: {line:?}"))?,
+            ),
             "expect_window_size" => {
                 let (window, rest) = parse_window_target(rest);
                 let (w, h) = rest.split_once('x').ok_or_else(|| {
@@ -786,6 +820,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 stage.set_text(*t, s);
                 None
             }
+            Step::SelectSection(i) => {
+                stage.select_section(*i);
+                None
+            }
+            Step::ExpectSections(n) => Some(poll(|| {
+                let got = stage.section_count();
+                if got == *n {
+                    Ok(format!("{n} sections"))
+                } else {
+                    Err(format!("{got} sections, wanted {n}"))
+                }
+            })),
+            Step::ExpectSection(want) => Some(poll(|| {
+                let got = stage.active_section_title();
+                if got == *want {
+                    Ok(format!("section {want:?}"))
+                } else {
+                    Err(format!("section {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::CloseWindow(window) => {
                 // An action, silent like click: the veto grammar's
                 // observable is what the scene does next.
@@ -1357,6 +1411,13 @@ mod tests {
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
+        fn section_count(&self) -> usize {
+            0
+        }
+        fn active_section_title(&self) -> String {
+            String::new()
+        }
+        fn select_section(&self, _: usize) {}
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -1515,6 +1576,13 @@ mod tests {
         fn alert_count(&self) -> usize {
             0
         }
+        fn section_count(&self) -> usize {
+            0
+        }
+        fn active_section_title(&self) -> String {
+            String::new()
+        }
+        fn select_section(&self, _: usize) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -1631,6 +1699,13 @@ mod tests {
         fn alert_count(&self) -> usize {
             0
         }
+        fn section_count(&self) -> usize {
+            0
+        }
+        fn active_section_title(&self) -> String {
+            String::new()
+        }
+        fn select_section(&self, _: usize) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }

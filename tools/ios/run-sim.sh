@@ -524,7 +524,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # measured 2026-07-22); legs queue only after every binary
     # exists. The list is explicit: window/panels are desktop-only
     # by design and must not ride $SCENES here.
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea"
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections"
     swift_pids=()
     swift_names=()
     for guest in $IOS_SWIFT_SCENES; do

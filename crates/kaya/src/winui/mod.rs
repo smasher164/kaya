@@ -205,6 +205,37 @@ struct CoreState {
     nav_stacks: HashMap<u64, Vec<u64>>,
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
+    /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
+    /// containers by section id, and the selection mirror. The
+    /// switcher is KAYA-OWNED chrome (a bar of Buttons over/beside a
+    /// content Grid) — this backend's established stance: its nav
+    /// back-affordance is a kaya-owned wrapper too, and the platform's
+    /// NavigationView dies with stowed E_NOINTERFACE in dll-hosted
+    /// guests (docs/deferred.md carries the upgrade). A section's
+    /// pane swaps between its own root and its stack's top entry
+    /// (stacks are per-surface; nav_stacks keys sections too).
+    sections: HashMap<u64, Vec<u64>>,
+    section_panes: HashMap<u64, WinSection>,
+    /// Per-window: (the hint the chrome was built for, outer chrome
+    /// Grid, the bar panel holding the switcher buttons, the content
+    /// Grid the active pane fills). Built once and grown
+    /// incrementally — XAML refuses re-parenting, so a rebuild (hint
+    /// change only) detaches everything first.
+    section_chrome: HashMap<u64, (i64, Grid, Grid, Grid)>,
+    /// Per-section switcher button; the ACTIVE one is disabled — the
+    /// real control state the harness reads back.
+    section_buttons: HashMap<u64, Button>,
+    selected_sections: HashMap<u64, u64>,
+    sections_presentation: HashMap<u64, i64>,
+}
+
+/// One section's materialized state: the pane Grid (the mount
+/// target), its title, its own mounted root, and the hosting window.
+struct WinSection {
+    window: u64,
+    pane: Grid,
+    title: String,
+    root: Option<UIElement>,
 }
 
 /// One navigation entry: a pushed scene root, retained while covered
@@ -757,6 +788,13 @@ fn track(weight: f64) -> GridLength {
 /// (the veto class); an unarmed top pops here, reconciles the
 /// core-owned stack post-fact, and reports entry_popped.
 fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    // With sections present, back routes to the ACTIVE section's
+    // stack — back never switches sections (DESIGN.md, Sections).
+    let window = if core.sections.contains_key(&window) {
+        core.selected_sections.get(&window).copied().unwrap_or(window)
+    } else {
+        window
+    };
     let Some(&top) = core.nav_stacks.get(&window).and_then(|s| s.last()) else {
         return Ok(());
     };
@@ -781,6 +819,11 @@ fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
 /// while covered), or the window's own root and title when the stack
 /// empties.
 fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    // A section host reconciles its PANE, not a window (stacks are
+    // per-surface; DESIGN.md, Sections).
+    if core.section_panes.contains_key(&window) {
+        return refresh_section_pane(core, window);
+    }
     let target = winui_window(core, window)?;
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
     match top.and_then(|id| core.nav_entries.get(&id)) {
@@ -848,6 +891,227 @@ fn mount_entry(
     entry.back_button = Some(back);
     if core.nav_stacks.get(&host).and_then(|s| s.last()) == Some(&entry_id) {
         refresh_nav(core, host)?;
+    }
+    Ok(())
+}
+
+/// Assemble (or reassemble on a hint change) the window's sections
+/// chrome — KAYA-OWNED, the back-bar precedent: a bar of switcher
+/// Buttons over (hint `bar`) or beside (auto/`sidebar` — Left, the
+/// ratified Windows default) a content Grid the active pane fills.
+/// A button click is the USER route: it reconciles the core, swaps
+/// the pane, re-marks the buttons, and emits — synchronously, no
+/// async raises to swallow. The ACTIVE button is disabled: a real
+/// control state, which is what the harness reads back.
+fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    let ids = core.sections.get(&window).cloned().unwrap_or_default();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let hint = core
+        .sections_presentation
+        .get(&window)
+        .copied()
+        .unwrap_or(0);
+    // A hint change is the ONE rebuild: detach the long-lived buttons
+    // and panes from the old chrome first (XAML refuses a second
+    // parent), then drop it.
+    if matches!(core.section_chrome.get(&window), Some((h, ..)) if *h != hint) {
+        for sid in &ids {
+            if let Some(button) = core.section_buttons.get(sid) {
+                let el: UIElement = button.cast()?;
+                detach(&el)?;
+            }
+            if let Some(record) = core.section_panes.get(sid) {
+                let el: UIElement = record.pane.cast()?;
+                detach(&el)?;
+            }
+        }
+        core.section_chrome.remove(&window);
+    }
+    let horizontal = hint == 1;
+    if !core.section_chrome.contains_key(&window) {
+        // Build once: bar + content in a 2-track Grid, the track axis
+        // picked by the hint (`bar` = top row; auto/`sidebar` = the
+        // leading column, the ratified Windows default).
+        let outer = Grid::new()?;
+        let bar = Grid::new()?;
+        let content = Grid::new()?;
+        if horizontal {
+            let rows = outer.RowDefinitions()?;
+            let bar_track = RowDefinition::new()?;
+            bar_track.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            rows.Append(&bar_track)?;
+            let fill = RowDefinition::new()?;
+            fill.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
+            rows.Append(&fill)?;
+            let bar_el: FrameworkElement = bar.cast()?;
+            Grid::SetRow(&bar_el, 0)?;
+            let content_el: FrameworkElement = content.cast()?;
+            Grid::SetRow(&content_el, 1)?;
+        } else {
+            let cols = outer.ColumnDefinitions()?;
+            let bar_track = ColumnDefinition::new()?;
+            bar_track.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            cols.Append(&bar_track)?;
+            let fill = ColumnDefinition::new()?;
+            fill.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
+            cols.Append(&fill)?;
+            let bar_el: FrameworkElement = bar.cast()?;
+            Grid::SetColumn(&bar_el, 0)?;
+            let content_el: FrameworkElement = content.cast()?;
+            Grid::SetColumn(&content_el, 1)?;
+        }
+        outer.Children()?.Append(&bar)?;
+        outer.Children()?.Append(&content)?;
+        core.section_chrome
+            .insert(window, (hint, outer.clone(), bar, content));
+        let target = winui_window(core, window)?;
+        target.SetContent(&outer)?;
+    }
+    // Grow the bar incrementally: a track + button per section not
+    // yet appended (add order; ids never leave — the set is
+    // append-only by grammar).
+    let (_, _, bar, _) = core.section_chrome[&window].clone();
+    for (i, sid) in ids.iter().enumerate() {
+        if core.section_buttons.contains_key(sid) {
+            continue;
+        }
+        if horizontal {
+            let track = ColumnDefinition::new()?;
+            track.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            bar.ColumnDefinitions()?.Append(&track)?;
+        } else {
+            let track = RowDefinition::new()?;
+            track.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
+            bar.RowDefinitions()?.Append(&track)?;
+        }
+        let button = Button::new()?;
+        let sid_copy = *sid;
+        let handler = RoutedEventHandler::new(move |_, _| {
+            // Fires from the message loop, never under an apply
+            // borrow (the back-button precedent).
+            let mut emit = None;
+            CORE.with_borrow_mut(|core| -> windows_core::Result<()> {
+                let Some(core) = core.as_mut() else { return Ok(()) };
+                let Some(&window) = core
+                    .section_panes
+                    .get(&sid_copy)
+                    .map(|record| &record.window)
+                else {
+                    return Ok(());
+                };
+                if core.selected_sections.get(&window) == Some(&sid_copy) {
+                    return Ok(());
+                }
+                core.selected_sections.insert(window, sid_copy);
+                core.scene
+                    .user_selected_section(WindowId(window), WindowId(sid_copy));
+                show_section_pane(core, window, sid_copy)?;
+                mark_section_buttons(core, window)?;
+                emit = Some(window);
+                Ok(())
+            })?;
+            if let Some(window) = emit {
+                CORE.with_borrow(|core| {
+                    if let Some(core) = core.as_ref() {
+                        core.occurrences.send(Occurrence::SectionSelected {
+                            window: WindowId(window),
+                            section: WindowId(sid_copy),
+                        });
+                    }
+                });
+            }
+            Ok(())
+        });
+        button.Click(&handler)?;
+        let caption = TextBlock::new()?;
+        caption.SetText(&HSTRING::from(&*core.section_panes[sid].title))?;
+        button.SetContent(&caption)?;
+        let button_el: FrameworkElement = button.cast()?;
+        if horizontal {
+            Grid::SetColumn(&button_el, i as i32)?;
+        } else {
+            Grid::SetRow(&button_el, i as i32)?;
+        }
+        bar.Children()?.Append(&button)?;
+        core.section_buttons.insert(*sid, button);
+    }
+    if let Some(sel) = core.selected_sections.get(&window).copied() {
+        show_section_pane(core, window, sel)?;
+        mark_section_buttons(core, window)?;
+    }
+    Ok(())
+}
+
+/// Remove an element from its current panel parent, if any — chrome
+/// rebuilds re-home long-lived buttons and panes, and XAML refuses a
+/// second parent ("Element is already the child of another element").
+fn detach(element: &UIElement) -> windows_core::Result<()> {
+    let framework: FrameworkElement = element.cast()?;
+    let Ok(parent) = framework.Parent() else {
+        return Ok(());
+    };
+    let Ok(panel) = parent.cast::<bindings::Microsoft::UI::Xaml::Controls::Panel>() else {
+        return Ok(());
+    };
+    let children = panel.Children()?;
+    let mut index = 0u32;
+    if bool::from(children.IndexOf(element, &mut index)?) {
+        children.RemoveAt(index)?;
+    }
+    Ok(())
+}
+
+/// Re-mark the switcher: the active section's button is DISABLED —
+/// the selection state the harness's active-title read uses.
+fn mark_section_buttons(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let selected = core.selected_sections.get(&window).copied();
+    for sid in core.sections.get(&window).cloned().unwrap_or_default() {
+        if let Some(button) = core.section_buttons.get(&sid) {
+            button.SetIsEnabled(Some(sid) != selected)?;
+        }
+    }
+    Ok(())
+}
+
+/// Put the section's pane into the chrome's content slot.
+fn show_section_pane(
+    core: &CoreState,
+    window: u64,
+    section: u64,
+) -> windows_core::Result<()> {
+    let (Some((_, _, _, content)), Some(record)) = (
+        core.section_chrome.get(&window),
+        core.section_panes.get(&section),
+    ) else {
+        return Ok(());
+    };
+    let children = content.Children()?;
+    children.Clear()?;
+    let pane_el: UIElement = record.pane.cast()?;
+    detach(&pane_el)?;
+    children.Append(&pane_el)?;
+    Ok(())
+}
+
+/// Reconcile a section pane's visible child: its stack's top entry
+/// wrapper while covered (stacks are per-surface), its own mounted
+/// root otherwise.
+fn refresh_section_pane(core: &mut CoreState, sid: u64) -> windows_core::Result<()> {
+    let Some(record) = core.section_panes.get(&sid) else {
+        return Ok(());
+    };
+    let top = core.nav_stacks.get(&sid).and_then(|s| s.last()).copied();
+    let desired: Option<UIElement> = top
+        .and_then(|id| core.nav_entries.get(&id))
+        .and_then(|e| e.wrapper.clone())
+        .map(|w| w.cast().expect("a Grid is a UIElement"))
+        .or_else(|| record.root.clone());
+    let children = record.pane.Children()?;
+    children.Clear()?;
+    if let Some(widget) = desired {
+        children.Append(&widget)?;
     }
     Ok(())
 }
@@ -1324,6 +1588,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
+                (WindowProp::SectionsPresentation, Value::I64(hint)) => {
+                    // ADVISORY: Left pane for auto/sidebar, Top for
+                    // bar; rebuilt if the chrome already exists.
+                    core.sections_presentation.insert(window.0, *hint);
+                    if core.sections.contains_key(&window.0) {
+                        refresh_sections(core, window.0)?;
+                    }
+                }
                 (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
             }
         }
@@ -1348,6 +1620,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             for entry in core.nav_stacks.remove(&window.0).unwrap_or_default() {
                 core.nav_entries.remove(&entry);
             }
+            // ... and its sections, each with ITS stack (the one way
+            // a section dies).
+            for sid in core.sections.remove(&window.0).unwrap_or_default() {
+                core.section_panes.remove(&sid);
+                core.section_buttons.remove(&sid);
+                for entry in core.nav_stacks.remove(&sid).unwrap_or_default() {
+                    core.nav_entries.remove(&entry);
+                }
+            }
+            core.section_chrome.remove(&window.0);
+            core.selected_sections.remove(&window.0);
+            core.sections_presentation.remove(&window.0);
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
         }
@@ -1393,6 +1677,54 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let window = record.window;
             if core.nav_stacks.get(&window).and_then(|s| s.last()) == Some(&entry.0) {
                 refresh_nav(core, window)?;
+            }
+        }
+        ApplyOp::AddSection { window, section } => {
+            // Append-only: a pane joins the window's NavigationView;
+            // the mount fills it. First added is selected (mirrored
+            // from the core).
+            let pane = Grid::new()?;
+            core.section_panes.insert(
+                section.0,
+                WinSection {
+                    window: window.0,
+                    pane,
+                    title: String::new(),
+                    root: None,
+                },
+            );
+            core.sections.entry(window.0).or_default().push(section.0);
+            core.selected_sections.entry(window.0).or_insert(section.0);
+            refresh_sections(core, window.0)?;
+        }
+        ApplyOp::SelectSection { window, section } => {
+            // Programmatic and QUIET (the echo doctrine): the pane
+            // swaps and the buttons re-mark; no user path is touched
+            // and nothing emits.
+            core.selected_sections.insert(window.0, section.0);
+            show_section_pane(core, window.0, section.0)?;
+            mark_section_buttons(core, window.0)?;
+        }
+        ApplyOp::SetSectionProp { section, prop, value } => {
+            use crate::protocol::SectionProp;
+            let record = core
+                .section_panes
+                .get_mut(&section.0)
+                .expect("scene validated the section id");
+            match (prop, &value) {
+                (SectionProp::Title, Value::Str(title)) => {
+                    record.title = title.clone();
+                    let caption = record.title.clone();
+                    if let Some(button) = core.section_buttons.get(&section.0) {
+                        let text = TextBlock::new()?;
+                        text.SetText(&HSTRING::from(&*caption))?;
+                        button.SetContent(&text)?;
+                    }
+                }
+                // Day-one slot: accepted; the switcher TITLE is the
+                // harness observable.
+                (SectionProp::Icon, Value::Blob(_)) => {}
+                (p, v) => unreachable!("scene validated section prop {p:?}/{v:?}"),
             }
         }
         ApplyOp::PresentAlert(spec) => {
@@ -1818,7 +2150,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // it), the primary is the window's own root, an auxiliary
             // presents its window.
             let element = widget.element()?;
-            if core.nav_entries.contains_key(&window.0) {
+            if core.section_panes.contains_key(&window.0) {
+                // A section presents in-window: added to the set
+                // already; the mount fills its pane.
+                core.section_panes.get_mut(&window.0).unwrap().root =
+                    Some(element);
+                refresh_section_pane(core, window.0)?;
+            } else if core.nav_entries.contains_key(&window.0) {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
                 core.window.SetContent(&element)?;
@@ -2374,6 +2712,12 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             window,
             aux_windows: HashMap::new(),
             nav_entries: HashMap::new(),
+            sections: HashMap::new(),
+            section_panes: HashMap::new(),
+            section_chrome: HashMap::new(),
+            section_buttons: HashMap::new(),
+            selected_sections: HashMap::new(),
+            sections_presentation: HashMap::new(),
             nav_stacks: HashMap::new(),
             window_roots: HashMap::new(),
             window_titles: HashMap::new(),
@@ -2395,6 +2739,29 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
 struct WinUiStage;
 
 impl WinUiStage {
+    /// The mutable twin of on_ui, for stage actions that reconcile
+    /// core-owned state (select_section's user route).
+    fn on_ui_mut<T: Send + 'static>(
+        f: impl FnOnce(&mut CoreState) -> windows_core::Result<T> + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dispatcher = DISPATCHER.get().expect("the dispatcher is up");
+        let cell = std::sync::Mutex::new(Some((f, tx)));
+        let handler = DispatcherQueueHandler::new(move || {
+            if let Some((f, tx)) = cell.lock().unwrap().take() {
+                CORE.with_borrow_mut(|core| {
+                    let core = core.as_mut().expect("core state initialized");
+                    let _ = tx.send(f(core));
+                });
+            }
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+        rx.recv()
+            .expect("the dispatcher applied the step")
+            .expect("the step's WinRT calls succeeded")
+    }
+
     fn on_ui<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> T {
@@ -3144,6 +3511,62 @@ impl crate::harness::Stage for WinUiStage {
             )
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn section_count(&self) -> usize {
+        // The REAL switcher bar's child count, never the section map.
+        Self::on_ui_read(|core| {
+            Ok(core
+                .section_chrome
+                .get(&0)
+                .map(|(_, _, bar, _)| bar.Children()?.Size().map(|n| n as usize))
+                .transpose()?
+                .unwrap_or(0))
+        })
+        .unwrap_or(0)
+    }
+
+    fn active_section_title(&self) -> String {
+        // The DISABLED button's caption — the real selection marker
+        // on this backend's kaya-owned chrome.
+        Self::on_ui_read(|core| {
+            let ids = core.sections.get(&0).cloned().unwrap_or_default();
+            for sid in ids {
+                let Some(button) = core.section_buttons.get(&sid) else {
+                    continue;
+                };
+                if !bool::from(button.IsEnabled()?) {
+                    let content = button.Content()?;
+                    if let Ok(text) = content.cast::<TextBlock>() {
+                        return Ok(text.Text()?.to_string());
+                    }
+                }
+            }
+            Ok(String::new())
+        })
+        .unwrap_or_default()
+    }
+
+    fn select_section(&self, index: usize) {
+        // The user's route: the same reconcile + re-mark + emit the
+        // switcher button's Click runs, synchronously.
+        Self::on_ui_mut(move |core| {
+            let ids = core.sections.get(&0).cloned().unwrap_or_default();
+            let Some(&sid) = ids.get(index) else { return Ok(()) };
+            if core.selected_sections.get(&0) == Some(&sid) {
+                return Ok(());
+            }
+            core.selected_sections.insert(0, sid);
+            core.scene
+                .user_selected_section(WindowId(0), WindowId(sid));
+            show_section_pane(core, 0, sid)?;
+            mark_section_buttons(core, 0)?;
+            core.occurrences.send(Occurrence::SectionSelected {
+                window: WindowId(0),
+                section: WindowId(sid),
+            });
+            Ok(())
+        });
     }
 
     fn finish(&self, code: i32, verdict: &str) {

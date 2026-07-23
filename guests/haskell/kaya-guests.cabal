@@ -110,6 +110,11 @@ executable textarea
   main-is: textarea.hs
   build-depends: kaya-guests
 
+executable sections
+  import: shared
+  main-is: sections.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

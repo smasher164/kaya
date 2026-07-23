@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
 BUILD_EXAMPLES=()
 for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -221,7 +221,15 @@ run_build c build_c
 # platform — without this the container gets handed mac binaries as
 # "fresh" (the same disease target-linux/ exists to prevent for cargo).
 build_ocaml() {
-    dune build --build-dir=_build-linux || return 1
+    # A failed incremental build self-heals with one forced rebuild
+    # (caught 2026-07-22 adding the sections module: dune's
+    # incremental view through the virtiofs mount produced "Unbound
+    # module Dune__exe"; the same class as the staleness assert
+    # below, at build time instead of link time).
+    if ! dune build --build-dir=_build-linux; then
+        echo "dune incremental build failed; forcing a full rebuild" >&2
+        dune build --force --build-dir=_build-linux || return 1
+    fi
     # Freshness assert (caught live 2026-07-22: under PARALLEL lanes,
     # two exes rode a previous run's link — dune's incremental view
     # through the virtiofs mount raced the host lane's concurrent
@@ -496,6 +504,18 @@ for proto in x11 wayland; do
     run "$proto" textarea-ocaml env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/textarea.exe
     run "$proto" textarea-haskell env KAYA_SELFTEST=textarea "$(hs_bin textarea)"
     run "$proto" textarea-java env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The sections scene: GtkStackSwitcher over GtkStack — the
+    # presentation context (echo doctrine both ways + retention).
+    run "$proto" sections-rust env KAYA_SELFTEST=sections "$CARGO_TARGET_DIR/debug/examples/sections"
+    run "$proto" sections-python env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
+        python3 guests/python/sections.py
+    run "$proto" sections-go env KAYA_SELFTEST=sections /tmp/go-guests/sections
+    run "$proto" sections-csharp env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" sections-ocaml env KAYA_SELFTEST=sections KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/sections.exe
+    run "$proto" sections-haskell env KAYA_SELFTEST=sections "$(hs_bin sections)"
+    run "$proto" sections-java env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

@@ -919,6 +919,27 @@ def pop_entry(window=0):
     _records().append(wire.tx_pop_entry(int(window)))
 
 
+def select_section(section_id, window=0):
+    """Select a section programmatically: configuration, never echoes
+    on_selected (the echo doctrine). The section must already be
+    added."""
+    _records().append(wire.tx_select_section(int(window), int(section_id)))
+
+
+def sections_presentation(hint, window=0):
+    """How the window presents its sections — ADVISORY (the
+    width/height precedent): kaya.SECTIONS_AUTO, kaya.SECTIONS_BAR, or
+    kaya.SECTIONS_SIDEBAR; the phones ignore it by physics."""
+    _records().append(
+        wire.tx_set_window_sections_presentation(int(window), int(hint)))
+
+
+# The presentation hint's closed set, spelled for guests.
+SECTIONS_AUTO = wire.SECTIONS_PRESENTATION_AUTO
+SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR
+SECTIONS_SIDEBAR = wire.SECTIONS_PRESENTATION_SIDEBAR
+
+
 # The alert_choice cancel sentinel, spelled for handlers:
 # `if choice == kaya.CANCEL`. Deliberately not an index.
 CANCEL = wire.ALERT_CHOICE_CANCEL
@@ -1328,7 +1349,8 @@ def when(sig):
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
                  window=0, create=False, veto_close=None, push=False,
-                 intercept_back=None, on_popped=None, on_back=None):
+                 intercept_back=None, on_popped=None, on_back=None,
+                 section=False, on_selected=None):
         self._app = app
         self._mount = mount_on_exit
         self._title = title
@@ -1341,9 +1363,33 @@ class _TxScope:
         self._intercept_back = intercept_back
         self._on_popped = on_popped
         self._on_back = on_back
+        self._section = section
+        self._on_selected = on_selected
 
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
+        if self._section:
+            # A section's scene scope (the push_entry nesting rules:
+            # it may open inside the ambient build): add_section into
+            # the primary window, the section's props, and the body's
+            # root mounts INTO the section on exit. Append-only —
+            # sections have no destruction grammar.
+            self._nested = _tx is not None
+            if not self._nested:
+                _tx = []
+                _journal = {}
+            self._outer = (_recording, _pending_root)
+            _recording = True
+            _pending_root = None
+            _records().append(wire.tx_add_section(0, self._window))
+            if self._title is not None:
+                _records().append(
+                    wire.tx_set_section_title(self._window, str(self._title)))
+            # Per-section, NOT one-shot: the user can return any
+            # number of times; a programmatic select never fires it.
+            if self._on_selected is not None:
+                self._app._section_selected[self._window] = self._on_selected
+            return self
         if self._push:
             # A navigation entry's scope: push onto the primary's
             # stack, entry props, and the body's root mounts INTO the
@@ -1401,7 +1447,7 @@ class _TxScope:
 
     def __exit__(self, exc_type, exc, tb):
         global _tx, _recording, _journal, _pending_root
-        if self._push:
+        if self._section or self._push:
             # Mount the scope's root into the entry, restore the outer
             # scope's root-tracking, and — when the scope opened its
             # own transaction (top-level use) — submit it. Inside a
@@ -1417,7 +1463,8 @@ class _TxScope:
                 return False
             if root is None:
                 raise RuntimeError(
-                    "kaya: push_entry() body declared no root container")
+                    "kaya: push_entry()/add_section() body declared no "
+                    "root container")
             _tx.append(wire.tx_mount(self._window, root.id))
             if not self._nested:
                 records, _tx = _tx, None
@@ -1465,6 +1512,7 @@ class App:
         # (the request-bound alert precedent).
         self._entry_popped = {}
         self._back_requested = {}
+        self._section_selected = {}
         # Per-window lifecycle handlers, keyed by window id — same
         # rule: handlers scope to the thing that creates them.
         self._close_requested = {}
@@ -1541,6 +1589,23 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
+    def add_section(self, section_id, title=None, on_selected=None):
+        """A section's scene scope (DESIGN.md, Sections): add_section
+        into the primary window plus the section's props, and the
+        single top-level container mounts INTO IT on exit. Section
+        ids are guest-allocated in the shared surface namespace; the
+        set is append-only (no destruction grammar), and every
+        section's root is retained while covered — switching is
+        SELECTION, not lifecycle.
+
+        on_selected() rides the add (per-section): fires each time
+        the USER switches to this section through the platform's
+        switcher — post-fact and NOT one-shot. A programmatic
+        kaya.select_section does not fire it (the echo doctrine)."""
+        return _TxScope(
+            self, mount_on_exit=True, window=section_id, section=True,
+            title=title, on_selected=on_selected)
+
 
     def _dispatch_loop(self):
         while occurrence := runtime.next_occurrence():
@@ -1569,6 +1634,17 @@ class App:
                 # retire with it.
                 self._back_requested.pop(ident, None)
                 handler = self._entry_popped.pop(ident, None)
+                if handler is not None:
+                    try:
+                        handler()
+                    except Exception:
+                        traceback.print_exc()
+                continue
+            if kind == wire.OCC_SECTION_SELECTED:
+                # NOT one-shot: sections never die, and the user can
+                # return any number of times (ident is the section;
+                # the window rides as the payload).
+                handler = self._section_selected.get(ident)
                 if handler is not None:
                     try:
                         handler()

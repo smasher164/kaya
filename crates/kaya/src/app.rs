@@ -21,7 +21,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use crate::protocol::{
     AlertChoice, AlertId, AlertSpec,
     CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, Occurrence, Path, Prop, PropValue,
-    Record, SignalId, WindowId, WindowProp,
+    Record, SectionProp, SignalId, WindowId, WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -935,6 +935,48 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// Append a section to the primary surface's section set (section
+    /// ids are guest-allocated in the shared surface namespace). The
+    /// first added becomes selected; the set is append-only — this
+    /// grammar has no destruction verbs. Mounting a root into it
+    /// fills its pane:
+    /// `let s = tx.add_section(WindowId(7)).title("Feed").id();
+    ///  tx.mount_in(s, root);`
+    pub fn add_section(&mut self, section: WindowId) -> SectionRef<'_, 'a> {
+        self.add_section_in(DEFAULT_WINDOW, section)
+    }
+
+    /// Append onto another window's section set.
+    pub fn add_section_in(&mut self, window: WindowId, section: WindowId) -> SectionRef<'_, 'a> {
+        self.ops.push(TxOp::AddSection { window, section });
+        SectionRef { tx: self, section }
+    }
+
+    /// Select a section programmatically: configuration, never echoes
+    /// section_selected (the echo doctrine).
+    pub fn select_section(&mut self, section: WindowId) {
+        self.select_section_in(DEFAULT_WINDOW, section);
+    }
+
+    pub fn select_section_in(&mut self, window: WindowId, section: WindowId) {
+        self.ops.push(TxOp::SelectSection { window, section });
+    }
+
+    /// Set a section property to a constant ([`SectionProp`]; the
+    /// floor the [`SectionRef`] chain rides).
+    pub fn set_section_prop(
+        &mut self,
+        section: WindowId,
+        prop: SectionProp,
+        value: impl Into<Value>,
+    ) {
+        self.ops.push(TxOp::SetSectionProp {
+            section,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
     /// Request a modal alert (the request/result grammar): a chain
     /// that ends in [`AlertRef::show`], which sends the one atomic
     /// record and returns the request's id —
@@ -1734,6 +1776,7 @@ pub struct Messages<M> {
     window_closed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     back_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
 }
 
@@ -1754,6 +1797,7 @@ impl<M> Messages<M> {
             window_closed: RefCell::new(HashMap::new()),
             back_requested: RefCell::new(HashMap::new()),
             entry_popped: RefCell::new(HashMap::new()),
+            section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
         }
     }
@@ -1916,6 +1960,21 @@ impl<M> Messages<M> {
             .insert(entry.0, Box::new(move || msg.clone()));
     }
 
+    /// Bind the selected handler to ONE section: fires each time the
+    /// user switches TO it through the platform's switcher (post-fact;
+    /// the selection has already changed on screen). Not one-shot —
+    /// sections never die, and the user can return any number of
+    /// times. A programmatic select_section does not fire it: its
+    /// caller already knows (the echo doctrine).
+    pub fn on_section_selected(&self, section: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.section_selected
+            .borrow_mut()
+            .insert(section.0, Box::new(move || msg.clone()));
+    }
+
     /// Bind the one-shot result handler to a REQUEST (the id
     /// [`AlertRef::show`] returned): an action index or Cancel (every
     /// platform-native dismissal). The registration retires with the
@@ -1966,6 +2025,15 @@ impl<M> Messages<M> {
                     // retire with it.
                     self.back_requested.borrow_mut().remove(&entry.0);
                     self.entry_popped.borrow_mut().remove(&entry.0).map(|f| f())
+                }
+                Occurrence::SectionSelected { section, .. } => {
+                    // NOT one-shot: sections never die (the grammar
+                    // has no destruction verbs), and the user can
+                    // return any number of times. Keyed by section —
+                    // the handler is the section's own "I came on
+                    // screen", registered at add_section (handlers
+                    // scope to their creator).
+                    self.section_selected.borrow().get(&section.0).map(|f| f())
                 }
             };
             if let Some(m) = mapped {
@@ -2068,6 +2136,20 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// How this window presents its sections — ADVISORY, the
+    /// width/height precedent: honored where the platform has the
+    /// idiom, nearest thing otherwise, ignored on the phones.
+    pub fn sections_presentation(self, hint: crate::SectionsPresentation) -> Self {
+        let raw = match hint {
+            crate::SectionsPresentation::Auto => 0i64,
+            crate::SectionsPresentation::Bar => 1,
+            crate::SectionsPresentation::Sidebar => 2,
+        };
+        self.tx
+            .set_window_prop(self.window, WindowProp::SectionsPresentation, raw);
+        self
+    }
+
     pub fn id(&self) -> WindowId {
         self.window
     }
@@ -2099,6 +2181,32 @@ impl EntryRef<'_, '_> {
 
     pub fn id(&self) -> WindowId {
         self.entry
+    }
+}
+
+pub struct SectionRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    section: WindowId,
+}
+
+impl SectionRef<'_, '_> {
+    /// The switcher item's label — the tab title on every platform.
+    pub fn title(self, title: &str) -> Self {
+        self.tx
+            .set_section_prop(self.section, SectionProp::Title, title);
+        self
+    }
+
+    /// The switcher item's icon (the blob channel, the image-source
+    /// shape): rendered where the platform's switcher shows icons.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_section_prop(self.section, SectionProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.section
     }
 }
 
@@ -2641,6 +2749,7 @@ mod tests {
                     | Occurrence::AlertResult { .. }
                     | Occurrence::EntryPopped { .. }
                     | Occurrence::BackRequested { .. }
+                    | Occurrence::SectionSelected { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. } => {}
                     Occurrence::Shutdown => break,

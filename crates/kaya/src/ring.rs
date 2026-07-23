@@ -28,6 +28,7 @@ pub const REC_WINDOW_CLOSED: u16 = 6;
 pub const REC_ALERT_RESULT: u16 = 7;
 pub const REC_ENTRY_POPPED: u16 = 8;
 pub const REC_BACK_REQUESTED: u16 = 9;
+pub const REC_SECTION_SELECTED: u16 = 10;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

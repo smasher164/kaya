@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x4605672632603270
+specHash = 0x39a6143b6f4c3e0e
 
 valueBool :: Word32
 valueBool = 1
@@ -94,10 +94,22 @@ wpropHeight :: Word32
 wpropHeight = 3
 wpropVetoClose :: Word32
 wpropVetoClose = 4
+wpropSectionsPresentation :: Word32
+wpropSectionsPresentation = 5
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
 epropInterceptBack = 2
+spropTitle :: Word32
+spropTitle = 1
+spropIcon :: Word32
+spropIcon = 2
+sectionsPresentationAuto :: Word32
+sectionsPresentationAuto = 0
+sectionsPresentationBar :: Word32
+sectionsPresentationBar = 1
+sectionsPresentationSidebar :: Word32
+sectionsPresentationSidebar = 2
 alertChoiceAction0 :: Word32
 alertChoiceAction0 = 0
 alertChoiceAction1 :: Word32
@@ -182,6 +194,12 @@ txKindPopEntry :: Word16
 txKindPopEntry = 23
 txKindSetEntryProp :: Word16
 txKindSetEntryProp = 24
+txKindAddSection :: Word16
+txKindAddSection = 25
+txKindSelectSection :: Word16
+txKindSelectSection = 26
+txKindSetSectionProp :: Word16
+txKindSetSectionProp = 27
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -210,6 +228,12 @@ applyKindPopEntry :: Word16
 applyKindPopEntry = 13
 applyKindSetEntryProp :: Word16
 applyKindSetEntryProp = 14
+applyKindAddSection :: Word16
+applyKindAddSection = 15
+applyKindSelectSection :: Word16
+applyKindSelectSection = 16
+applyKindSetSectionProp :: Word16
+applyKindSetSectionProp = 17
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -228,6 +252,8 @@ occKindEntryPopped :: Word16
 occKindEntryPopped = 8
 occKindBackRequested :: Word16
 occKindBackRequested = 9
+occKindSectionSelected :: Word16
+occKindSectionSelected = 10
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -355,6 +381,18 @@ txPopEntry window = wireRecord txKindPopEntry (word64LE window)
 -- Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
 txSetEntryProp :: Word64 -> Word32 -> Word32 -> Builder
 txSetEntryProp entry prop source = wireRecord txKindSetEntryProp (word64LE entry <> word32LE prop <> word32LE source)
+
+-- Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections).
+txAddSection :: Word64 -> Word64 -> Builder
+txAddSection window section = wireRecord txKindAddSection (word64LE window <> word64LE section)
+
+-- Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive.
+txSelectSection :: Word64 -> Word64 -> Builder
+txSelectSection window section = wireRecord txKindSelectSection (word64LE window <> word64LE section)
+
+-- Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
+txSetSectionProp :: Word64 -> Word32 -> Word32 -> Builder
+txSetSectionProp section prop source = wireRecord txKindSetSectionProp (word64LE section <> word32LE prop <> word32LE source)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -613,6 +651,18 @@ txBindWindowVetoClose window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropVetoClose <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_window_prop with a constant sections_presentation value (window 0, the primary surface).
+txSetWindowSectionsPresentation :: Word64 -> Int64 -> Builder
+txSetWindowSectionsPresentation window sectionsPresentation = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropSectionsPresentation <> word32LE sourceConst
+    <> encodeValue (VI64 sectionsPresentation))
+
+-- set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface).
+txBindWindowSectionsPresentation :: Word64 -> Word64 -> Builder
+txBindWindowSectionsPresentation window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropSectionsPresentation <> word32LE sourceSignal
+    <> word64LE signalId)
+
 -- set_entry_prop with a constant title value.
 txSetEntryTitle :: Word64 -> String -> Builder
 txSetEntryTitle entry title = wireRecord txKindSetEntryProp
@@ -635,6 +685,30 @@ txSetEntryInterceptBack entry interceptBack = wireRecord txKindSetEntryProp
 txBindEntryInterceptBack :: Word64 -> Word64 -> Builder
 txBindEntryInterceptBack entry signalId = wireRecord txKindSetEntryProp
   (word64LE entry <> word32LE epropInterceptBack <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_section_prop with a constant title value.
+txSetSectionTitle :: Word64 -> String -> Builder
+txSetSectionTitle section title = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropTitle <> word32LE sourceConst
+    <> encodeValue (VStr title))
+
+-- set_section_prop with a signal-bound title value.
+txBindSectionTitle :: Word64 -> Word64 -> Builder
+txBindSectionTitle section signalId = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropTitle <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_section_prop with a constant icon value.
+txSetSectionIcon :: Word64 -> Word64 -> Builder
+txSetSectionIcon section handle = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropIcon <> word32LE sourceConst
+    <> encodeValue (VBlob handle))
+
+-- set_section_prop with a signal-bound icon value.
+txBindSectionIcon :: Word64 -> Word64 -> Builder
+txBindSectionIcon section signalId = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropIcon <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- Decode one value at offset `at` from the record base; returns the
@@ -671,7 +745,7 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -684,6 +758,12 @@ parseOccurrence rec = do
         -- (derived from the record shapes).
         else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested
           then return (Just (kind, ident, [], Nothing))
+        -- Surface-pair records (window, section): the SECOND id
+        -- keys the handler; the first rides as the payload.
+        else if kind == occKindSectionSelected
+          then do
+            second <- peekByteOff rec 16 :: IO Word64
+            return (Just (kind, second, [], Just (VI64 (fromIntegral ident))))
           else do
           pathLen <- peekByteOff rec 16 :: IO Word32
           let go at 0 acc = return (reverse acc, at)

@@ -111,6 +111,12 @@ pub enum Occurrence {
     /// intercept_back is armed. Nothing has popped; the app answers
     /// with pop_entry if it agrees — the CloseRequested veto class.
     BackRequested { entry: WindowId },
+    /// The user switched sections through the platform's own switcher
+    /// — informational and post-fact: the selection has already
+    /// changed on screen. Only the user's act emits; a programmatic
+    /// SelectSection is configuration and stays silent (the echo
+    /// doctrine).
+    SectionSelected { window: WindowId, section: WindowId },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
     /// The user moved a slider the guest created directly; carries the
@@ -409,6 +415,44 @@ pub enum WindowProp {
     /// with destroy_window — the veto class, armed by opt-in. Inert
     /// on mobile: no chrome close, and back is not close.
     VetoClose,
+    /// How this window presents its sections (Enum-valued:
+    /// [`SectionsPresentation`]; default Auto). ADVISORY, the
+    /// width/height precedent: honored where the platform has the
+    /// idiom, resolved to the nearest thing otherwise, ignored on the
+    /// phones where physics decides. Window-scoped because the GROUP
+    /// is the unit — no platform mixes per-section presentations
+    /// (DESIGN.md, Sections).
+    SectionsPresentation,
+}
+
+/// The presentation hint's closed set (spec enum
+/// "sections_presentation"). `Auto` resolves to each platform's
+/// dominant sections idiom: the bottom tab bar on the phones, toolbar
+/// tabs on macOS, NavigationView's left pane on Windows, the header
+/// switcher on GTK. `Bar` asks for the horizontal spelling, `Sidebar`
+/// for the leading-edge list; both are advisory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SectionsPresentation {
+    #[default]
+    Auto,
+    Bar,
+    Sidebar,
+}
+
+/// Section property keys — the third typed surface table (see
+/// spec::SECTION_PROPS and DESIGN.md's Sections). Sections share the
+/// surface-id namespace with windows and entries, so [`WindowId`]
+/// carries section ids too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SectionProp {
+    /// The switcher item's label (Str-valued): the tab title on every
+    /// platform.
+    Title,
+    /// The switcher item's icon (Blob-valued, the image-source
+    /// channel). Materialized where the platform's switcher shows
+    /// icons (the phones' tab bars, NavigationView); a desktop
+    /// switcher without icon slots ignores it.
+    Icon,
 }
 
 /// Navigation-entry property keys — their own typed table (see
@@ -502,6 +546,18 @@ pub enum TxOp {
     /// Bind a navigation-entry property. Element sources are rejected
     /// at decode — entries are not collection elements.
     SetEntryProp { entry: WindowId, prop: EntryProp, value: PropValue },
+    /// Append a section to `window`'s section set (no capability gate
+    /// — every platform has a sections idiom). The first added
+    /// becomes selected; the set is append-only, and every section's
+    /// root is retained while covered (DESIGN.md, Sections).
+    AddSection { window: WindowId, section: WindowId },
+    /// Select a section programmatically: configuration, never echoes
+    /// section_selected (the echo doctrine). The section must already
+    /// be added to `window`.
+    SelectSection { window: WindowId, section: WindowId },
+    /// Bind a section property. Element sources are rejected at
+    /// decode — sections are not collection elements.
+    SetSectionProp { section: WindowId, prop: SectionProp, value: PropValue },
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -595,6 +651,13 @@ pub enum ApplyOp {
     /// (the multi-pop obligation; see DESIGN.md, Navigation).
     PopEntry { window: WindowId },
     SetEntryProp { entry: WindowId, prop: EntryProp, value: Value },
+    /// Append a section to the window's section set, its root hidden
+    /// until a mount fills it; the first added becomes selected.
+    AddSection { window: WindowId, section: WindowId },
+    /// Select a section, quietly: programmatic selection never echoes
+    /// section_selected.
+    SelectSection { window: WindowId, section: WindowId },
+    SetSectionProp { section: WindowId, prop: SectionProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
@@ -696,6 +759,12 @@ impl OccSink {
                 }
                 Occurrence::BackRequested { entry } => {
                     ring.push_record(crate::ring::REC_BACK_REQUESTED, &entry.0.to_le_bytes());
+                }
+                Occurrence::SectionSelected { window, section } => {
+                    let mut body = [0u8; 16];
+                    body[..8].copy_from_slice(&window.0.to_le_bytes());
+                    body[8..].copy_from_slice(&section.0.to_le_bytes());
+                    ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
                 }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },

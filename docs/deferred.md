@@ -603,3 +603,12 @@ Landed history lives in git; this file only carries what is still open.
 - Arena offset+length form (row batches, audio) — returns when the row
   window and audio land; the blob table is its v1 realization.
 - Attach/embedding tooling rework (parked at milestone 0).
+
+- WinUI sections: upgrade the kaya-owned switcher chrome to
+  NavigationView (the ratified idiom). The types are already in the
+  winui-bindgen filter and the emit architecture is control-agnostic;
+  blocked on the stowed E_NOINTERFACE its async template machinery
+  raises in dll-hosted guests (docs/traps.md has the full
+  investigation: not the delegate, not pri adjacency, not the
+  metadata provider — needs interactive VM debugging with stowed-
+  exception analysis).

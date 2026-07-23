@@ -210,6 +210,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::F64 => (camel(prop), "Double", "f64"),
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -265,6 +266,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        self.end(start)");
         c.line("    }");
     }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::Blob => ("handle".to_string(), "UInt64", "blob"),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_section_prop with a constant {prop} value."));
+        c.line(&format!("    mutating func setSection{pc}(_ section: UInt64, _ {p}: {ty}) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
+        c.line("        self.u64(section)");
+        c.line(&format!("        self.u32(UInt32(KAYA_SPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value(.{ctor}({p}))"));
+        c.line("        self.end(start)");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_section_prop with a signal-bound {prop} value."));
+        c.line(&format!("    mutating func bindSection{pc}(_ section: UInt64, _ signalId: UInt64) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
+        c.line("        self.u64(section)");
+        c.line(&format!("        self.u32(UInt32(KAYA_SPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+        c.line("        self.u64(signalId)");
+        c.line("        self.end(start)");
+        c.line("    }");
+    }
     c.line("");
     c.line("    func submit() {");
     c.line("        bytes.withUnsafeBytes { raw in");
@@ -312,6 +345,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        {");
     c.line("            return (kind, id, [], nil)");
     c.line("        }");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !id_pair.is_empty() {
+        c.line("        // Surface-pair records (window, section): the SECOND id");
+        c.line("        // keys the handler; the first rides as the payload.");
+        c.line(&format!("        if {}", id_pair[0]));
+        for cond in &id_pair[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)");
+        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)))");
+        c.line("        }");
+    }
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
     c.line("        var keys: [KayaValue] = []");
     c.line("        var at = 24");

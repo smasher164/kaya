@@ -63,6 +63,7 @@ type app = {
   close_requested : (int64, tx -> unit) Hashtbl.t;
   entry_popped : (int64, tx -> unit) Hashtbl.t;
   back_requested : (int64, tx -> unit) Hashtbl.t;
+  section_selected : (int64, tx -> unit) Hashtbl.t;
   alert_handlers : (int64, int -> tx -> unit) Hashtbl.t;
   mutable next_alert : int64;
   window_closed : (int64, tx -> unit) Hashtbl.t;
@@ -119,6 +120,7 @@ let create () =
     close_requested = Hashtbl.create 8;
     entry_popped = Hashtbl.create 8;
     back_requested = Hashtbl.create 8;
+    section_selected = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
     window_closed = Hashtbl.create 8;
@@ -873,6 +875,33 @@ let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
     (fun f -> Hashtbl.replace tx.app.back_requested id f)
     on_back_requested
 
+(* Append a section to the window's section set (section ids are
+   guest-allocated in the shared surface namespace); the set is
+   append-only — sections have no destruction grammar, and every
+   section's root is retained while covered (switching is SELECTION,
+   not lifecycle). [mount_in] fills its pane:
+   [add_section ~title:"Feed" ~on_selected:(fun tx -> …) 7L].
+   [~on_selected] rides the add (per-section): fires each time the
+   USER switches to it — post-fact and NOT one-shot; a programmatic
+   [select_section] does not fire it (the echo doctrine). *)
+let add_section ?(window = 0L) ?title ?on_selected id tx =
+  emit tx (Kaya_wire.tx_add_section window id);
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_section_title id t)) title;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.section_selected id f)
+    on_selected
+
+(* Select a section programmatically: configuration, never echoes
+   [~on_selected] (the echo doctrine). *)
+let select_section ?(window = 0L) id tx =
+  emit tx (Kaya_wire.tx_select_section window id)
+
+(* The window's ADVISORY presentation hint
+   (Kaya_wire.sections_presentation_auto/bar/sidebar — the
+   width/height precedent; the phones ignore it by physics). *)
+let sections_presentation ?(window = 0L) hint tx =
+  emit tx (Kaya_wire.tx_set_window_sections_presentation window hint)
+
 (* Pop the window's top navigation entry and forget its tree — also
    the back-veto grammar's confirmation after [on_back_requested].
    Popping an empty stack is a scene error. *)
@@ -1297,6 +1326,14 @@ let dispatch_loop app =
            | None -> ())
          else if kind = Kaya_wire.occ_kind_back_requested then
            (match Hashtbl.find_opt app.back_requested id with
+           | Some handler -> dispatch app handler
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_section_selected then
+           (* NOT one-shot: sections never die, and the user can
+              return any number of times (id is the section; the
+              window rides as the payload). A programmatic
+              select_section never lands here (the echo doctrine). *)
+           (match Hashtbl.find_opt app.section_selected id with
            | Some handler -> dispatch app handler
            | None -> ())
          else if kind = Kaya_wire.occ_kind_alert_result then

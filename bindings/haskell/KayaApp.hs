@@ -62,6 +62,10 @@ module KayaApp
     mountIn,
     createWindow,
     pushEntry,
+    addSection,
+    selectSection,
+    sectionsPresentation,
+    SectionAttr (..),
     popEntry,
     EntryAttr (..),
     destroyWindow,
@@ -249,6 +253,7 @@ data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (Word32 -> IO ())
   | PEntryPopped !Word64 (IO ())
+  | PSectionSelected !Word64 (IO ())
   | PBackRequested !Word64 (IO ())
   | PCloseRequested !Word64 (IO ())
   | PWindowClosed !Word64 (IO ())
@@ -639,6 +644,10 @@ data EntryAttr
   | EOnPopped (IO ())
   | EOnBack (IO ())
 
+data SectionAttr
+  = STitle String
+  | SOnSelected (IO ())
+
 -- | Push a navigation entry onto the primary surface's stack (entry
 -- ids are guest-allocated in the shared surface namespace, the
 -- 'createWindow' discipline); materializes covered, 'mountIn'
@@ -661,6 +670,33 @@ pushEntry n attrs = do
 -- 'onBackRequested'. Popping an empty stack is a scene error.
 popEntry :: Build ()
 popEntry = emitB (W.txPopEntry 0)
+
+-- | Append a section to the primary window's section set (section
+-- ids are guest-allocated in the shared surface namespace); the set
+-- is append-only — sections have no destruction grammar, and every
+-- section's root is retained while covered (switching is SELECTION,
+-- not lifecycle). 'mountIn' fills its pane:
+-- @addSection 7 [STitle "Feed", SOnSelected (…)]@. 'SOnSelected'
+-- rides the add (per-section): fires each time the USER switches to
+-- it — post-fact and NOT one-shot; a programmatic 'selectSection'
+-- does not fire it (the echo doctrine).
+addSection :: Word64 -> [SectionAttr] -> Build ()
+addSection n attrs = do
+  emitB (W.txAddSection 0 n)
+  mapM_ apply attrs
+  where
+    apply (STitle t) = emitB (W.txSetSectionTitle n t)
+    apply (SOnSelected handler) = pendB (PSectionSelected n handler)
+
+-- | Select a section programmatically: configuration, never echoes
+-- 'SOnSelected' (the echo doctrine).
+selectSection :: Word64 -> Build ()
+selectSection n = emitB (W.txSelectSection 0 n)
+
+-- | The window's ADVISORY presentation hint (0 auto / 1 bar /
+-- 2 sidebar — the width/height precedent; phones ignore it).
+sectionsPresentation :: Int64 -> Build ()
+sectionsPresentation hint = emitB (W.txSetWindowSectionsPresentation 0 hint)
 
 
 
@@ -1526,6 +1562,7 @@ data App = App
     -- Per-entry navigation handlers, keyed by entry surface id (the
     -- request-bound alert precedent).
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),
+    appSectionSelected :: IORef (Map.Map Word64 (IO ())),
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64
@@ -1571,6 +1608,7 @@ register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
+  PSectionSelected n handler -> modifyIORef' (appSectionSelected app) (Map.insert n handler)
   PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
   PCloseRequested n handler -> modifyIORef' (appCloseRequested app) (Map.insert n handler)
   PWindowClosed n handler -> modifyIORef' (appWindowClosed app) (Map.insert n handler)
@@ -1632,6 +1670,7 @@ newApp =
   App
     <$> newIORef (Counters 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
+    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -1727,6 +1766,14 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindBackRequested -> do
           handlers <- readIORef (appBackRequested app)
+          dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindSectionSelected -> do
+          -- NOT one-shot: sections never die, and the user can
+          -- return any number of times (ident is the section; the
+          -- window rides as the payload). A programmatic
+          -- selectSection never lands here (the echo doctrine).
+          handlers <- readIORef (appSectionSelected app)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindAlertResult -> do

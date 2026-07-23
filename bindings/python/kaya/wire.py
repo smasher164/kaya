@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x4605672632603270
+SPEC_HASH = 0x39a6143b6f4c3e0e
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -46,8 +46,14 @@ WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
 WPROP_VETO_CLOSE = 4
+WPROP_SECTIONS_PRESENTATION = 5
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
+SPROP_TITLE = 1
+SPROP_ICON = 2
+SECTIONS_PRESENTATION_AUTO = 0
+SECTIONS_PRESENTATION_BAR = 1
+SECTIONS_PRESENTATION_SIDEBAR = 2
 ALERT_CHOICE_ACTION0 = 0
 ALERT_CHOICE_ACTION1 = 1
 ALERT_CHOICE_CANCEL = 4294967295
@@ -91,6 +97,9 @@ TX_SHOW_ALERT = 21
 TX_PUSH_ENTRY = 22
 TX_POP_ENTRY = 23
 TX_SET_ENTRY_PROP = 24
+TX_ADD_SECTION = 25
+TX_SELECT_SECTION = 26
+TX_SET_SECTION_PROP = 27
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -105,6 +114,9 @@ APPLY_PRESENT_ALERT = 11
 APPLY_PUSH_ENTRY = 12
 APPLY_POP_ENTRY = 13
 APPLY_SET_ENTRY_PROP = 14
+APPLY_ADD_SECTION = 15
+APPLY_SELECT_SECTION = 16
+APPLY_SET_SECTION_PROP = 17
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -114,6 +126,7 @@ OCC_WINDOW_CLOSED = 6
 OCC_ALERT_RESULT = 7
 OCC_ENTRY_POPPED = 8
 OCC_BACK_REQUESTED = 9
+OCC_SECTION_SELECTED = 10
 
 
 def _pad(b):
@@ -258,6 +271,18 @@ def tx_pop_entry(window):
 def tx_set_entry_prop(entry, prop, source):
     """Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<Q", entry) + struct.pack("<I", prop) + struct.pack("<I", source))
+
+def tx_add_section(window, section):
+    """Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections)."""
+    return record(TX_ADD_SECTION, struct.pack("<Q", window) + struct.pack("<Q", section))
+
+def tx_select_section(window, section):
+    """Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive."""
+    return record(TX_SELECT_SECTION, struct.pack("<Q", window) + struct.pack("<Q", section))
+
+def tx_set_section_prop(section, prop, source):
+    """Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<Q", section) + struct.pack("<I", prop) + struct.pack("<I", source))
 
 
 def tx_set_text(widget_id, text):
@@ -465,6 +490,16 @@ def tx_bind_window_veto_close(window, signal_id):
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_VETO_CLOSE, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_window_sections_presentation(window, sections_presentation):
+    """set_window_prop with a constant sections_presentation value (int); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_SECTIONS_PRESENTATION, SOURCE_CONST) + _enc.value(int(sections_presentation)))
+
+
+def tx_bind_window_sections_presentation(window, signal_id):
+    """set_window_prop with a signal-bound sections_presentation value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_SECTIONS_PRESENTATION, SOURCE_SIGNAL, signal_id))
+
+
 def tx_set_entry_title(entry, title):
     """set_entry_prop with a constant title value (str)."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -483,6 +518,26 @@ def tx_set_entry_intercept_back(entry, intercept_back):
 def tx_bind_entry_intercept_back(entry, signal_id):
     """set_entry_prop with a signal-bound intercept_back value."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QIIQ", entry, EPROP_INTERCEPT_BACK, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_section_title(section, title):
+    """set_section_prop with a constant title value (str)."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+
+
+def tx_bind_section_title(section, signal_id):
+    """set_section_prop with a signal-bound title value."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_TITLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_section_icon(section, handle):
+    """set_section_prop with a constant icon value (a kaya_blob_register handle, consumed by the next submit)."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_ICON, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
+
+
+def tx_bind_section_icon(section, signal_id):
+    """set_section_prop with a signal-bound icon value."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_ICON, SOURCE_SIGNAL, signal_id))
 
 
 def parse_value(buf, at):
@@ -513,7 +568,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
@@ -524,6 +579,12 @@ def parse_occurrence(buf):
         # no key path, no payload (derived from the record shapes).
         (surface_id,) = struct.unpack_from("<Q", buf, 8)
         return kind, surface_id, [], None
+    if kind in (OCC_SECTION_SELECTED,):
+        # Surface-pair records (window, section): the SECOND id
+        # keys the handler (they scope to the section); the
+        # first rides as the payload.
+        window, section = struct.unpack_from("<QQ", buf, 8)
+        return kind, section, [], window
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
     at = 24

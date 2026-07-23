@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -750,6 +750,23 @@ run textarea-ocaml-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/deb
 run textarea-haskell-swiftui env KAYA_SELFTEST=textarea "$(hs_bin textarea)"
 run textarea-swift-swiftui env KAYA_SELFTEST=textarea target/swift-guests/textarea
 run textarea-java-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The sections scene: the presentation context — echo doctrine both
+# ways (user switch emits, programmatic select stays quiet) plus
+# retention (DESIGN.md, Sections).
+KAYA_SELFTEST_SCRIPT="$(scene_script sections)"
+export KAYA_SELFTEST_SCRIPT
+run sections-rust-swiftui env KAYA_SELFTEST=sections target/debug/examples/sections
+run sections-python-swiftui env KAYA_SELFTEST=sections python3 guests/python/sections.py
+run sections-go-swiftui env KAYA_SELFTEST=sections target/go-guests/sections
+run sections-csharp-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run sections-ocaml-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/sections.exe
+run sections-haskell-swiftui env KAYA_SELFTEST=sections "$(hs_bin sections)"
+run sections-swift-swiftui env KAYA_SELFTEST=sections target/swift-guests/sections
+run sections-java-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

@@ -180,6 +180,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             PropKind::Str => ("str", format!("_enc.value({prop})")),
             PropKind::F64 => ("float", format!("_enc.value({prop})")),
             PropKind::Bool => ("bool", format!("_enc.value({prop})")),
+            PropKind::Enum(_) => ("int", format!("_enc.value(int({prop}))")),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -213,6 +214,31 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("def tx_bind_entry_{prop}(entry, signal_id):"));
         c.line(&format!("    \"\"\"set_entry_prop with a signal-bound {prop} value.\"\"\""));
         c.line(&format!("    return record(TX_SET_ENTRY_PROP, struct.pack(\"<QIIQ\", entry, EPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+    }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (param, ty, expr) = match kind {
+            PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
+            PropKind::Blob => (
+                "handle",
+                "a kaya_blob_register handle, consumed by the next submit",
+                "_enc.value(BlobHandle(handle))".to_string(),
+            ),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_section_{prop}(section, {param}):"));
+        c.line(&format!("    \"\"\"set_section_prop with a constant {prop} value ({ty}).\"\"\""));
+        c.line(&format!("    return record(TX_SET_SECTION_PROP, struct.pack(\"<QII\", section, SPROP_{up}, SOURCE_CONST) + {expr})"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_section_{prop}(section, signal_id):"));
+        c.line(&format!("    \"\"\"set_section_prop with a signal-bound {prop} value.\"\"\""));
+        c.line(&format!("    return record(TX_SET_SECTION_PROP, struct.pack(\"<QIIQ\", section, SPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
     c.line("");
     c.line("");
@@ -266,6 +292,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        # no key path, no payload (derived from the record shapes).");
     c.line("        (surface_id,) = struct.unpack_from(\"<Q\", buf, 8)");
     c.line("        return kind, surface_id, [], None");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !id_pair.is_empty() {
+        c.line(&format!("    if kind in ({id_pair},):"));
+        c.line("        # Surface-pair records (window, section): the SECOND id");
+        c.line("        # keys the handler (they scope to the section); the");
+        c.line("        # first rides as the payload.");
+        c.line("        window, section = struct.unpack_from(\"<QQ\", buf, 8)");
+        c.line("        return kind, section, [], window");
+    }
 c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
     c.line("    at = 24");

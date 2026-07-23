@@ -173,6 +173,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::F64 => (camel(prop), "Double", "VF64"),
             crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -209,6 +210,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("txBindEntry{pc} :: Word64 -> Word64 -> Builder"));
         c.line(&format!("txBindEntry{pc} entry signalId = wireRecord txKindSetEntryProp"));
         c.line(&format!("  (word64LE entry <> word32LE eprop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
+    }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("-- set_section_prop with a constant {prop} value."));
+        c.line(&format!("txSetSection{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetSection{pc} section {p} = wireRecord txKindSetSectionProp"));
+        c.line(&format!("  (word64LE section <> word32LE sprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line("");
+        c.line(&format!("-- set_section_prop with a signal-bound {prop} value."));
+        c.line(&format!("txBindSection{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBindSection{pc} section signalId = wireRecord txKindSetSectionProp"));
+        c.line(&format!("  (word64LE section <> word32LE sprop{pc} <> word32LE sourceSignal"));
         c.line("    <> word64LE signalId)");
     }
     c.line("");
@@ -269,6 +293,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        -- (derived from the record shapes).");
     c.line(&format!("        else if {id_only}"));
     c.line("          then return (Just (kind, ident, [], Nothing))");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !id_pair.is_empty() {
+        c.line("        -- Surface-pair records (window, section): the SECOND id");
+        c.line("        -- keys the handler; the first rides as the payload.");
+        c.line(&format!("        else if {id_pair}"));
+        c.line("          then do");
+        c.line("            second <- peekByteOff rec 16 :: IO Word64");
+        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident))))");
+    }
     c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
     c.line("          let go at 0 acc = return (reverse acc, at)");

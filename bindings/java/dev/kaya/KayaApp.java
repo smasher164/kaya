@@ -59,6 +59,7 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> closeRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> backRequested = new java.util.HashMap<>();
+    final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
@@ -355,6 +356,41 @@ public final class KayaApp {
         }
 
         /** The entry's surface id, for mountIn. */
+        public long id() {
+            return id;
+        }
+    }
+
+    /** Chains section props, the construction-sugar tier:
+     * tx.addSection(7).title("Feed").onSelected(tx -> …). */
+    public static final class SectionRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+
+        SectionRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** The switcher item's label — the tab title everywhere. */
+        public SectionRef title(String title) {
+            tx.records.add(KayaWire.txSetSectionTitle(id, title));
+            return this;
+        }
+
+        /** Binds the selected handler to THIS section (per-section):
+         * fires each time the USER switches to it through the
+         * platform's switcher — post-fact and NOT one-shot. A
+         * programmatic selectSection does not fire it (the echo
+         * doctrine). */
+        public SectionRef onSelected(Consumer<Tx> handler) {
+            app.sectionSelected.put(id, handler);
+            return this;
+        }
+
+        /** The section's surface id, for mountIn. */
         public long id() {
             return id;
         }
@@ -1381,6 +1417,43 @@ public final class KayaApp {
         }
 
         /**
+         * Append a section to the primary window's section set
+         * (section ids are guest-allocated in the shared surface
+         * namespace); the set is append-only — sections have no
+         * destruction grammar, and every section's root is retained
+         * while covered (switching is SELECTION, not lifecycle).
+         * mountIn fills its pane. Chains are the JVM spelling:
+         * tx.addSection(7).title("Feed").onSelected(tx -> …).
+         */
+        public SectionRef addSection(long id) {
+            records.add(KayaWire.txAddSection(0, id));
+            return new SectionRef(this, KayaApp.this, id);
+        }
+
+        /** Append onto another window's section set. */
+        public SectionRef addSectionIn(long window, long id) {
+            records.add(KayaWire.txAddSection(window, id));
+            return new SectionRef(this, KayaApp.this, id);
+        }
+
+        /** Select a section programmatically: configuration, never
+         * echoes onSelected (the echo doctrine). */
+        public void selectSection(long id) {
+            records.add(KayaWire.txSelectSection(0, id));
+        }
+
+        public void selectSectionIn(long window, long id) {
+            records.add(KayaWire.txSelectSection(window, id));
+        }
+
+        /** The window's ADVISORY presentation hint
+         * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
+         * width/height precedent; phones ignore it by physics). */
+        public void sectionsPresentation(long hint) {
+            records.add(KayaWire.txSetWindowSectionsPresentation(0, hint));
+        }
+
+        /**
          * Set the primary surface's title (the title bar on the
          * desktops, the switcher label on iOS, the task label on
          * Android).
@@ -1842,6 +1915,15 @@ public final class KayaApp {
                 // retire with it.
                 closeRequested.remove(occ.id);
                 Consumer<Tx> handler = windowClosed.remove(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SECTION_SELECTED) {
+                // NOT one-shot: sections never die, and the user can
+                // return any number of times (id is the section; the
+                // window rides as the payload). A programmatic
+                // selectSection never lands here (the echo doctrine).
+                Consumer<Tx> handler = sectionSelected.get(occ.id);
                 if (handler != null) {
                     dispatch(handler);
                 }

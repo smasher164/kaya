@@ -40,6 +40,12 @@ object KayaPresent {
      * answers with pop_entry if it agrees. */
     @JvmStatic external fun emitBackRequested(entry: Long)
 
+    /** The user switched sections through the platform switcher
+     * (post-fact; the core's selection mirror reconciles inside).
+     * Programmatic select_section never comes here — the echo
+     * doctrine. */
+    @JvmStatic external fun emitSectionSelected(window: Long, section: Long)
+
     /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —

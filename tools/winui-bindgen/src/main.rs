@@ -169,6 +169,17 @@ fn main() {
         // inline control — Items (a plain IVector, no ItemCollection
         // hierarchy), SelectedIndex, SelectionChanged.
         "Microsoft.UI.Xaml.Controls.RadioButtons".to_string(),
+        // The sections switcher: NavigationView is the platform's own
+        // idiom (left pane for auto/sidebar, Top for the bar hint) —
+        // items are NavigationViewItems with string content, selection
+        // rides SelectionChanged. The enums and event args must be
+        // named or the members vanish (the transitivity trap).
+        "Microsoft.UI.Xaml.Controls.NavigationView".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewItemBase".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewPaneDisplayMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewSelectionChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.NavigationViewBackButtonVisible".to_string(),
         // The runner's REAL press: the open dialog lives in the popup
         // layer (GetOpenPopupsForXamlRoot), its template buttons are
         // found by part name, and ButtonAutomationPeer.Invoke runs

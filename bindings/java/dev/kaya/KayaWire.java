@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x4605672632603270L;
+    public static final long SPEC_HASH = 0x39a6143b6f4c3e0eL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -49,8 +49,14 @@ public final class KayaWire {
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
     public static final int WPROP_VETO_CLOSE = 4;
+    public static final int WPROP_SECTIONS_PRESENTATION = 5;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
+    public static final int SPROP_TITLE = 1;
+    public static final int SPROP_ICON = 2;
+    public static final int SECTIONS_PRESENTATION_AUTO = 0;
+    public static final int SECTIONS_PRESENTATION_BAR = 1;
+    public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
     public static final int ALERT_CHOICE_ACTION0 = 0;
     public static final int ALERT_CHOICE_ACTION1 = 1;
     public static final int ALERT_CHOICE_CANCEL = -1;
@@ -93,6 +99,9 @@ public final class KayaWire {
     public static final short TX_KIND_PUSH_ENTRY = 22;
     public static final short TX_KIND_POP_ENTRY = 23;
     public static final short TX_KIND_SET_ENTRY_PROP = 24;
+    public static final short TX_KIND_ADD_SECTION = 25;
+    public static final short TX_KIND_SELECT_SECTION = 26;
+    public static final short TX_KIND_SET_SECTION_PROP = 27;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -107,6 +116,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_PUSH_ENTRY = 12;
     public static final short APPLY_KIND_POP_ENTRY = 13;
     public static final short APPLY_KIND_SET_ENTRY_PROP = 14;
+    public static final short APPLY_KIND_ADD_SECTION = 15;
+    public static final short APPLY_KIND_SELECT_SECTION = 16;
+    public static final short APPLY_KIND_SET_SECTION_PROP = 17;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -116,6 +128,7 @@ public final class KayaWire {
     public static final short OCC_KIND_ALERT_RESULT = 7;
     public static final short OCC_KIND_ENTRY_POPPED = 8;
     public static final short OCC_KIND_BACK_REQUESTED = 9;
+    public static final short OCC_KIND_SECTION_SELECTED = 10;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -374,6 +387,31 @@ public final class KayaWire {
     public static byte[] txSetEntryProp(long entry, int prop, int source) {
         ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry);
+        b.putInt(prop);
+        b.putInt(source);
+        return finish(b);
+    }
+
+    /** Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). */
+    public static byte[] txAddSection(long window, long section) {
+        ByteBuffer b = begin(TX_KIND_ADD_SECTION);
+        b.putLong(window);
+        b.putLong(section);
+        return finish(b);
+    }
+
+    /** Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. */
+    public static byte[] txSelectSection(long window, long section) {
+        ByteBuffer b = begin(TX_KIND_SELECT_SECTION);
+        b.putLong(window);
+        b.putLong(section);
+        return finish(b);
+    }
+
+    /** Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. */
+    public static byte[] txSetSectionProp(long section, int prop, int source) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section);
         b.putInt(prop);
         b.putInt(source);
         return finish(b);
@@ -692,6 +730,21 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_window_prop with a constant sections_presentation value (window 0, the primary surface). */
+    public static byte[] txSetWindowSectionsPresentation(long window, long sectionsPresentation) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_SECTIONS_PRESENTATION).putInt(SOURCE_CONST);
+        encodeValue(b, sectionsPresentation);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface). */
+    public static byte[] txBindWindowSectionsPresentation(long window, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_SECTIONS_PRESENTATION).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     /** set_entry_prop with a constant title value. */
     public static byte[] txSetEntryTitle(long entry, String title) {
         ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
@@ -719,6 +772,36 @@ public final class KayaWire {
     public static byte[] txBindEntryInterceptBack(long entry, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);
         b.putLong(entry).putInt(EPROP_INTERCEPT_BACK).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_section_prop with a constant title value. */
+    public static byte[] txSetSectionTitle(long section, String title) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_TITLE).putInt(SOURCE_CONST);
+        encodeValue(b, title);
+        return finish(b);
+    }
+
+    /** set_section_prop with a signal-bound title value. */
+    public static byte[] txBindSectionTitle(long section, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_section_prop with a constant icon value. */
+    public static byte[] txSetSectionIcon(long section, long handle) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_ICON).putInt(SOURCE_CONST);
+        encodeValue(b, new BlobHandle(handle));
+        return finish(b);
+    }
+
+    /** set_section_prop with a signal-bound icon value. */
+    public static byte[] txBindSectionIcon(long section, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_ICON).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
@@ -760,7 +843,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -773,6 +856,11 @@ public final class KayaWire {
         // (derived from the record shapes).
         if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED) {
             return new Occ(kind, id, java.util.List.of(), null);
+        }
+        // Surface-pair records (window, section): the SECOND id
+        // keys the handler; the first rides as the payload.
+        if (kind == OCC_KIND_SECTION_SELECTED) {
+            return new Occ(kind, b.getLong(16), java.util.List.of(), id);
         }
         int pathLen = b.getInt(16);
         List<Object> keys = new ArrayList<>();

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x4605672632603270;
+    public const ulong SpecHash = 0x39a6143b6f4c3e0e;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -48,8 +48,14 @@ static class KayaWire
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
     public const uint WpropVetoClose = 4;
+    public const uint WpropSectionsPresentation = 5;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
+    public const uint SpropTitle = 1;
+    public const uint SpropIcon = 2;
+    public const uint SectionsPresentationAuto = 0;
+    public const uint SectionsPresentationBar = 1;
+    public const uint SectionsPresentationSidebar = 2;
     public const uint AlertChoiceAction0 = 0;
     public const uint AlertChoiceAction1 = 1;
     public const uint AlertChoiceCancel = 4294967295;
@@ -92,6 +98,9 @@ static class KayaWire
     public const ushort TxKindPushEntry = 22;
     public const ushort TxKindPopEntry = 23;
     public const ushort TxKindSetEntryProp = 24;
+    public const ushort TxKindAddSection = 25;
+    public const ushort TxKindSelectSection = 26;
+    public const ushort TxKindSetSectionProp = 27;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -106,6 +115,9 @@ static class KayaWire
     public const ushort ApplyKindPushEntry = 12;
     public const ushort ApplyKindPopEntry = 13;
     public const ushort ApplyKindSetEntryProp = 14;
+    public const ushort ApplyKindAddSection = 15;
+    public const ushort ApplyKindSelectSection = 16;
+    public const ushort ApplyKindSetSectionProp = 17;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -115,6 +127,7 @@ static class KayaWire
     public const ushort OccKindAlertResult = 7;
     public const ushort OccKindEntryPopped = 8;
     public const ushort OccKindBackRequested = 9;
+    public const ushort OccKindSectionSelected = 10;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -418,6 +431,34 @@ static class KayaWire
         w.Write(prop);
         w.Write(source);
         return Finish(stream, w, TxKindSetEntryProp);
+    }
+
+    /// Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections).
+    public static byte[] TxAddSection(ulong window, ulong section)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(section);
+        return Finish(stream, w, TxKindAddSection);
+    }
+
+    /// Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive.
+    public static byte[] TxSelectSection(ulong window, ulong section)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(section);
+        return Finish(stream, w, TxKindSelectSection);
+    }
+
+    /// Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
+    public static byte[] TxSetSectionProp(ulong section, uint prop, uint source)
+    {
+        var w = Begin(out var stream);
+        w.Write(section);
+        w.Write(prop);
+        w.Write(source);
+        return Finish(stream, w, TxKindSetSectionProp);
     }
 
     /// set_property with a constant text value.
@@ -763,6 +804,23 @@ static class KayaWire
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
+    /// set_window_prop with a constant sections_presentation value (window 0, the primary surface).
+    public static byte[] TxSetWindowSectionsPresentation(ulong window, long sectionsPresentation)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropSectionsPresentation); w.Write(SourceConst);
+        EncodeValue(w, sectionsPresentation);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface).
+    public static byte[] TxBindWindowSectionsPresentation(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropSectionsPresentation); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
     /// set_entry_prop with a constant title value.
     public static byte[] TxSetEntryTitle(ulong entry, string title)
     {
@@ -797,6 +855,40 @@ static class KayaWire
         return Finish(stream, w, TxKindSetEntryProp);
     }
 
+    /// set_section_prop with a constant title value.
+    public static byte[] TxSetSectionTitle(ulong section, string title)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropTitle); w.Write(SourceConst);
+        EncodeValue(w, title);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a signal-bound title value.
+    public static byte[] TxBindSectionTitle(ulong section, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a constant icon value.
+    public static byte[] TxSetSectionIcon(ulong section, ulong handle)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropIcon); w.Write(SourceConst);
+        EncodeValue(w, new BlobHandle(handle));
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a signal-bound icon value.
+    public static byte[] TxBindSectionIcon(ulong section, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropIcon); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
@@ -808,7 +900,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -821,6 +913,14 @@ static class KayaWire
         // (derived from the record shapes).
         if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested)
             return true;
+        // Surface-pair records (window, section): the SECOND id
+        // keys the handler; the first rides as the payload.
+        if (kind == OccKindSectionSelected)
+        {
+            payload = id;
+            id = BitConverter.ToUInt64(rec, 16);
+            return true;
+        }
         uint pathLen = BitConverter.ToUInt32(rec, 16);
         int at = 24;
         for (uint i = 0; i < pathLen; i++)

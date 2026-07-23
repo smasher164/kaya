@@ -82,6 +82,7 @@ for arg in "$@"; do
         radio_rust|radio_python|radio_go|radio_csharp|radio_java) SUITE="$arg" ;;
         grid_rust|grid_python|grid_go|grid_csharp|grid_java) SUITE="$arg" ;;
         textarea_rust|textarea_python|textarea_go|textarea_csharp|textarea_java) SUITE="$arg" ;;
+        sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -157,7 +158,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -788,6 +789,13 @@ case "$SUITE" in
         run_suite textarea_go
         run_suite textarea_csharp
         run_suite textarea_java
+        # The sections scene: NavigationView — the presentation
+        # context (echo doctrine both ways + retention).
+        run_suite sections_rust
+        run_suite sections_python
+        run_suite sections_go
+        run_suite sections_csharp
+        run_suite sections_java
         run_suite layout_rust
         run_suite layout_python
         run_suite layout_go

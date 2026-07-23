@@ -112,6 +112,7 @@ type App struct {
 	windowClosed   map[uint64]func(*Tx)
 	entryPopped    map[uint64]func(*Tx)
 	backRequested  map[uint64]func(*Tx)
+	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	model          map[uint64][]*instance
@@ -149,6 +150,7 @@ func NewApp() *App {
 		alerts:         make(map[uint64]func(*Tx, uint32)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
+		sectionSelected: make(map[uint64]func(*Tx)),
 		closeRequested: make(map[uint64]func(*Tx)),
 		windowClosed:   make(map[uint64]func(*Tx)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
@@ -1051,6 +1053,40 @@ func (tx *Tx) PopEntryIn(window uint64) {
 	tx.records = append(tx.records, TxPopEntry(window))
 }
 
+// AddSection appends a section to the primary window's section set
+// (section ids are guest-allocated in the shared surface namespace);
+// the set is append-only — sections have no destruction grammar, and
+// every section's root is retained while covered (switching is
+// SELECTION, not lifecycle). A MountIn fills its pane. Returns the
+// prop chain: tx.AddSection(7).Title("Feed").OnSelected(fn).
+func (tx *Tx) AddSection(id uint64) SectionRef {
+	tx.records = append(tx.records, TxAddSection(0, id))
+	return SectionRef{tx: tx, id: id}
+}
+
+// AddSectionIn appends onto another window's section set.
+func (tx *Tx) AddSectionIn(window, id uint64) SectionRef {
+	tx.records = append(tx.records, TxAddSection(window, id))
+	return SectionRef{tx: tx, id: id}
+}
+
+// SelectSection selects a section programmatically: configuration,
+// never echoes OnSelected (the echo doctrine).
+func (tx *Tx) SelectSection(id uint64) {
+	tx.records = append(tx.records, TxSelectSection(0, id))
+}
+
+func (tx *Tx) SelectSectionIn(window, id uint64) {
+	tx.records = append(tx.records, TxSelectSection(window, id))
+}
+
+// SectionsPresentation sets the window's ADVISORY presentation hint
+// (SectionsPresentationAuto/Bar/Sidebar — the width/height
+// precedent; the phones ignore it by physics).
+func (tx *Tx) SectionsPresentation(hint int64) {
+	tx.records = append(tx.records, TxSetWindowSectionsPresentation(0, hint))
+}
+
 // ShowAlert requests a modal alert (the request/result grammar): a
 // chain that ends in Show, which sends the one atomic record —
 // tx.ShowAlert().Title("delete item?").Message("…").Action("Delete").
@@ -1231,6 +1267,32 @@ func (e EntryRef) OnBackRequested(fn func(*Tx)) EntryRef {
 // Id returns the entry's surface id, for MountIn.
 func (e EntryRef) Id() uint64 {
 	return e.id
+}
+
+// SectionRef is the prop chain an AddSection rides.
+type SectionRef struct {
+	tx *Tx
+	id uint64
+}
+
+// Title names the switcher item — the tab title on every platform.
+func (r SectionRef) Title(title string) SectionRef {
+	r.tx.records = append(r.tx.records, TxSetSectionTitle(r.id, title))
+	return r
+}
+
+// OnSelected binds the selected handler to THIS section (per-section,
+// the entry-handler precedent): fires each time the USER switches to
+// it through the platform's switcher — post-fact and NOT one-shot. A
+// programmatic SelectSection does not fire it (the echo doctrine).
+func (r SectionRef) OnSelected(fn func(*Tx)) SectionRef {
+	r.tx.app.sectionSelected[r.id] = fn
+	return r
+}
+
+// Id returns the section's surface id, for MountIn.
+func (r SectionRef) Id() uint64 {
+	return r.id
 }
 
 func (tx *Tx) Mount(root Widget) {
@@ -1428,6 +1490,14 @@ func (a *App) Run() int {
 				delete(a.backRequested, id)
 				if fn := a.entryPopped[id]; fn != nil {
 					delete(a.entryPopped, id)
+					a.dispatch(func(tx *Tx) { fn(tx) })
+				}
+			case kind == occSectionSelected:
+				// NOT one-shot: sections never die, and the user can
+				// return any number of times (id is the section; the
+				// window rides as the payload). A programmatic
+				// SelectSection never lands here (the echo doctrine).
+				if fn := a.sectionSelected[id]; fn != nil {
 					a.dispatch(func(tx *Tx) { fn(tx) })
 				}
 			case kind == occBackRequested:

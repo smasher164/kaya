@@ -53,6 +53,11 @@ pub struct KayaHostApi {
     /// is armed and nothing popped.
     pub emit_entry_popped: extern "C" fn(u64),
     pub emit_back_requested: extern "C" fn(u64),
+    /// The user switched sections through the platform switcher
+    /// (post-fact; the core's selection mirror reconciles inside this
+    /// call). A programmatic select_section never arrives here — the
+    /// echo doctrine.
+    pub emit_section_selected: extern "C" fn(u64, u64),
 }
 
 unsafe extern "C" {
@@ -92,6 +97,7 @@ pub(crate) fn run() -> i32 {
         emit_alert_result: crate::capi::kaya_emit_alert_result,
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,
         emit_back_requested: crate::capi::kaya_emit_back_requested,
+        emit_section_selected: crate::capi::kaya_emit_section_selected,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, EntryProp, Key, Prop, PropValue, Record, SignalId,
-    Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
+    ApplyOp, CollectionId, CommandKind, EntryProp, Key, Prop, PropValue, Record, SectionProp,
+    SignalId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -198,6 +198,19 @@ pub(crate) struct Scene {
     /// user pops reconcile through `user_popped`.
     nav_stacks: HashMap<WindowId, Vec<WindowId>>,
     entry_bindings: HashMap<SignalId, Vec<(WindowId, EntryProp)>>,
+    /// Live sections: section surface id -> the window whose section
+    /// set holds it. Sections share the surface namespace with
+    /// windows and entries (one guest allocator; mount and push_entry
+    /// target any of them). APPEND-ONLY by design: this grammar has
+    /// no destruction verbs, and a section only dies with its window.
+    section_of: HashMap<WindowId, WindowId>,
+    /// Per-window section sets, in add order.
+    sections: HashMap<WindowId, Vec<WindowId>>,
+    /// Per-window selected section — the core's mirror of the
+    /// switcher state, kept for select_section validation and
+    /// user-switch reconciliation (the nav_stacks stance).
+    selected_section: HashMap<WindowId, WindowId>,
+    section_bindings: HashMap<SignalId, Vec<(WindowId, SectionProp)>>,
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
@@ -324,6 +337,15 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
                 "kaya: window size request must be finite and positive, got {v}"
             );
         }
+        // The enum's closed set (the align precedent): the wire
+        // carries I64, the domain is the spec enum's values.
+        (WindowProp::SectionsPresentation, Value::I64(v)) => {
+            assert!(
+                (0..=2).contains(v),
+                "kaya: sections_presentation must be auto (0), bar (1), or \
+                 sidebar (2), got {v}"
+            );
+        }
         (p, v) => panic!("kaya: window property {p:?} rejects value {v:?}"),
     }
 }
@@ -333,6 +355,14 @@ fn check_entry_prop_value(prop: EntryProp, value: &Value) {
         (EntryProp::Title, Value::Str(_)) => {}
         (EntryProp::InterceptBack, Value::Bool(_)) => {}
         (p, v) => panic!("kaya: entry property {p:?} rejects value {v:?}"),
+    }
+}
+
+fn check_section_prop_value(prop: SectionProp, value: &Value) {
+    match (prop, value) {
+        (SectionProp::Title, Value::Str(_)) => {}
+        (SectionProp::Icon, Value::Blob(_)) => {}
+        (p, v) => panic!("kaya: section property {p:?} rejects value {v:?}"),
     }
 }
 
@@ -678,6 +708,18 @@ impl Scene {
                         self.nav_entries.remove(&entry);
                         self.mounted_windows.remove(&entry);
                     }
+                    // ... and its sections, each with ITS stack — the
+                    // one way a section dies (the grammar itself has
+                    // no destruction verbs).
+                    for section in self.sections.remove(&window).unwrap_or_default() {
+                        self.section_of.remove(&section);
+                        self.mounted_windows.remove(&section);
+                        for entry in self.nav_stacks.remove(&section).unwrap_or_default() {
+                            self.nav_entries.remove(&entry);
+                            self.mounted_windows.remove(&entry);
+                        }
+                    }
+                    self.selected_section.remove(&window);
                     out.push(ApplyOp::DestroyWindow { window });
                 }
                 TxOp::ShowAlert(spec) => {
@@ -717,11 +759,17 @@ impl Scene {
                     // No capability gate — every host materializes a
                     // serial stack natively (the deliberate contrast
                     // with create_window; DESIGN.md, Navigation).
+                    // Stacks are PER-SURFACE: a section hosts its own
+                    // stack (pushing into a section fell out of the
+                    // same generalization mount made; DESIGN.md,
+                    // Sections), and back routes to the ACTIVE
+                    // section's stack on the backends.
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
-                            || self.windows.contains(&window),
-                        "kaya: push_entry onto unknown window {window:?} — \
-                         create_window first (0 is the primary)"
+                            || self.windows.contains(&window)
+                            || self.section_of.contains_key(&window),
+                        "kaya: push_entry onto unknown surface {window:?} — \
+                         create_window or add_section first (0 is the primary)"
                     );
                     assert!(
                         entry.0 != 0,
@@ -754,6 +802,84 @@ impl Scene {
                     self.nav_entries.remove(&entry);
                     self.mounted_windows.remove(&entry);
                     out.push(ApplyOp::PopEntry { window });
+                }
+                TxOp::AddSection { window, section } => {
+                    // No capability gate — every platform has a
+                    // sections idiom (the push_entry stance).
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: add_section onto unknown window {window:?} — \
+                         create_window first (0 is the primary)"
+                    );
+                    assert!(
+                        section.0 != 0,
+                        "kaya: surface id 0 is the primary window, not a section"
+                    );
+                    assert!(
+                        section.0 & INTERNAL_BIT == 0,
+                        "kaya: section id {section:?} uses the reserved internal bit"
+                    );
+                    // One surface namespace: fresh among windows,
+                    // entries, AND sections.
+                    assert!(
+                        !self.windows.contains(&section)
+                            && !self.nav_entries.contains_key(&section)
+                            && !self.section_of.contains_key(&section),
+                        "kaya: surface id {section:?} already exists"
+                    );
+                    self.section_of.insert(section, window);
+                    let set = self.sections.entry(window).or_default();
+                    set.push(section);
+                    // The first added becomes selected — a window with
+                    // sections always shows one.
+                    self.selected_section.entry(window).or_insert(section);
+                    out.push(ApplyOp::AddSection { window, section });
+                }
+                TxOp::SelectSection { window, section } => {
+                    assert!(
+                        self.section_of.get(&section) == Some(&window),
+                        "kaya: select_section of {section:?} which is not a \
+                         section of window {window:?} — add_section first"
+                    );
+                    self.selected_section.insert(window, section);
+                    // Quiet by doctrine: configuration, no echo.
+                    out.push(ApplyOp::SelectSection { window, section });
+                }
+                TxOp::SetSectionProp { section, prop, value } => {
+                    assert!(
+                        self.section_of.contains_key(&section),
+                        "kaya: section prop on unknown section {section:?} — \
+                         add_section first"
+                    );
+                    match value {
+                        PropValue::Const(v) => {
+                            check_section_prop_value(prop, &v);
+                            out.push(ApplyOp::SetSectionProp { section, prop, value: v })
+                        }
+                        PropValue::Signal(id) => {
+                            let current = self
+                                .signals
+                                .get(&id)
+                                .unwrap_or_else(|| {
+                                    panic!("kaya: binding to unknown signal {id:?}")
+                                })
+                                .clone();
+                            check_section_prop_value(prop, &current);
+                            self.section_bindings
+                                .entry(id)
+                                .or_default()
+                                .push((section, prop));
+                            out.push(ApplyOp::SetSectionProp {
+                                section,
+                                prop,
+                                value: current,
+                            });
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: section properties cannot bind element sources")
+                        }
+                    }
                 }
                 TxOp::SetEntryProp { entry, prop, value } => {
                     assert!(
@@ -825,14 +951,17 @@ impl Scene {
                 }
                 TxOp::Mount { window, root } => {
                     // The target's domain is SURFACES: the primary, a
-                    // created window, or a pushed navigation entry
-                    // (generalize the TARGET of mount, not the tree).
+                    // created window, a pushed navigation entry, or an
+                    // added section (generalize the TARGET of mount,
+                    // not the tree).
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&window)
-                            || self.nav_entries.contains_key(&window),
+                            || self.nav_entries.contains_key(&window)
+                            || self.section_of.contains_key(&window),
                         "kaya: mount into unknown surface {window:?} — \
-                         create_window or push_entry first (0 is the primary)"
+                         create_window, push_entry, or add_section first \
+                         (0 is the primary)"
                     );
                     assert!(
                         self.widgets.contains_key(&root),
@@ -995,6 +1124,15 @@ impl Scene {
                     });
                 }
             }
+            if let Some(bound) = self.section_bindings.get(&id) {
+                for (section, prop) in bound {
+                    out.push(ApplyOp::SetSectionProp {
+                        section: *section,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
+            }
             if let Some(bound) = self.entry_bindings.get(&id) {
                 for (entry, prop) in bound {
                     out.push(ApplyOp::SetEntryProp {
@@ -1021,6 +1159,18 @@ impl Scene {
         not(any(target_os = "macos", target_os = "ios", target_os = "android")),
         allow(dead_code)
     )]
+    /// The user switched sections through the platform's switcher —
+    /// post-fact reconciliation of the core's selected-section mirror
+    /// (the user_popped stance). Selecting a section that was never
+    /// added is a backend bug and fails loudly.
+    pub(crate) fn user_selected_section(&mut self, window: WindowId, section: WindowId) {
+        assert!(
+            self.section_of.get(&section) == Some(&window),
+            "kaya: user selected {section:?} which is not a section of {window:?}"
+        );
+        self.selected_section.insert(window, section);
+    }
+
     pub(crate) fn user_popped(&mut self, entry: WindowId) {
         let window = self
             .nav_entries
@@ -2249,6 +2399,77 @@ mod tests {
             value: v("tick"),
         }]);
         assert_eq!(ops.len(), 0); // no dangling binding
+    }
+
+    /// The sections grammar end to end at the core: add (first added
+    /// becomes selected), select validates membership, mount and
+    /// push_entry both accept a section as their surface, and the
+    /// selection mirror reconciles user switches.
+    #[test]
+    fn sections_are_surfaces() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(8) },
+            TxOp::SetSectionProp {
+                section: WindowId(7),
+                prop: SectionProp::Title,
+                value: PropValue::Const(Value::from("Feed")),
+            },
+            TxOp::SelectSection { window: DEFAULT_WINDOW, section: WindowId(8) },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            // Sections are mount targets...
+            TxOp::Mount { window: WindowId(7), root: WidgetId(1) },
+            // ...and stack hosts (per-surface stacks): push INTO one.
+            TxOp::PushEntry { window: WindowId(7), entry: WindowId(9) },
+        ]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::AddSection { window, section }
+                if *window == DEFAULT_WINDOW && section.0 == 7
+        )));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SelectSection { section, .. } if section.0 == 8
+        )));
+        assert_eq!(scene.selected_section[&DEFAULT_WINDOW].0, 8);
+        // The user switches back: the mirror reconciles.
+        scene.user_selected_section(DEFAULT_WINDOW, WindowId(7));
+        assert_eq!(scene.selected_section[&DEFAULT_WINDOW].0, 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "not a section of")]
+    fn selecting_an_unadded_section_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SelectSection {
+            window: DEFAULT_WINDOW,
+            section: WindowId(7),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already exists")]
+    fn section_ids_share_the_surface_namespace() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn section_icon_rejects_non_blob() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+            TxOp::SetSectionProp {
+                section: WindowId(7),
+                prop: SectionProp::Icon,
+                value: PropValue::Const(Value::from("not bytes")),
+            },
+        ]);
     }
 
     #[test]

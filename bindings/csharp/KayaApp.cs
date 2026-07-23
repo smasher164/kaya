@@ -201,6 +201,7 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
     internal readonly Dictionary<ulong, Action<Tx>> backRequested = new();
+    internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
     internal ulong nextAlert;
@@ -409,6 +410,15 @@ sealed class KayaApp
                 closeRequested.Remove(id);
                 if (windowClosed.Remove(id, out var fn))
                     Dispatch(tx => fn(tx));
+            }
+            else if (kind == KayaWire.OccKindSectionSelected)
+            {
+                // NOT one-shot: sections never die, and the user can
+                // return any number of times (id is the section; the
+                // window rides as the payload). A programmatic
+                // SelectSection never lands here (the echo doctrine).
+                if (sectionSelected.TryGetValue(id, out var fn))
+                    Dispatch(fn);
             }
             else if (kind == KayaWire.OccKindEntryPopped)
             {
@@ -1289,6 +1299,37 @@ sealed class Tx
     /// also the back-veto grammar's confirmation after
     /// OnBackRequested. Popping an empty stack is a scene error.
     public void PopEntry(ulong window = 0) => Records.Add(KayaWire.TxPopEntry(window));
+
+    /// Append a section to the window's section set (section ids are
+    /// guest-allocated in the shared surface namespace); the set is
+    /// append-only — sections have no destruction grammar, and every
+    /// section's root is retained while covered (switching is
+    /// SELECTION, not lifecycle). MountIn fills its pane. Named
+    /// arguments are the C# spelling:
+    /// tx.AddSection(7, title: "Feed", onSelected: tx => …).
+    /// onSelected rides the add (per-section): fires each time the
+    /// USER switches to it — post-fact and NOT one-shot; a
+    /// programmatic SelectSection does not fire it (the echo
+    /// doctrine).
+    public void AddSection(
+        ulong id, string? title = null, Action<Tx>? onSelected = null,
+        ulong window = 0)
+    {
+        Records.Add(KayaWire.TxAddSection(window, id));
+        if (title is { } t) Records.Add(KayaWire.TxSetSectionTitle(id, t));
+        if (onSelected is { } fn) App.sectionSelected[id] = fn;
+    }
+
+    /// Select a section programmatically: configuration, never echoes
+    /// onSelected (the echo doctrine).
+    public void SelectSection(ulong id, ulong window = 0) =>
+        Records.Add(KayaWire.TxSelectSection(window, id));
+
+    /// The window's ADVISORY presentation hint
+    /// (KayaWire.SectionsPresentationAuto/Bar/Sidebar — the
+    /// width/height precedent; the phones ignore it by physics).
+    public void SectionsPresentation(long hint, ulong window = 0) =>
+        Records.Add(KayaWire.TxSetWindowSectionsPresentation(window, hint));
 
     /// Mount a root into a specific window; mounting presents an
     /// auxiliary.

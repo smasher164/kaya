@@ -146,6 +146,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_back_requested as *mut _,
             },
             NativeMethod {
+                name: "emitSectionSelected".into(),
+                sig: "(JJ)V".into(),
+                fn_ptr: present_emit_section_selected as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -227,6 +232,18 @@ extern "system" fn present_emit_alert_result(
 /// entry natively — the core's stack reconciles inside this call.
 extern "system" fn present_emit_entry_popped(_env: JNIEnv, _class: JClass, entry: jlong) {
     crate::capi::kaya_emit_entry_popped(entry as u64);
+}
+
+/// KayaPresent.emitSectionSelected: the user switched sections through
+/// the platform switcher (post-fact; the core's selection mirror
+/// reconciles inside). Programmatic selection never comes here.
+extern "system" fn present_emit_section_selected(
+    _env: JNIEnv,
+    _class: JClass,
+    window: jlong,
+    section: jlong,
+) {
+    crate::capi::kaya_emit_section_selected(window as u64, section as u64);
 }
 
 /// KayaPresent.emitBackRequested: back on an intercept_back-armed

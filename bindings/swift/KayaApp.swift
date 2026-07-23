@@ -218,6 +218,7 @@ final class KayaApp {
     private var closeRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var nextAlert: UInt64 = 0
     private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
@@ -522,6 +523,13 @@ final class KayaApp {
         backRequested[entry] = handler
     }
 
+    /// Per-section, NOT one-shot: the user can return any number of
+    /// times; a programmatic selectSection never fires it (the echo
+    /// doctrine).
+    func onSectionSelected(_ section: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        sectionSelected[section] = handler
+    }
+
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
@@ -591,6 +599,13 @@ final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_BACK_REQUESTED), _):
                 if let handler = backRequested[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SECTION_SELECTED), _):
+                // NOT one-shot: sections never die, and the user can
+                // return any number of times (id is the section; the
+                // window rides as the payload).
+                if let handler = sectionSelected[id] {
                     dispatch { try build(handler) }
                 }
             case (UInt16(KAYA_OCCURRENCE_ALERT_RESULT), _):
@@ -1430,6 +1445,40 @@ final class KayaAppTx {
     /// onBackRequested. Popping an empty stack is a scene error.
     func popEntry(window: UInt64 = 0) {
         tx.popEntry(window)
+    }
+
+    /// Append a section to the window's section set (section ids are
+    /// guest-allocated in the shared surface namespace); the set is
+    /// append-only — sections have no destruction grammar, and every
+    /// section's root is retained while covered (switching is
+    /// SELECTION, not lifecycle). mountIn fills its pane. Named
+    /// arguments are the Swift spelling:
+    /// tx.addSection(7, title: "Feed", onSelected: { tx in … }).
+    /// onSelected rides the add (per-section): fires each time the
+    /// USER switches to it — post-fact and NOT one-shot; a
+    /// programmatic selectSection does not fire it (the echo
+    /// doctrine).
+    func addSection(
+        _ id: UInt64, title: String? = nil,
+        onSelected: ((KayaAppTx) throws -> Void)? = nil,
+        window: UInt64 = 0
+    ) {
+        tx.addSection(window, id)
+        if let title { tx.setSectionTitle(id, title) }
+        if let onSelected { app.onSectionSelected(id, onSelected) }
+    }
+
+    /// Select a section programmatically: configuration, never echoes
+    /// onSelected (the echo doctrine).
+    func selectSection(_ id: UInt64, window: UInt64 = 0) {
+        tx.selectSection(window, id)
+    }
+
+    /// The window's ADVISORY presentation hint
+    /// (KAYA_SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
+    /// width/height precedent; the phones ignore it by physics).
+    func sectionsPresentation(_ hint: Int64, window: UInt64 = 0) {
+        tx.setWindowSectionsPresentation(window, hint)
     }
 
     /// Mount a root into a specific window; mounting presents an

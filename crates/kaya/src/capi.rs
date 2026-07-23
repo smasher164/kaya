@@ -52,6 +52,7 @@ pub const KAYA_OCCURRENCE_WINDOW_CLOSED: u16 = 6;
 pub const KAYA_OCCURRENCE_ALERT_RESULT: u16 = 7;
 pub const KAYA_OCCURRENCE_ENTRY_POPPED: u16 = 8;
 pub const KAYA_OCCURRENCE_BACK_REQUESTED: u16 = 9;
+pub const KAYA_OCCURRENCE_SECTION_SELECTED: u16 = 10;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -63,6 +64,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_ALERT_RESULT == ring::REC_ALERT_RESULT
         && KAYA_OCCURRENCE_ENTRY_POPPED == ring::REC_ENTRY_POPPED
         && KAYA_OCCURRENCE_BACK_REQUESTED == ring::REC_BACK_REQUESTED
+        && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -127,6 +129,9 @@ pub const KAYA_TX_SHOW_ALERT: u16 = 21;
 pub const KAYA_TX_PUSH_ENTRY: u16 = 22;
 pub const KAYA_TX_POP_ENTRY: u16 = 23;
 pub const KAYA_TX_SET_ENTRY_PROP: u16 = 24;
+pub const KAYA_TX_ADD_SECTION: u16 = 25;
+pub const KAYA_TX_SELECT_SECTION: u16 = 26;
+pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -226,6 +231,9 @@ pub const KAYA_APPLY_PRESENT_ALERT: u16 = 11;
 pub const KAYA_APPLY_PUSH_ENTRY: u16 = 12;
 pub const KAYA_APPLY_POP_ENTRY: u16 = 13;
 pub const KAYA_APPLY_SET_ENTRY_PROP: u16 = 14;
+pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
+pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
+pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -362,6 +370,32 @@ pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 pub const KAYA_EPROP_TITLE: u32 = 1;
 pub const KAYA_EPROP_INTERCEPT_BACK: u32 = 2;
 
+/// Section properties (spec::SECTION_PROPS) — the third typed surface
+/// table (DESIGN.md, Sections). `icon` rides the blob channel.
+pub const KAYA_SPROP_TITLE: u32 = 1;
+pub const KAYA_SPROP_ICON: u32 = 2;
+
+/// The window prop naming how sections present, and its enum values
+/// (spec enum "sections_presentation") — ADVISORY, the width/height
+/// precedent; auto is the default and each platform's dominant idiom.
+pub const KAYA_WPROP_SECTIONS_PRESENTATION: u32 = 5;
+pub const KAYA_SECTIONS_PRESENTATION_AUTO: u32 = 0;
+pub const KAYA_SECTIONS_PRESENTATION_BAR: u32 = 1;
+pub const KAYA_SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
+const _: () = assert!(
+    KAYA_SPROP_TITLE == wire::SPROP_TITLE
+        && KAYA_SPROP_ICON == wire::SPROP_ICON
+        && KAYA_WPROP_SECTIONS_PRESENTATION == wire::WPROP_SECTIONS_PRESENTATION
+        && KAYA_SECTIONS_PRESENTATION_AUTO == wire::SECTIONS_PRESENTATION_AUTO
+        && KAYA_SECTIONS_PRESENTATION_BAR == wire::SECTIONS_PRESENTATION_BAR
+        && KAYA_SECTIONS_PRESENTATION_SIDEBAR == wire::SECTIONS_PRESENTATION_SIDEBAR
+);
+const _: () = assert!(
+    crate::spec::SECTION_PROPS.len() == 2,
+    "spec::SECTION_PROPS grew: export the new KAYA_SPROP_* above, extend the pin, and bump \
+     this count"
+);
+
 /// Alert choices (the alert_result occurrence's `choice`): action
 /// indices, or the deliberately-not-an-index cancel sentinel every
 /// platform-native dismissal (Esc, back, outside tap) resolves to.
@@ -416,7 +450,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 4,
+    crate::spec::WINDOW_PROPS.len() == 5,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -781,6 +815,37 @@ pub extern "C" fn kaya_emit_entry_popped(entry: u64) {
     }
 }
 
+/// Presentation side: the user switched sections through the
+/// platform's own switcher (post-fact — the selection has already
+/// changed on screen; the core's selected-section mirror reconciles
+/// here). Only the user's act arrives this way: a programmatic
+/// select_section is configuration and never echoes (the echo
+/// doctrine). The entry_popped export pattern: one header, every
+/// platform, answerable where a presentation layer exists.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_section_selected(window: u64, section: u64) {
+    PRESENTATION_SCENE
+        .lock()
+        .unwrap()
+        .as_mut()
+        .expect("kaya: section selected before any transaction was applied")
+        .user_selected_section(
+            crate::protocol::WindowId(window),
+            crate::protocol::WindowId(section),
+        );
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::SectionSelected {
+            window: crate::protocol::WindowId(window),
+            section: crate::protocol::WindowId(section),
+        });
+        return;
+    }
+    let mut body = [0u8; 16];
+    body[..8].copy_from_slice(&window.to_le_bytes());
+    body[8..].copy_from_slice(&section.to_le_bytes());
+    state().ring.push_record(ring::REC_SECTION_SELECTED, &body);
+}
+
 /// Presentation side: the user drove the back affordance on an entry
 /// whose intercept_back is armed. Nothing has popped; the app answers
 /// with pop_entry if it agrees (the close_requested veto class).
@@ -1072,6 +1137,9 @@ mod tests {
             ("push_entry", KAYA_TX_PUSH_ENTRY),
             ("pop_entry", KAYA_TX_POP_ENTRY),
             ("set_entry_prop", KAYA_TX_SET_ENTRY_PROP),
+            ("add_section", KAYA_TX_ADD_SECTION),
+            ("select_section", KAYA_TX_SELECT_SECTION),
+            ("set_section_prop", KAYA_TX_SET_SECTION_PROP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -1088,6 +1156,9 @@ mod tests {
             ("push_entry", KAYA_APPLY_PUSH_ENTRY),
             ("pop_entry", KAYA_APPLY_POP_ENTRY),
             ("set_entry_prop", KAYA_APPLY_SET_ENTRY_PROP),
+            ("add_section", KAYA_APPLY_ADD_SECTION),
+            ("select_section", KAYA_APPLY_SELECT_SECTION),
+            ("set_section_prop", KAYA_APPLY_SET_SECTION_PROP),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

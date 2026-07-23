@@ -144,6 +144,14 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // presence). Inert on mobile by physics: no chrome close, and
     // back is not close (DESIGN.md, Presentation contexts).
     ("veto_close", 4, PropKind::Bool),
+    // How this window presents its sections (DESIGN.md, Sections).
+    // ADVISORY, the width/height precedent: honored where the platform
+    // has the idiom, resolved to the nearest thing otherwise, ignored
+    // on the phones where physics decides (bottom bar regardless).
+    // Scoped to the window because the GROUP is the unit — no platform
+    // mixes per-section presentations. `auto` (the default) resolves
+    // to each platform's dominant sections idiom.
+    ("sections_presentation", 5, PropKind::Enum("sections_presentation")),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -160,6 +168,17 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
 pub const ENTRY_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("title", 1, PropKind::Str),
     ("intercept_back", 2, PropKind::Bool),
+];
+
+/// Section properties: the third typed surface table (the ENTRY_PROPS
+/// stance — spec facts with typed setters, never applicability
+/// checks). `title` labels the switcher item on every platform;
+/// `icon` rides the blob channel (the image-source precedent) — a
+/// tab bar without icons is not the platform's real thing, so the
+/// slot is day-one even though desktop switchers may not render it.
+pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("title", 1, PropKind::Str),
+    ("icon", 2, PropKind::Blob),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -527,6 +546,45 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is \
                   rejected — entries are not collection elements.",
         },
+        Record {
+            kind: 25,
+            name: "add_section",
+            fields: &[f("window", FieldTy::U64), f("section", FieldTy::U64)],
+            payload: None,
+            doc: "Append a section to `window`'s section set (0 = the \
+                  primary surface; no capability gate — every platform has \
+                  a sections idiom). Section ids share the surface \
+                  namespace with windows and entries: one guest-side \
+                  allocator, and mount's target field addresses any of \
+                  them. The first section added becomes the selected one; \
+                  the set is APPEND-ONLY — this grammar has no destruction \
+                  verbs by design, and every section's root is retained \
+                  while covered (DESIGN.md, Sections).",
+        },
+        Record {
+            kind: 26,
+            name: "select_section",
+            fields: &[f("window", FieldTy::U64), f("section", FieldTy::U64)],
+            payload: None,
+            doc: "Select a section programmatically: configuration, not a \
+                  user act — it never echoes section_selected (the echo \
+                  doctrine). The section must already be added to \
+                  `window`; switching is SELECTION, not lifecycle — the \
+                  covered root stays alive.",
+        },
+        Record {
+            kind: 27,
+            name: "set_section_prop",
+            fields: &[
+                f("section", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a section property (SECTION_PROPS). Same tail \
+                  convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is \
+                  rejected — sections are not collection elements.",
+        },
     ],
     apply: &[
         Record {
@@ -679,6 +737,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Set a navigation-entry property to an already-resolved \
                   value.",
         },
+        Record {
+            kind: 15,
+            name: "add_section",
+            fields: &[f("window", FieldTy::U64), f("section", FieldTy::U64)],
+            payload: None,
+            doc: "Append a section to a window's section set; the first \
+                  added becomes selected.",
+        },
+        Record {
+            kind: 16,
+            name: "select_section",
+            fields: &[f("window", FieldTy::U64), f("section", FieldTy::U64)],
+            payload: None,
+            doc: "Select a section, quietly: programmatic selection never \
+                  echoes section_selected.",
+        },
+        Record {
+            kind: 17,
+            name: "set_section_prop",
+            fields: &[
+                f("section", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a section property to an already-resolved value.",
+        },
     ],
     occurrence: &[
         Record {
@@ -795,6 +881,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   answers with pop_entry if it agrees — the veto class, \
                   the close_requested precedent.",
         },
+        Record {
+            kind: 10,
+            name: "section_selected",
+            fields: &[f("window", FieldTy::U64), f("section", FieldTy::U64)],
+            payload: None,
+            doc: "The user switched sections through the platform's own \
+                  switcher (tab bar, toolbar tabs, NavigationView, stack \
+                  switcher). Only the user's act emits — a programmatic \
+                  select_section is configuration and stays silent (the \
+                  echo doctrine). Informational and post-fact: the \
+                  selection has already changed on screen.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -843,11 +941,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("width", 2),
                 ("height", 3),
                 ("veto_close", 4),
+                ("sections_presentation", 5),
             ],
         },
         EnumSpec {
             name: "eprop",
             variants: &[("title", 1), ("intercept_back", 2)],
+        },
+        EnumSpec {
+            name: "sprop",
+            variants: &[("title", 1), ("icon", 2)],
+        },
+        EnumSpec {
+            // The presentation hint's closed set (DESIGN.md, Sections):
+            // auto = the platform's dominant sections idiom, bar = the
+            // horizontal spelling, sidebar = the leading-edge list.
+            name: "sections_presentation",
+            variants: &[("auto", 0), ("bar", 1), ("sidebar", 2)],
         },
         EnumSpec {
             // The sentinel is deliberately not an index: any
@@ -1025,6 +1135,9 @@ mod tests {
             ("push_entry", wire::TX_PUSH_ENTRY),
             ("pop_entry", wire::TX_POP_ENTRY),
             ("set_entry_prop", wire::TX_SET_ENTRY_PROP),
+            ("add_section", wire::TX_ADD_SECTION),
+            ("select_section", wire::TX_SELECT_SECTION),
+            ("set_section_prop", wire::TX_SET_SECTION_PROP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -1052,6 +1165,9 @@ mod tests {
                 ("push_entry", wire::APPLY_PUSH_ENTRY),
                 ("pop_entry", wire::APPLY_POP_ENTRY),
                 ("set_entry_prop", wire::APPLY_SET_ENTRY_PROP),
+                ("add_section", wire::APPLY_ADD_SECTION),
+                ("select_section", wire::APPLY_SELECT_SECTION),
+                ("set_section_prop", wire::APPLY_SET_SECTION_PROP),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -1063,6 +1179,7 @@ mod tests {
         assert_eq!(SPEC.occurrence[6].kind, crate::ring::REC_ALERT_RESULT);
         assert_eq!(SPEC.occurrence[7].kind, crate::ring::REC_ENTRY_POPPED);
         assert_eq!(SPEC.occurrence[8].kind, crate::ring::REC_BACK_REQUESTED);
+        assert_eq!(SPEC.occurrence[9].kind, crate::ring::REC_SECTION_SELECTED);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -1141,8 +1258,16 @@ mod tests {
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
+                    ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
+                    ("sprop", "title") => wire::SPROP_TITLE,
+                    ("sprop", "icon") => wire::SPROP_ICON,
+                    ("sections_presentation", "auto") => wire::SECTIONS_PRESENTATION_AUTO,
+                    ("sections_presentation", "bar") => wire::SECTIONS_PRESENTATION_BAR,
+                    ("sections_presentation", "sidebar") => {
+                        wire::SECTIONS_PRESENTATION_SIDEBAR
+                    }
                     ("alert_choice", "action0") => wire::ALERT_CHOICE_ACTION0,
                     ("alert_choice", "action1") => wire::ALERT_CHOICE_ACTION1,
                     ("alert_choice", "cancel") => wire::ALERT_CHOICE_CANCEL,

@@ -30,6 +30,7 @@ static class Program
             case "radio": RadioScene.Run(); break;
             case "grid": GridScene.Run(); break;
             case "textarea": TextareaScene.Run(); break;
+            case "sections": SectionsScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;

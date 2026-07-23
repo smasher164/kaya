@@ -165,6 +165,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::F64 => ("F64", *prop),
             crate::PropKind::Bool => ("Bool", *prop),
+            crate::PropKind::Enum(_) => ("I64", *prop),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -207,6 +208,32 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("  finish tx_kind_set_entry_prop (fun b ->");
         c.line("      Buffer.add_int64_le b entry;");
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int eprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
+    }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::Blob => ("Blob", "handle"),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("(* set_section_prop with a constant {prop} value. *)"));
+        c.line(&format!("let tx_set_section_{prop} section {param} ="));
+        c.line("  finish tx_kind_set_section_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b section;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int sprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line("");
+        c.line(&format!("(* set_section_prop with a signal-bound {prop} value. *)"));
+        c.line(&format!("let tx_bind_section_{prop} section signal_id ="));
+        c.line("  finish tx_kind_set_section_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b section;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int sprop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
         c.line("      Buffer.add_int64_le b signal_id)");
     }
@@ -268,6 +295,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("       ( derived from the record shapes ). *)");
     c.line(&format!("    else if {id_only}"));
     c.line("    then Some (kind, Int64.of_int id, [], None)");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !id_pair.is_empty() {
+        c.line("    (* Surface-pair records (window, section): the SECOND id");
+        c.line("       keys the handler; the first rides as the payload. *)");
+        c.line(&format!("    else if {id_pair}"));
+        c.line("    then");
+        c.line("      Some");
+        c.line("        ( kind,");
+        c.line("          Int64.of_int (u32_at byte 16),");
+        c.line("          [],");
+        c.line("          Some (I64 (Int64.of_int id)) )");
+    }
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
     c.line("    let keys = ref [] in");

@@ -69,7 +69,8 @@ pub use app::{
 pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, Occurrence, Path, Prop,
-    SignalId, TemplateNodeId, Value, ValueType, WidgetId, WidgetKind, WindowId,
+    SectionProp, SectionsPresentation, SignalId, TemplateNodeId, Value, ValueType, WidgetId,
+    WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "windows")]

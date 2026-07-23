@@ -12,7 +12,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x4605672632603270
+	SpecHash uint64 = 0x39a6143b6f4c3e0e
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -48,8 +48,14 @@ const (
 	WpropWidth = 2
 	WpropHeight = 3
 	WpropVetoClose = 4
+	WpropSectionsPresentation = 5
 	EpropTitle = 1
 	EpropInterceptBack = 2
+	SpropTitle = 1
+	SpropIcon = 2
+	SectionsPresentationAuto = 0
+	SectionsPresentationBar = 1
+	SectionsPresentationSidebar = 2
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
@@ -92,6 +98,9 @@ const (
 	txPushEntry = 22
 	txPopEntry = 23
 	txSetEntryProp = 24
+	txAddSection = 25
+	txSelectSection = 26
+	txSetSectionProp = 27
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -106,6 +115,9 @@ const (
 	applyPushEntry = 12
 	applyPopEntry = 13
 	applySetEntryProp = 14
+	applyAddSection = 15
+	applySelectSection = 16
+	applySetSectionProp = 17
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -115,6 +127,7 @@ const (
 	occAlertResult = 7
 	occEntryPopped = 8
 	occBackRequested = 9
+	occSectionSelected = 10
 )
 
 func pad8(b []byte) []byte {
@@ -399,6 +412,31 @@ func TxPopEntry(window uint64) []byte {
 func TxSetEntryProp(entry uint64, prop uint32, source uint32) []byte {
 	b := beginRecord(txSetEntryProp)
 	b = binary.LittleEndian.AppendUint64(b, entry)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, source)
+	return endRecord(b)
+}
+
+// TxAddSection: Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections).
+func TxAddSection(window uint64, section uint64) []byte {
+	b := beginRecord(txAddSection)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	return endRecord(b)
+}
+
+// TxSelectSection: Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive.
+func TxSelectSection(window uint64, section uint64) []byte {
+	b := beginRecord(txSelectSection)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	return endRecord(b)
+}
+
+// TxSetSectionProp: Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
+func TxSetSectionProp(section uint64, prop uint32, source uint32) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
 	b = binary.LittleEndian.AppendUint32(b, prop)
 	b = binary.LittleEndian.AppendUint32(b, source)
 	return endRecord(b)
@@ -836,6 +874,26 @@ func TxBindWindowVetoClose(window uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetWindowSectionsPresentation: set_window_prop with a constant sections_presentation value (window 0, the primary surface).
+func TxSetWindowSectionsPresentation(window uint64, sectionsPresentation int64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropSectionsPresentation)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, sectionsPresentation)
+	return endRecord(b)
+}
+
+// TxBindWindowSectionsPresentation: set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface).
+func TxBindWindowSectionsPresentation(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropSectionsPresentation)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 // TxSetEntryTitle: set_entry_prop with a constant title value.
 func TxSetEntryTitle(entry uint64, title string) []byte {
 	b := beginRecord(txSetEntryProp)
@@ -876,6 +934,46 @@ func TxBindEntryInterceptBack(entry uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetSectionTitle: set_section_prop with a constant title value.
+func TxSetSectionTitle(section uint64, title string) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, title)
+	return endRecord(b)
+}
+
+// TxBindSectionTitle: set_section_prop with a signal-bound title value.
+func TxBindSectionTitle(section uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetSectionIcon: set_section_prop with a constant icon value.
+func TxSetSectionIcon(section uint64, handle uint64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropIcon)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, BlobHandle(handle))
+	return endRecord(b)
+}
+
+// TxBindSectionIcon: set_section_prop with a signal-bound icon value.
+func TxBindSectionIcon(section uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropIcon)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
@@ -885,7 +983,7 @@ func TxBindEntryInterceptBack(entry uint64, signalID uint64) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -897,6 +995,11 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// Surface lifecycle records carry the surface id alone —
 		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true
+	}
+	if kind == occSectionSelected {
+		// Surface-pair records (window, section): the SECOND id
+		// keys the handler; the first rides as the payload.
+		return kind, binary.LittleEndian.Uint64(rec[16:]), nil, id, true
 	}
 	pathLen := binary.LittleEndian.Uint32(rec[16:])
 	at := 24

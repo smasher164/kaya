@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
@@ -178,6 +180,13 @@ object KayaSceneModel {
     // surface, so this is THE stack.
     val navEntries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
     val navIndex = HashMap<Long, KayaNavEntry>()
+    // The window's section set (add order) and selection; non-empty
+    // sections render as the M3 bottom NavigationBar — the phones'
+    // physics regardless of the ADVISORY hint, which is recorded only.
+    val sections = androidx.compose.runtime.mutableStateListOf<KayaSection>()
+    val sectionIndex = HashMap<Long, KayaSection>()
+    var selectedSection by mutableStateOf<Long?>(null)
+    var sectionsPresentation: Long = 0
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -200,6 +209,17 @@ object KayaSceneModel {
     val cellMinX = HashMap<Long, Int>()
 }
 
+/** One section: a peer root in the primary window's section set —
+ * presentation context, not lifecycle: ALL retained, never destroyed
+ * (a section dies only with its window, and this host has one).
+ * Carries its own navigation stack: stacks are per-surface
+ * (DESIGN.md, Sections). */
+class KayaSection(val id: Long) {
+    var root by mutableStateOf<KayaNode?>(null)
+    var title by mutableStateOf("")
+    val entries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
+}
+
 /** One navigation entry: a pushed scene root, retained while covered,
  * destroyed at pop. interceptBack is the close-veto class transplanted
  * to POP. */
@@ -218,7 +238,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x4605672632603270uL
+    private const val SPEC_HASH: ULong = 0x39a6143b6f4c3e0euL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -234,6 +254,9 @@ object KayaCompose {
     private const val APPLY_PUSH_ENTRY = 12
     private const val APPLY_POP_ENTRY = 13
     private const val APPLY_SET_ENTRY_PROP = 14
+    private const val APPLY_ADD_SECTION = 15
+    private const val APPLY_SELECT_SECTION = 16
+    private const val APPLY_SET_SECTION_PROP = 17
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -246,6 +269,9 @@ object KayaCompose {
     private const val WPROP_WIDTH = 2
     private const val WPROP_HEIGHT = 3
     private const val WPROP_VETO_CLOSE = 4
+    private const val WPROP_SECTIONS_PRESENTATION = 5
+    private const val SPROP_TITLE = 1
+    private const val SPROP_ICON = 2
     // Navigation-entry properties: their own typed table;
     // intercept_back is the close-veto class transplanted to POP.
     private const val EPROP_TITLE = 1
@@ -461,6 +487,8 @@ object KayaCompose {
                         // no chrome close, and back is not close
                         // (DESIGN.md, Presentation contexts).
                         WPROP_VETO_CLOSE -> readBool(b)
+                        WPROP_SECTIONS_PRESENTATION ->
+                            KayaSceneModel.sectionsPresentation = readI64(b)
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
@@ -498,19 +526,28 @@ object KayaCompose {
                     // the mount fills it; the top of navEntries is the
                     // visible screen and recomposition animates the
                     // push.
-                    b.long // window: 0, the one surface on this host
+                    // The host surface may be the window (0) or a
+                    // section — stacks are per-surface.
+                    val host = b.long
                     val eid = b.long
                     val entry = KayaNavEntry(eid)
                     KayaSceneModel.navIndex[eid] = entry
-                    KayaSceneModel.navEntries.add(entry)
+                    val hostSection = KayaSceneModel.sectionIndex[host]
+                    if (hostSection != null) hostSection.entries.add(entry)
+                    else KayaSceneModel.navEntries.add(entry)
                 }
                 APPLY_POP_ENTRY -> {
                     // Programmatic pop: the core already reconciled;
                     // the batch's NET stack change recomposes as one
                     // transition (the multi-pop obligation).
-                    b.long // window
-                    val entry = KayaSceneModel.navEntries.removeAt(
-                        KayaSceneModel.navEntries.size - 1)
+                    val host = b.long
+                    val hostSection = KayaSceneModel.sectionIndex[host]
+                    val entry =
+                        if (hostSection != null)
+                            hostSection.entries.removeAt(hostSection.entries.size - 1)
+                        else
+                            KayaSceneModel.navEntries.removeAt(
+                                KayaSceneModel.navEntries.size - 1)
                     KayaSceneModel.navIndex.remove(entry.id)
                     refreshNavTitle()
                 }
@@ -526,6 +563,36 @@ object KayaCompose {
                         }
                         EPROP_INTERCEPT_BACK -> entry.interceptBack = readBool(b)
                         else -> error("kaya: unknown entry prop $prop")
+                    }
+                }
+                APPLY_ADD_SECTION -> {
+                    // Append-only; mirror the core's first-added-is-
+                    // selected so the bar shows a selection at once.
+                    b.long // window: 0, the one surface on this host
+                    val sid = b.long
+                    val section = KayaSection(sid)
+                    KayaSceneModel.sectionIndex[sid] = section
+                    KayaSceneModel.sections.add(section)
+                    if (KayaSceneModel.selectedSection == null) {
+                        KayaSceneModel.selectedSection = sid
+                    }
+                }
+                APPLY_SELECT_SECTION -> {
+                    // Programmatic and QUIET (the echo doctrine).
+                    b.long // window
+                    KayaSceneModel.selectedSection = b.long
+                }
+                APPLY_SET_SECTION_PROP -> {
+                    val sid = b.long
+                    val prop = b.int
+                    b.int // pad
+                    val section = KayaSceneModel.sectionIndex[sid]!!
+                    when (prop) {
+                        SPROP_TITLE -> section.title = readString(b)
+                        // Day-one slot: accepted; the bar item's TITLE
+                        // is the harness observable.
+                        SPROP_ICON -> skipValue(b)
+                        else -> error("kaya: unknown section prop $prop")
                     }
                 }
                 APPLY_ADD_CHILD -> {
@@ -553,7 +620,9 @@ object KayaCompose {
                     val wid = b.long
                     val root = b.long
                     val entry = KayaSceneModel.navIndex[wid]
+                    val section = KayaSceneModel.sectionIndex[wid]
                     if (entry != null) entry.root = KayaSceneModel.nodes[root]
+                    else if (section != null) section.root = KayaSceneModel.nodes[root]
                     else KayaSceneModel.root = KayaSceneModel.nodes[root]
                 }
                 APPLY_MOVE_CHILD -> {
@@ -626,6 +695,12 @@ object KayaCompose {
         b.int // len
         check(type == VALUE_I64) { "kaya: expected an i64 value, got type $type" }
         return b.long
+    }
+
+    private fun skipValue(b: ByteBuffer) {
+        b.int // type
+        val len = b.int
+        b.position(b.position() + ((len + 7) and (7.inv())))
     }
 
     private fun readBool(b: ByteBuffer): Boolean {
@@ -769,6 +844,30 @@ object KayaCompose {
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                    }
+                    "expect_sections" -> {
+                        val want = parts[1].toInt()
+                        val got = onUi(activity) { KayaSceneModel.sections.size }
+                        if (got == want) observed.add("$want sections")
+                        else failures.add("$got sections, wanted $want")
+                    }
+                    "expect_section" -> {
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) {
+                            KayaSceneModel.selectedSection
+                                ?.let { KayaSceneModel.sectionIndex[it]?.title } ?: ""
+                        }
+                        if (got == want) observed.add("section \"$want\"")
+                        else failures.add("section \"$got\", wanted \"$want\"")
+                    }
+                    "select_section" -> {
+                        val index = parts[1].toInt()
+                        val ok = onUi(activity) {
+                            val section = KayaSceneModel.sections.getOrNull(index)
+                            if (section != null) kayaUserSelectsSection(section.id)
+                            section != null
+                        }
+                        if (!ok) failures.add("no such section ${parts[1]}")
                     }
                     "choose" -> {
                         // The choice widget's real change route in
@@ -1620,6 +1719,15 @@ fun KayaRoot() {
             .onGloballyPositioned { kayaAvailableSize = it.size },
         contentAlignment = Alignment.TopStart,
     ) {
+        val activeSection =
+            KayaSceneModel.selectedSection?.let { KayaSceneModel.sectionIndex[it] }
+        if (KayaSceneModel.sections.isNotEmpty() && activeSection != null) {
+            // Sections present: the M3 bottom bar is the phones'
+            // idiom regardless of the ADVISORY hint (physics). Each
+            // pane shows ITS stack's top (stacks are per-surface);
+            // covered panes stay in the model, retained.
+            KayaSectionsScaffold(activeSection)
+        } else {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
         if (topEntry != null) {
             // The stack's top is the one visible screen; the covered
@@ -1634,6 +1742,7 @@ fun KayaRoot() {
                     KayaRender(root, isRoot = true)
                 }
             }
+        }
         }
     }
 
@@ -1684,7 +1793,59 @@ internal fun scrollTarget(spec: String): KayaNode? {
     return KayaSceneModel.scrolls.getOrNull(i)
 }
 
+/** The sections materialization: the M3 bottom NavigationBar (the
+ * platform's dominant idiom — hints are ignored here by physics).
+ * The bar's item taps are the USER route: they move the selection
+ * and emit section_selected; a programmatic select_section lands in
+ * the model quietly. Each pane renders its own stack's top. */
+@Composable
+fun KayaSectionsScaffold(active: KayaSection) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
+            val top = active.entries.lastOrNull()
+            val pane = top?.root ?: active.root
+            pane?.let { KayaRender(it, isRoot = true) }
+        }
+        NavigationBar {
+            KayaSceneModel.sections.forEach { section ->
+                NavigationBarItem(
+                    selected = section.id == active.id,
+                    onClick = { kayaUserSelectsSection(section.id) },
+                    icon = {},
+                    label = { Text(section.title) },
+                )
+            }
+        }
+    }
+}
+
+/** The user's switch: selection moves and EMITS (the bar-tap route —
+ * the harness's select_section drives this same path). */
+fun kayaUserSelectsSection(sid: Long) {
+    if (KayaSceneModel.selectedSection == sid) return
+    KayaSceneModel.selectedSection = sid
+    KayaPresent.emitSectionSelected(0, sid)
+}
+
 fun kayaUserBack() {
+    // Back routes to the ACTIVE section's stack when sections are
+    // present (back never switches sections — DESIGN.md, Sections).
+    val activeStack =
+        KayaSceneModel.selectedSection
+            ?.let { KayaSceneModel.sectionIndex[it] }
+            ?.entries
+            ?.takeIf { KayaSceneModel.sections.isNotEmpty() }
+    if (activeStack != null) {
+        val top = activeStack.lastOrNull() ?: return
+        if (top.interceptBack) {
+            KayaPresent.emitBackRequested(top.id)
+        } else {
+            activeStack.removeAt(activeStack.size - 1)
+            KayaSceneModel.navIndex.remove(top.id)
+            KayaPresent.emitEntryPopped(top.id)
+        }
+        return
+    }
     val top = KayaSceneModel.navEntries.lastOrNull() ?: return
     if (top.interceptBack) {
         KayaPresent.emitBackRequested(top.id)

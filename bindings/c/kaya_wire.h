@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x4605672632603270ULL
+#define KAYA_SPEC_HASH 0x39a6143b6f4c3e0eULL
 
 
 /* Create a signal holding `initial`. */
@@ -344,6 +344,31 @@ static inline void kaya_tx_pop_entry(KayaTx *tx, uint64_t window) {
 static inline void kaya_tx_set_entry_prop(KayaTx *tx, uint64_t entry, uint32_t prop, uint32_t source) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_ENTRY_PROP);
     kaya_wire_u64(tx, entry);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, start);
+}
+
+/* Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). */
+static inline void kaya_tx_add_section(KayaTx *tx, uint64_t window, uint64_t section) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_ADD_SECTION);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, section);
+    kaya_wire_end(tx, start);
+}
+
+/* Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. */
+static inline void kaya_tx_select_section(KayaTx *tx, uint64_t window, uint64_t section) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SELECT_SECTION);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, section);
+    kaya_wire_end(tx, start);
+}
+
+/* Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. */
+static inline void kaya_tx_set_section_prop(KayaTx *tx, uint64_t section, uint32_t prop, uint32_t source) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_SECTION_PROP);
+    kaya_wire_u64(tx, section);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
     kaya_wire_end(tx, start);

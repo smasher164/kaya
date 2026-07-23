@@ -230,6 +230,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::F64 => ("float64", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::Bool => ("bool", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Enum(_) => ("int64", format!("encodeValue(b, {})", param(prop))),
             other => unreachable!("no window prop carries {other:?}"),
         };
         let p = param(prop);
@@ -286,6 +287,41 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\treturn endRecord(b)");
         c.line("}");
     }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let pc = camel(prop);
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (param(prop), "string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "uint64",
+                "encodeValue(b, BlobHandle(handle))".to_string(),
+            ),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("// TxSetSection{pc}: set_section_prop with a constant {prop} value."));
+        c.line(&format!("func TxSetSection{pc}(section uint64, {p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetSectionProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, section)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Sprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBindSection{pc}: set_section_prop with a signal-bound {prop} value."));
+        c.line(&format!("func TxBindSection{pc}(section uint64, signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetSectionProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, section)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Sprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
@@ -319,6 +355,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t// no key path, no payload (derived from the record shapes).");
     c.line("\t\treturn kind, id, nil, nil, true");
     c.line("\t}");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !id_pair.is_empty() {
+        c.line(&format!("\tif {id_pair} {{"));
+        c.line("\t\t// Surface-pair records (window, section): the SECOND id");
+        c.line("\t\t// keys the handler; the first rides as the payload.");
+        c.line("\t\treturn kind, binary.LittleEndian.Uint64(rec[16:]), nil, id, true");
+        c.line("\t}");
+    }
     c.line("\tpathLen := binary.LittleEndian.Uint32(rec[16:])");
     c.line("\tat := 24");
     c.line("\tfor i := uint32(0); i < pathLen; i++ {");

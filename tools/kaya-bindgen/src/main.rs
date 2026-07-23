@@ -147,6 +147,15 @@ pub(crate) fn entry_prop_variants(
     kaya::spec::ENTRY_PROPS
 }
 
+/// Section properties (title, icon) — the third typed surface table,
+/// the entry-prop stance (DESIGN.md, Sections). Const + signal duos;
+/// icon rides the blob channel like the image source.
+pub(crate) fn section_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::SECTION_PROPS
+}
+
 /// Occurrence records, split by whether they carry a trailing payload
 /// value after the key path — a spec fact (Record::payload), so the
 /// generated parsers' kind lists derive rather than drift.
@@ -168,6 +177,26 @@ pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
             r.payload.is_none()
                 && r.fields.len() == 1
                 && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
+/// Surface-pair occurrences: records whose whole body is two u64
+/// surface ids (section_selected's window+section). Same derivation
+/// stance as id_only — a new pair-shaped occurrence reaches all 8
+/// parsers with zero emitter edits. Parsers yield the SECOND id as
+/// the handler key (handlers scope to the section) and the first as
+/// the payload.
+pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 2
+                && r.fields
+                    .iter()
+                    .all(|f| matches!(f.ty, kaya::spec::FieldTy::U64))
         })
         .map(|r| r.name)
         .collect()

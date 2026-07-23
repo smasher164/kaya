@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x4605672632603270L
+let spec_hash = 0x39a6143b6f4c3e0eL
 
 let value_bool = 1
 let value_i64 = 2
@@ -51,8 +51,14 @@ let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
 let wprop_veto_close = 4
+let wprop_sections_presentation = 5
 let eprop_title = 1
 let eprop_intercept_back = 2
+let sprop_title = 1
+let sprop_icon = 2
+let sections_presentation_auto = 0
+let sections_presentation_bar = 1
+let sections_presentation_sidebar = 2
 let alert_choice_action0 = 0
 let alert_choice_action1 = 1
 let alert_choice_cancel = 4294967295
@@ -95,6 +101,9 @@ let tx_kind_show_alert = 21
 let tx_kind_push_entry = 22
 let tx_kind_pop_entry = 23
 let tx_kind_set_entry_prop = 24
+let tx_kind_add_section = 25
+let tx_kind_select_section = 26
+let tx_kind_set_section_prop = 27
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -109,6 +118,9 @@ let apply_kind_present_alert = 11
 let apply_kind_push_entry = 12
 let apply_kind_pop_entry = 13
 let apply_kind_set_entry_prop = 14
+let apply_kind_add_section = 15
+let apply_kind_select_section = 16
+let apply_kind_set_section_prop = 17
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -118,6 +130,7 @@ let occ_kind_window_closed = 6
 let occ_kind_alert_result = 7
 let occ_kind_entry_popped = 8
 let occ_kind_back_requested = 9
+let occ_kind_section_selected = 10
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -329,6 +342,25 @@ let tx_pop_entry window =
 let tx_set_entry_prop entry prop source =
   finish tx_kind_set_entry_prop (fun b ->
       Buffer.add_int64_le b entry;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b (Int32.of_int source))
+
+(* Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). *)
+let tx_add_section window section =
+  finish tx_kind_add_section (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b section)
+
+(* Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. *)
+let tx_select_section window section =
+  finish tx_kind_select_section (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b section)
+
+(* Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. *)
+let tx_set_section_prop section prop source =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
       Buffer.add_int32_le b (Int32.of_int prop);
       Buffer.add_int32_le b (Int32.of_int source))
 
@@ -682,6 +714,22 @@ let tx_bind_window_veto_close window signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+(* set_window_prop with a constant sections_presentation value (window 0, the primary surface). *)
+let tx_set_window_sections_presentation window sections_presentation =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_sections_presentation);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 sections_presentation))
+
+(* set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface). *)
+let tx_bind_window_sections_presentation window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_sections_presentation);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
 (* set_entry_prop with a constant title value. *)
 let tx_set_entry_title entry title =
   finish tx_kind_set_entry_prop (fun b ->
@@ -711,6 +759,38 @@ let tx_bind_entry_intercept_back entry signal_id =
   finish tx_kind_set_entry_prop (fun b ->
       Buffer.add_int64_le b entry;
       Buffer.add_int32_le b (Int32.of_int eprop_intercept_back);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_section_prop with a constant title value. *)
+let tx_set_section_title section title =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str title))
+
+(* set_section_prop with a signal-bound title value. *)
+let tx_bind_section_title section signal_id =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_section_prop with a constant icon value. *)
+let tx_set_section_icon section handle =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_icon);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Blob handle))
+
+(* set_section_prop with a signal-bound icon value. *)
+let tx_bind_section_icon section signal_id =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_icon);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
@@ -749,7 +829,7 @@ let parse_value byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -761,6 +841,15 @@ let parse_occurrence byte =
        ( derived from the record shapes ). *)
     else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested
     then Some (kind, Int64.of_int id, [], None)
+    (* Surface-pair records (window, section): the SECOND id
+       keys the handler; the first rides as the payload. *)
+    else if kind = occ_kind_section_selected
+    then
+      Some
+        ( kind,
+          Int64.of_int (u32_at byte 16),
+          [],
+          Some (I64 (Int64.of_int id)) )
     else begin
     let path_len = u32_at byte 16 in
     let keys = ref [] in

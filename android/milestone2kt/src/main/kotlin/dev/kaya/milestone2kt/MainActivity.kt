@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
             "radio" -> Radio::app
             "grid" -> GridScene::app
             "textarea" -> TextareaScene::app
+            "sections" -> Sections::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

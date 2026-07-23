@@ -1,0 +1,22 @@
+# The sections scene: the presentation context. Two peer roots inside
+# the primary window; switching is SELECTION, not lifecycle. The
+# archive pane counts how often the USER surfaces it — which pins the
+# echo doctrine both ways: driving the real switcher emits
+# section_selected (visits rise), while the guest's own programmatic
+# select_section (button#0) moves the selection WITHOUT an echo
+# (visits hold). The count surviving round trips is the retention
+# proof: covered roots stay alive.
+expect_sections 2
+expect_section "Feed"
+expect label#0 "feed ready"
+select_section 1
+expect_section "Archive"
+expect label#1 "archive: 1 visits"
+select_section 0
+expect_section "Feed"
+click button#0
+expect_section "Archive"
+expect label#1 "archive: 1 visits"
+select_section 0
+select_section 1
+expect label#1 "archive: 2 visits"

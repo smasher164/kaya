@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x4605672632603270
+let kayaSpecHash: UInt64 = 0x39a6143b6f4c3e0e
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -39,6 +39,9 @@ private let applyPresentAlert: UInt16 = 11
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
+private let applyAddSection: UInt16 = 15
+private let applySelectSection: UInt16 = 16
+private let applySetSectionProp: UInt16 = 17
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -48,6 +51,12 @@ private let wpropTitle: UInt32 = 1
 private let wpropWidth: UInt32 = 2
 private let wpropHeight: UInt32 = 3
 private let wpropVetoClose: UInt32 = 4
+private let wpropSectionsPresentation: UInt32 = 5
+private let spropTitle: UInt32 = 1
+private let spropIcon: UInt32 = 2
+private let sectionsPresentationAuto: Int64 = 0
+private let sectionsPresentationBar: Int64 = 1
+private let sectionsPresentationSidebar: Int64 = 2
 /// Navigation-entry properties (their own typed table; intercept_back
 /// is the close-veto class transplanted to POP).
 private let epropTitle: UInt32 = 1
@@ -161,10 +170,35 @@ final class KayaWindowModel: Identifiable {
     /// window's own root when empty). NavigationStack's path derives
     /// from this — the core-owned stack is the source of truth.
     var entries: [KayaEntryModel] = []
+    /// The window's section set (add order) and selection: presentation
+    /// context, not lifecycle — every section's root stays alive while
+    /// covered. Non-empty sections render as the platform's switcher
+    /// (TabView here) instead of the bare root.
+    var sections: [KayaSectionModel] = []
+    var selectedSection: UInt64?
+    /// The ADVISORY presentation hint (wprop 5): auto | bar | sidebar.
+    var sectionsPresentation: Int64 = 0
 
     init(id: UInt64, title: String = "") {
         self.id = id
         self.title = title
+    }
+}
+
+/// One section: a peer root inside a window's section set, user-
+/// switched, ALL retained — switching is selection, not lifecycle,
+/// and the grammar has no destruction verbs (a section dies only
+/// with its window). Carries its own navigation stack: stacks are
+/// per-surface (DESIGN.md, Sections).
+@Observable
+final class KayaSectionModel: Identifiable {
+    let id: UInt64
+    var root: KayaNode?
+    var title = ""
+    var entries: [KayaEntryModel] = []
+
+    init(id: UInt64) {
+        self.id = id
     }
 }
 
@@ -202,6 +236,10 @@ final class KayaSceneModel {
     var navEntries: [UInt64: KayaEntryModel] = [:]
     /// entry id -> the window whose stack holds it.
     var entryWindow: [UInt64: UInt64] = [:]
+    /// Live sections by surface id (the one namespace: windows,
+    /// entries, sections), and section id -> hosting window.
+    var sectionsById: [UInt64: KayaSectionModel] = [:]
+    var sectionWindow: [UInt64: UInt64] = [:]
     // The focus command's landing spot: the entry view's FocusState
     // mirrors it into SwiftUI, and expect_focused reads it back.
     var focusedId: UInt64?
@@ -492,6 +530,13 @@ enum KayaHost {
         api.emit_back_requested(entry)
     }
 
+    /// The user switched sections through the platform switcher —
+    /// post-fact; the core's selection mirror reconciles inside this
+    /// call. Programmatic selection never comes here (echo doctrine).
+    static func emitSectionSelected(_ window: UInt64, _ section: UInt64) {
+        api.emit_section_selected(window, section)
+    }
+
     static func emitToggled(_ tag: [UInt8], _ checked: Bool) {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_toggled(buffer.baseAddress, UInt(buffer.count), checked ? 1 : 0)
@@ -657,6 +702,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaApplyWindowSize(wid)
                 case (wpropVetoClose, valueBool):
                     model?.vetoClose = raw[body + 24] != 0
+                case (wpropSectionsPresentation, valueI64):
+                    // ADVISORY (the width/height precedent): honored
+                    // where this platform has the idiom.
+                    model?.sectionsPresentation =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 default:
                     fatalError("kaya: bad window prop \(prop) value type \(wvType)")
                 }
@@ -835,6 +885,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     entry.root = kayaScene.nodes[root]
                     break
                 }
+                if let section = kayaScene.sectionsById[wid] {
+                    // A section presents in-window too: added to the
+                    // set already; the mount fills its pane.
+                    section.root = kayaScene.nodes[root]
+                    break
+                }
                 kayaScene.windows[wid]?.root = kayaScene.nodes[root]
                 // Mounting presents: auxiliaries open here (the
                 // primary's window is the WindowGroup's own). A mount
@@ -895,14 +951,22 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let entry = KayaEntryModel(id: eid)
                 kayaScene.navEntries[eid] = entry
                 kayaScene.entryWindow[eid] = wid
-                kayaScene.windows[wid]!.entries.append(entry)
+                // The host surface may be a window OR a section —
+                // stacks are per-surface (DESIGN.md, Sections).
+                if let section = kayaScene.sectionsById[wid] {
+                    section.entries.append(entry)
+                } else {
+                    kayaScene.windows[wid]!.entries.append(entry)
+                }
             case applyPopEntry:
                 // Programmatic pop: the core already reconciled its
                 // stack; drop the top model and let the derived path
                 // animate the NET change of the batch as one
                 // transition (the multi-pop obligation).
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
-                let entry = kayaScene.windows[wid]!.entries.removeLast()
+                let entry =
+                    kayaScene.sectionsById[wid]?.entries.removeLast()
+                    ?? kayaScene.windows[wid]!.entries.removeLast()
                 kayaScene.navEntries.removeValue(forKey: entry.id)
                 kayaScene.entryWindow.removeValue(forKey: entry.id)
             case applySetEntryProp:
@@ -919,6 +983,45 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     entry.interceptBack = raw[body + 24] != 0
                 default:
                     fatalError("kaya: bad entry prop \(prop) value type \(evType)")
+                }
+            case applyAddSection:
+                // Append-only; the first added is already selected on
+                // the core side — mirror that here so the switcher
+                // shows a selection from the first frame.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let sid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let section = KayaSectionModel(id: sid)
+                kayaScene.sectionsById[sid] = section
+                kayaScene.sectionWindow[sid] = wid
+                let window = kayaScene.windows[wid]!
+                window.sections.append(section)
+                if window.selectedSection == nil {
+                    window.selectedSection = sid
+                }
+            case applySelectSection:
+                // Programmatic and QUIET: the model moves, no emit
+                // (the echo doctrine — only the user's switch emits).
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let sid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.windows[wid]!.selectedSection = sid
+            case applySetSectionProp:
+                let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let svType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let section = kayaScene.sectionsById[sid]!
+                switch (prop, svType) {
+                case (spropTitle, valueStr):
+                    let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    section.title = String(decoding: bytes, as: UTF8.self)
+                case (spropIcon, valueBlob):
+                    // Day-one slot: decoded and rendered where the
+                    // platform switcher shows icons; the tab TITLE is
+                    // the harness observable, so the blob is accepted
+                    // and title rendering stays authoritative.
+                    break
+                default:
+                    fatalError("kaya: bad section prop \(prop) value type \(svType)")
                 }
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
@@ -1275,6 +1378,52 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_sections":
+                // The primary window's section count from the
+                // switcher's item source (the model the TabView
+                // enumerates — SwiftUI's tab bar has no separate
+                // item registry to read).
+                let want = Int(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync {
+                    kayaScene.windows[0]?.sections.count ?? 0
+                }
+                if got == want {
+                    observed.append("\(want) sections")
+                } else {
+                    failures.append("\(got) sections, wanted \(want)")
+                }
+            case "expect_section":
+                // The ACTIVE section's title from the platform's own
+                // selection state.
+                let want = kayaQuoted(Array(parts[1...]))
+                let got = DispatchQueue.main.sync { () -> String in
+                    guard let window = kayaScene.windows[0],
+                        let sid = window.selectedSection
+                    else { return "" }
+                    return kayaScene.sectionsById[sid]?.title ?? ""
+                }
+                if kayaBytesEqual(got, want) {
+                    observed.append("section \"\(want)\"")
+                } else {
+                    failures.append("section \"\(got)\", wanted \"\(want)\"")
+                }
+            case "select_section":
+                // The user's route: move the switcher's selection and
+                // emit — exactly what the TabView selection binding's
+                // setter does for a real tap (choose/toggle precedent).
+                let index = Int(parts[1]) ?? -1
+                let ok = DispatchQueue.main.sync { () -> Bool in
+                    guard let window = kayaScene.windows[0],
+                        index >= 0, index < window.sections.count
+                    else { return false }
+                    let sid = window.sections[index].id
+                    if window.selectedSection != sid {
+                        window.selectedSection = sid
+                        KayaHost.emitSectionSelected(0, sid)
+                    }
+                    return true
+                }
+                if !ok { failures.append("no such section \(parts[1])") }
             case "expect_title":
                 // The REAL materialized title, never the model's copy
                 // on macOS — a backend that ignored the write must
@@ -2366,10 +2515,20 @@ struct KayaRender: View {
 /// interception point — SwiftUI writes a shorter path when the back
 /// affordance fires (the toolbar back button, swipe-back), and the
 /// model decides what actually pops.
-func kayaNavPath(_ wid: UInt64) -> Binding<[UInt64]> {
+func kayaNavPath(_ sid: UInt64) -> Binding<[UInt64]> {
+    // The surface may be a window or a section — stacks are
+    // per-surface (DESIGN.md, Sections).
     Binding(
-        get: { kayaScene.windows[wid]?.entries.map(\.id) ?? [] },
-        set: { newPath in kayaUserPops(wid, to: newPath.count) })
+        get: {
+            (kayaScene.sectionsById[sid]?.entries
+                ?? kayaScene.windows[sid]?.entries ?? []).map(\.id)
+        },
+        set: { newPath in kayaUserPops(sid, to: newPath.count) })
+}
+
+/// The surface's stack accessor: window or section, one shape.
+private func kayaStackEntries(_ sid: UInt64) -> [KayaEntryModel] {
+    kayaScene.sectionsById[sid]?.entries ?? kayaScene.windows[sid]?.entries ?? []
 }
 
 /// A user-driven pop down to `depth` entries: pop unarmed tops one at
@@ -2378,14 +2537,17 @@ func kayaNavPath(_ wid: UInt64) -> Binding<[UInt64]> {
 /// nothing pops there, back_requested fires instead, and the derived
 /// path snaps the view back to the retained stack (the veto class,
 /// materialized; the app answers with pop_entry if it agrees).
-func kayaUserPops(_ wid: UInt64, to depth: Int) {
-    guard let window = kayaScene.windows[wid] else { return }
-    while window.entries.count > depth, let top = window.entries.last {
+func kayaUserPops(_ sid: UInt64, to depth: Int) {
+    while kayaStackEntries(sid).count > depth, let top = kayaStackEntries(sid).last {
         if top.interceptBack {
             KayaHost.emitBackRequested(top.id)
             return
         }
-        window.entries.removeLast()
+        if let section = kayaScene.sectionsById[sid] {
+            section.entries.removeLast()
+        } else {
+            kayaScene.windows[sid]?.entries.removeLast()
+        }
         kayaScene.navEntries.removeValue(forKey: top.id)
         kayaScene.entryWindow.removeValue(forKey: top.id)
         KayaHost.emitEntryPopped(top.id)
@@ -2425,6 +2587,11 @@ struct KayaAuxRoot: View {
         // The stack hosts the window's serial entries; the window's
         // own root is the stack's base. The accessor rides OUTSIDE
         // the stack so its view never detaches under a push.
+        Group {
+        if scene.windows[windowId]?.sections.isEmpty == false {
+            KayaSectionsView(windowId: windowId)
+                .navigationTitle(scene.windows[windowId]?.title ?? "")
+        } else {
         NavigationStack(path: kayaNavPath(windowId)) {
             Group {
                 if let model = scene.windows[windowId], let root = model.root {
@@ -2437,6 +2604,8 @@ struct KayaAuxRoot: View {
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
+        }
+        }
         }
         .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
         #if os(macOS)
@@ -2517,12 +2686,106 @@ struct KayaTextarea: View {
     }
 }
 
+/// A window's sections materialized: SwiftUI's TabView carries the
+/// platform's dominant idiom under the `auto` hint — toolbar tabs on
+/// macOS, the bottom bar on iOS. `sidebar` resolves to
+/// NavigationSplitView on macOS; the phones ignore hints by physics.
+/// Each pane hosts ITS OWN NavigationStack (stacks are per-surface).
+/// The selection binding's setter fires only for USER switches, which
+/// emit section_selected — a programmatic select_section writes the
+/// model directly and stays quiet (the echo doctrine).
+struct KayaSectionsView: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    private var selection: Binding<UInt64> {
+        Binding(
+            get: {
+                scene.windows[windowId]?.selectedSection
+                    ?? scene.windows[windowId]?.sections.first?.id ?? 0
+            },
+            set: { sid in
+                guard let window = scene.windows[windowId],
+                    window.selectedSection != sid
+                else { return }
+                window.selectedSection = sid
+                KayaHost.emitSectionSelected(windowId, sid)
+            })
+    }
+
+    var body: some View {
+        if let window = scene.windows[windowId] {
+            #if os(macOS)
+                if window.sectionsPresentation == sectionsPresentationSidebar {
+                    // The leading-edge list spelling, honored where the
+                    // platform has it.
+                    NavigationSplitView {
+                        List(
+                            window.sections,
+                            selection: Binding<UInt64?>(
+                                get: { selection.wrappedValue },
+                                set: { if let sid = $0 { selection.wrappedValue = sid } })
+                        ) { section in
+                            Text(section.title).tag(section.id)
+                        }
+                    } detail: {
+                        KayaSectionPane(sectionId: selection.wrappedValue)
+                    }
+                } else {
+                    tabBody(window)
+                }
+            #else
+                tabBody(window)
+            #endif
+        }
+    }
+
+    private func tabBody(_ window: KayaWindowModel) -> some View {
+        TabView(selection: selection) {
+            ForEach(window.sections) { section in
+                KayaSectionPane(sectionId: section.id)
+                    .tabItem { Text(section.title) }
+                    .tag(section.id)
+            }
+        }
+    }
+}
+
+/// One section's pane: the mounted root in the normalized frame over
+/// the section's own stack — the KayaAuxRoot shape on a section
+/// surface.
+struct KayaSectionPane: View {
+    let sectionId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        NavigationStack(path: kayaNavPath(sectionId)) {
+            Group {
+                if let section = scene.sectionsById[sectionId], let root = section.root {
+                    KayaRender(node: root, isRoot: true)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .navigationDestination(for: UInt64.self) { eid in
+                KayaEntryRoot(entryId: eid)
+            }
+        }
+    }
+}
+
 struct KayaRoot: View {
     @State private var scene = kayaScene
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
+        Group {
+        if scene.windows[0]?.sections.isEmpty == false {
+            // Sections present: the switcher IS the window content
+            // (each pane carries its own stack).
+            KayaSectionsView(windowId: 0)
+        } else {
         // The primary surface's stack: pushed entries cover this root
         // serially; the root is the stack's base and stays alive
         // (retained-until-popped) underneath.
@@ -2564,6 +2827,8 @@ struct KayaRoot: View {
         .navigationTitle(scene.windowTitle)
         .navigationDestination(for: UInt64.self) { eid in
             KayaEntryRoot(entryId: eid)
+        }
+        }
         }
         }
         // The accessor rides OUTSIDE the stack so its view never

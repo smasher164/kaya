@@ -767,3 +767,32 @@ The fix: the dylib build's exit status kills the lane. The class
 script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
+
+## NavigationView dies stowed in dll-hosted guests
+
+The first WinUI sections materialization used NavigationView (the
+ratified idiom). In dll-hosted foreign guests it fail-fasts
+(c000027b, two stowed E_NOINTERFACE) ~100ms after creation — its
+async template machinery fails even with resources.pri adjacent and
+the full XamlControlsResources merged, and rust guests only "passed"
+by exiting before the async work completed. Ruled out: the
+SelectionChanged delegate (crash persists unsubscribed), pri
+adjacency, the metadata provider. The shipped materialization is
+KAYA-OWNED chrome (a Grid bar of Buttons + content swap) — the same
+stance as this backend's kaya-owned nav back bar; the active button
+is DISABLED, which is the real control state the harness reads.
+docs/deferred.md carries the NavigationView upgrade (bindings are
+already in the winui-bindgen filter).
+
+Two sub-traps from the same session:
+- XAML refuses re-parenting ("Element is already the child of
+  another element"): long-lived elements (switcher buttons, section
+  panes) must be DETACHED from their old panel before appending to a
+  new one — or better, build chrome once and grow it incrementally
+  (the shipped shape; a full rebuild happens only on a presentation
+  hint change and detaches everything first).
+- WinRT SelectionChanged (like TextChanged) is raised ASYNC: a
+  quiet-FLAG guard's window closes before the late raise arrives.
+  If a native selection control ever returns here, the guard must be
+  the entry_swallow COUNTER, incremented only on real moves (a no-op
+  set raises nothing and would leave the counter armed).

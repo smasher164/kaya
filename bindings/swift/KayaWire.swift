@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x4605672632603270
+let kayaSpecHash: UInt64 = 0x39a6143b6f4c3e0e
 
 struct KayaTx {
     var bytes = Data()
@@ -294,6 +294,31 @@ struct KayaTx {
     mutating func setEntryProp(_ entry: UInt64, _ prop: UInt32, _ source: UInt32) {
         let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
+        self.u32(prop)
+        self.u32(source)
+        self.end(start)
+    }
+
+    /// Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections).
+    mutating func addSection(_ window: UInt64, _ section: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_ADD_SECTION))
+        self.u64(window)
+        self.u64(section)
+        self.end(start)
+    }
+
+    /// Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive.
+    mutating func selectSection(_ window: UInt64, _ section: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SELECT_SECTION))
+        self.u64(window)
+        self.u64(section)
+        self.end(start)
+    }
+
+    /// Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
+    mutating func setSectionProp(_ section: UInt64, _ prop: UInt32, _ source: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
         self.u32(prop)
         self.u32(source)
         self.end(start)
@@ -731,6 +756,26 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_window_prop with a constant sections_presentation value (window 0, the primary surface).
+    mutating func setWindowSectionsPresentation(_ window: UInt64, _ sectionsPresentation: Int64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_SECTIONS_PRESENTATION))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(sectionsPresentation))
+        self.end(start)
+    }
+
+    /// set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface).
+    mutating func bindWindowSectionsPresentation(_ window: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_SECTIONS_PRESENTATION))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
     /// set_entry_prop with a constant title value.
     mutating func setEntryTitle(_ entry: UInt64, _ title: String) {
         let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
@@ -771,6 +816,46 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_section_prop with a constant title value.
+    mutating func setSectionTitle(_ section: UInt64, _ title: String) {
+        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(title))
+        self.end(start)
+    }
+
+    /// set_section_prop with a signal-bound title value.
+    mutating func bindSectionTitle(_ section: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_section_prop with a constant icon value.
+    mutating func setSectionIcon(_ section: UInt64, _ handle: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_ICON))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.blob(handle))
+        self.end(start)
+    }
+
+    /// set_section_prop with a signal-bound icon value.
+    mutating func bindSectionIcon(_ section: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_ICON))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -798,6 +883,7 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -813,6 +899,13 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         {
             return (kind, id, [], nil)
+        }
+        // Surface-pair records (window, section): the SECOND id
+        // keys the handler; the first rides as the payload.
+        if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
+        {
+            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
+            return (kind, section, [], .i64(Int64(bitPattern: id)))
         }
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []

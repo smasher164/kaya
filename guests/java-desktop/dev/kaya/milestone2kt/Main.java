@@ -83,6 +83,9 @@ public final class Main {
             case "textarea":
                 app = TextareaScene::app;
                 break;
+            case "sections":
+                app = Sections::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

@@ -28,6 +28,8 @@
 
 #define REC_BACK_REQUESTED 9
 
+#define REC_SECTION_SELECTED 10
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -78,6 +80,12 @@
 
 #define TX_SET_ENTRY_PROP 24
 
+#define TX_ADD_SECTION 25
+
+#define TX_SELECT_SECTION 26
+
+#define TX_SET_SECTION_PROP 27
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -105,6 +113,12 @@
 #define APPLY_POP_ENTRY 13
 
 #define APPLY_SET_ENTRY_PROP 14
+
+#define APPLY_ADD_SECTION 15
+
+#define APPLY_SELECT_SECTION 16
+
+#define APPLY_SET_SECTION_PROP 17
 
 #define VALUE_BOOL 1
 
@@ -178,6 +192,26 @@
 
 #define WPROP_VETO_CLOSE 4
 
+#define WPROP_SECTIONS_PRESENTATION 5
+
+/**
+ * Section property ids (spec::SECTION_PROPS) — the third typed
+ * surface table (see DESIGN.md, Sections).
+ */
+#define SPROP_TITLE 1
+
+#define SPROP_ICON 2
+
+/**
+ * The sections_presentation enum's wire values (spec enum
+ * "sections_presentation"): ADVISORY, the width/height precedent.
+ */
+#define SECTIONS_PRESENTATION_AUTO 0
+
+#define SECTIONS_PRESENTATION_BAR 1
+
+#define SECTIONS_PRESENTATION_SIDEBAR 2
+
 /**
  * Navigation-entry property ids (spec::ENTRY_PROPS) — their own
  * typed table, not WINDOW_PROPS with applicability checks (see
@@ -247,6 +281,8 @@
 #define KAYA_OCCURRENCE_ENTRY_POPPED 8
 
 #define KAYA_OCCURRENCE_BACK_REQUESTED 9
+
+#define KAYA_OCCURRENCE_SECTION_SELECTED 10
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -340,6 +376,12 @@
 
 #define KAYA_TX_SET_ENTRY_PROP 24
 
+#define KAYA_TX_ADD_SECTION 25
+
+#define KAYA_TX_SELECT_SECTION 26
+
+#define KAYA_TX_SET_SECTION_PROP 27
+
 /**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
@@ -410,6 +452,12 @@
 #define KAYA_APPLY_POP_ENTRY 13
 
 #define KAYA_APPLY_SET_ENTRY_PROP 14
+
+#define KAYA_APPLY_ADD_SECTION 15
+
+#define KAYA_APPLY_SELECT_SECTION 16
+
+#define KAYA_APPLY_SET_SECTION_PROP 17
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -509,6 +557,27 @@
 #define KAYA_EPROP_TITLE 1
 
 #define KAYA_EPROP_INTERCEPT_BACK 2
+
+/**
+ * Section properties (spec::SECTION_PROPS) — the third typed surface
+ * table (DESIGN.md, Sections). `icon` rides the blob channel.
+ */
+#define KAYA_SPROP_TITLE 1
+
+#define KAYA_SPROP_ICON 2
+
+/**
+ * The window prop naming how sections present, and its enum values
+ * (spec enum "sections_presentation") — ADVISORY, the width/height
+ * precedent; auto is the default and each platform's dominant idiom.
+ */
+#define KAYA_WPROP_SECTIONS_PRESENTATION 5
+
+#define KAYA_SECTIONS_PRESENTATION_AUTO 0
+
+#define KAYA_SECTIONS_PRESENTATION_BAR 1
+
+#define KAYA_SECTIONS_PRESENTATION_SIDEBAR 2
 
 /**
  * Alert choices (the alert_result occurrence's `choice`): action
@@ -636,6 +705,13 @@ typedef struct KayaHostApi {
    */
   void (*emit_entry_popped)(uint64_t);
   void (*emit_back_requested)(uint64_t);
+  /**
+   * The user switched sections through the platform switcher
+   * (post-fact; the core's selection mirror reconciles inside this
+   * call). A programmatic select_section never arrives here — the
+   * echo doctrine.
+   */
+  void (*emit_section_selected)(uint64_t, uint64_t);
 } KayaHostApi;
 
 
@@ -739,6 +815,17 @@ void kaya_emit_window_closed(uint64_t window);
  * the kaya_emit_alert_result pattern.
  */
 void kaya_emit_entry_popped(uint64_t entry);
+
+/**
+ * Presentation side: the user switched sections through the
+ * platform's own switcher (post-fact — the selection has already
+ * changed on screen; the core's selected-section mirror reconciles
+ * here). Only the user's act arrives this way: a programmatic
+ * select_section is configuration and never echoes (the echo
+ * doctrine). The entry_popped export pattern: one header, every
+ * platform, answerable where a presentation layer exists.
+ */
+void kaya_emit_section_selected(uint64_t window, uint64_t section);
 
 /**
  * Presentation side: the user drove the back affordance on an entry

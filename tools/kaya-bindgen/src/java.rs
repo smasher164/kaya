@@ -212,6 +212,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
             crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Enum(_) => (
+                camel(prop),
+                "long",
+                format!("encodeValue(b, {});", camel(prop)),
+            ),
             other => unreachable!("no window prop carries {other:?}"),
         };
         c.line("");
@@ -254,6 +259,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    public static byte[] txBindEntry{pc}(long entry, long signalId) {{"));
         c.line("        ByteBuffer b = begin(TX_KIND_SET_ENTRY_PROP);");
         c.line(&format!("        b.putLong(entry).putInt(EPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
+
+    // The section-prop duos (const + signal), the entry shape on the
+    // section table; icon rides the blob channel (DESIGN.md, Sections).
+    for (prop, _, kind) in crate::section_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "long",
+                "encodeValue(b, new BlobHandle(handle));".to_string(),
+            ),
+            other => unreachable!("no section prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /** set_section_prop with a constant {prop} value. */"));
+        c.line(&format!("    public static byte[] txSetSection{pc}(long section, {ty} {p}) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);");
+        c.line(&format!("        b.putLong(section).putInt(SPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_section_prop with a signal-bound {prop} value. */"));
+        c.line(&format!("    public static byte[] txBindSection{pc}(long section, long signalId) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);");
+        c.line(&format!("        b.putLong(section).putInt(SPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
         c.line("        return finish(b);");
         c.line("    }");
     }
@@ -320,6 +356,18 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("        if ({id_only}) {{"));
     c.line("            return new Occ(kind, id, java.util.List.of(), null);");
     c.line("        }");
+    let id_pair = crate::id_pair_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !id_pair.is_empty() {
+        c.line("        // Surface-pair records (window, section): the SECOND id");
+        c.line("        // keys the handler; the first rides as the payload.");
+        c.line(&format!("        if ({id_pair}) {{"));
+        c.line("            return new Occ(kind, b.getLong(16), java.util.List.of(), id);");
+        c.line("        }");
+    }
     c.line("        int pathLen = b.getInt(16);");
     c.line("        List<Object> keys = new ArrayList<>();");
     c.line("        int at = 24;");
