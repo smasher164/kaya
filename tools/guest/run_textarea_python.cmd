@@ -3,6 +3,7 @@ cd /d C:\kaya
 set PATH=C:\kaya;%PATH%
 set PYTHONPATH=C:\kaya\bindings\python
 set KAYA_SELFTEST=textarea
+
 rem ms-appx (XamlControlsResources) resolves against the PROCESS
 rem exe's directory: place kaya's minimal resources.pri beside
 rem python.exe (idempotent; inert for non-WinUI python programs).

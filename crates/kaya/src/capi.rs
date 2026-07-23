@@ -390,6 +390,16 @@ const _: () = assert!(
         && KAYA_SECTIONS_PRESENTATION_BAR == wire::SECTIONS_PRESENTATION_BAR
         && KAYA_SECTIONS_PRESENTATION_SIDEBAR == wire::SECTIONS_PRESENTATION_SIDEBAR
 );
+// Completeness for the occurrence exports too: the section_selected
+// record shipped to every generated wire file while KAYA_OCCURRENCE_*
+// silently lacked it, and check-abort's Swift build was the first
+// thing to notice (the spacing-prop lesson, occurrence spelling). A
+// new spec occurrence trips this count and walks you here.
+const _: () = assert!(
+    crate::spec::SPEC.occurrence.len() == 10,
+    "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
+     bump this count"
+);
 const _: () = assert!(
     crate::spec::SECTION_PROPS.len() == 2,
     "spec::SECTION_PROPS grew: export the new KAYA_SPROP_* above, extend the pin, and bump \

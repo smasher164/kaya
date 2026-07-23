@@ -33,7 +33,8 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
-    ContentDialogButton, ContentDialogResult, Grid, Image, ProgressBar, RowDefinition,
+    ContentDialogButton, ContentDialogResult, Grid, Image, NavigationView, NavigationViewItem,
+    NavigationViewPaneDisplayMode, ProgressBar, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
     Slider, TextBlock, TextBox, TextChangedEventHandler,
 };
@@ -206,25 +207,24 @@ struct CoreState {
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
-    /// containers by section id, and the selection mirror. The
-    /// switcher is KAYA-OWNED chrome (a bar of Buttons over/beside a
-    /// content Grid) — this backend's established stance: its nav
-    /// back-affordance is a kaya-owned wrapper too, and the platform's
-    /// NavigationView dies with stowed E_NOINTERFACE in dll-hosted
-    /// guests (docs/deferred.md carries the upgrade). A section's
-    /// pane swaps between its own root and its stack's top entry
-    /// (stacks are per-surface; nav_stacks keys sections too).
+    /// containers by section id, the NavigationView that materializes
+    /// the switcher (the platform's own idiom — viable now that the
+    /// aggregation outer delegates QI; docs/traps.md), and the
+    /// selection mirror. A section's pane swaps between its own root
+    /// and its stack's top entry (stacks are per-surface; nav_stacks
+    /// keys sections too).
     sections: HashMap<u64, Vec<u64>>,
     section_panes: HashMap<u64, WinSection>,
-    /// Per-window: (the hint the chrome was built for, outer chrome
-    /// Grid, the bar panel holding the switcher buttons, the content
-    /// Grid the active pane fills). Built once and grown
-    /// incrementally — XAML refuses re-parenting, so a rebuild (hint
-    /// change only) detaches everything first.
-    section_chrome: HashMap<u64, (i64, Grid, Grid, Grid)>,
-    /// Per-section switcher button; the ACTIVE one is disabled — the
-    /// real control state the harness reads back.
-    section_buttons: HashMap<u64, Button>,
+    section_navs: HashMap<u64, NavigationView>,
+    section_items: HashMap<u64, NavigationViewItem>,
+    /// The TextChanged lesson applied to the switcher: WinRT raises
+    /// SelectionChanged ASYNCHRONOUSLY, so programmatic moves swallow
+    /// the late raise via a counter (a flag's guard window closes too
+    /// early), and only real user switches reach the handler body.
+    section_swallow: HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+    /// What the CONTROL last showed — a no-op SetSelectedItem raises
+    /// nothing, so the swallow only increments on a real move.
+    ui_selected_sections: HashMap<u64, u64>,
     selected_sections: HashMap<u64, u64>,
     sections_presentation: HashMap<u64, i64>,
 }
@@ -286,7 +286,7 @@ static EXIT_CODE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::n
 static EXIT_DECIDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // The composed Application, kept from CreateInstance: the composition
-// outer (KayaApplication) answers only its own interfaces and does not
+// outer (KayaOuter) answers its own interfaces and forwards the rest
 // delegate QI to the inner, so Application::Current() — whose identity
 // is the outer — cannot be cast back to Application. Everything the
 // backend needs goes through this handle instead. UI thread only.
@@ -356,63 +356,6 @@ const ENTRY_STYLE_XAML: &str = r#"<Style xmlns="http://schemas.microsoft.com/win
   </Setter>
 </Style>"#;
 
-/// Implement-scaffolding for the Application overrides interface: the
-/// generator emits it caller-side only (it is exclusive-to
-/// Application), so the trait, thunk, and vtable constructor the
-/// #[implement] macro expects live here, mirroring the generator's own
-/// pattern for IXamlMetadataProvider. The re-exports make the _Vtbl
-/// and _Impl names resolvable as siblings of the interface path the
-/// macro is given.
-mod app_overrides {
-    pub use super::bindings::Microsoft::UI::Xaml::IApplicationOverrides;
-    pub use super::bindings::Microsoft::UI::Xaml::IApplicationOverrides_Vtbl;
-    use super::bindings::Microsoft::UI::Xaml::LaunchActivatedEventArgs;
-
-    // The generator emits RuntimeName only for public interfaces; the
-    // implement macro needs it for IInspectable::GetRuntimeClassName.
-    impl windows_core::RuntimeName for IApplicationOverrides {
-        const NAME: &'static str = "Microsoft.UI.Xaml.IApplicationOverrides";
-    }
-
-    pub trait IApplicationOverrides_Impl: windows_core::IUnknownImpl {
-        fn OnLaunched(
-            &self,
-            args: windows_core::Ref<'_, LaunchActivatedEventArgs>,
-        ) -> windows_core::Result<()>;
-    }
-
-    impl IApplicationOverrides_Vtbl {
-        pub const fn new<Identity: IApplicationOverrides_Impl, const OFFSET: isize>() -> Self {
-            unsafe extern "system" fn OnLaunched<
-                Identity: IApplicationOverrides_Impl,
-                const OFFSET: isize,
-            >(
-                this: *mut core::ffi::c_void,
-                args: *mut core::ffi::c_void,
-            ) -> windows_core::HRESULT {
-                unsafe {
-                    let this: &Identity =
-                        &*((this as *const *const ()).offset(OFFSET) as *const Identity);
-                    IApplicationOverrides_Impl::OnLaunched(this, core::mem::transmute(&args))
-                        .into()
-                }
-            }
-            Self {
-                base__: windows_core::IInspectable_Vtbl::new::<
-                    Identity,
-                    IApplicationOverrides,
-                    OFFSET,
-                >(),
-                OnLaunched: OnLaunched::<Identity, OFFSET>,
-            }
-        }
-
-        pub fn matches(iid: &windows_core::GUID) -> bool {
-            iid == &<IApplicationOverrides as windows_core::Interface>::IID
-        }
-    }
-}
-
 /// The load-bearing piece of code-only WinUI: the XAML parser resolves
 /// non-core types (TextCommandBarFlyout inside TextBox's built-in
 /// style, everything in XamlControlsResources) through an
@@ -421,26 +364,178 @@ mod app_overrides {
 /// deferred theme XAML fail-fasts the process
 /// (STOWED_EXCEPTION_80004005 ... XamlSchemaContext::
 /// GetTypeInfoProvider — microsoft-ui-xaml discussions #7357/#8151).
-/// This is that subclass, done the official way: the Application is
-/// composed via COM aggregation with this object as the outer, which
-/// answers IXamlMetadataProvider by delegating to the framework's own
-/// XamlControlsXamlMetaDataProvider (prior art: windows-rs reactor,
-/// compio-rs/winio).
-#[windows_core::implement(
-    app_overrides::IApplicationOverrides,
-    bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider
-)]
-struct KayaApplication {
+///
+/// HAND-ROLLED, not #[implement]: the Application is composed via COM
+/// aggregation with this object as the outer, and the AGGREGATION
+/// CONTRACT requires the outer's QueryInterface to forward every IID
+/// it does not implement to the inner's non-delegating IUnknown.
+/// windows-core's #[implement] answers unknown IIDs with
+/// E_NOINTERFACE instead, which made Application.Current() — an
+/// identity QI for IApplication — fail 0x80004002, and every control
+/// that consults it at runtime stow-crashed the process
+/// (NavigationView's ResourceAccessor was the first; docs/traps.md).
+///
+/// Layout is three vtable slots at fixed offsets (identity /
+/// IApplicationOverrides / IXamlMetadataProvider); the thunks recover
+/// the object by subtracting the slot index. Lifetime is the process
+/// (the framework holds the Application forever), so AddRef/Release
+/// are counters in name only.
+#[repr(C)]
+struct KayaOuter {
+    identity: *const windows_core::IInspectable_Vtbl,
+    overrides: *const bindings::Microsoft::UI::Xaml::IApplicationOverrides_Vtbl,
+    metadata: *const bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl,
+    /// The inner's non-delegating IUnknown/IInspectable, set once
+    /// after CreateInstance; QIs the outer cannot answer forward
+    /// here. Null only during CreateInstance itself.
+    inner: std::cell::Cell<*mut core::ffi::c_void>,
     // Lazily created: the provider activates WinUI machinery that is
     // not ready until the application object exists.
-    provider: RefCell<Option<bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider>>,
+    provider: RefCell<
+        Option<bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider>,
+    >,
 }
 
-impl KayaApplication_Impl {
+static KAYA_OUTER_IDENTITY_VTBL: windows_core::IInspectable_Vtbl =
+    windows_core::IInspectable_Vtbl {
+        base: windows_core::IUnknown_Vtbl {
+            QueryInterface: outer_qi::<0>,
+            AddRef: outer_addref,
+            Release: outer_release,
+        },
+        GetIids: outer_get_iids,
+        GetRuntimeClassName: outer_get_class_name,
+        GetTrustLevel: outer_get_trust_level,
+    };
+
+static KAYA_OUTER_OVERRIDES_VTBL: bindings::Microsoft::UI::Xaml::IApplicationOverrides_Vtbl =
+    bindings::Microsoft::UI::Xaml::IApplicationOverrides_Vtbl {
+        base__: windows_core::IInspectable_Vtbl {
+            base: windows_core::IUnknown_Vtbl {
+                QueryInterface: outer_qi::<1>,
+                AddRef: outer_addref,
+                Release: outer_release,
+            },
+            GetIids: outer_get_iids,
+            GetRuntimeClassName: outer_get_class_name,
+            GetTrustLevel: outer_get_trust_level,
+        },
+        OnLaunched: outer_on_launched,
+    };
+
+static KAYA_OUTER_METADATA_VTBL:
+    bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl =
+    bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl {
+        base__: windows_core::IInspectable_Vtbl {
+            base: windows_core::IUnknown_Vtbl {
+                QueryInterface: outer_qi::<2>,
+                AddRef: outer_addref,
+                Release: outer_release,
+            },
+            GetIids: outer_get_iids,
+            GetRuntimeClassName: outer_get_class_name,
+            GetTrustLevel: outer_get_trust_level,
+        },
+        GetXamlType: outer_get_xaml_type,
+        GetXamlTypeByFullName: outer_get_xaml_type_by_full_name,
+        GetXmlnsDefinitions: outer_get_xmlns_definitions,
+    };
+
+/// Recover the object from a slot's `this` pointer.
+unsafe fn outer_from_slot<const SLOT: isize>(this: *mut core::ffi::c_void) -> *const KayaOuter {
+    unsafe { (this as *mut *const core::ffi::c_void).offset(-SLOT) as *const KayaOuter }
+}
+
+unsafe extern "system" fn outer_qi<const SLOT: isize>(
+    this: *mut core::ffi::c_void,
+    iid: *const windows_core::GUID,
+    out: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        if out.is_null() {
+            return windows_core::imp::E_POINTER;
+        }
+        let outer = outer_from_slot::<SLOT>(this);
+        let iid = &*iid;
+        let slot: isize = if *iid == windows_core::IUnknown::IID
+            || *iid == windows_core::IInspectable::IID
+        {
+            0
+        } else if *iid
+            == <bindings::Microsoft::UI::Xaml::IApplicationOverrides as Interface>::IID
+        {
+            1
+        } else if *iid
+            == <bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider as Interface>::IID
+        {
+            2
+        } else {
+            -1
+        };
+        if slot >= 0 {
+            *out = (outer as *mut *const core::ffi::c_void).offset(slot)
+                as *mut core::ffi::c_void;
+            return windows_core::HRESULT(0);
+        }
+        // The aggregation contract: everything else is the inner's
+        // business, through its NON-delegating IUnknown.
+        let inner = (*outer).inner.get();
+        if !inner.is_null() {
+            let vtbl = *(inner as *mut *const windows_core::IUnknown_Vtbl);
+            return ((*vtbl).QueryInterface)(inner, iid, out);
+        }
+        *out = core::ptr::null_mut();
+        windows_core::imp::E_NOINTERFACE
+    }
+}
+
+unsafe extern "system" fn outer_addref(_this: *mut core::ffi::c_void) -> u32 {
+    // Process-lifetime object; the count is nominal.
+    2
+}
+
+unsafe extern "system" fn outer_release(_this: *mut core::ffi::c_void) -> u32 {
+    1
+}
+
+unsafe extern "system" fn outer_get_iids(
+    _this: *mut core::ffi::c_void,
+    count: *mut u32,
+    values: *mut *mut windows_core::GUID,
+) -> windows_core::HRESULT {
+    unsafe {
+        *count = 0;
+        *values = core::ptr::null_mut();
+    }
+    windows_core::HRESULT(0)
+}
+
+unsafe extern "system" fn outer_get_class_name(
+    _this: *mut core::ffi::c_void,
+    value: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    let name = windows_core::HSTRING::from("Microsoft.UI.Xaml.Application");
+    unsafe {
+        *value = core::mem::transmute::<windows_core::HSTRING, *mut core::ffi::c_void>(name);
+    }
+    windows_core::HRESULT(0)
+}
+
+unsafe extern "system" fn outer_get_trust_level(
+    _this: *mut core::ffi::c_void,
+    value: *mut i32,
+) -> windows_core::HRESULT {
+    unsafe { *value = 0 };
+    windows_core::HRESULT(0)
+}
+
+impl KayaOuter {
     fn provider(
         &self,
-    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider>
-    {
+    ) -> windows_core::Result<
+        bindings::Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider,
+    > {
         let mut slot = self.provider.borrow_mut();
         if slot.is_none() {
             *slot = Some(
@@ -449,92 +544,124 @@ impl KayaApplication_Impl {
         }
         Ok(slot.as_ref().expect("just filled").clone())
     }
+
+    fn raw_provider(
+        &self,
+    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider> {
+        use windows_core::Interface;
+        self.provider()?.cast()
+    }
 }
 
-impl app_overrides::IApplicationOverrides_Impl for KayaApplication_Impl {
-    fn OnLaunched(
-        &self,
-        _args: windows_core::Ref<'_, bindings::Microsoft::UI::Xaml::LaunchActivatedEventArgs>,
-    ) -> windows_core::Result<()> {
-        // Merge the framework's control resources once, at launch: a
-        // code-only app has no App.xaml to do it, and while most
-        // control templates happen to resolve without the merge,
-        // ProgressBar's was the first to hit a missing theme key
-        // ("Cannot find a Resource ... TabViewScrollButtonBackground",
-        // 2026-07-22) — the research footnote from the entry work,
-        // now load-bearing. Application.Current() is unusable here
-        // (the composition trap: identity is the outer), so the
-        // handle comes from the thread-local stashed at composition.
-        //
-        // The merge is TIERED because it cannot always load:
-        // XamlControlsResources resolves through ms-appx, which needs
-        // the exe-adjacent resources.pri — present for the scene
-        // executables, structurally absent for dll-hosted guests
-        // (python.exe, java.exe, dotnet, go: kaya.dll is not the
-        // exe). Where the real merge fails, kaya logs and continues:
-        // every control except ProgressBar resolves without it (the
-        // dll-hosted ProgressBar gap is ledgered — app-scope stub
-        // keys were tried and do NOT satisfy the realization walk;
-        // it fail-fasts 0xC000027B regardless).
-        APP.with_borrow(|app| -> windows_core::Result<()> {
-            let Some(app) = app.as_ref() else {
-                return Ok(());
-            };
-            let merged: windows_core::Result<()> = (|| {
-                let resources =
-                    bindings::Microsoft::UI::Xaml::Controls::XamlControlsResources::new()?;
-                app.Resources()?.MergedDictionaries()?.Append(&resources)?;
-                Ok(())
-            })();
-            if let Err(e) = merged {
-                eprintln!(
-                    "kaya: winui XamlControlsResources unavailable ({})",
-                    e.message()
-                );
-            }
+unsafe extern "system" fn outer_on_launched(
+    this: *mut core::ffi::c_void,
+    _args: *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    let _ = unsafe { outer_from_slot::<1>(this) };
+    // Merge the framework's control resources once, at launch: a
+    // code-only app has no App.xaml to do it, and while most control
+    // templates happen to resolve without the merge, ProgressBar's
+    // was the first to hit a missing theme key. The merge is TIERED
+    // because it cannot always load: XamlControlsResources resolves
+    // through ms-appx, which needs the exe-adjacent resources.pri —
+    // present for the scene executables, structurally absent for
+    // dll-hosted guests without the pri-adjacency runners. Where the
+    // real merge fails, kaya logs and continues.
+    let launched: windows_core::Result<()> = APP.with_borrow(|app| {
+        let Some(app) = app.as_ref() else {
+            return Ok(());
+        };
+        let merged: windows_core::Result<()> = (|| {
+            let resources =
+                bindings::Microsoft::UI::Xaml::Controls::XamlControlsResources::new()?;
+            app.Resources()?.MergedDictionaries()?.Append(&resources)?;
             Ok(())
-        })?;
-        // Scene setup runs via the dispatcher from run_core's
-        // initialization callback.
+        })();
+        if let Err(e) = merged {
+            eprintln!(
+                "kaya: winui XamlControlsResources unavailable ({})",
+                e.message()
+            );
+        }
         Ok(())
+    });
+    launched.into()
+}
+
+unsafe extern "system" fn outer_get_xaml_type(
+    this: *mut core::ffi::c_void,
+    type_name: core::mem::MaybeUninit<bindings::Windows::UI::Xaml::Interop::TypeName>,
+    out: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        let outer = outer_from_slot::<2>(this);
+        match (*outer).raw_provider() {
+            Ok(provider) => {
+                let vtbl = *(provider.as_raw()
+                    as *mut *const bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl);
+                ((*vtbl).GetXamlType)(provider.as_raw(), type_name, out)
+            }
+            Err(e) => e.into(),
+        }
     }
 }
 
-impl bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Impl for KayaApplication_Impl {
-    fn GetXamlType(
-        &self,
-        r#type: &bindings::Windows::UI::Xaml::Interop::TypeName,
-    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::Markup::IXamlType> {
-        self.provider()?.GetXamlType(r#type)
-    }
-
-    fn GetXamlTypeByFullName(
-        &self,
-        full_name: &windows_core::HSTRING,
-    ) -> windows_core::Result<bindings::Microsoft::UI::Xaml::Markup::IXamlType> {
-        self.provider()?.GetXamlTypeByFullName(full_name)
-    }
-
-    fn GetXmlnsDefinitions(
-        &self,
-    ) -> windows_core::Result<
-        windows_core::Array<bindings::Microsoft::UI::Xaml::Markup::XmlnsDefinition>,
-    > {
-        self.provider()?.GetXmlnsDefinitions()
+unsafe extern "system" fn outer_get_xaml_type_by_full_name(
+    this: *mut core::ffi::c_void,
+    full_name: *mut core::ffi::c_void,
+    out: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        let outer = outer_from_slot::<2>(this);
+        match (*outer).raw_provider() {
+            Ok(provider) => {
+                let vtbl = *(provider.as_raw()
+                    as *mut *const bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl);
+                ((*vtbl).GetXamlTypeByFullName)(provider.as_raw(), full_name, out)
+            }
+            Err(e) => e.into(),
+        }
     }
 }
 
-/// Construct the Application composed with KayaApplication as the COM
+unsafe extern "system" fn outer_get_xmlns_definitions(
+    this: *mut core::ffi::c_void,
+    count: *mut u32,
+    values: *mut *mut core::mem::MaybeUninit<
+        bindings::Microsoft::UI::Xaml::Markup::XmlnsDefinition,
+    >,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        let outer = outer_from_slot::<2>(this);
+        match (*outer).raw_provider() {
+            Ok(provider) => {
+                let vtbl = *(provider.as_raw()
+                    as *mut *const bindings::Microsoft::UI::Xaml::Markup::IXamlMetadataProvider_Vtbl);
+                ((*vtbl).GetXmlnsDefinitions)(provider.as_raw(), count, values)
+            }
+            Err(e) => e.into(),
+        }
+    }
+}
+
+/// Construct the Application composed with KayaOuter as the COM
 /// aggregation outer: the returned instance is the framework object,
-/// but identity QIs route to the outer, so the XAML parser finds
-/// IXamlMetadataProvider. The outer and the returned inner reference
-/// live for the process lifetime, matching the Application itself.
+/// identity QIs route to the outer (which answers
+/// IXamlMetadataProvider and forwards the rest to the inner — see
+/// KayaOuter). The outer and the inner reference live for the process
+/// lifetime, matching the Application itself.
 fn compose_application() -> windows_core::Result<Application> {
     use windows_core::Interface;
-    let outer: windows_core::IInspectable = KayaApplication {
+    let outer: &'static KayaOuter = Box::leak(Box::new(KayaOuter {
+        identity: &KAYA_OUTER_IDENTITY_VTBL,
+        overrides: &KAYA_OUTER_OVERRIDES_VTBL,
+        metadata: &KAYA_OUTER_METADATA_VTBL,
+        inner: std::cell::Cell::new(core::ptr::null_mut()),
         provider: RefCell::new(None),
-    }
-    .into();
+    }));
     let factory = windows_core::factory::<
         Application,
         bindings::Microsoft::UI::Xaml::IApplicationFactory,
@@ -544,16 +671,14 @@ fn compose_application() -> windows_core::Result<Application> {
         let mut result: *mut core::ffi::c_void = core::ptr::null_mut();
         (Interface::vtable(&factory).CreateInstance)(
             Interface::as_raw(&factory),
-            outer.as_raw(),
+            outer as *const KayaOuter as *mut core::ffi::c_void,
             &mut inner,
             &mut result,
         )
         .ok()?;
-        // The composed pair must outlive this frame: the framework
-        // holds the app for the process lifetime, and dropping our
-        // references here would release the aggregation.
-        std::mem::forget(outer);
-        let _ = inner; // owned by the composition; never released by us
+        // The non-delegating inner: the QI fallback target. Owned by
+        // the composition for the process lifetime; never released.
+        outer.inner.set(inner);
         windows_core::Type::from_abi(result)
     }
 }
@@ -895,203 +1020,162 @@ fn mount_entry(
     Ok(())
 }
 
-/// Assemble (or reassemble on a hint change) the window's sections
-/// chrome — KAYA-OWNED, the back-bar precedent: a bar of switcher
-/// Buttons over (hint `bar`) or beside (auto/`sidebar` — Left, the
-/// ratified Windows default) a content Grid the active pane fills.
-/// A button click is the USER route: it reconciles the core, swaps
-/// the pane, re-marks the buttons, and emits — synchronously, no
-/// async raises to swallow. The ACTIVE button is disabled: a real
-/// control state, which is what the harness reads back.
+/// Assemble the window's sections chrome: a NavigationView — the
+/// platform's own idiom, viable now that the aggregation outer
+/// delegates QI (docs/traps.md) — whose items are the sections
+/// (string content, the ComboBox content-stealing trap) and whose
+/// Content is the active pane. Built ONCE and grown incrementally
+/// (XAML refuses re-parenting); a hint change is just
+/// SetPaneDisplayMode — Left for auto/`sidebar` (the ratified
+/// Windows default), Top for `bar`. SelectionChanged is the USER
+/// route, guarded by the swallow COUNTER (it raises async; the
+/// entry_swallow pattern): unguarded raises reconcile the core and
+/// emit.
 fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     let ids = core.sections.get(&window).cloned().unwrap_or_default();
     if ids.is_empty() {
         return Ok(());
+    }
+    if !core.section_navs.contains_key(&window) {
+        let nav = NavigationView::new()?;
+        nav.SetIsSettingsVisible(false)?;
+        nav.SetIsBackButtonVisible(
+            bindings::Microsoft::UI::Xaml::Controls::NavigationViewBackButtonVisible::Collapsed,
+        )?;
+        let swallow =
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        core.section_swallow.insert(window, swallow.clone());
+        let handler = bindings::Windows::Foundation::TypedEventHandler::new(
+            move |nav: windows_core::Ref<NavigationView>, _| {
+                use windows_core::Interface;
+                // A programmatic move's late raise: swallow it — the
+                // model and emit were handled synchronously at the
+                // set (the entry_swallow pattern).
+                if swallow
+                    .fetch_update(
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                        |n| n.checked_sub(1),
+                    )
+                    .is_ok()
+                {
+                    return Ok(());
+                }
+                let Some(nav) = nav.as_ref() else { return Ok(()) };
+                let Ok(selected) = nav.SelectedItem() else { return Ok(()) };
+                let Ok(item) = selected.cast::<NavigationViewItem>() else {
+                    return Ok(());
+                };
+                let Ok(tag) = item.Tag() else { return Ok(()) };
+                let Ok(sid_ref) = tag.cast::<IReference<u64>>() else {
+                    return Ok(());
+                };
+                let sid = sid_ref.Value()?;
+                // Fires from the message loop, never under an apply
+                // borrow (the back-button precedent).
+                let mut emit = false;
+                CORE.with_borrow_mut(|core| {
+                    let Some(core) = core.as_mut() else { return };
+                    if core.selected_sections.get(&window) == Some(&sid) {
+                        return;
+                    }
+                    core.selected_sections.insert(window, sid);
+                    core.ui_selected_sections.insert(window, sid);
+                    core.scene
+                        .user_selected_section(WindowId(window), WindowId(sid));
+                    let _ = show_section_pane(core, window, sid);
+                    emit = true;
+                });
+                if emit {
+                    CORE.with_borrow(|core| {
+                        if let Some(core) = core.as_ref() {
+                            core.occurrences.send(Occurrence::SectionSelected {
+                                window: WindowId(window),
+                                section: WindowId(sid),
+                            });
+                        }
+                    });
+                }
+                Ok(())
+            },
+        );
+        nav.SelectionChanged(&handler)?;
+        core.section_navs.insert(window, nav.clone());
+        let target = winui_window(core, window)?;
+        target.SetContent(&nav)?;
+    }
+    let nav = core.section_navs[&window].clone();
+    // Grow incrementally: an item per section not yet appended (add
+    // order; the set is append-only by grammar).
+    for sid in &ids {
+        if core.section_items.contains_key(sid) {
+            continue;
+        }
+        let item = NavigationViewItem::new()?;
+        let title = &core.section_panes[sid].title;
+        // String content, never a UIElement child — the ComboBox
+        // content-stealing trap (docs/traps.md).
+        item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&**title))?)?;
+        item.SetTag(&PropertyValue::CreateUInt64(*sid)?)?;
+        nav.MenuItems()?.Append(&item)?;
+        core.section_items.insert(*sid, item);
     }
     let hint = core
         .sections_presentation
         .get(&window)
         .copied()
         .unwrap_or(0);
-    // A hint change is the ONE rebuild: detach the long-lived buttons
-    // and panes from the old chrome first (XAML refuses a second
-    // parent), then drop it.
-    if matches!(core.section_chrome.get(&window), Some((h, ..)) if *h != hint) {
-        for sid in &ids {
-            if let Some(button) = core.section_buttons.get(sid) {
-                let el: UIElement = button.cast()?;
-                detach(&el)?;
-            }
-            if let Some(record) = core.section_panes.get(sid) {
-                let el: UIElement = record.pane.cast()?;
-                detach(&el)?;
-            }
-        }
-        core.section_chrome.remove(&window);
-    }
-    let horizontal = hint == 1;
-    if !core.section_chrome.contains_key(&window) {
-        // Build once: bar + content in a 2-track Grid, the track axis
-        // picked by the hint (`bar` = top row; auto/`sidebar` = the
-        // leading column, the ratified Windows default).
-        let outer = Grid::new()?;
-        let bar = Grid::new()?;
-        let content = Grid::new()?;
-        if horizontal {
-            let rows = outer.RowDefinitions()?;
-            let bar_track = RowDefinition::new()?;
-            bar_track.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
-            rows.Append(&bar_track)?;
-            let fill = RowDefinition::new()?;
-            fill.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
-            rows.Append(&fill)?;
-            let bar_el: FrameworkElement = bar.cast()?;
-            Grid::SetRow(&bar_el, 0)?;
-            let content_el: FrameworkElement = content.cast()?;
-            Grid::SetRow(&content_el, 1)?;
-        } else {
-            let cols = outer.ColumnDefinitions()?;
-            let bar_track = ColumnDefinition::new()?;
-            bar_track.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
-            cols.Append(&bar_track)?;
-            let fill = ColumnDefinition::new()?;
-            fill.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Star })?;
-            cols.Append(&fill)?;
-            let bar_el: FrameworkElement = bar.cast()?;
-            Grid::SetColumn(&bar_el, 0)?;
-            let content_el: FrameworkElement = content.cast()?;
-            Grid::SetColumn(&content_el, 1)?;
-        }
-        outer.Children()?.Append(&bar)?;
-        outer.Children()?.Append(&content)?;
-        core.section_chrome
-            .insert(window, (hint, outer.clone(), bar, content));
-        let target = winui_window(core, window)?;
-        target.SetContent(&outer)?;
-    }
-    // Grow the bar incrementally: a track + button per section not
-    // yet appended (add order; ids never leave — the set is
-    // append-only by grammar).
-    let (_, _, bar, _) = core.section_chrome[&window].clone();
-    for (i, sid) in ids.iter().enumerate() {
-        if core.section_buttons.contains_key(sid) {
-            continue;
-        }
-        if horizontal {
-            let track = ColumnDefinition::new()?;
-            track.SetWidth(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
-            bar.ColumnDefinitions()?.Append(&track)?;
-        } else {
-            let track = RowDefinition::new()?;
-            track.SetHeight(GridLength { Value: 1.0, GridUnitType: GridUnitType::Auto })?;
-            bar.RowDefinitions()?.Append(&track)?;
-        }
-        let button = Button::new()?;
-        let sid_copy = *sid;
-        let handler = RoutedEventHandler::new(move |_, _| {
-            // Fires from the message loop, never under an apply
-            // borrow (the back-button precedent).
-            let mut emit = None;
-            CORE.with_borrow_mut(|core| -> windows_core::Result<()> {
-                let Some(core) = core.as_mut() else { return Ok(()) };
-                let Some(&window) = core
-                    .section_panes
-                    .get(&sid_copy)
-                    .map(|record| &record.window)
-                else {
-                    return Ok(());
-                };
-                if core.selected_sections.get(&window) == Some(&sid_copy) {
-                    return Ok(());
-                }
-                core.selected_sections.insert(window, sid_copy);
-                core.scene
-                    .user_selected_section(WindowId(window), WindowId(sid_copy));
-                show_section_pane(core, window, sid_copy)?;
-                mark_section_buttons(core, window)?;
-                emit = Some(window);
-                Ok(())
-            })?;
-            if let Some(window) = emit {
-                CORE.with_borrow(|core| {
-                    if let Some(core) = core.as_ref() {
-                        core.occurrences.send(Occurrence::SectionSelected {
-                            window: WindowId(window),
-                            section: WindowId(sid_copy),
-                        });
-                    }
-                });
-            }
-            Ok(())
-        });
-        button.Click(&handler)?;
-        let caption = TextBlock::new()?;
-        caption.SetText(&HSTRING::from(&*core.section_panes[sid].title))?;
-        button.SetContent(&caption)?;
-        let button_el: FrameworkElement = button.cast()?;
-        if horizontal {
-            Grid::SetColumn(&button_el, i as i32)?;
-        } else {
-            Grid::SetRow(&button_el, i as i32)?;
-        }
-        bar.Children()?.Append(&button)?;
-        core.section_buttons.insert(*sid, button);
-    }
+    nav.SetPaneDisplayMode(if hint == 1 {
+        NavigationViewPaneDisplayMode::Top
+    } else {
+        NavigationViewPaneDisplayMode::Left
+    })?;
     if let Some(sel) = core.selected_sections.get(&window).copied() {
+        nav_set_selected(core, window, sel)?;
         show_section_pane(core, window, sel)?;
-        mark_section_buttons(core, window)?;
     }
     Ok(())
 }
 
-/// Remove an element from its current panel parent, if any — chrome
-/// rebuilds re-home long-lived buttons and panes, and XAML refuses a
-/// second parent ("Element is already the child of another element").
-fn detach(element: &UIElement) -> windows_core::Result<()> {
-    let framework: FrameworkElement = element.cast()?;
-    let Ok(parent) = framework.Parent() else {
+/// Move the switcher's selection programmatically: swallow the async
+/// SelectionChanged raise (counter, not flag) and skip no-op moves,
+/// which raise nothing and would leave the counter armed against a
+/// future real switch.
+fn nav_set_selected(
+    core: &mut CoreState,
+    window: u64,
+    sid: u64,
+) -> windows_core::Result<()> {
+    if core.ui_selected_sections.get(&window) == Some(&sid) {
+        return Ok(());
+    }
+    let (Some(nav), Some(item)) = (
+        core.section_navs.get(&window).cloned(),
+        core.section_items.get(&sid).cloned(),
+    ) else {
         return Ok(());
     };
-    let Ok(panel) = parent.cast::<bindings::Microsoft::UI::Xaml::Controls::Panel>() else {
-        return Ok(());
-    };
-    let children = panel.Children()?;
-    let mut index = 0u32;
-    if bool::from(children.IndexOf(element, &mut index)?) {
-        children.RemoveAt(index)?;
+    if let Some(swallow) = core.section_swallow.get(&window) {
+        swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
+    core.ui_selected_sections.insert(window, sid);
+    nav.SetSelectedItem(&item)?;
     Ok(())
 }
 
-/// Re-mark the switcher: the active section's button is DISABLED —
-/// the selection state the harness's active-title read uses.
-fn mark_section_buttons(core: &CoreState, window: u64) -> windows_core::Result<()> {
-    let selected = core.selected_sections.get(&window).copied();
-    for sid in core.sections.get(&window).cloned().unwrap_or_default() {
-        if let Some(button) = core.section_buttons.get(&sid) {
-            button.SetIsEnabled(Some(sid) != selected)?;
-        }
-    }
-    Ok(())
-}
-
-/// Put the section's pane into the chrome's content slot.
+/// Put the section's pane into the NavigationView's content slot.
 fn show_section_pane(
     core: &CoreState,
     window: u64,
     section: u64,
 ) -> windows_core::Result<()> {
-    let (Some((_, _, _, content)), Some(record)) = (
-        core.section_chrome.get(&window),
+    let (Some(nav), Some(record)) = (
+        core.section_navs.get(&window),
         core.section_panes.get(&section),
     ) else {
         return Ok(());
     };
-    let children = content.Children()?;
-    children.Clear()?;
-    let pane_el: UIElement = record.pane.cast()?;
-    detach(&pane_el)?;
-    children.Append(&pane_el)?;
+    nav.SetContent(&record.pane)?;
     Ok(())
 }
 
@@ -1132,6 +1216,50 @@ fn lf(s: String) -> String {
     }
 }
 
+/// KAYA_WINUI_NAV_PROBE: wrap the primary mount in a NavigationView
+/// ("bare" = no items; anything else adds two string items). The
+/// stowed-E_NOINTERFACE bisection instrument (docs/traps.md): it
+/// answers whether the control is viable in THIS hosting shape at
+/// all, independent of kaya's sections machinery.
+fn nav_probe_wrap(element: &UIElement) -> windows_core::Result<UIElement> {
+    use bindings::Microsoft::UI::Xaml::Controls::{NavigationView, NavigationViewItem};
+    let level = std::env::var("KAYA_WINUI_NAV_PROBE").unwrap_or_default();
+    if level.is_empty() {
+        return Ok(element.clone());
+    }
+    eprintln!("kaya: NAV PROBE armed ({level})");
+    // The aggregation hypothesis: NavigationView's ResourceAccessor
+    // consults Application.Current at runtime; with the outer
+    // discarding the inner, identity QIs for IApplication die
+    // E_NOINTERFACE. Reproduce the exact lookup it would make.
+    match bindings::Microsoft::UI::Xaml::Application::Current() {
+        Ok(app) => match app.Resources() {
+            Ok(_) => eprintln!("kaya: PROBE Current().Resources() OK"),
+            Err(e) => eprintln!(
+                "kaya: PROBE Current().Resources() FAILED: {:?} {}",
+                e.code(),
+                e.message()
+            ),
+        },
+        Err(e) => eprintln!(
+            "kaya: PROBE Application::Current() FAILED: {:?} {}",
+            e.code(),
+            e.message()
+        ),
+    }
+    let nav = NavigationView::new()?;
+    nav.SetIsSettingsVisible(false)?;
+    if level != "bare" {
+        for title in ["Feed", "Archive"] {
+            let item = NavigationViewItem::new()?;
+            item.SetContent(&PropertyValue::CreateString(&HSTRING::from(title))?)?;
+            nav.MenuItems()?.Append(&item)?;
+        }
+    }
+    nav.SetContent(element)?;
+    nav.cast()
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -1153,7 +1281,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // deploy ships tools/guest/minimal-resources.pri),
                     // and the built-in template's deferred theme XAML
                     // needs the composed Application's metadata provider
-                    // (see KayaApplication below) — without it the XAML
+                    // (see KayaOuter below) — without it the XAML
                     // parser fail-fasts (0xC000027B) resolving
                     // TextCommandBarFlyout. The minimal template keeps
                     // the widget free of chrome resources kaya doesn't
@@ -1624,12 +1752,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // a section dies).
             for sid in core.sections.remove(&window.0).unwrap_or_default() {
                 core.section_panes.remove(&sid);
-                core.section_buttons.remove(&sid);
+                core.section_items.remove(&sid);
                 for entry in core.nav_stacks.remove(&sid).unwrap_or_default() {
                     core.nav_entries.remove(&entry);
                 }
             }
-            core.section_chrome.remove(&window.0);
+            core.section_navs.remove(&window.0);
+            core.section_swallow.remove(&window.0);
+            core.ui_selected_sections.remove(&window.0);
             core.selected_sections.remove(&window.0);
             core.sections_presentation.remove(&window.0);
             core.window_roots.remove(&window.0);
@@ -1698,12 +1828,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             refresh_sections(core, window.0)?;
         }
         ApplyOp::SelectSection { window, section } => {
-            // Programmatic and QUIET (the echo doctrine): the pane
-            // swaps and the buttons re-mark; no user path is touched
-            // and nothing emits.
+            // Programmatic and QUIET: the switcher moves under the
+            // swallow counter (SelectionChanged raises ASYNC — the
+            // echo doctrine, the entry_swallow spelling).
             core.selected_sections.insert(window.0, section.0);
+            nav_set_selected(core, window.0, section.0)?;
             show_section_pane(core, window.0, section.0)?;
-            mark_section_buttons(core, window.0)?;
         }
         ApplyOp::SetSectionProp { section, prop, value } => {
             use crate::protocol::SectionProp;
@@ -1714,11 +1844,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             match (prop, &value) {
                 (SectionProp::Title, Value::Str(title)) => {
                     record.title = title.clone();
-                    let caption = record.title.clone();
-                    if let Some(button) = core.section_buttons.get(&section.0) {
-                        let text = TextBlock::new()?;
-                        text.SetText(&HSTRING::from(&*caption))?;
-                        button.SetContent(&text)?;
+                    if let Some(item) = core.section_items.get(&section.0) {
+                        // String content, never a UIElement child —
+                        // the ComboBox content-stealing trap.
+                        item.SetContent(&PropertyValue::CreateString(&HSTRING::from(
+                            &*record.title,
+                        ))?)?;
                     }
                 }
                 // Day-one slot: accepted; the switcher TITLE is the
@@ -2159,6 +2290,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             } else if core.nav_entries.contains_key(&window.0) {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
+                let element = nav_probe_wrap(&element)?;
                 core.window.SetContent(&element)?;
                 core.window_roots.insert(0, element);
             } else {
@@ -2349,6 +2481,18 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         unhandled.UnhandledErrorDetected(&on_core_error)?;
         let app = compose_application()?;
         APP.with_borrow_mut(|slot| *slot = Some(app));
+        // The aggregation contract, asserted where it can fail loudly:
+        // Application.Current() is an identity QI for IApplication
+        // through the OUTER — if the outer ever stops delegating
+        // unknown IIDs to the inner, every control that consults
+        // Current at runtime (NavigationView's ResourceAccessor was
+        // the first found) stow-crashes minutes later with a bare
+        // E_NOINTERFACE instead of failing here, at the source
+        // (docs/traps.md, the aggregation trap).
+        bindings::Microsoft::UI::Xaml::Application::Current().expect(
+            "kaya: Application.Current() failed — the aggregation outer \
+             is not delegating QI to the inner (see KayaOuter)",
+        );
         // Stowed exceptions (0xC000027B) die silently; print what XAML
         // actually complained about before the process goes down. A
         // permanent diagnostic, not scaffolding.
@@ -2714,8 +2858,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             nav_entries: HashMap::new(),
             sections: HashMap::new(),
             section_panes: HashMap::new(),
-            section_chrome: HashMap::new(),
-            section_buttons: HashMap::new(),
+            section_navs: HashMap::new(),
+            section_items: HashMap::new(),
+            section_swallow: HashMap::new(),
+            ui_selected_sections: HashMap::new(),
             selected_sections: HashMap::new(),
             sections_presentation: HashMap::new(),
             nav_stacks: HashMap::new(),
@@ -3514,12 +3660,12 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn section_count(&self) -> usize {
-        // The REAL switcher bar's child count, never the section map.
+        // The REAL switcher's item collection, never the section map.
         Self::on_ui_read(|core| {
             Ok(core
-                .section_chrome
+                .section_navs
                 .get(&0)
-                .map(|(_, _, bar, _)| bar.Children()?.Size().map(|n| n as usize))
+                .map(|nav| nav.MenuItems()?.Size().map(|n| n as usize))
                 .transpose()?
                 .unwrap_or(0))
         })
@@ -3527,29 +3673,34 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn active_section_title(&self) -> String {
-        // The DISABLED button's caption — the real selection marker
-        // on this backend's kaya-owned chrome.
+        // The selected item's OWN content string — the platform's
+        // selection state, not the model mirror.
         Self::on_ui_read(|core| {
-            let ids = core.sections.get(&0).cloned().unwrap_or_default();
-            for sid in ids {
-                let Some(button) = core.section_buttons.get(&sid) else {
-                    continue;
-                };
-                if !bool::from(button.IsEnabled()?) {
-                    let content = button.Content()?;
-                    if let Ok(text) = content.cast::<TextBlock>() {
-                        return Ok(text.Text()?.to_string());
-                    }
-                }
-            }
-            Ok(String::new())
+            use windows_core::Interface;
+            let Some(nav) = core.section_navs.get(&0) else {
+                return Ok(String::new());
+            };
+            let Ok(selected) = nav.SelectedItem() else {
+                return Ok(String::new());
+            };
+            let Ok(item) = selected.cast::<NavigationViewItem>() else {
+                return Ok(String::new());
+            };
+            let Ok(content) = item.Content() else {
+                return Ok(String::new());
+            };
+            let Ok(text) = content.cast::<IReference<HSTRING>>() else {
+                return Ok(String::new());
+            };
+            Ok(text.Value()?.to_string())
         })
         .unwrap_or_default()
     }
 
     fn select_section(&self, index: usize) {
-        // The user's route: the same reconcile + re-mark + emit the
-        // switcher button's Click runs, synchronously.
+        // The user's route: reconcile, move the switcher under the
+        // swallow counter, and emit exactly once — the synchronous-
+        // emit pattern set_text uses (SelectionChanged raises async).
         Self::on_ui_mut(move |core| {
             let ids = core.sections.get(&0).cloned().unwrap_or_default();
             let Some(&sid) = ids.get(index) else { return Ok(()) };
@@ -3559,8 +3710,8 @@ impl crate::harness::Stage for WinUiStage {
             core.selected_sections.insert(0, sid);
             core.scene
                 .user_selected_section(WindowId(0), WindowId(sid));
+            nav_set_selected(core, 0, sid)?;
             show_section_pane(core, 0, sid)?;
-            mark_section_buttons(core, 0)?;
             core.occurrences.send(Occurrence::SectionSelected {
                 window: WindowId(0),
                 section: WindowId(sid),

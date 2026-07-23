@@ -228,17 +228,30 @@ fi
 # nowhere on a platform — the layout scene shipped exactly that way
 # (functionally green on mac, absent from every suite), and the iOS
 # SwiftUI suite later missed the grow/layout legs the same silent way.
-# A file-level name check cannot see a per-suite gap inside one runner,
-# but it holds the coarse class: no scene vanishes from a PLATFORM
-# without this failing.
+# The grep demands each runner's LEG SIGNATURE, not the bare name: a
+# scene listed in SCENES whose leg block is dead (cloned below the
+# script's exit, commented out, mangled) satisfies a name check while
+# running nowhere — the sections regex-clone near-miss, 2026-07-22.
+# (iOS and Android stay name-level: their legs derive mechanically
+# from the scene list, so the name IS the wiring — except the scenes
+# each platform deliberately skips, carved out below.)
 wired() {
-    local runner scene status=0
+    local runner scene sig status=0
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
         for runner in tools/validate-mac.sh tools/linux/run-suites.sh \
             tools/deploy-win.sh tools/ios/run-sim.sh tools/android/run-emulator.sh; do
-            if ! grep -q "$scene" "$runner"; then
-                echo "check-steps: scene \"$scene\" is not wired into $runner" >&2
+            case "$runner" in
+                tools/validate-mac.sh) sig="run $scene-" ;;
+                tools/linux/run-suites.sh) sig="run \"\$proto\" $scene-" ;;
+                tools/deploy-win.sh) sig="run_suite ${scene}_" ;;
+                *) sig="$scene" ;;
+            esac
+            # milestone2's legs drop the scene prefix (they ARE the
+            # unprefixed originals); its name check stays coarse.
+            [ "$scene" = milestone2 ] && sig="$scene"
+            if ! grep -qF "$sig" "$runner"; then
+                echo "check-steps: scene \"$scene\" has no live legs in $runner (wanted \"$sig\")" >&2
                 status=1
             fi
         done

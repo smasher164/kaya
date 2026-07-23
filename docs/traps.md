@@ -768,21 +768,37 @@ script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
 
-## NavigationView dies stowed in dll-hosted guests
+## The aggregation outer MUST delegate QI (the NavigationView saga)
 
-The first WinUI sections materialization used NavigationView (the
-ratified idiom). In dll-hosted foreign guests it fail-fasts
-(c000027b, two stowed E_NOINTERFACE) ~100ms after creation — its
-async template machinery fails even with resources.pri adjacent and
-the full XamlControlsResources merged, and rust guests only "passed"
-by exiting before the async work completed. Ruled out: the
-SelectionChanged delegate (crash persists unsubscribed), pri
-adjacency, the metadata provider. The shipped materialization is
-KAYA-OWNED chrome (a Grid bar of Buttons + content swap) — the same
-stance as this backend's kaya-owned nav back bar; the active button
-is DISABLED, which is the real control state the harness reads.
-docs/deferred.md carries the NavigationView upgrade (bindings are
-already in the winui-bindgen filter).
+NavigationView stow-crashed (c000027b, bare E_NOINTERFACE) in every
+kaya process ~100ms after creation. Three sessions of suspects fell:
+not the SelectionChanged delegate, not resources.pri adjacency, not
+the metadata provider, not XamlControlsResources placement, and NOT
+a hosting constraint (a first verdict said "unpackaged hosting" —
+wrong: rust hosts only looked immune because they exited before the
+async work ran). The KAYA_WINUI_NAV_PROBE instrument (permanent,
+flag-gated: wraps the primary mount in a NavigationView) plus one
+probe line found it: Application::Current() ITSELF failed
+0x80004002.
+
+Root cause: kaya's Application is COM-aggregated with a kaya outer,
+and windows-core's #[implement] answers unknown-IID QIs with
+E_NOINTERFACE — but the AGGREGATION CONTRACT requires the outer to
+forward every IID it does not implement to the inner's
+non-delegating IUnknown. Application.Current() is an identity QI for
+IApplication through the outer, so it failed; simple controls never
+consult Current at runtime, but NavigationView's ResourceAccessor
+does — hence one control crashing while ComboBox and friends lived.
+
+The fix is the hand-rolled KayaOuter (winui/mod.rs): three vtable
+slots (identity / IApplicationOverrides / IXamlMetadataProvider) and
+a QueryInterface that forwards everything else to the stored inner.
+A startup assert now calls Application::Current() right after
+composition — if the delegation ever regresses, the process fails AT
+THE SOURCE with a named message instead of stowing minutes later.
+The lesson: a bare async E_NOINTERFACE in XAML work points at an
+identity QI the Application outer refused — check the aggregation
+before anything else.
 
 Two sub-traps from the same session:
 - XAML refuses re-parenting ("Element is already the child of
