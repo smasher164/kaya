@@ -75,7 +75,11 @@ engine.
   languages will hold stale handles, so with generational ids a stale
   handle is a catchable error instead of use-after-free undefined behavior
   in someone's runtime. Multi-language bindings are the strongest argument
-  for generational ids.
+  for generational ids. (As shipped, the generation half never became
+  necessary: ids are guest-allocated monotone u64 counters, never
+  reused, so ABA cannot arise and a stale id is simply absent from the
+  registry — the same catchable-error property by a cheaper route. The
+  generational scheme returns only if id reuse ever does.)
 - Removing a widget must release its native handle and cascade to
   descendants, and this has to be reconciled with the fact that native
   toolkits destroy the children of a destroyed parent on their own. This
@@ -95,7 +99,12 @@ version negotiation: each vocabulary (widget set, layout, transforms, IME
 contract, and so on) advertises a version, bindings bind at the minimum
 they support, opcodes are additive-only and never repurposed, and an
 unknown opcode fails at submission with an error record rather than a
-silent no-op.
+silent no-op. (Negotiation is the at-release plan; pre-release, churn
+is free and the shipped mechanism is simpler: everything regenerates
+in lockstep from spec.rs, `kaya_spec_hash` asserts the lockstep at
+attach, pin tables freeze the wire constants, opcodes are already
+additive-only, and the one capability that exists — aux windows —
+rides a `kaya_capabilities` bit, the seed of the eventual handshake.)
 
 The boundary is two-tier, on io_uring's model. Functions are the portable
 floor: any language calls them and never thinks about memory ordering.
@@ -229,7 +238,11 @@ The encoding at the C ABI is a builder API (`begin_node`, `set_prop`,
 `bind_slot`, `end_node`). Templates are small and built rarely, so the
 encoding optimizes for binding simplicity. The builder records into the
 canonical serialized form, and submitting a prebuilt buffer is equally
-legal; that is the path server-driven UI and tooling use. Node properties
+legal; that is the path server-driven UI and tooling use. (As shipped,
+the prebuilt-buffer path became the only path: every binding's
+generated layer 1 writes the canonical records directly and the
+builder functions were never needed — the C floor guests spell the
+records out by hand, which is the floor's documentation role.) Node properties
 are constants or slot references. Templates nest, so `When`/`For` branches
 can be anonymous fragments.
 
@@ -1221,7 +1234,10 @@ bindings' scene construction, and the geometry gates do not move.
     completions. Records have a fixed header (u32 size, u16 channel/type,
     u16 flags), 8-byte alignment, and variable-length payloads inline.
     Overflow grows by chained segments; the producer is never blocked and
-    no record is dropped. The core reads the app's consumer cursor
+    no record is dropped. (Chained growth is still to build: the shipped
+    ring is fixed-capacity and a full ring fails loudly — ring.rs marks
+    segment growth as pending, and no scene has yet filled a ring.) The
+    core reads the app's consumer cursor
     directly, so stall detection ("log undrained for N seconds") requires
     no protocol.
   - Slots: seqlock cells for keep-latest traffic, one per channel. A write
@@ -1641,7 +1657,12 @@ The first-admissions queue, post-v1 and in rough order: Grid (forms will
 demand cross-row alignment), TextArea, Canvas (with the surface-handle
 transport), Tabs, RadioGroup, ProgressBar, ContextMenu, file dialogs,
 Separator, Splitter, Table, Tree, and date/time pickers. Tooltips return as
-a plain property. Not core: webview (a separate crate, if ever), rich text
+a plain property. (Half this queue was pulled forward and landed in v1
+during the 2026-07-22 widget run: Grid, TextArea, Tabs — as sections,
+a presentation context rather than a widget — RadioGroup as radio,
+ProgressBar, plus Select and Spacer which never sat in the queue.
+Still ahead: Canvas, ContextMenu, file dialogs, Separator, Splitter,
+Table, Tree, date/time pickers.) Not core: webview (a separate crate, if ever), rich text
 (after display lists), and the audio implementation (designed above,
 scheduled when an app needs it).
 

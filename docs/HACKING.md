@@ -71,10 +71,13 @@ The slider and image commits are the worked examples. The ~30 touchpoints:
 
 Interactive widgets additionally follow the occurrence machinery: spec
 `payload:` field, tag bytes at create, per-backend emit through the
-control's own event path (programmatic mutation must re-fire the change
-path where the toolkit is silent about it — the SwiftUI/Compose
-interpreters emit from their own bindings; GTK and WinUI fire their
-change paths on programmatic set).
+control's own event path. The echo doctrine (ratified 2026-07-22,
+DESIGN's Binding conventions): only the user's act emits — a property
+write is configuration and NEVER echoes (GTK and WinUI arm an
+apply_quiet guard around every interactive SetProp, because their
+native change events cannot tell user from programmatic); commands
+(clear) act like the user and DO emit. The gallery scene's quarter
+button + signal-bound slider is the standing negative test.
 
 ## The blob channel (bulk payloads)
 

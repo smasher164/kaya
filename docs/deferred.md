@@ -170,7 +170,7 @@ moved to git history; their traps live in docs/traps.md.)
 - Value::Record — waits for nested fields or field-level sum payloads.
 - Nesting depth >2 validation; typed keys in collection schemas.
 - Occurrence growth: subscription/filtering (every click emits today),
-  suspension lifecycle (Android), CloseRequested.
+  suspension lifecycle (Android).
 - Vello scene-encoding subset (open question #3) — arrives with Canvas,
   post-v1, on the surface-handle transport (pixel surfaces as
   IOSurface/DXGI/dmabuf handles; the blob channel is the byte-copy arm,
@@ -202,9 +202,14 @@ moved to git history; their traps live in docs/traps.md.)
 
 ## Testing / infrastructure
 
-- Nothing checks that a scene is actually RUN by a suite: check-steps
-  validates script well-formedness and scene REGISTRATION (harness.rs),
-  but a scene can still exist, be registered, and be exercised nowhere.
+- Scene-run coverage, the remaining half: check-steps' wired() now
+  demands per-runner LEG SIGNATURES (run $scene- / run "$proto"
+  $scene- / run_suite ${scene}_), so a scene absent from a runner
+  fails the gate — but a grep signature proves WIRING, not execution.
+  Nothing yet proves the exact scene × language × platform tuples
+  that actually ran and produced verdicts (a runner can still skip
+  legs at runtime); an executed-suite manifest compared against the
+  expected tuple set is the missing gate.
   Packaging notes for whoever adds the next scene: iOS needs a bundle
   per example in run-sim.sh; Android has ONE apk whose guest
   (guests/rust/milestone2_android.rs) is a scene selector keyed on

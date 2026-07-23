@@ -98,14 +98,20 @@ promises):
 - The zone split is spelled by the language's own idiom: a type family
   (Haskell), distinct handle types plus a Tpl builder (Go, C#, Swift,
   Java, Python), or a submodule path (OCaml's `Kaya_app.Tpl`, since
-  OCaml has no overloading — and its binding operators live per zone,
-  so `Tpl.( ... )` switches vocabulary and `let*` together).
-- Where the language has monadic sugar, the declaration program is a
-  value and the transaction never appears in app code: Haskell's
-  do-blocks over Build/Tpl, OCaml's `let*`/`let+`/`and+` over
-  `'a decl = tx -> 'a`. Both make a dropped declaration a type error
-  (a non-unit value in statement position), the same loudness Rust
-  will get from #[must_use] delta values.
+  OCaml has no overloading — `Tpl.( ... )` switches the vocabulary
+  wholesale).
+- Haskell keeps the monadic spelling: do-blocks over Build/Tpl make
+  the declaration program a value and a dropped declaration a type
+  error (a non-unit value in statement position), the same loudness
+  Rust will get from #[must_use] delta values. OCaml runs DIRECT
+  STYLE over an ambient transaction (ratified 2026-07-22; the
+  let*/decl reader is deleted) with curried children: every creator
+  ends in `()`, omitting the unit leaves a pure `unit -> widget`
+  thunk — the child form — and containers realize child lists left
+  to right themselves, so document order never rides on OCaml's
+  right-to-left list-literal evaluation (the trap that killed eager
+  children; see docs/traps.md and DESIGN's Binding conventions for
+  the full taste, including `w` and the eta/force corners).
 
 Per-language status:
 
@@ -115,7 +121,7 @@ Per-language status:
 | Haskell | KayaWire.hs | KayaRuntime.hs (peeks + stubs) | KayaApp.hs (Build/Tpl monads) | the monad-sugar experiment, realized |
 | Go      | kaya_wire.go | runtime.go (atomics ring) | app.go | handlers take *Tx per convention |
 | C#      | KayaWire.cs | Kaya.cs (Volatile ring) | KayaApp.cs | |
-| OCaml   | kaya_wire.ml | kaya_runtime.ml (Bigarray + stubs) | kaya_app.ml | let*/let+ over 'a decl (= tx -> 'a) — the reader spelling of Haskell's Build; Tpl as submodule with its own operators, so a local open switches zone and operators together; io lifts host code; effect handlers are the flagged follow-up |
+| OCaml   | kaya_wire.ml | kaya_runtime.ml (Bigarray + stubs) | kaya_app.ml | direct style over an ambient tx; curried children (trailing-unit creators, `w` wraps realized widgets); Tpl as submodule, so a local open switches the zone; effect handlers are the flagged follow-up |
 | Swift   | KayaWire.swift | function floor via kaya.h | KayaApp.swift | Kaya-prefixed handles (hosts link UI frameworks with bare Widget/Node names) |
 | Java    | KayaWire.java | (ring recipe lives in KayaApp) | KayaApp.java | needs API 26 (invokeExact); Android's kaya module minSdk says so |
 | C       | kaya_wire.h | kaya.h is the runtime | — none, by decision | flat functions over a caller-owned buffer *are* C's idiomatic surface; a C app that wants handles is a C app about to become a binding |
@@ -124,12 +130,12 @@ Entry (the first owned-state widget) is in every layer-3 surface:
 `on_change` registration beside `on_click`, dispatch keyed by
 (occurrence kind, id) per id space, and an entry example per language
 proving the uncontrolled fold end to end ("added milk, 1 total").
-Backends: all eight — AppKit, GTK, UIKit, SwiftUI, WinUI (a code-only
-WinUI app must be composed with IXamlMetadataProvider delegating to
-XamlControlsXamlMetaDataProvider — see KayaApplication in winui/mod.rs
-— and ship an exe-adjacent resources.pri), Android Views (EditText +
-KayaTextWatcher), and Compose (TextField). On Android one APK hosts
-both scenes; the selftest script doubles as the scene selector.
+Backends: the full roster — SwiftUI (macOS + iOS), GTK4, WinUI (a
+code-only WinUI app must be composed with IXamlMetadataProvider
+delegating to XamlControlsXamlMetaDataProvider — see KayaApplication
+in winui/mod.rs — and ship an exe-adjacent resources.pri), and
+Compose (TextField). On Android one APK hosts all scenes; the
+selftest script doubles as the scene selector.
 
 The north star for what layer 3 grows into is DESIGN.md's appendix
 ("the shape of an app"); the tier-1 sugar there (container

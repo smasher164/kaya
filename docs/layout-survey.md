@@ -8,10 +8,14 @@ backends offer to lower onto — and which of those capabilities are
 portable enough to normalize, which need a per-backend container swap,
 and which are idiomatic-only (escape-hatch territory)?
 
-Status: working reference, uncommitted, drafted 2026-07-19. The "kaya
-today" facts are grounded in the source; the native-toolkit inventories
-are from the toolkit docs/knowledge and want a second pass from Akhil,
-who implemented all seven backends.
+Status: HISTORICAL — a working paper from the seven-backend era,
+drafted 2026-07-19, kept as the survey that informed the layout
+props. Everything it proposed has since landed (grow, spacing, align
+with baseline, the root inset, the 540×330 default), and the backend
+roster it surveys predates the one-backend-per-platform ratification
+(2026-07-20): AppKit, UIKit, and Android Views are deleted. Read it
+for the native-toolkit capability inventories and the reasoning;
+read DESIGN.md's Layout section for what is true today.
 
 ## What kaya lowers to today (and the magic numbers to strip)
 
