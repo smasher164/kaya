@@ -19,8 +19,9 @@ fi
 # expect_order). This gate holds them structurally: every harness verb,
 # every APPLY/KIND/PROP/COMMAND constant (with its value), and every
 # value type reachable through the spec's PROPS must appear in BOTH
-# interpreter files. A new widget, prop, verb, or value type that
-# misses an interpreter fails here, in seconds, not on an emulator.
+# interpreter files, as is every MENU_KIND/MPROP menu constant. A new
+# widget, prop, verb, menu item kind, or value type that misses an
+# interpreter fails here, in seconds, not on an emulator.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -54,10 +55,10 @@ for verb in verbs:
             fail(f'verb "{verb}" missing from {name}')
 
 # --- Wire constants the interpreters mirror privately. ---------------
-# APPLY/KIND/PROP/COMMAND: all of them. VALUE: only the types reachable
-# through the spec's PROPS PropKinds (the scene's prop typing keeps the
-# rest off the pump).
-rows = re.findall(r"pub const ((?:APPLY|KIND|PROP|COMMAND|VALUE)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
+# APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
+# types reachable through the spec's PROPS PropKinds (the scene's prop
+# typing keeps the rest off the pump).
+rows = re.findall(r"pub const ((?:APPLY|KIND|PROP|COMMAND|VALUE|MENU_KIND|MPROP)_[A-Z_0-9]+): u\d+ = (\d+);", wire)
 props_block = spec[spec.index("pub const PROPS") : spec.index("];", spec.index("pub const PROPS"))]
 prop_kinds = set(re.findall(r"PropKind::(\w+)", props_block))
 required_values = {"VALUE_" + k.upper() for k in prop_kinds}

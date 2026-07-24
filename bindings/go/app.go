@@ -79,7 +79,7 @@ func assertRoot(c Collection) {
 }
 
 type counters struct {
-	signal, widget, collection, node, alert uint64
+	signal, widget, collection, node, alert, menuItem uint64
 }
 
 // Entry is one key/value pair of a collection instance, in insertion
@@ -115,6 +115,16 @@ type App struct {
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
+	// Menu dispatch tables, keyed by MENU ITEM id — their own id
+	// space, separate from every widget/node table ("two tables,
+	// always" — now N tables, still always). The node flavors receive
+	// the stamped copy's key path (the keys ARE the noun).
+	menuActivated     map[uint64]func(*Tx)
+	menuActivatedNode map[uint64]func(*Tx, []any)
+	menuToggled       map[uint64]func(*Tx, bool)
+	menuToggledNode   map[uint64]func(*Tx, []any, bool)
+	menuSelected      map[uint64]func(*Tx, int)
+	menuSelectedNode  map[uint64]func(*Tx, []any, int)
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
@@ -159,6 +169,12 @@ func NewApp() *App {
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
+		menuActivated:     make(map[uint64]func(*Tx)),
+		menuActivatedNode: make(map[uint64]func(*Tx, []any)),
+		menuToggled:       make(map[uint64]func(*Tx, bool)),
+		menuToggledNode:   make(map[uint64]func(*Tx, []any, bool)),
+		menuSelected:      make(map[uint64]func(*Tx, int)),
+		menuSelectedNode:  make(map[uint64]func(*Tx, []any, int)),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
 		derived:        make(map[uint64][]func(*Tx)),
@@ -809,12 +825,20 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 // body once with the returned Tpl, then close() ends the template and
 // parents the For into the enclosing scope. Range-over-func makes the
 // close structural — the iterator regains control even on break.
+// The For rides the zone it opens in: the widget id space in the live
+// zone, the node space inside an enclosing template (a nested trace).
 func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 	assertRoot(c)
-	tx.app.c.widget++
-	w := Widget{id: tx.app.c.widget, tx: tx}
+	var id uint64
+	if tx.app.tplDepth > 0 {
+		tx.app.c.node++
+		id = tx.app.c.node
+	} else {
+		tx.app.c.widget++
+		id = tx.app.c.widget
+	}
 	parent := tx.currentParent()
-	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
+	tx.records = append(tx.records, TxCreateFor(id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
 	tx.app.tplDepth++
@@ -824,8 +848,38 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 		tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
 		tx.records = append(tx.records, TxTemplateEnd())
 		if parent != 0 {
-			tx.records = append(tx.records, TxAddChild(parent, w.id))
+			tx.records = append(tx.records, TxAddChild(parent, id))
 		}
+	}
+}
+
+// Row is the scalar-collection row surface a Rows trace yields: the
+// whole template vocabulary (the embedded Tpl) plus the element's own
+// token — a scalar collection has exactly one field, the element
+// itself, and Value() is that token (the generated record twin mints
+// one token per struct field).
+type Row struct{ *Tpl }
+
+// Value is the element's token: what a stamped copy's bindings read.
+func (r Row) Value() Field[string] { return FieldAt[string](0) }
+
+// Label creates a label bound to the element's token.
+func (r Row) Label(f Field[string]) Node {
+	n := r.Tpl.Widget(KindLabel)
+	r.Tpl.BindTextField(n, 0, f)
+	return n
+}
+
+// Rows traces this scalar collection's template as a for statement:
+// `for row := range items.Rows(tx)` runs the body ONCE, authoring the
+// blueprint over the row surface, and range-over-func makes the close
+// structural — even on break. The statement IS the For in both tiers;
+// the record twin is the generated <Type>Rows surface (todos).
+func (c Collection) Rows(tx *Tx) func(func(Row) bool) {
+	return func(yield func(Row) bool) {
+		t, done := BeginRowTrace(tx, c)
+		yield(Row{t})
+		done()
 	}
 }
 
@@ -1211,6 +1265,31 @@ func (w WindowRef) Id() uint64 {
 	return w.id
 }
 
+// Menu declares a top-level menu in this window's command catalog —
+// the menubar rides the window construct (DESIGN.md, Menus):
+// tx.Window(0).Menu("File") returns the retained grouping handle,
+// whose creators (Item/Toggle/Menu/RadioGroup/Separator) append the
+// children: file.Item("Save").Shortcut("primary+s").OnActivate(fn).
+// Append-at-any-time: reopen the retained handle in a later
+// transaction with tx.Menu(file).
+func (w WindowRef) Menu(label string) MenuItem {
+	m := newMenuItem(w.tx, MenuKindMenu, label, false)
+	w.tx.records = append(w.tx.records, TxMenubarAppend(w.id, m.id))
+	return m
+}
+
+// RadioGroup declares a BAR-LEVEL radio group — admissible wherever a
+// menu grouping node is (it materializes as a top-level menu with the
+// platform's checkmark idiom). Declare only Option children; chain
+// BindValue/Value AFTER them (the Choice contract: the selected
+// 0-based index; programmatic writes are quiet) and OnSelect for each
+// USER pick's new index.
+func (w WindowRef) RadioGroup(label string) MenuItem {
+	m := newMenuItem(w.tx, MenuKindRadioGroup, label, false)
+	w.tx.records = append(w.tx.records, TxMenubarAppend(w.id, m.id))
+	return m
+}
+
 // EntryRef chains navigation-entry props, the construction-sugar tier.
 type EntryRef struct {
 	tx *Tx
@@ -1279,6 +1358,317 @@ func (r SectionRef) OnSelected(fn func(*Tx)) SectionRef {
 func (r SectionRef) Id() uint64 {
 	return r.id
 }
+
+// --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+//
+// MenuItem is a live menu item: its OWN id space (the c_menu_item
+// counter) behind its own type, so cross-use with widget or node ids
+// is a compile error. The id alone is the item's durable name; the
+// chain methods (props, creators, handlers) ride the transaction that
+// minted the value and die with it — the Widget.Grow discipline —
+// and tx.Menu(item) reopens a retained handle in a later transaction
+// (append-at-any-time; props mutate freely; nothing is ever removed
+// in v1).
+type MenuItem struct {
+	id uint64
+	tx *Tx
+	// ctx marks a context-anchored chain: a shortcut needs a window
+	// catalog as its native dispatch home, so Shortcut panics here at
+	// record time — the root remains the floor beneath.
+	ctx bool
+}
+
+func (m MenuItem) chain() *Tx {
+	if m.tx == nil || m.tx.closed {
+		panic("kaya: menu chain outside its transaction — reopen the retained handle with Tx.Menu inside a live transaction")
+	}
+	return m.tx
+}
+
+// newMenuItem creates one item in the menu-item id space. Menu
+// records are live-zone only: a template body records a blueprint,
+// and items are live and shared across stamped copies — build the
+// catalog outside (Tx.ContextCatalog) and attach it inside the
+// template with Tpl.ContextMenu.
+func newMenuItem(tx *Tx, kind uint32, label string, ctx bool) MenuItem {
+	if tx == nil || tx.closed {
+		panic("kaya: menu declaration outside its transaction")
+	}
+	if tx.app.tplDepth > 0 {
+		panic("kaya: menu items are live — build the context catalog in the live zone (Tx.ContextCatalog) and attach it inside the template with Tpl.ContextMenu")
+	}
+	tx.app.c.menuItem++
+	m := MenuItem{id: tx.app.c.menuItem, tx: tx, ctx: ctx}
+	tx.records = append(tx.records, TxMenuItemCreate(m.id, kind))
+	if kind != MenuKindSeparator {
+		tx.records = append(tx.records, TxSetMenuLabel(m.id, label))
+	}
+	return m
+}
+
+// child creates and appends one child under this grouping node (the
+// closed parent/child grammar and the depth cap are root errors).
+func (m MenuItem) child(kind uint32, label string) MenuItem {
+	c := newMenuItem(m.chain(), kind, label, m.ctx)
+	m.tx.records = append(m.tx.records, TxMenuItemAppend(m.id, c.id))
+	return c
+}
+
+// Item appends an action — a leaf command firing exactly one
+// menu_activated occurrence (menu click OR its shortcut: ONE
+// occurrence, one dispatch path). Chain OnActivate beside it.
+func (m MenuItem) Item(label string) MenuItem {
+	return m.child(MenuKindAction, label)
+}
+
+// Toggle appends a stateful leaf reusing the Checkbox contract: user
+// flips emit menu_toggled (chain OnToggle); programmatic checked
+// writes are quiet.
+func (m MenuItem) Toggle(label string) MenuItem {
+	return m.child(MenuKindToggle, label)
+}
+
+// Menu appends a NESTED menu — grouping, never navigation. One nested
+// grouping level is the cap (root-checked).
+func (m MenuItem) Menu(label string) MenuItem {
+	return m.child(MenuKindMenu, label)
+}
+
+// RadioGroup appends a NESTED radio group — the Choice contract
+// inline, with the platform's checkmark idiom. Only Option children.
+func (m MenuItem) RadioGroup(label string) MenuItem {
+	return m.child(MenuKindRadioGroup, label)
+}
+
+// Option appends one labeled option (radio groups only — root
+// checked), in declaration order: the order IS the index vocabulary
+// the group's value selects over.
+func (m MenuItem) Option(label string) MenuItem {
+	return m.child(MenuKindRadioOption, label)
+}
+
+// Separator appends native grouping chrome: no label, no props, no
+// handle kept.
+func (m MenuItem) Separator() {
+	c := newMenuItem(m.chain(), MenuKindSeparator, "", m.ctx)
+	m.tx.records = append(m.tx.records, TxMenuItemAppend(m.id, c.id))
+}
+
+// Label renames the item to constant text. Label writes never emit
+// anything.
+func (m MenuItem) Label(text string) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuLabel(m.id, text))
+	return m
+}
+
+// BindLabel binds the item's label to a Str signal.
+func (m MenuItem) BindLabel(s Signal[string]) MenuItem {
+	m.chain().records = append(m.tx.records, TxBindMenuLabel(m.id, s.id))
+	return m
+}
+
+// Enabled sets whether the item is enabled (default true). Enablement
+// writes never emit anything; disabling a grouping node disables its
+// subtree everywhere (the inherited-disabled contract).
+func (m MenuItem) Enabled(on bool) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuEnabled(m.id, on))
+	return m
+}
+
+// BindEnabled binds the item's enablement to a Bool signal.
+func (m MenuItem) BindEnabled(s Signal[bool]) MenuItem {
+	m.chain().records = append(m.tx.records, TxBindMenuEnabled(m.id, s.id))
+	return m
+}
+
+// Checked sets a toggle's state (toggle items only — root-checked):
+// the Checkbox contract. The programmatic write is configuration —
+// QUIET, no menu_toggled echo (the echo doctrine).
+func (m MenuItem) Checked(on bool) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuChecked(m.id, on))
+	return m
+}
+
+// BindChecked binds a toggle's state to a Bool signal, both ways.
+func (m MenuItem) BindChecked(s Signal[bool]) MenuItem {
+	m.chain().records = append(m.tx.records, TxBindMenuChecked(m.id, s.id))
+	return m
+}
+
+// Value sets a radio group's selected option index (radio groups only
+// — root-checked): the Choice contract. QUIET, like Checked.
+func (m MenuItem) Value(index int) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuValue(m.id, float64(index)))
+	return m
+}
+
+// BindValue binds a radio group's selected index to a float signal,
+// both ways.
+func (m MenuItem) BindValue(s Signal[float64]) MenuItem {
+	m.chain().records = append(m.tx.records, TxBindMenuValue(m.id, s.id))
+	return m
+}
+
+// Icon sets the item's icon (the blob channel): used by phone
+// promotion, ignored where native menu dress has no icons. Const-only.
+func (m MenuItem) Icon(data []byte) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuIcon(m.id, RegisterBlob(data)))
+	return m
+}
+
+// Primary sets the phone-bar promotion hint (actions only —
+// root-checked). Flipping it recomputes the promoted set
+// deterministically; INERT on desktops — not a toolbar grammar.
+// Const-only.
+func (m MenuItem) Primary(on bool) MenuItem {
+	m.chain().records = append(m.tx.records, TxSetMenuPrimary(m.id, on))
+	return m
+}
+
+// Shortcut sets the action's shortcut (window-anchored actions only).
+// Canonicalized by the binding's one parser (CanonicalizeShortcut);
+// the shortcut is another affordance of the same item — it fires the
+// SAME menu_activated occurrence as a click. Const-only.
+func (m MenuItem) Shortcut(spelling string) MenuItem {
+	if m.ctx {
+		panic("kaya: a context item takes no shortcut — a shortcut needs a window catalog as its native dispatch home")
+	}
+	m.chain().records = append(m.tx.records, TxSetMenuShortcut(m.id, spelling))
+	return m
+}
+
+// OnActivate binds this action's handler — it rides the declaration
+// (no app-global menu dispatcher exists), and the action's click and
+// its shortcut are ONE occurrence on one dispatch path, so it covers
+// both.
+func (m MenuItem) OnActivate(fn func(*Tx)) MenuItem {
+	m.chain().app.menuActivated[m.id] = fn
+	return m
+}
+
+// OnActivateNode is the template-node flavor: an item attached to a
+// stamped copy reports the copy's key path, outermost first — the
+// keys ARE the noun the command acts on.
+func (m MenuItem) OnActivateNode(fn func(*Tx, []any)) MenuItem {
+	m.chain().app.menuActivatedNode[m.id] = fn
+	return m
+}
+
+// OnToggle binds a toggle's handler: each USER flip's new state.
+// Programmatic Checked writes are quiet, so a handler's own writes
+// cannot loop back at it.
+func (m MenuItem) OnToggle(fn func(*Tx, bool)) MenuItem {
+	m.chain().app.menuToggled[m.id] = fn
+	return m
+}
+
+// OnToggleNode is the template-node flavor: the copy's keys, then the
+// new state.
+func (m MenuItem) OnToggleNode(fn func(*Tx, []any, bool)) MenuItem {
+	m.chain().app.menuToggledNode[m.id] = fn
+	return m
+}
+
+// OnSelect binds a radio group's handler (registered on the GROUP):
+// each USER pick's new 0-based option index. Programmatic Value
+// writes are quiet.
+func (m MenuItem) OnSelect(fn func(*Tx, int)) MenuItem {
+	m.chain().app.menuSelected[m.id] = fn
+	return m
+}
+
+// OnSelectNode is the template-node flavor: the copy's keys, then the
+// new index.
+func (m MenuItem) OnSelectNode(fn func(*Tx, []any, int)) MenuItem {
+	m.chain().app.menuSelectedNode[m.id] = fn
+	return m
+}
+
+// Menu reopens a RETAINED menu item — the append-at-any-time
+// discipline: tx.Menu(file).Label("Document").Item("Publish"). Props
+// mutate freely on every kind the prop applies to; the root judges a
+// misapplied prop (kind and anchor rules) exactly as at construction.
+func (tx *Tx) Menu(item MenuItem) MenuItem {
+	return MenuItem{id: item.id, tx: tx}
+}
+
+// ContextRef is a live widget's context anchor (Tx.ContextMenu): the
+// same item vocabulary as the bar, scoped to a NOUN — each creator
+// attaches another root. No shortcuts here (record-time checked; the
+// editable text controls reject attachment at the root).
+type ContextRef struct {
+	tx     *Tx
+	widget uint64
+}
+
+// ContextMenu opens the context anchor on a live widget: the
+// platform's own gesture (right-click, long-press) presents the
+// catalog. Calling it again appends more roots.
+func (tx *Tx) ContextMenu(w Widget) ContextRef {
+	return ContextRef{tx: tx, widget: w.id}
+}
+
+func (c ContextRef) root(kind uint32, label string) MenuItem {
+	m := newMenuItem(c.tx, kind, label, true)
+	c.tx.records = append(c.tx.records, TxContextAttach(c.widget, m.id))
+	return m
+}
+
+// Item attaches an action root; chain OnActivate beside it.
+func (c ContextRef) Item(label string) MenuItem { return c.root(MenuKindAction, label) }
+
+// Toggle attaches a toggle root; chain OnToggle beside it.
+func (c ContextRef) Toggle(label string) MenuItem { return c.root(MenuKindToggle, label) }
+
+// Menu attaches a grouping root (one nested grouping level — the
+// context depth cap is root-checked).
+func (c ContextRef) Menu(label string) MenuItem { return c.root(MenuKindMenu, label) }
+
+// RadioGroup attaches a radio-group root; declare only Option
+// children.
+func (c ContextRef) RadioGroup(label string) MenuItem { return c.root(MenuKindRadioGroup, label) }
+
+// Separator attaches native grouping chrome.
+func (c ContextRef) Separator() { c.root(MenuKindSeparator, "") }
+
+// ContextCatalog is a context catalog built UNANCHORED
+// (Tx.ContextCatalog) for a template node: menu items are live and
+// shared across stamped copies, so the catalog is built in the live
+// zone and Tpl.ContextMenu attaches it inside the template, where
+// each activation carries the copy's key path. An item takes exactly
+// one anchor — a second attach panics.
+type ContextCatalog struct {
+	tx       *Tx
+	roots    []uint64
+	attached bool
+}
+
+// ContextCatalog builds free context roots for a later template-node
+// attach.
+func (tx *Tx) ContextCatalog() *ContextCatalog {
+	return &ContextCatalog{tx: tx}
+}
+
+func (c *ContextCatalog) root(kind uint32, label string) MenuItem {
+	m := newMenuItem(c.tx, kind, label, true)
+	c.roots = append(c.roots, m.id)
+	return m
+}
+
+// Item collects an action root; chain OnActivateNode beside it.
+func (c *ContextCatalog) Item(label string) MenuItem { return c.root(MenuKindAction, label) }
+
+// Toggle collects a toggle root; chain OnToggleNode beside it.
+func (c *ContextCatalog) Toggle(label string) MenuItem { return c.root(MenuKindToggle, label) }
+
+// Menu collects a grouping root.
+func (c *ContextCatalog) Menu(label string) MenuItem { return c.root(MenuKindMenu, label) }
+
+// RadioGroup collects a radio-group root; chain OnSelectNode.
+func (c *ContextCatalog) RadioGroup(label string) MenuItem { return c.root(MenuKindRadioGroup, label) }
+
+// Separator collects native grouping chrome.
+func (c *ContextCatalog) Separator() { c.root(MenuKindSeparator, "") }
 
 func (tx *Tx) Mount(root Widget) {
 	tx.records = append(tx.records, TxMount(0, root.id))
@@ -1353,6 +1743,22 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 		t.tx.records = append(t.tx.records, TxAddChild(parent, n.id))
 	}
 	return n
+}
+
+// ContextMenu attaches a live-built context catalog (Tx.ContextCatalog)
+// to a template node: every stamped copy shows the same catalog, and
+// each activation carries that copy's key path — the keys ARE the
+// noun (the OnClickNode encoding, received by the OnActivateNode
+// handler flavors). An item takes exactly one anchor, so a second
+// attach of the same catalog panics here.
+func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
+	if c.attached {
+		panic("kaya: a context catalog takes exactly one anchor")
+	}
+	c.attached = true
+	for _, root := range c.roots {
+		t.tx.records = append(t.tx.records, TxContextAttachNode(n.id, root))
+	}
 }
 
 func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
@@ -1494,6 +1900,36 @@ func (a *App) Run() int {
 				if fn := a.alerts[id]; fn != nil {
 					delete(a.alerts, id)
 					a.dispatch(func(tx *Tx) { fn(tx, choice) })
+				}
+			// Menu occurrences key the menu-item tables — their own
+			// id space, so neither widget nor node ids can collide
+			// with them. Node-anchored context items carry the
+			// stamped copy's keys (the keys ARE the noun); toggles
+			// carry the new state, radio groups the new 0-based
+			// index.
+			case kind == occMenuActivated && len(keys) == 0:
+				if fn := a.menuActivated[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx) })
+				}
+			case kind == occMenuActivated:
+				if fn := a.menuActivatedNode[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, keys) })
+				}
+			case kind == occMenuToggled && len(keys) == 0:
+				if fn := a.menuToggled[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, checked) })
+				}
+			case kind == occMenuToggled:
+				if fn := a.menuToggledNode[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
+				}
+			case kind == occMenuValueChanged && len(keys) == 0:
+				if fn := a.menuSelected[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, int(value)) })
+				}
+			case kind == occMenuValueChanged:
+				if fn := a.menuSelectedNode[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, keys, int(value)) })
 				}
 			}
 		}

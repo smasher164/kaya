@@ -30,6 +30,12 @@
 
 #define REC_SECTION_SELECTED 10
 
+#define REC_MENU_ACTIVATED 11
+
+#define REC_MENU_TOGGLED 12
+
+#define REC_MENU_VALUE_CHANGED 13
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -86,6 +92,18 @@
 
 #define TX_SET_SECTION_PROP 27
 
+#define TX_MENU_ITEM_CREATE 28
+
+#define TX_MENU_ITEM_APPEND 29
+
+#define TX_MENUBAR_APPEND 30
+
+#define TX_CONTEXT_ATTACH 31
+
+#define TX_CONTEXT_ATTACH_NODE 32
+
+#define TX_SET_MENU_PROP 33
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -119,6 +137,18 @@
 #define APPLY_SELECT_SECTION 16
 
 #define APPLY_SET_SECTION_PROP 17
+
+#define APPLY_MENU_ITEM_CREATE 18
+
+#define APPLY_MENU_ITEM_APPEND 19
+
+#define APPLY_MENUBAR_APPEND 20
+
+#define APPLY_CONTEXT_ATTACH 21
+
+#define APPLY_CONTEXT_ATTACH_NODE 22
+
+#define APPLY_SET_MENU_PROP 23
 
 #define VALUE_BOOL 1
 
@@ -203,6 +233,40 @@
 #define SPROP_ICON 2
 
 /**
+ * Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
+ * and `radio_group` are the grouping nodes.
+ */
+#define MENU_KIND_MENU 1
+
+#define MENU_KIND_ACTION 2
+
+#define MENU_KIND_TOGGLE 3
+
+#define MENU_KIND_RADIO_GROUP 4
+
+#define MENU_KIND_RADIO_OPTION 5
+
+#define MENU_KIND_SEPARATOR 6
+
+/**
+ * Menu property ids (spec::MENU_PROPS) — their own typed surface
+ * table, separate from widget/window/entry/section props.
+ */
+#define MPROP_LABEL 1
+
+#define MPROP_ENABLED 2
+
+#define MPROP_CHECKED 3
+
+#define MPROP_VALUE 4
+
+#define MPROP_ICON 5
+
+#define MPROP_PRIMARY 6
+
+#define MPROP_SHORTCUT 7
+
+/**
  * The sections_presentation enum's wire values (spec enum
  * "sections_presentation"): ADVISORY, the width/height precedent.
  */
@@ -283,6 +347,20 @@
 #define KAYA_OCCURRENCE_BACK_REQUESTED 9
 
 #define KAYA_OCCURRENCE_SECTION_SELECTED 10
+
+/**
+ * Menu occurrences (core -> guest). Each carries the BUTTON_CLICKED
+ * body shape: u64 item id, u32 path_len, u32 reserved, then path_len
+ * key values (the on_click_node encoding — empty for a bar or
+ * live-widget activation, the anchor copy's key path for a
+ * node-anchored context item), then the payload for the stateful pair
+ * (a Bool value for TOGGLED, an F64 index for VALUE_CHANGED).
+ */
+#define KAYA_OCCURRENCE_MENU_ACTIVATED 11
+
+#define KAYA_OCCURRENCE_MENU_TOGGLED 12
+
+#define KAYA_OCCURRENCE_MENU_VALUE_CHANGED 13
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -383,6 +461,31 @@
 #define KAYA_TX_SET_SECTION_PROP 27
 
 /**
+ * MENU_ITEM_CREATE: u64 item, u32 menu_kind, u32 pad — create a menu
+ * item in its own id space (c_menu_item). MENU_ITEM_APPEND: u64
+ * parent, u64 child — append under a grouping node (closed grammar,
+ * single-parent). MENUBAR_APPEND: u64 window, u64 item — a top-level
+ * grouping node into the window catalog. CONTEXT_ATTACH: u64 widget,
+ * u64 item — a context catalog on a live widget (entry/textarea
+ * rejected). CONTEXT_ATTACH_NODE: u64 node, u64 item — a context
+ * catalog on a template node (Tpl zone; activations carry the copy's
+ * keys). SET_MENU_PROP: u64 item, u32 mprop, u32 source, then the
+ * SET_PROPERTY tail (element rejected; icon/primary/shortcut reject
+ * signal sources).
+ */
+#define KAYA_TX_MENU_ITEM_CREATE 28
+
+#define KAYA_TX_MENU_ITEM_APPEND 29
+
+#define KAYA_TX_MENUBAR_APPEND 30
+
+#define KAYA_TX_CONTEXT_ATTACH 31
+
+#define KAYA_TX_CONTEXT_ATTACH_NODE 32
+
+#define KAYA_TX_SET_MENU_PROP 33
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -458,6 +561,26 @@
 #define KAYA_APPLY_SELECT_SECTION 16
 
 #define KAYA_APPLY_SET_SECTION_PROP 17
+
+/**
+ * MENU_ITEM_CREATE: u64 item, u32 menu_kind, u32 pad. MENU_ITEM_APPEND:
+ * u64 parent, u64 child. MENUBAR_APPEND: u64 window, u64 item.
+ * CONTEXT_ATTACH: u64 widget, u64 item. CONTEXT_ATTACH_NODE: u64
+ * widget, u64 item, then the anchor copy's key path { u32 count; u32
+ * reserved; count values } — the noun stamped into every activation.
+ * SET_MENU_PROP: u64 item, u32 mprop, u32 pad, value (resolved).
+ */
+#define KAYA_APPLY_MENU_ITEM_CREATE 18
+
+#define KAYA_APPLY_MENU_ITEM_APPEND 19
+
+#define KAYA_APPLY_MENUBAR_APPEND 20
+
+#define KAYA_APPLY_CONTEXT_ATTACH 21
+
+#define KAYA_APPLY_CONTEXT_ATTACH_NODE 22
+
+#define KAYA_APPLY_SET_MENU_PROP 23
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -565,6 +688,41 @@
 #define KAYA_SPROP_TITLE 1
 
 #define KAYA_SPROP_ICON 2
+
+/**
+ * Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
+ * and `radio_group` are the grouping nodes; the rest are leaves.
+ */
+#define KAYA_MENU_KIND_MENU 1
+
+#define KAYA_MENU_KIND_ACTION 2
+
+#define KAYA_MENU_KIND_TOGGLE 3
+
+#define KAYA_MENU_KIND_RADIO_GROUP 4
+
+#define KAYA_MENU_KIND_RADIO_OPTION 5
+
+#define KAYA_MENU_KIND_SEPARATOR 6
+
+/**
+ * Menu properties (spec::MENU_PROPS) — the fifth typed surface table
+ * (DESIGN.md, Menus). `label`/`enabled`/`checked`/`value` are
+ * signal-bindable; `icon`/`primary`/`shortcut` are const-only.
+ */
+#define KAYA_MPROP_LABEL 1
+
+#define KAYA_MPROP_ENABLED 2
+
+#define KAYA_MPROP_CHECKED 3
+
+#define KAYA_MPROP_VALUE 4
+
+#define KAYA_MPROP_ICON 5
+
+#define KAYA_MPROP_PRIMARY 6
+
+#define KAYA_MPROP_SHORTCUT 7
 
 /**
  * The window prop naming how sections present, and its enum values
@@ -712,6 +870,18 @@ typedef struct KayaHostApi {
    * echo doctrine.
    */
   void (*emit_section_selected)(uint64_t, uint64_t);
+  /**
+   * Menu occurrence emits — ONE dispatch path for chrome clicks,
+   * shortcuts, and harness activation (DESIGN.md, Menus). The
+   * pointer/length pair is the noun: the wire path
+   * CONTEXT_ATTACH_NODE handed the backend for a node-anchored
+   * context item, or NULL/0 for a bar or live-widget item.
+   * Programmatic checked/value writes never arrive here — the echo
+   * doctrine.
+   */
+  void (*emit_menu_activated)(uint64_t, const uint8_t*, uintptr_t);
+  void (*emit_menu_toggled)(uint64_t, const uint8_t*, uintptr_t, uint8_t);
+  void (*emit_menu_value_changed)(uint64_t, const uint8_t*, uintptr_t, double);
 } KayaHostApi;
 
 
@@ -879,6 +1049,39 @@ void kaya_emit_text_changed(const uint8_t *tag,
                             uintptr_t tag_len,
                             const uint8_t *text,
                             uintptr_t text_len);
+
+/**
+ * Presentation side: a menu action fired — a bar/overflow click, a
+ * context-menu selection, OR a shortcut. ONE occurrence, one dispatch
+ * path: the shortcut is another affordance of the same item. `item` is
+ * the menu item id; `noun`/`noun_len` carry the anchor copy's key path
+ * (the wire path CONTEXT_ATTACH_NODE handed the backend) for a
+ * node-anchored context item, or NULL/0 for a bar or live-widget
+ * activation. One entry serves both routes. Do not combine with
+ * kaya_run.
+ */
+void kaya_emit_menu_activated(uint64_t item, const uint8_t *noun, uintptr_t noun_len);
+
+/**
+ * Presentation side: a toggle item flipped; `checked` is the new state
+ * (0 or 1). Same `item`/`noun` identity as kaya_emit_menu_activated.
+ * Do not combine with kaya_run.
+ */
+void kaya_emit_menu_toggled(uint64_t item,
+                            const uint8_t *noun,
+                            uintptr_t noun_len,
+                            uint8_t checked);
+
+/**
+ * Presentation side: a radio group's selected option changed;
+ * `index` is the new 0-based option index (integral). Same
+ * `item`/`noun` identity as kaya_emit_menu_activated, keyed by the
+ * group. Do not combine with kaya_run.
+ */
+void kaya_emit_menu_value_changed(uint64_t item,
+                                  const uint8_t *noun,
+                                  uintptr_t noun_len,
+                                  double index);
 
 /**
  * Presentation side: block until the next transaction, resolve it

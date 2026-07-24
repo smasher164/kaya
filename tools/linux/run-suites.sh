@@ -27,9 +27,13 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
+# Depth-slice scenes: built and run for rust only until the language
+# sweep lands their guests (the validate-mac DEPTH_SCENES convention).
+# Empty since the menus sweep landed its guests here and on mac.
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
-for s in $SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
+for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
 # Phase timing, the validate-mac convention: greppable lines say
 # where the container's wall time went.
@@ -516,6 +520,24 @@ for proto in x11 wayland; do
     run "$proto" sections-ocaml env KAYA_SELFTEST=sections KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/sections.exe
     run "$proto" sections-haskell env KAYA_SELFTEST=sections "$(hs_bin sections)"
     run "$proto" sections-java env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The menus scene: the command vocabulary on GTK — GMenu +
+    # PopoverMenuBar in a strip above the root, every item a
+    # window-scoped GSimpleAction (enablement, toggle state, and radio
+    # targets all native), the shortcut resolved through the
+    # application's own accel table, context popovers on a live label
+    # and on a stamped row (the keys are the noun). All eight
+    # languages plus the C floor, byte-identical.
+    run "$proto" menus-rust env KAYA_SELFTEST=menus "$CARGO_TARGET_DIR/debug/examples/menus"
+    run "$proto" menus-c env KAYA_SELFTEST=menus /tmp/c-guests/menus
+    run "$proto" menus-python env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
+        python3 guests/python/menus.py
+    run "$proto" menus-go env KAYA_SELFTEST=menus /tmp/go-guests/menus
+    run "$proto" menus-csharp env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" menus-ocaml env KAYA_SELFTEST=menus KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/menus.exe
+    run "$proto" menus-haskell env KAYA_SELFTEST=menus "$(hs_bin menus)"
+    run "$proto" menus-java env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

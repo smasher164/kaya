@@ -10,6 +10,7 @@ use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "wireRecord", "parseValue", "parseOccurrence",
+    "canonicalizeShortcut", "shortcutNamedKeys",
     "case", "class", "data", "default", "deriving", "do", "else", "foreign", "if", "import",
     "in", "infix", "infixl", "infixr", "instance", "let", "module", "newtype", "of", "then",
     "type", "where",
@@ -56,7 +57,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("import Foreign.Ptr (Ptr, plusPtr)");
     c.line("import Foreign.Storable (peekByteOff)");
     c.line("import GHC.Float (castDoubleToWord64, castWord64ToDouble)");
-    c.line("import Data.Char (chr)");
+    c.line("import Data.Char (chr, toLower)");
     c.line("");
     c.line("-- VBlob carries the u64 handle from kaya_blob_register, consumed by");
     c.line("-- the next submit; the bytes never ride the record stream.");
@@ -234,6 +235,98 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("txBindSection{pc} section signalId = wireRecord txKindSetSectionProp"));
         c.line(&format!("  (word64LE section <> word32LE sprop{pc} <> word32LE sourceSignal"));
         c.line("    <> word64LE signalId)");
+    }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // txSetMenuShortcut routes through it, so no call site can bypass
+    // canonicalization (wireRecord materializes the body strictly, so
+    // a bad spelling errors at record construction, before submit).
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line("");
+    c.line("shortcutNamedKeys :: [String]");
+    c.line(&format!("shortcutNamedKeys = [{named_keys}]"));
+    c.line("");
+    c.line("-- | Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("-- '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("-- key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("-- variants and any modifier order; errors on whitespace, empty");
+    c.line("-- tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
+    c.line("-- or multiple or missing keys. POLICY stays at the core: escape,");
+    c.line("-- shift-only and bare alphanumerics, and the reserved floor are");
+    c.line("-- validated there, on the canonical spelling, never rewritten.");
+    c.line("canonicalizeShortcut :: String -> String");
+    c.line("canonicalizeShortcut spelling");
+    c.line("  | null spelling = error \"kaya: shortcut is empty\"");
+    c.line("  | any (`elem` \" \\t\\n\\v\\f\\r\") spelling =");
+    c.line("      error (\"kaya: shortcut \\\"\" ++ spelling ++ \"\\\" contains whitespace\")");
+    c.line("  | any null parts =");
+    c.line("      error (\"kaya: shortcut \\\"\" ++ spelling ++ \"\\\" has an empty token\")");
+    c.line("  | otherwise = emitKey (foldl addMod [] (init parts)) (last parts)");
+    c.line("  where");
+    c.line("    parts = cut (map toLower spelling)");
+    c.line("    cut = foldr step [[]]");
+    c.line("      where");
+    c.line("        step '+' acc = [] : acc");
+    c.line("        step ch (t : ts) = (ch : t) : ts");
+    c.line("        step ch [] = [[ch]]");
+    c.line("    addMod seen m");
+    c.line("      | m /= \"primary\" && m /= \"shift\" && m /= \"alt\" =");
+    c.line("          error (\"kaya: shortcut \\\"\" ++ spelling ++ \"\\\" has an unknown modifier \\\"\" ++ m");
+    c.line("            ++ \"\\\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\")");
+    c.line("      | m `elem` seen =");
+    c.line("          error (\"kaya: shortcut \\\"\" ++ spelling ++ \"\\\" repeats modifier \\\"\" ++ m ++ \"\\\"\")");
+    c.line("      | otherwise = seen ++ [m]");
+    c.line("    emitKey seen key");
+    c.line("      | not (alnum key) && key `notElem` shortcutNamedKeys =");
+    c.line("          error (\"kaya: shortcut \\\"\" ++ spelling ++ \"\\\" key \\\"\" ++ key");
+    c.line("            ++ \"\\\" is outside the floor (one of a-z, 0-9, or the closed named set)\")");
+    c.line("      | otherwise =");
+    c.line("          concat [m ++ \"+\" | m <- [\"primary\", \"shift\", \"alt\"], m `elem` seen] ++ key");
+    c.line("    alnum [ch] = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')");
+    c.line("    alnum _ = False");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor_expr) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => (
+                camel(prop),
+                "String",
+                format!("VStr (canonicalizeShortcut {})", camel(prop)),
+            ),
+            crate::PropKind::Str => (camel(prop), "String", format!("VStr {}", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "Bool", format!("VBool {}", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "Double", format!("VF64 {}", camel(prop))),
+            crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob handle".to_string()),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("-- set_menu_prop with a constant shortcut value, canonicalized here");
+            c.line("-- (the one binding-tier shortcut parser — no call site bypasses it).");
+        } else {
+            c.line(&format!("-- set_menu_prop with a constant {prop} value."));
+        }
+        c.line(&format!("txSetMenu{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetMenu{pc} item {p} = wireRecord txKindSetMenuProp"));
+        c.line(&format!("  (word64LE item <> word32LE mprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor_expr}))"));
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("-- set_menu_prop with a signal-bound {prop} value."));
+            c.line(&format!("txBindMenu{pc} :: Word64 -> Word64 -> Builder"));
+            c.line(&format!("txBindMenu{pc} item signalId = wireRecord txKindSetMenuProp"));
+            c.line(&format!("  (word64LE item <> word32LE mprop{pc} <> word32LE sourceSignal"));
+            c.line("    <> word64LE signalId)");
+        }
     }
     c.line("");
     c.line("-- Decode one value at offset `at` from the record base; returns the");

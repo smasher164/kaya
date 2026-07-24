@@ -21,8 +21,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, EntryProp, Key, Prop, PropValue, Record, SectionProp,
-    SignalId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
+    ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp, Prop,
+    PropValue, Record, SectionProp, SignalId, Transaction, TxOp, Value, ValueType, WidgetId,
+    WidgetKind, WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -49,6 +50,12 @@ enum TplOp {
     /// discriminant; a For over a record collection has exactly one.
     For { node: u64, collection: CollectionId, bodies: Vec<Arc<TplBody>> },
     When { node: u64, signal: SignalId, body: Arc<TplBody> },
+    /// A context catalog attached to a template node: every stamped
+    /// copy shows the shared `item` tree, and each stamp emits a
+    /// CONTEXT_ATTACH_NODE apply carrying that copy's key path (the
+    /// noun). Menu items are not stamped in v1 — the tree is shared, the
+    /// path is what differs per copy.
+    ContextAttachNode { node: u64, item: MenuItemId },
 }
 
 #[derive(Debug)]
@@ -177,6 +184,29 @@ struct Stamp {
     when_sites: Vec<u64>,
 }
 
+/// Where a menu item's subtree root is anchored. Set once — an item
+/// acquires exactly one parent OR one anchor (single-parent; DESIGN.md,
+/// Menus).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuAnchor {
+    /// The window's command catalog (the bar). Carries the window so a
+    /// later append into the subtree can dup-check against its catalog.
+    Window(WindowId),
+    /// A widget or template-node context menu.
+    Context,
+}
+
+/// One menu item's core state: its kind, its single parent (or None for
+/// a root), its anchor (or None until anchored), its children in append
+/// order, and its own canonical shortcut spelling (action-only).
+struct MenuItem {
+    kind: MenuItemKind,
+    parent: Option<MenuItemId>,
+    anchor: Option<MenuAnchor>,
+    children: Vec<MenuItemId>,
+    shortcut: Option<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct Scene {
     signals: HashMap<SignalId, Value>,
@@ -211,6 +241,19 @@ pub(crate) struct Scene {
     /// user-switch reconciliation (the nav_stacks stance).
     selected_section: HashMap<WindowId, WindowId>,
     section_bindings: HashMap<SignalId, Vec<(WindowId, SectionProp)>>,
+    /// Menu items by id — their OWN id space (DESIGN.md, Menus).
+    /// Append-only, never removed in v1.
+    menu_items: HashMap<MenuItemId, MenuItem>,
+    /// Per-window top-level catalog (bar) items, in menubar_append
+    /// order.
+    window_menus: HashMap<WindowId, Vec<MenuItemId>>,
+    /// Per-window catalog shortcuts, for the duplicate-within-a-window
+    /// check (the same chord in separate windows is fine).
+    window_shortcuts: HashMap<WindowId, std::collections::HashSet<String>>,
+    /// signal -> the (item, property) pairs it feeds. Only the
+    /// signal-bindable menu props (label, enabled, checked, value) land
+    /// here; the coalesced value is domain-validated at the barrier.
+    menu_bindings: HashMap<SignalId, Vec<(MenuItemId, MenuProp)>>,
     /// entry -> the (widget, property, field) triples its record feeds.
     element_bindings: HashMap<EntryRef, Vec<(WidgetId, Prop, u32)>>,
     widgets: HashMap<WidgetId, WidgetKind>,
@@ -366,6 +409,196 @@ fn check_section_prop_value(prop: SectionProp, value: &Value) {
     }
 }
 
+/// The closed parent/child grammar (DESIGN.md, Menus): a `menu`
+/// contains the five non-option kinds; a `radio_group` contains only
+/// `radio_option`; leaves contain nothing. The depth cap is separate
+/// (validated at the anchor); this is the per-edge grammar.
+fn menu_accepts(parent: MenuItemKind, child: MenuItemKind) -> bool {
+    match parent {
+        MenuItemKind::Menu => matches!(
+            child,
+            MenuItemKind::Menu
+                | MenuItemKind::RadioGroup
+                | MenuItemKind::Action
+                | MenuItemKind::Toggle
+                | MenuItemKind::Separator
+        ),
+        MenuItemKind::RadioGroup => matches!(child, MenuItemKind::RadioOption),
+        MenuItemKind::Action
+        | MenuItemKind::Toggle
+        | MenuItemKind::RadioOption
+        | MenuItemKind::Separator => false,
+    }
+}
+
+fn is_menu_group(kind: MenuItemKind) -> bool {
+    matches!(kind, MenuItemKind::Menu | MenuItemKind::RadioGroup)
+}
+
+/// Which kinds carry which property (DESIGN.md, Menus): label/enabled
+/// on everything but a separator; checked toggle-only; value
+/// radio-group-only; primary/shortcut action-only; icon on everything
+/// but a separator. Misuse dies at the root, the check_prop precedent.
+fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
+    let ok = match prop {
+        MenuProp::Label | MenuProp::Enabled | MenuProp::Icon => {
+            !matches!(kind, MenuItemKind::Separator)
+        }
+        MenuProp::Checked => matches!(kind, MenuItemKind::Toggle),
+        MenuProp::Value => matches!(kind, MenuItemKind::RadioGroup),
+        MenuProp::Primary | MenuProp::Shortcut => matches!(kind, MenuItemKind::Action),
+    };
+    assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
+}
+
+/// Every menu property has one value type (spec::MENU_PROPS). The match
+/// is exhaustive: a new prop cannot ship without declaring its type.
+fn menu_prop_value_type(prop: MenuProp) -> ValueType {
+    match prop {
+        MenuProp::Label | MenuProp::Shortcut => ValueType::Str,
+        MenuProp::Enabled | MenuProp::Checked | MenuProp::Primary => ValueType::Bool,
+        MenuProp::Value => ValueType::F64,
+        MenuProp::Icon => ValueType::Blob,
+    }
+}
+
+/// The signal-bindable menu props: label, enabled, checked, value. icon,
+/// primary, and shortcut are const-only (DESIGN.md, Menus).
+fn is_bindable_menu_prop(prop: MenuProp) -> bool {
+    matches!(
+        prop,
+        MenuProp::Label | MenuProp::Enabled | MenuProp::Checked | MenuProp::Value
+    )
+}
+
+/// A menu property value against its type, plus the value domain: a
+/// radio group's `value` is a 0-based option index (integral,
+/// non-negative). The upper bound (index < option count) needs scene
+/// state, so it lives at the call site (the select-index precedent).
+fn check_menu_prop_value(prop: MenuProp, value: &Value) {
+    assert!(
+        value.type_of() == menu_prop_value_type(prop),
+        "kaya: menu property {prop:?} cannot hold {value:?}"
+    );
+    if let (MenuProp::Value, Value::F64(idx)) = (prop, value) {
+        assert!(
+            idx.is_finite() && *idx >= 0.0 && idx.fract() == 0.0,
+            "kaya: a radio group's value is a 0-based option index \
+             (integral, non-negative), got {idx}"
+        );
+    }
+}
+
+/// The closed named-key set of the shortcut floor (DESIGN.md, Menus),
+/// beyond the ASCII alphanumerics. `escape` is recognized here so it
+/// can be rejected with its own reason.
+fn is_named_key(key: &str) -> bool {
+    matches!(key, "enter" | "escape" | "delete" | "left" | "right" | "up" | "down")
+        || is_function_key(key)
+}
+
+/// `f1`..`f12`, exactly — no leading zeros, no `f0`, no `f13`.
+fn is_function_key(key: &str) -> bool {
+    match key.strip_prefix('f') {
+        Some(n) => n
+            .parse::<u8>()
+            .ok()
+            .filter(|d| (1..=12).contains(d))
+            .is_some_and(|d| n == d.to_string()),
+        None => false,
+    }
+}
+
+fn is_ascii_alnum_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => c.is_ascii_lowercase() || c.is_ascii_digit(),
+        _ => false,
+    }
+}
+
+/// Validate a CANONICAL shortcut wire spelling and the reserved-floor
+/// policy — the one shortcut checker, validating and never rewriting
+/// (DESIGN.md, Menus). Canonical form: `+`-joined lowercase tokens,
+/// optional `primary`, `shift`, `alt` in that order, then exactly one
+/// key. The strict key floor is one ASCII alphanumeric or one closed
+/// named key; `escape` is recognized but always rejected; `shift` and
+/// an alphanumeric key both require `primary` or `alt`; `primary+q` and
+/// `alt+f4` are the reserved cross-platform union. Returns the exact
+/// error a raw non-canonical or inapplicable spelling must die with.
+fn validate_shortcut(spelling: &str) -> Result<(), String> {
+    if spelling.is_empty() {
+        return Err("kaya: shortcut is empty".to_string());
+    }
+    if spelling.chars().any(|c| c.is_whitespace()) {
+        return Err(format!("kaya: shortcut {spelling:?} contains whitespace"));
+    }
+    let parts: Vec<&str> = spelling.split('+').collect();
+    if parts.iter().any(|p| p.is_empty()) {
+        return Err(format!("kaya: shortcut {spelling:?} has an empty token"));
+    }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let key = key[0];
+    let (mut has_primary, mut has_shift, mut has_alt) = (false, false, false);
+    let mut last_rank = 0u8;
+    for m in mods {
+        let (rank, slot): (u8, &mut bool) = match *m {
+            "primary" => (1, &mut has_primary),
+            "shift" => (2, &mut has_shift),
+            "alt" => (3, &mut has_alt),
+            other => {
+                return Err(format!(
+                    "kaya: shortcut {spelling:?} has an unknown or non-canonical \
+                     modifier {other:?} (the portable modifiers are primary, \
+                     shift, alt)"
+                ));
+            }
+        };
+        if *slot {
+            return Err(format!("kaya: shortcut {spelling:?} repeats modifier {m:?}"));
+        }
+        if rank <= last_rank {
+            return Err(format!(
+                "kaya: shortcut {spelling:?} modifiers are not in canonical order \
+                 (primary, shift, alt)"
+            ));
+        }
+        last_rank = rank;
+        *slot = true;
+    }
+    if key == "escape" {
+        return Err(format!(
+            "kaya: shortcut {spelling:?} uses escape — the platforms' universal \
+             dismiss key is never a shortcut"
+        ));
+    }
+    let alnum = is_ascii_alnum_key(key);
+    if !alnum && !is_named_key(key) {
+        return Err(format!(
+            "kaya: shortcut {spelling:?} key {key:?} is outside the floor \
+             (one of a-z, 0-9, or the closed named set)"
+        ));
+    }
+    if alnum && !(has_primary || has_alt) {
+        return Err(format!(
+            "kaya: shortcut {spelling:?}: an alphanumeric key needs primary or alt \
+             (bare and shift-only spellings are ordinary typing)"
+        ));
+    }
+    if has_shift && !(has_primary || has_alt) {
+        return Err(format!(
+            "kaya: shortcut {spelling:?}: shift is valid only with primary or alt"
+        ));
+    }
+    if spelling == "primary+q" || spelling == "alt+f4" {
+        return Err(format!(
+            "kaya: shortcut {spelling:?} is reserved (the strict cross-platform \
+             floor: primary+q and alt+f4)"
+        ));
+    }
+    Ok(())
+}
+
 /// applies it.
 fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     assert!(
@@ -497,6 +730,13 @@ impl Scene {
         let mut out = Vec::new();
         // First-dirtied order, deduped.
         let mut dirty: Vec<SignalId> = Vec::new();
+        // Pre-transaction values of the signals this batch writes,
+        // captured on first write. If a menu binding's COALESCED value
+        // fails its domain check at the barrier, these restore every
+        // signal this batch touched before the panic propagates — so a
+        // caught panic never leaves partially-applied signal state
+        // (DESIGN.md, Menus: barrier validation with rollback).
+        let mut rollback: HashMap<SignalId, Value> = HashMap::new();
         // Template scopes currently open; while non-empty, creation
         // records describe a blueprint instead of executing.
         let mut scopes: Vec<TplScope> = Vec::new();
@@ -517,9 +757,12 @@ impl Scene {
                         .get_mut(&id)
                         .unwrap_or_else(|| panic!("kaya: write to unknown signal {id:?}"));
                     check_type(current, &value, &format!("signal {id:?}"));
-                    *current = value;
+                    let old = std::mem::replace(current, value);
                     if !dirty.contains(&id) {
                         dirty.push(id);
+                        // First write of this signal in the batch: its
+                        // pre-transaction value, for barrier rollback.
+                        rollback.insert(id, old);
                     }
                 }
                 TxOp::CreateWidget { id, kind } => {
@@ -720,6 +963,16 @@ impl Scene {
                         }
                     }
                     self.selected_section.remove(&window);
+                    // ... and its command catalog: the chords free with
+                    // the window (window ids are recreatable — a fresh
+                    // window must not inherit a dead catalog's
+                    // shortcuts), and the anchored trees revert to free
+                    // roots. Items are append-only and outlive the
+                    // window; their anchor does not.
+                    self.window_shortcuts.remove(&window);
+                    for root in self.window_menus.remove(&window).unwrap_or_default() {
+                        self.menu_items.get_mut(&root).unwrap().anchor = None;
+                    }
                     out.push(ApplyOp::DestroyWindow { window });
                 }
                 TxOp::ShowAlert(spec) => {
@@ -916,6 +1169,100 @@ impl Scene {
                         }
                     }
                 }
+                TxOp::MenuItemCreate { item, kind } => {
+                    assert!(item.0 != 0, "kaya: menu item id 0 is not a valid item");
+                    assert!(
+                        item.0 & INTERNAL_BIT == 0,
+                        "kaya: menu item id {item:?} uses the reserved internal bit"
+                    );
+                    let clash = self
+                        .menu_items
+                        .insert(
+                            item,
+                            MenuItem {
+                                kind,
+                                parent: None,
+                                anchor: None,
+                                children: Vec::new(),
+                                shortcut: None,
+                            },
+                        )
+                        .is_some();
+                    assert!(!clash, "kaya: menu item id {item:?} already exists");
+                    out.push(ApplyOp::MenuItemCreate { item, kind });
+                }
+                TxOp::MenuItemAppend { parent, child } => {
+                    self.menu_item_append(parent, child, &mut out)
+                }
+                TxOp::MenubarAppend { window, item } => {
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: menubar_append onto unknown window {window:?} — \
+                         create_window first (0 is the primary)"
+                    );
+                    let kind = self
+                        .menu_items
+                        .get(&item)
+                        .unwrap_or_else(|| {
+                            panic!("kaya: menubar_append of unknown menu item {item:?}")
+                        })
+                        .kind;
+                    self.assert_menu_root_free(item);
+                    assert!(
+                        is_menu_group(kind),
+                        "kaya: the menu bar accepts only grouping nodes \
+                         (menu or radio_group), got {kind:?}"
+                    );
+                    // Walk the subtree: depth cap + collect shortcuts (the
+                    // bar is a shortcut home). A group root sits at depth 1.
+                    let mut shortcuts = Vec::new();
+                    self.validate_menu_subtree(item, 1, true, &mut shortcuts);
+                    // Duplicate detection within THIS window's catalog and
+                    // within the appended subtree — checked before any
+                    // mutation so a reject leaves the catalog untouched.
+                    let mut seen = std::collections::HashSet::new();
+                    for sc in &shortcuts {
+                        assert!(
+                            seen.insert(sc.clone()),
+                            "kaya: duplicate shortcut {sc:?} within window {window:?}'s catalog"
+                        );
+                        assert!(
+                            !self
+                                .window_shortcuts
+                                .get(&window)
+                                .is_some_and(|c| c.contains(sc)),
+                            "kaya: duplicate shortcut {sc:?} within window {window:?}'s catalog"
+                        );
+                    }
+                    self.window_shortcuts.entry(window).or_default().extend(shortcuts);
+                    self.menu_items.get_mut(&item).unwrap().anchor =
+                        Some(MenuAnchor::Window(window));
+                    self.window_menus.entry(window).or_default().push(item);
+                    out.push(ApplyOp::MenubarAppend { window, item });
+                }
+                TxOp::ContextAttach { widget, item } => {
+                    let wkind = *self.widgets.get(&widget).unwrap_or_else(|| {
+                        panic!("kaya: context_attach to unknown widget {widget:?}")
+                    });
+                    assert!(
+                        !matches!(wkind, WidgetKind::Entry | WidgetKind::Textarea),
+                        "kaya: context_attach rejected on {wkind:?} — the editable text \
+                         controls keep their native edit menus (dress)"
+                    );
+                    self.validate_context_root(item);
+                    self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
+                    out.push(ApplyOp::ContextAttach { widget, item });
+                }
+                TxOp::ContextAttachNode { .. } => {
+                    panic!(
+                        "kaya: context_attach_node names a template node — it is valid only \
+                         inside a For/When template scope (use context_attach for a live widget)"
+                    )
+                }
+                TxOp::SetMenuProp { item, prop, value } => {
+                    self.set_menu_prop(item, prop, value, &mut out)
+                }
                 TxOp::AddChild { parent, child } => {
                     assert!(
                         self.widgets.contains_key(&parent),
@@ -1104,6 +1451,27 @@ impl Scene {
             "kaya: template scope left open at end of transaction"
         );
 
+        // Barrier: validate every signal-bound menu prop on its COMPLETE
+        // coalesced value BEFORE any fan-out mutates derived state
+        // (SetProp emissions, When stamps). label/enabled/checked are
+        // type-fixed by their signal; a radio group's `value` has a live
+        // domain a late write can break. A rejection must not leave
+        // partially-applied signal state — so restore every signal this
+        // batch wrote, then propagate the panic (DESIGN.md, Menus).
+        for id in &dirty {
+            if let Some(bound) = self.menu_bindings.get(id).cloned() {
+                let value = self.signals[id].clone();
+                for (item, prop) in bound {
+                    if let Err(msg) = self.check_menu_binding_domain(item, prop, &value) {
+                        for (sid, old) in &rollback {
+                            self.signals.insert(*sid, old.clone());
+                        }
+                        panic!("{msg}");
+                    }
+                }
+            }
+        }
+
         for id in dirty {
             let value = self.signals[&id].clone();
             if let Some(bound) = self.bindings.get(&id) {
@@ -1137,6 +1505,15 @@ impl Scene {
                 for (entry, prop) in bound {
                     out.push(ApplyOp::SetEntryProp {
                         entry: *entry,
+                        prop: *prop,
+                        value: value.clone(),
+                    });
+                }
+            }
+            if let Some(bound) = self.menu_bindings.get(&id) {
+                for (item, prop) in bound {
+                    out.push(ApplyOp::SetMenuProp {
+                        item: *item,
                         prop: *prop,
                         value: value.clone(),
                     });
@@ -1186,6 +1563,307 @@ impl Scene {
             "kaya: user pop of {entry:?} but the top of {window:?}'s stack is {top:?}"
         );
         self.mounted_windows.remove(&entry);
+    }
+
+    // --- Menus -----------------------------------------------------------
+
+    /// The topmost ancestor of a menu item (itself when it is a root).
+    fn menu_root(&self, item: MenuItemId) -> MenuItemId {
+        let mut cur = item;
+        while let Some(parent) = self.menu_items[&cur].parent {
+            cur = parent;
+        }
+        cur
+    }
+
+    /// The anchor of an item's whole tree (its root's anchor), or None if
+    /// the tree is not anchored yet.
+    fn anchored_root(&self, item: MenuItemId) -> Option<MenuAnchor> {
+        self.menu_items[&self.menu_root(item)].anchor
+    }
+
+    /// The grouping-node depth of an item: grouping nodes on the path
+    /// from its root down to and including it. A leaf does not deepen the
+    /// chain; the cap (DESIGN.md, Menus) is a chain of at most two
+    /// grouping nodes.
+    fn menu_group_depth(&self, item: MenuItemId) -> u32 {
+        let mut depth = 0;
+        let mut cur = Some(item);
+        while let Some(id) = cur {
+            let it = &self.menu_items[&id];
+            if is_menu_group(it.kind) {
+                depth += 1;
+            }
+            cur = it.parent;
+        }
+        depth
+    }
+
+    /// Whether `target` sits anywhere in `root`'s subtree (root
+    /// included) — the cycle guard for append.
+    fn menu_subtree_contains(&self, root: MenuItemId, target: MenuItemId) -> bool {
+        root == target
+            || self.menu_items[&root]
+                .children
+                .iter()
+                .any(|&c| self.menu_subtree_contains(c, target))
+    }
+
+    /// An item destined for an anchor or a new parent must be a free
+    /// root — no parent, no anchor. Single-parent, no shared nodes.
+    fn assert_menu_root_free(&self, item: MenuItemId) {
+        let it = &self.menu_items[&item];
+        assert!(
+            it.parent.is_none() && it.anchor.is_none(),
+            "kaya: menu item {item:?} already has a parent or anchor \
+             (an item takes exactly one parent or anchor)"
+        );
+    }
+
+    /// Walk a subtree from `item` (at grouping depth `depth`): enforce
+    /// the depth cap on every grouping node, and either collect its
+    /// shortcuts (a window catalog is a shortcut home) or reject any
+    /// shortcut (a context anchor is not).
+    fn validate_menu_subtree(
+        &self,
+        item: MenuItemId,
+        depth: u32,
+        is_bar: bool,
+        shortcuts: &mut Vec<String>,
+    ) {
+        let it = &self.menu_items[&item];
+        if is_menu_group(it.kind) {
+            assert!(
+                depth <= 2,
+                "kaya: menu item {item:?} exceeds the depth cap \
+                 (bar > grouping node > one nested grouping node > leaf)"
+            );
+        }
+        if let Some(sc) = &it.shortcut {
+            if is_bar {
+                shortcuts.push(sc.clone());
+            } else {
+                panic!(
+                    "kaya: shortcut {sc:?} on a context menu item {item:?} — \
+                     a shortcut needs a window catalog home"
+                );
+            }
+        }
+        for &child in &it.children {
+            let child_depth = depth
+                + u32::from(is_menu_group(self.menu_items[&child].kind));
+            self.validate_menu_subtree(child, child_depth, is_bar, shortcuts);
+        }
+    }
+
+    /// The shared front of context_attach and context_attach_node: the
+    /// root must be a free root, must not be a radio_option, and its
+    /// subtree must hold no shortcut (validated from the group-or-leaf
+    /// starting depth).
+    fn validate_context_root(&self, item: MenuItemId) {
+        let kind = self
+            .menu_items
+            .get(&item)
+            .unwrap_or_else(|| panic!("kaya: context attach of unknown menu item {item:?}"))
+            .kind;
+        self.assert_menu_root_free(item);
+        assert!(
+            !matches!(kind, MenuItemKind::RadioOption),
+            "kaya: a context menu root cannot be a radio_option"
+        );
+        let mut shortcuts = Vec::new();
+        self.validate_menu_subtree(item, u32::from(is_menu_group(kind)), false, &mut shortcuts);
+    }
+
+    /// Link `child` under grouping node `parent`, then — if the parent's
+    /// tree is already anchored — re-validate the appended subtree in
+    /// that anchor's context (depth, and shortcut collection/rejection).
+    fn menu_item_append(&mut self, parent: MenuItemId, child: MenuItemId, out: &mut Vec<ApplyOp>) {
+        let parent_kind = self
+            .menu_items
+            .get(&parent)
+            .unwrap_or_else(|| panic!("kaya: menu_item_append to unknown parent {parent:?}"))
+            .kind;
+        let child_kind = self
+            .menu_items
+            .get(&child)
+            .unwrap_or_else(|| panic!("kaya: menu_item_append of unknown child {child:?}"))
+            .kind;
+        assert!(parent != child, "kaya: a menu item cannot be its own parent");
+        self.assert_menu_root_free(child);
+        assert!(
+            menu_accepts(parent_kind, child_kind),
+            "kaya: a {parent_kind:?} menu item cannot contain a {child_kind:?}"
+        );
+        assert!(
+            !self.menu_subtree_contains(child, parent),
+            "kaya: menu_item_append of {child:?} under {parent:?} would create a cycle"
+        );
+        // If the parent's tree is anchored, the child joins that catalog
+        // now — re-validate at the child's would-be absolute grouping
+        // depth BEFORE linking, so a reject leaves the tree and the
+        // catalog untouched (the MenubarAppend standard). The depth is
+        // computed from the parent pre-link: the child is a free root,
+        // so its post-link depth is the parent's plus its own grouping
+        // contribution.
+        if let Some(anchor) = self.anchored_root(parent) {
+            let is_bar = matches!(anchor, MenuAnchor::Window(_));
+            let start = self.menu_group_depth(parent) + u32::from(is_menu_group(child_kind));
+            let mut shortcuts = Vec::new();
+            self.validate_menu_subtree(child, start, is_bar, &mut shortcuts);
+            if let MenuAnchor::Window(window) = anchor {
+                let mut seen = std::collections::HashSet::new();
+                for sc in &shortcuts {
+                    assert!(
+                        seen.insert(sc.clone()),
+                        "kaya: duplicate shortcut {sc:?} within window {window:?}'s catalog"
+                    );
+                    assert!(
+                        !self
+                            .window_shortcuts
+                            .get(&window)
+                            .is_some_and(|c| c.contains(sc)),
+                        "kaya: duplicate shortcut {sc:?} within window {window:?}'s catalog"
+                    );
+                }
+                self.window_shortcuts.entry(window).or_default().extend(shortcuts);
+            }
+        }
+        self.menu_items.get_mut(&child).unwrap().parent = Some(parent);
+        self.menu_items.get_mut(&parent).unwrap().children.push(child);
+        out.push(ApplyOp::MenuItemAppend { parent, child });
+    }
+
+    /// A radio group's `value` upper bound: the index must address an
+    /// existing option (the select-index precedent — append the
+    /// radio_option children first).
+    fn check_radio_value_range(&self, item: MenuItemId, value: &Value) {
+        if let Value::F64(idx) = value {
+            let count = self.menu_items[&item].children.len() as u32;
+            assert!(
+                (*idx as u32) < count,
+                "kaya: radio group {item:?} has {count} options; index {idx} is \
+                 out of range (append radio_option children before selecting)"
+            );
+        }
+    }
+
+    /// Store a validated canonical shortcut on an action, and — for an
+    /// action already in a window catalog — dup-check and register it.
+    /// A shortcut on a context-anchored item is a root error.
+    ///
+    /// Props mutate freely (DESIGN.md, Menus), so a re-set REPLACES the
+    /// item's own registration: the item's previous spelling leaves the
+    /// window set before the new one is dup-checked in. The dup-check
+    /// runs before any mutation, so a reject leaves both the registry
+    /// and the item untouched.
+    fn set_item_shortcut(&mut self, item: MenuItemId, spelling: String) {
+        match self.anchored_root(item) {
+            Some(MenuAnchor::Context) => panic!(
+                "kaya: shortcut {spelling:?} on a context menu item {item:?} — \
+                 a shortcut needs a window catalog home"
+            ),
+            Some(MenuAnchor::Window(window)) => {
+                let old = self.menu_items[&item].shortcut.clone();
+                let set = self.window_shortcuts.entry(window).or_default();
+                assert!(
+                    old.as_deref() == Some(spelling.as_str()) || !set.contains(&spelling),
+                    "kaya: duplicate shortcut {spelling:?} within window {window:?}'s catalog"
+                );
+                if let Some(old) = old {
+                    set.remove(&old);
+                }
+                set.insert(spelling.clone());
+            }
+            None => {}
+        }
+        self.menu_items.get_mut(&item).unwrap().shortcut = Some(spelling);
+    }
+
+    fn set_menu_prop(
+        &mut self,
+        item: MenuItemId,
+        prop: MenuProp,
+        value: PropValue,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let kind = self
+            .menu_items
+            .get(&item)
+            .unwrap_or_else(|| panic!("kaya: set_menu_prop on unknown menu item {item:?}"))
+            .kind;
+        check_menu_prop(kind, prop);
+        match value {
+            PropValue::Const(v) => {
+                check_menu_prop_value(prop, &v);
+                if prop == MenuProp::Shortcut {
+                    let Value::Str(spelling) = &v else { unreachable!() };
+                    if let Err(msg) = validate_shortcut(spelling) {
+                        panic!("{msg}");
+                    }
+                    self.set_item_shortcut(item, spelling.clone());
+                }
+                if prop == MenuProp::Value {
+                    self.check_radio_value_range(item, &v);
+                }
+                out.push(ApplyOp::SetMenuProp { item, prop, value: v });
+            }
+            PropValue::Signal(id) => {
+                assert!(
+                    is_bindable_menu_prop(prop),
+                    "kaya: menu property {prop:?} is not signal-bindable \
+                     (icon, primary, and shortcut are const-only)"
+                );
+                let current = self
+                    .signals
+                    .get(&id)
+                    .unwrap_or_else(|| panic!("kaya: binding to unknown signal {id:?}"))
+                    .clone();
+                check_menu_prop_value(prop, &current);
+                if prop == MenuProp::Value {
+                    self.check_radio_value_range(item, &current);
+                }
+                self.menu_bindings.entry(id).or_default().push((item, prop));
+                out.push(ApplyOp::SetMenuProp { item, prop, value: current });
+            }
+            PropValue::Element { .. } => {
+                panic!("kaya: menu properties cannot bind element sources")
+            }
+        }
+    }
+
+    /// A menu binding's COALESCED value against its live domain, at the
+    /// barrier. Only a radio group's `value` has a domain that a later
+    /// coalesced write can break (label/enabled/checked are type-fixed
+    /// by their signal). Returns the exact message the barrier must
+    /// panic with (after restoring signal state).
+    fn check_menu_binding_domain(
+        &self,
+        item: MenuItemId,
+        prop: MenuProp,
+        value: &Value,
+    ) -> Result<(), String> {
+        if prop == MenuProp::Value {
+            if let Value::F64(idx) = value {
+                if !(idx.is_finite() && *idx >= 0.0 && idx.fract() == 0.0) {
+                    return Err(format!(
+                        "kaya: a radio group's value is a 0-based option index \
+                         (integral, non-negative), got {idx}"
+                    ));
+                }
+                let count = self
+                    .menu_items
+                    .get(&item)
+                    .map_or(0, |it| it.children.len() as u32);
+                if (*idx as u32) >= count {
+                    return Err(format!(
+                        "kaya: radio group {item:?} has {count} options; index {idx} \
+                         is out of range"
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// One record of a template declaration. Creation records describe;
@@ -1425,6 +2103,26 @@ impl Scene {
                         );
                     }
                 }
+            }
+            TxOp::ContextAttachNode { node, item } => {
+                assert!(
+                    top.current.declared.contains(&node.0),
+                    "kaya: context_attach_node on node {} not declared in this template case",
+                    node.0
+                );
+                let node_kind = self.template_nodes[&node.0];
+                assert!(
+                    !matches!(node_kind, WidgetKind::Entry | WidgetKind::Textarea),
+                    "kaya: context_attach_node rejected on {node_kind:?} — the editable \
+                     text controls keep their native edit menus (dress)"
+                );
+                // The menu item tree is live (items are not stamped in
+                // v1) — validate it as a context root and anchor it once.
+                // Every stamped copy shares this tree; only the noun key
+                // path differs per copy.
+                self.validate_context_root(item);
+                self.menu_items.get_mut(&item).unwrap().anchor = Some(MenuAnchor::Context);
+                top.current.ops.push(TplOp::ContextAttachNode { node: node.0, item });
             }
             other => panic!("kaya: {other:?} is not valid inside a template"),
         }
@@ -2010,6 +2708,18 @@ impl Scene {
                         out,
                     );
                     stamp.when_sites.push(site);
+                }
+                TplOp::ContextAttachNode { node, item } => {
+                    // The menu tree is shared (live); each stamp attaches
+                    // it to this copy's widget carrying the copy's key
+                    // path — the noun every activation stamps into its
+                    // occurrence (the on_click_node encoding).
+                    let widget = node_map[node];
+                    out.push(ApplyOp::ContextAttachNode {
+                        widget,
+                        item: *item,
+                        path: path_values(copy_path),
+                    });
                 }
             }
         }
@@ -3596,5 +4306,904 @@ mod tests {
                 value: PropValue::Const(Value::F64(1.5)),
             },
         ]);
+    }
+
+    // --- Menus -----------------------------------------------------------
+
+    use crate::protocol::{MenuItemId, MenuItemKind, MenuProp, TemplateNodeId};
+
+    fn item(id: u64, kind: MenuItemKind) -> TxOp {
+        TxOp::MenuItemCreate { item: MenuItemId(id), kind }
+    }
+    fn label(id: u64, text: &str) -> TxOp {
+        TxOp::SetMenuProp {
+            item: MenuItemId(id),
+            prop: MenuProp::Label,
+            value: PropValue::Const(v(text)),
+        }
+    }
+    fn append(parent: u64, child: u64) -> TxOp {
+        TxOp::MenuItemAppend { parent: MenuItemId(parent), child: MenuItemId(child) }
+    }
+    fn sc(id: u64, spelling: &str) -> TxOp {
+        TxOp::SetMenuProp {
+            item: MenuItemId(id),
+            prop: MenuProp::Shortcut,
+            value: PropValue::Const(v(spelling)),
+        }
+    }
+
+    /// A bar catalog builds, a signal-bound `enabled` fans out on write,
+    /// and a bar-anchored action's shortcut joins the window catalog.
+    #[test]
+    fn menu_bar_builds_and_enabled_fans_out() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::Bool(false) },
+            item(1, MenuItemKind::Menu),
+            label(1, "File"),
+            item(2, MenuItemKind::Action),
+            label(2, "Save"),
+            TxOp::SetMenuProp {
+                item: MenuItemId(2),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+s")),
+            },
+            item(3, MenuItemKind::Action),
+            label(3, "Export"),
+            TxOp::SetMenuProp {
+                item: MenuItemId(3),
+                prop: MenuProp::Enabled,
+                value: PropValue::Signal(SignalId(1)),
+            },
+            append(1, 2),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::MenuItemCreate { item: MenuItemId(1), kind: MenuItemKind::Menu }
+        )));
+        assert!(ops
+            .iter()
+            .any(|op| matches!(op, ApplyOp::MenubarAppend { item: MenuItemId(1), .. })));
+        // Export's enabled binding emitted the signal's current (false).
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetMenuProp { item: MenuItemId(3), prop: MenuProp::Enabled, value: Value::Bool(false) }
+        )));
+        // Flipping the shared signal fans the new value out.
+        let ops = scene.apply(vec![TxOp::WriteSignal {
+            id: SignalId(1),
+            value: Value::Bool(true),
+        }]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetMenuProp { item: MenuItemId(3), prop: MenuProp::Enabled, value: Value::Bool(true) }
+        )));
+    }
+
+    /// A radio group takes radio_option children and a selected index in
+    /// range; a bar radio_group is a legal top-level entry.
+    #[test]
+    fn radio_group_options_and_value() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::RadioGroup),
+            label(1, "Sort"),
+            item(2, MenuItemKind::RadioOption),
+            label(2, "Name"),
+            item(3, MenuItemKind::RadioOption),
+            label(3, "Date"),
+            append(1, 2),
+            append(1, 3),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Value,
+                value: PropValue::Const(Value::F64(1.0)),
+            },
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    /// The node-anchored context attach: the shared item tree stamps a
+    /// CONTEXT_ATTACH_NODE per copy carrying that copy's key as the noun
+    /// (the on_click_node encoding).
+    #[test]
+    fn context_attach_node_stamps_with_noun_path() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Remove"),
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(30), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(30),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(1) },
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(3) },
+        ]);
+        let ops = scene.apply(vec![insert(1, vec![], "a", "Alice")]);
+        assert!(
+            ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::ContextAttachNode { item: MenuItemId(1), path, .. } if path == &vec![v("a")]
+            )),
+            "the stamped context attach must carry the row's key as the noun"
+        );
+    }
+
+    /// The full canonical-shortcut grammar and the reserved floor, as an
+    /// accept/reject table (the core validates, never rewrites).
+    #[test]
+    fn shortcut_grammar_table() {
+        for ok in [
+            "primary+s",
+            "primary+shift+s",
+            "primary+a",
+            "alt+a",
+            "shift+alt+a",
+            "primary+shift+alt+s",
+            "primary+0",
+            "alt+9",
+            "primary+f", // 'f' is an alphanumeric key, not a modifier
+            "enter",
+            "primary+enter",
+            "delete",
+            "primary+delete",
+            "left",
+            "right",
+            "up",
+            "down",
+            "primary+left",
+            "f1",
+            "f12",
+            "primary+f5",
+            "alt+f7",
+        ] {
+            assert!(validate_shortcut(ok).is_ok(), "expected accept: {ok:?}");
+        }
+        for bad in [
+            "",                       // empty
+            " ",                      // whitespace
+            "primary + s",            // whitespace
+            "s",                      // bare alphanumeric
+            "0",                      // bare alphanumeric
+            "shift+s",                // shift-only alphanumeric
+            "shift+enter",            // shift-only named
+            "shift+f1",               // shift-only named
+            "escape",                 // escape unmodified
+            "primary+escape",         // escape modified
+            "shift+alt+escape",       // escape modified
+            "alt+escape",             // escape modified
+            "primary+q",              // reserved floor
+            "alt+f4",                 // reserved floor
+            "ctrl+s",                 // modifier alias
+            "cmd+s",                  // modifier alias
+            "option+a",               // modifier alias
+            "meta+s",                 // modifier alias
+            "primary+shift",          // no key ('shift' is not a key)
+            "primary+",               // empty token
+            "+s",                     // empty token
+            "primary++s",             // empty token
+            "shift+primary+s",        // non-canonical order
+            "alt+shift+primary+s",    // non-canonical order
+            "primary+primary+s",      // duplicate modifier
+            "shift+shift+enter",      // duplicate modifier
+            "primary+S",              // uppercase key
+            "primary+.",              // punctuation key
+            "primary+,",              // punctuation key
+            "primary+f0",             // f0 is not a function key
+            "primary+f13",            // f13 is out of range
+            "primary+tab",            // unknown named key
+            "primary+space",          // unknown named key
+            "primary+esc",            // not the canonical 'escape'
+            "primary+ab",             // two-character key
+        ] {
+            assert!(validate_shortcut(bad).is_err(), "expected reject: {bad:?}");
+        }
+    }
+
+    /// A menu binding's domain is validated on the COMPLETE coalesced
+    /// value at the barrier; a rejection restores EVERY signal the batch
+    /// wrote, so a caught panic leaves no partial signal state.
+    #[test]
+    fn barrier_rollback_restores_signals_on_menu_reject() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::F64(0.0) },
+            TxOp::CreateSignal { id: SignalId(2), initial: v("keep") },
+            item(1, MenuItemKind::RadioGroup),
+            label(1, "Sort"),
+            item(2, MenuItemKind::RadioOption),
+            label(2, "A"),
+            item(3, MenuItemKind::RadioOption),
+            label(3, "B"),
+            append(1, 2),
+            append(1, 3),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Value,
+                value: PropValue::Signal(SignalId(1)),
+            },
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // The unrelated write lands first; the coalesced radio value
+            // is out of range (2 options, index 5) and the barrier
+            // rejects.
+            scene.apply(vec![
+                TxOp::WriteSignal { id: SignalId(2), value: v("changed") },
+                TxOp::WriteSignal { id: SignalId(1), value: Value::F64(5.0) },
+            ]);
+        }));
+        assert!(caught.is_err(), "an out-of-range coalesced radio value must reject");
+        assert_eq!(scene.signals[&SignalId(1)], Value::F64(0.0));
+        assert_eq!(scene.signals[&SignalId(2)], v("keep"));
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot contain")]
+    fn menu_grammar_rejects_bad_edge() {
+        // A radio_group accepts only radio_option children.
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::RadioGroup),
+            item(2, MenuItemKind::Action),
+            append(1, 2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "accepts only grouping nodes")]
+    fn menubar_rejects_non_group_root() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Save"),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "editable text controls keep their native")]
+    fn context_attach_rejects_entry() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Entry },
+            item(1, MenuItemKind::Action),
+            label(1, "Rename"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "context menu root cannot be a radio_option")]
+    fn context_root_rejects_radio_option() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::RadioOption),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds the depth cap")]
+    fn depth_cap_rejects_third_grouping_level() {
+        // bar > menu > menu > menu — three grouping nodes.
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Menu),
+            item(3, MenuItemKind::Menu),
+            append(2, 3),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already has a parent or anchor")]
+    fn item_rejects_second_parent() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Menu),
+            item(3, MenuItemKind::Action),
+            append(1, 3),
+            append(2, 3),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate shortcut")]
+    fn duplicate_shortcut_in_window_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            label(2, "Save"),
+            TxOp::SetMenuProp {
+                item: MenuItemId(2),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+s")),
+            },
+            item(3, MenuItemKind::Action),
+            label(3, "Send"),
+            TxOp::SetMenuProp {
+                item: MenuItemId(3),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+s")),
+            },
+            append(1, 2),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is reserved")]
+    fn reserved_shortcut_primary_q_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+q")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is reserved")]
+    fn reserved_shortcut_alt_f4_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("alt+f4")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not in canonical order")]
+    fn non_canonical_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("shift+primary+s")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "universal dismiss key")]
+    fn escape_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+escape")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "alphanumeric key needs primary or alt")]
+    fn bare_alnum_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("s")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "shift is valid only with primary or alt")]
+    fn shift_only_named_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("shift+enter")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn shortcut_on_non_action_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Shortcut,
+                value: PropValue::Const(v("primary+s")),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn primary_on_non_action_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Primary,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn checked_on_non_toggle_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Checked,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "0-based option index")]
+    fn radio_value_non_integral_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::RadioGroup),
+            item(2, MenuItemKind::RadioOption),
+            item(3, MenuItemKind::RadioOption),
+            append(1, 2),
+            append(1, 3),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Value,
+                value: PropValue::Const(Value::F64(0.5)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn radio_value_out_of_range_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::RadioGroup),
+            item(2, MenuItemKind::RadioOption),
+            append(1, 2),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Value,
+                value: PropValue::Const(Value::F64(3.0)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "is not signal-bindable")]
+    fn primary_signal_bind_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::Bool(true) },
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Primary,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "context_attach_node names a template node")]
+    fn context_attach_node_outside_scope_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Remove"),
+            TxOp::ContextAttachNode { node: TemplateNodeId(5), item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "menu item id 0")]
+    fn menu_item_id_zero_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(0, MenuItemKind::Menu)]);
+    }
+
+    /// Props mutate freely (DESIGN.md, Menus): re-setting a bar-anchored
+    /// action's shortcut to its OWN spelling replaces it — never a
+    /// duplicate against itself.
+    #[test]
+    fn shortcut_reset_same_spelling_on_bar_action_ok() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            sc(2, "primary+s"),
+        ]);
+        assert!(scene.window_shortcuts[&DEFAULT_WINDOW].contains("primary+s"));
+    }
+
+    /// Re-setting to a NEW spelling deregisters the old chord from the
+    /// window's registry, so a later item may legitimately claim it.
+    #[test]
+    fn shortcut_reset_frees_old_chord_for_reuse() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            sc(2, "primary+e"),
+            item(3, MenuItemKind::Action),
+            sc(3, "primary+s"),
+            append(1, 3),
+        ]);
+        let set = &scene.window_shortcuts[&DEFAULT_WINDOW];
+        assert!(set.contains("primary+e"), "the new spelling registers");
+        assert!(set.contains("primary+s"), "the freed chord is claimable");
+    }
+
+    /// A re-set onto a chord ANOTHER item holds rejects via the
+    /// window_shortcuts lookup — the set-after-anchor dup path.
+    #[test]
+    #[should_panic(expected = "duplicate shortcut")]
+    fn shortcut_set_after_anchor_duplicate_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            item(3, MenuItemKind::Action),
+            append(1, 2),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            sc(3, "primary+s"),
+        ]);
+    }
+
+    /// The rejected re-set mutates NOTHING: both prior registrations
+    /// survive and the item keeps its old spelling.
+    #[test]
+    fn shortcut_reset_reject_leaves_registry_intact() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            item(3, MenuItemKind::Action),
+            sc(3, "primary+e"),
+            append(1, 2),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![sc(3, "primary+s")]);
+        }));
+        assert!(caught.is_err(), "a re-set onto another item's chord must reject");
+        let set = &scene.window_shortcuts[&DEFAULT_WINDOW];
+        assert!(set.contains("primary+s") && set.contains("primary+e"));
+        assert_eq!(
+            scene.menu_items[&MenuItemId(3)].shortcut.as_deref(),
+            Some("primary+e")
+        );
+    }
+
+    /// The cross-tree half of the window dup-check: a second top-level
+    /// tree must dup-check against the window's REGISTRY, not just
+    /// within its own subtree's `seen` set.
+    #[test]
+    #[should_panic(expected = "duplicate shortcut")]
+    fn duplicate_shortcut_across_bar_trees_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            item(3, MenuItemKind::Menu),
+            item(4, MenuItemKind::Action),
+            sc(4, "primary+s"),
+            append(3, 4),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(3) },
+        ]);
+    }
+
+    /// The post-anchor append lookup: a free subtree carrying a chord
+    /// the window already registered cannot join the catalog.
+    #[test]
+    #[should_panic(expected = "duplicate shortcut")]
+    fn duplicate_shortcut_on_append_into_anchored_catalog_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            item(3, MenuItemKind::Action),
+            sc(3, "primary+s"),
+            append(1, 3),
+        ]);
+    }
+
+    /// `shortcut` on anything but a menubar-anchored action, direction
+    /// one: a set on an already context-anchored action.
+    #[test]
+    #[should_panic(expected = "needs a window catalog home")]
+    fn shortcut_on_context_anchored_action_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Action),
+            label(1, "Rename"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+            sc(1, "primary+r"),
+        ]);
+    }
+
+    /// Direction two: attaching a subtree that already carries a
+    /// shortcut to a context anchor.
+    #[test]
+    #[should_panic(expected = "needs a window catalog home")]
+    fn context_attach_of_subtree_with_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Menu),
+            label(1, "Stuff"),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+r"),
+            append(1, 2),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// Direction two, append flavor: a shortcut-carrying free item
+    /// appended INTO an already context-anchored tree.
+    #[test]
+    #[should_panic(expected = "needs a window catalog home")]
+    fn append_shortcut_into_context_anchor_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Menu),
+            label(1, "Stuff"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+r"),
+            append(1, 2),
+        ]);
+    }
+
+    /// The live-widget editable-text rejection covers BOTH kinds.
+    #[test]
+    #[should_panic(expected = "editable text controls keep their native")]
+    fn context_attach_rejects_textarea() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Textarea },
+            item(1, MenuItemKind::Action),
+            label(1, "Rename"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// The template-declare arm is its own code path and message; it
+    /// rejects entry ...
+    #[test]
+    #[should_panic(expected = "context_attach_node rejected on")]
+    fn context_attach_node_rejects_entry() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Clear"),
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(30), kind: WidgetKind::Entry },
+            TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// ... and textarea alike.
+    #[test]
+    #[should_panic(expected = "context_attach_node rejected on")]
+    fn context_attach_node_rejects_textarea() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Clear"),
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(30), kind: WidgetKind::Textarea },
+            TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// Shift-only alphanumeric through the scene root (the grammar
+    /// table's direct assert is not the root path).
+    #[test]
+    #[should_panic(expected = "alphanumeric key needs primary or alt")]
+    fn shift_only_alnum_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Action), sc(1, "shift+s")]);
+    }
+
+    /// Unmodified escape through the scene root.
+    #[test]
+    #[should_panic(expected = "universal dismiss key")]
+    fn unmodified_escape_shortcut_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Action), sc(1, "escape")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot be its own parent")]
+    fn menu_self_append_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Menu), append(1, 1)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "would create a cycle")]
+    fn menu_append_cycle_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Menu),
+            append(1, 2),
+            append(2, 1),
+        ]);
+    }
+
+    /// Double anchoring, bar+bar: one item cannot be the root of two
+    /// windows' catalogs (the anchor half of assert_menu_root_free).
+    #[test]
+    #[should_panic(expected = "already has a parent or anchor")]
+    fn menubar_append_to_two_windows_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(2) },
+            item(1, MenuItemKind::Menu),
+            label(1, "File"),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            TxOp::MenubarAppend { window: WindowId(2), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// Double anchoring, bar-then-context.
+    #[test]
+    #[should_panic(expected = "already has a parent or anchor")]
+    fn menubar_then_context_anchor_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Menu),
+            label(1, "File"),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// Double anchoring, context-then-context: no shared nodes.
+    #[test]
+    #[should_panic(expected = "already has a parent or anchor")]
+    fn context_then_context_anchor_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Action),
+            label(1, "Rename"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+            TxOp::ContextAttach { widget: WidgetId(2), item: MenuItemId(1) },
+        ]);
+    }
+
+    /// The depth cap holds on the append-into-anchored path, not just
+    /// at anchor time.
+    #[test]
+    #[should_panic(expected = "exceeds the depth cap")]
+    fn depth_cap_rejected_on_append_into_anchored_bar() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Menu),
+            item(3, MenuItemKind::Menu),
+            append(2, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            append(1, 2),
+        ]);
+    }
+
+    /// A rejected append into an anchored catalog leaves NO trace: the
+    /// edge is not linked, the registry is untouched, and the subtree
+    /// stays a free root a legal append may still take (the probe that
+    /// exposed the pre-fix mutate-before-validate divergence).
+    #[test]
+    fn rejected_append_leaves_tree_and_registry_untouched() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            item(2, MenuItemKind::Menu),
+            item(3, MenuItemKind::Menu),
+            append(2, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![append(1, 2)]);
+        }));
+        assert!(caught.is_err(), "the over-deep append must reject");
+        assert!(scene.menu_items[&MenuItemId(2)].parent.is_none());
+        assert!(!scene.menu_items[&MenuItemId(1)]
+            .children
+            .contains(&MenuItemId(2)));
+        // Still a free root: an unanchored parent takes the subtree.
+        scene.apply(vec![item(4, MenuItemKind::Menu), append(4, 2)]);
+    }
+
+    /// A destroyed window takes its command catalog with it: the same
+    /// (recreatable) window id starts with a free chord registry, and
+    /// the old trees revert to free roots.
+    #[test]
+    fn destroyed_window_frees_its_catalog() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(2) },
+            item(1, MenuItemKind::Menu),
+            label(1, "File"),
+            item(2, MenuItemKind::Action),
+            sc(2, "primary+s"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: WindowId(2), item: MenuItemId(1) },
+            TxOp::DestroyWindow { window: WindowId(2) },
+            TxOp::CreateWindow { window: WindowId(2) },
+            item(3, MenuItemKind::Menu),
+            label(3, "Edit"),
+            item(4, MenuItemKind::Action),
+            sc(4, "primary+s"),
+            append(3, 4),
+            TxOp::MenubarAppend { window: WindowId(2), item: MenuItemId(3) },
+        ]);
+        assert!(
+            scene.menu_items[&MenuItemId(1)].anchor.is_none(),
+            "the dead window's root reverts to a free root"
+        );
+        assert_eq!(scene.window_menus[&WindowId(2)], vec![MenuItemId(3)]);
+        assert!(scene.window_shortcuts[&WindowId(2)].contains("primary+s"));
     }
 }

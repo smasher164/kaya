@@ -25,6 +25,11 @@
 //!   expect entry#<index> "<text>"     (reads the field's displayed text)
 //!   expect image#<index> "<WxH>"      (reads the decoded image's size)
 //!   expect_focused <kind>#<index>
+//!   menu_activate "<path>"            (labels joined with `>`)
+//!   context_open <kind>#<index>
+//!   expect_menu "<path>" enabled|disabled|checked|unchecked|value <N>
+//!   expect_menus <count>
+//!   shortcut "<spelling>"
 //!
 //! Targets are (kind, creation index) — stamped copies enter the count
 //! in creation order, so `button#last` is "the most recently stamped
@@ -69,6 +74,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "grid" => Some(include_str!("../../../tools/scenes/grid.steps")),
         "textarea" => Some(include_str!("../../../tools/scenes/textarea.steps")),
         "sections" => Some(include_str!("../../../tools/scenes/sections.steps")),
+        "menus" => Some(include_str!("../../../tools/scenes/menus.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }
@@ -114,6 +120,55 @@ pub enum TargetKind {
     /// The multi-line entry: same set_text/read_text/focus verbs as
     /// the entry, its own registry.
     Textarea,
+}
+
+/// The state an `expect_menu` step asserts, exactly as the steps
+/// grammar spells it. One token per axis — an item has several axes at
+/// once (a toggle is enabled AND checked), so the step names which one
+/// it reads via [`MenuState::aspect`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuState {
+    Enabled,
+    Disabled,
+    Checked,
+    Unchecked,
+    /// The radio group's selected option index (the choice contract's
+    /// 0-based add order), asserted on the GROUP's path.
+    Value(usize),
+}
+
+/// Which axis of a menu item's state a step reads — what the stage's
+/// `menu_state` is asked for, so a backend never has to guess whether
+/// "the state" means enablement or checkedness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAspect {
+    Enablement,
+    Checkedness,
+    Value,
+}
+
+impl MenuState {
+    /// The axis this assertion reads.
+    pub fn aspect(self) -> MenuAspect {
+        match self {
+            MenuState::Enabled | MenuState::Disabled => MenuAspect::Enablement,
+            MenuState::Checked | MenuState::Unchecked => MenuAspect::Checkedness,
+            MenuState::Value(_) => MenuAspect::Value,
+        }
+    }
+
+    /// The steps grammar's own spelling — what the stage's read is
+    /// byte-compared against and what the pass observation echoes, so
+    /// every backend and interpreter reports identically.
+    pub fn spelling(self) -> String {
+        match self {
+            MenuState::Enabled => "enabled".to_owned(),
+            MenuState::Disabled => "disabled".to_owned(),
+            MenuState::Checked => "checked".to_owned(),
+            MenuState::Unchecked => "unchecked".to_owned(),
+            MenuState::Value(n) => format!("value {n}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,6 +291,36 @@ pub enum Step {
     /// nested rows can never fake: geometry from the toolkit, never
     /// a model copy.
     ExpectGridColumns(Target, usize),
+    /// Drive the REAL activation path of the menu item at the
+    /// `>`-joined label path — resolved wherever the item surfaced:
+    /// the bar (or its phone overflow), or the OPEN context menu
+    /// after a context_open. The platform's own action route fires,
+    /// so the native handler emits menu_activated / menu_toggled /
+    /// menu_value_changed (never a synthetic occurrence). An action,
+    /// silent like click; the guest's fold reaction and the menu
+    /// expects are the observables.
+    MenuActivate(String),
+    /// Open the context menu attached to the live widget through the
+    /// platform's own gesture route (right-click, long-press) — the
+    /// following menu_activate resolves against the OPEN menu. An
+    /// action, silent like click.
+    ContextOpen(Target),
+    /// Expect the menu item at the path to read the given state along
+    /// that state's axis (enablement, checkedness, or the radio
+    /// group's value), from the platform's REAL menu chrome — never
+    /// the scene model's copy, so a backend that ignored the write
+    /// must fail.
+    ExpectMenu(String, MenuState),
+    /// The window's top-level catalog count, from the REAL
+    /// materialized bar (or the phone overflow's group list) — the
+    /// observation menubar_append's topology is verified by.
+    ExpectMenus(usize),
+    /// Drive the platform's key-equivalent dispatch for a canonical
+    /// shortcut spelling — at minimum the same table the platform's
+    /// own key event traverses, emitting the SAME menu_activated the
+    /// item's direct activation would (one dispatch path). An action,
+    /// silent like click.
+    Shortcut(String),
 }
 
 /// What a backend supplies: its native calls, each hopping to its UI
@@ -396,6 +481,38 @@ pub trait Stage: Send + 'static {
     /// so it emits section_selected (choose/toggle precedent). No
     /// default.
     fn select_section(&self, index: usize);
+    /// Drive the REAL activation path of the menu item at the
+    /// `>`-joined label path — through the bar (or its phone
+    /// overflow), or the OPEN context menu when a context_open
+    /// preceded — so the platform's own action route emits
+    /// menu_activated / menu_toggled / menu_value_changed, never a
+    /// synthetic occurrence. No default: a backend that forgets it
+    /// must fail to compile rather than pass a menu leg vacuously.
+    fn menu_activate(&self, path: &str);
+    /// Open the context menu attached to the live widget through the
+    /// platform's own gesture route (right-click, long-press), so a
+    /// following menu_activate resolves against the OPEN menu. No
+    /// default.
+    fn context_open(&self, target: Target);
+    /// The top-level catalog count, read from the REAL materialized
+    /// bar (or the phone overflow's group list) — never the scene
+    /// model's copy. No default.
+    fn menu_count(&self) -> usize;
+    /// The menu item's state along one axis, read from the platform's
+    /// real menu chrome and spelled in the steps grammar's own words
+    /// ("enabled"/"disabled", "checked"/"unchecked", "value N") —
+    /// never a model copy, so a backend that ignored the write must
+    /// fail. TOTAL: a missing item reads as a short description ("no
+    /// such item"), a retryable non-match rather than a panic —
+    /// expect_menu doubles as the wait for a catalog rebuild to land.
+    /// No default.
+    fn menu_state(&self, path: &str, aspect: MenuAspect) -> String;
+    /// Drive the platform's key-equivalent dispatch for a canonical
+    /// shortcut spelling — at minimum the same table the platform's
+    /// own key event would traverse, emitting the SAME menu_activated
+    /// the item's direct activation would (one dispatch path). No
+    /// default.
+    fn shortcut(&self, spelling: &str);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -601,6 +718,42 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_overflow" => Step::ExpectOverflow(parse_target(rest.trim())?),
             "scroll_end" => Step::ScrollEnd(parse_target(rest.trim())?),
             "expect_at_end" => Step::ExpectAtEnd(parse_target(rest.trim())?),
+            "menu_activate" => {
+                let path = parse_string(rest)?;
+                check_menu_path(&path).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::MenuActivate(path)
+            }
+            "context_open" => Step::ContextOpen(parse_target(rest.trim())?),
+            "expect_menu" => {
+                let (path, tail) = parse_quoted_prefix(rest)
+                    .map_err(|e| format!("expect_menu wants a quoted path and a state: {e}"))?;
+                check_menu_path(&path).map_err(|e| format!("{e}: {line:?}"))?;
+                let state = parse_menu_state(tail).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::ExpectMenu(path, state)
+            }
+            "expect_menus" => Step::ExpectMenus(
+                rest.trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("expect_menus wants a count: {line:?}"))?,
+            ),
+            "shortcut" => {
+                let spelling = parse_string(rest)?;
+                // Grammar-level sanity only: emptiness and whitespace
+                // are line-noise, caught here; the POLICY floor (the
+                // modifier rules, the named-key set, the reserved
+                // union) is the root's one checker (scene.rs), and a
+                // spelling it rejects can never reach a dispatch
+                // table for this verb to hit.
+                if spelling.is_empty() {
+                    return Err(format!("shortcut wants a spelling: {line:?}"));
+                }
+                if spelling.chars().any(char::is_whitespace) {
+                    return Err(format!(
+                        "shortcut spelling {spelling:?} contains whitespace: {line:?}"
+                    ));
+                }
+                Step::Shortcut(spelling)
+            }
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -660,12 +813,16 @@ fn parse_string(spec: &str) -> Result<String, String> {
         .strip_prefix('"')
         .and_then(|s| s.strip_suffix('"'))
         .ok_or_else(|| format!("wanted a quoted string, got {spec:?}"))?;
-    // The escapes the line-oriented grammar needs: a literal newline
-    // cannot ride a script line, and a textarea's whole distinguishing
-    // observable is accepting one. `\\n` -> newline, `\\r` -> carriage
-    // return (the paste stand-in: set_text with CR-bearing text proves
-    // the backends' LF normalization), `\\\\` -> backslash; all three
-    // interpreters unescape identically.
+    Ok(unescape(inner))
+}
+
+/// The escapes the line-oriented grammar needs: a literal newline
+/// cannot ride a script line, and a textarea's whole distinguishing
+/// observable is accepting one. `\n` -> newline, `\r` -> carriage
+/// return (the paste stand-in: set_text with CR-bearing text proves
+/// the backends' LF normalization), `\\` -> backslash; all three
+/// interpreters unescape identically.
+fn unescape(inner: &str) -> String {
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
     while let Some(c) = chars.next() {
@@ -684,7 +841,81 @@ fn parse_string(spec: &str) -> Result<String, String> {
             out.push(c);
         }
     }
-    Ok(out)
+    out
+}
+
+/// A LEADING quoted string plus the remainder after its closing quote
+/// — for the verbs whose quoted argument comes first (expect_menu's
+/// path precedes its state token, and a path may contain spaces, so
+/// whitespace-splitting before the quote would shear a label). Honors
+/// the same escapes as [`parse_string`]; the remainder comes back with
+/// its leading whitespace stripped.
+fn parse_quoted_prefix(spec: &str) -> Result<(String, &str), String> {
+    let spec = spec.trim_start();
+    let Some(body) = spec.strip_prefix('"') else {
+        return Err(format!("wanted a quoted string, got {spec:?}"));
+    };
+    let mut escaped = false;
+    for (i, c) in body.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            return Ok((unescape(&body[..i]), body[i + 1..].trim_start()));
+        }
+    }
+    Err(format!("unterminated quoted string: {spec:?}"))
+}
+
+/// A menu path is labels joined with `>`: at least one label, every
+/// segment non-empty and byte-exact. No trimming — labels compare
+/// byte-for-byte across every language, so a segment padded with
+/// whitespace is a typo that would only surface as a bewildering
+/// "no such item" at runtime; reject it at parse instead.
+fn check_menu_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("menu path is empty".to_owned());
+    }
+    for seg in path.split('>') {
+        if seg.is_empty() {
+            return Err(format!("menu path {path:?} has an empty label segment"));
+        }
+        if seg != seg.trim() {
+            return Err(format!(
+                "menu path {path:?} pads a label with whitespace"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The state token(s) of an expect_menu step. `value` takes a 0-based
+/// option index (the choice contract's add order); the four bare
+/// states take nothing — trailing junk is rejected, not ignored.
+fn parse_menu_state(spec: &str) -> Result<MenuState, String> {
+    let spec = spec.trim();
+    match spec {
+        "enabled" => return Ok(MenuState::Enabled),
+        "disabled" => return Ok(MenuState::Disabled),
+        "checked" => return Ok(MenuState::Checked),
+        "unchecked" => return Ok(MenuState::Unchecked),
+        _ => {}
+    }
+    if let Some((word, index)) = spec.split_once(char::is_whitespace) {
+        if word == "value" {
+            return index
+                .trim()
+                .parse::<usize>()
+                .map(MenuState::Value)
+                .map_err(|_| {
+                    format!("expect_menu value wants a 0-based index, got {index:?}")
+                });
+        }
+    }
+    Err(format!(
+        "expect_menu wants enabled|disabled|checked|unchecked|value N, got {spec:?}"
+    ))
 }
 
 /// Run the scene's script on its own thread against a backend's stage.
@@ -1127,6 +1358,59 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Err(format!("{t:?} does not hold focus"))
                 }
             })),
+            Step::MenuActivate(path) => {
+                // An action, silent like click: the fold's reaction
+                // (or the next expect_menu) is the observable. Where
+                // the path resolves — the bar or the OPEN context
+                // menu — is the stage's own presentation state.
+                stage.menu_activate(path);
+                None
+            }
+            Step::ContextOpen(t) => {
+                // v1 rejects context menus on editable text (their
+                // native menus are dress — scene.rs refuses the
+                // attach), so driving the gesture there would probe a
+                // menu that cannot exist: the false-verdict class the
+                // container verbs reject loudly.
+                if matches!(t.kind, TargetKind::Entry | TargetKind::Textarea) {
+                    Some(Err(format!(
+                        "{t:?} is editable text — its context menu is dress, not a context_open target"
+                    )))
+                } else {
+                    // An action, silent like click: the following
+                    // menu_activate's effect is the observable.
+                    stage.context_open(*t);
+                    None
+                }
+            }
+            Step::Shortcut(spelling) => {
+                // An action, silent like click: the SAME
+                // menu_activated the item's direct activation emits
+                // is the observable, read back through the fold.
+                stage.shortcut(spelling);
+                None
+            }
+            Step::ExpectMenus(n) => Some(poll(|| {
+                let got = stage.menu_count();
+                if got == *n {
+                    Ok(format!("{n} menus"))
+                } else {
+                    Err(format!("{got} menus, wanted {n}"))
+                }
+            })),
+            Step::ExpectMenu(path, want) => {
+                let want_s = want.spelling();
+                Some(poll(|| {
+                    let got = stage.menu_state(path, want.aspect());
+                    if got == want_s {
+                        // Byte-identical on every backend: the path in
+                        // its quoted spelling, then the state token(s).
+                        Ok(format!("menu {path:?} {want_s}"))
+                    } else {
+                        Err(format!("menu {path:?} reads {got:?}, wanted {want_s:?}"))
+                    }
+                }))
+            }
         };
         match outcome {
             Some(Ok(o)) => observed.push(o),
@@ -1253,7 +1537,7 @@ mod tests {
 
     #[test]
     fn scripts_parse_and_grammar_round_trips() {
-        for scene in ["entry", "gallery", "todos", "reorder", "feed", "align", "1"] {
+        for scene in ["entry", "gallery", "todos", "reorder", "feed", "align", "menus", "1"] {
             parse(script(scene).unwrap()).unwrap();
         }
         let steps = parse(
@@ -1418,6 +1702,25 @@ mod tests {
             String::new()
         }
         fn select_section(&self, _: usize) {}
+        fn menu_activate(&self, path: &str) {
+            self.seen.lock().unwrap().push(format!("menu_activate {path}"));
+        }
+        fn context_open(&self, t: Target) {
+            self.seen.lock().unwrap().push(format!("context_open {t:?}"));
+        }
+        fn menu_count(&self) -> usize {
+            3
+        }
+        fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
+            match aspect {
+                MenuAspect::Enablement => "disabled".to_owned(),
+                MenuAspect::Checkedness => "checked".to_owned(),
+                MenuAspect::Value => "value 1".to_owned(),
+            }
+        }
+        fn shortcut(&self, spelling: &str) {
+            self.seen.lock().unwrap().push(format!("shortcut {spelling}"));
+        }
         fn finish(&self, code: i32, verdict: &str) {
             let _ = self.verdict.send((code, verdict.to_owned()));
         }
@@ -1583,6 +1886,15 @@ mod tests {
             String::new()
         }
         fn select_section(&self, _: usize) {}
+        fn menu_activate(&self, _: &str) {}
+        fn context_open(&self, _: Target) {}
+        fn menu_count(&self) -> usize {
+            0
+        }
+        fn menu_state(&self, _: &str, _: MenuAspect) -> String {
+            String::new()
+        }
+        fn shortcut(&self, _: &str) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -1706,6 +2018,15 @@ mod tests {
             String::new()
         }
         fn select_section(&self, _: usize) {}
+        fn menu_activate(&self, _: &str) {}
+        fn context_open(&self, _: Target) {}
+        fn menu_count(&self) -> usize {
+            0
+        }
+        fn menu_state(&self, _: &str, _: MenuAspect) -> String {
+            String::new()
+        }
+        fn shortcut(&self, _: &str) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
             }
@@ -1769,5 +2090,193 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 0);
         assert_eq!(verdict, "KAYA_SELFTEST: OK (ok-text, ok-text)");
+    }
+
+    /// The five menu verbs parse into their Step arms, including a
+    /// label with an internal space (the quoted-prefix helper must not
+    /// shear on whitespace) and each of the five state spellings.
+    #[test]
+    fn menu_grammar_parses() {
+        let steps = parse(
+            "menu_activate \"File>Save\"\n\
+             context_open label#1\n\
+             expect_menu \"File>Save As\" enabled\n\
+             expect_menu \"File>Export\" disabled\n\
+             expect_menu \"View>Details\" checked\n\
+             expect_menu \"View>Details\" unchecked\n\
+             expect_menu \"Sort\" value 1\n\
+             expect_menus 3\n\
+             shortcut \"primary+s\"",
+        )
+        .unwrap();
+        assert_eq!(steps[0], Step::MenuActivate("File>Save".into()));
+        assert_eq!(
+            steps[1],
+            Step::ContextOpen(Target { kind: TargetKind::Label, index: 1 })
+        );
+        assert_eq!(
+            steps[2],
+            Step::ExpectMenu("File>Save As".into(), MenuState::Enabled)
+        );
+        assert_eq!(
+            steps[3],
+            Step::ExpectMenu("File>Export".into(), MenuState::Disabled)
+        );
+        assert_eq!(
+            steps[4],
+            Step::ExpectMenu("View>Details".into(), MenuState::Checked)
+        );
+        assert_eq!(
+            steps[5],
+            Step::ExpectMenu("View>Details".into(), MenuState::Unchecked)
+        );
+        assert_eq!(steps[6], Step::ExpectMenu("Sort".into(), MenuState::Value(1)));
+        assert_eq!(steps[7], Step::ExpectMenus(3));
+        assert_eq!(steps[8], Step::Shortcut("primary+s".into()));
+        // The state's axis is derivable from its spelling — what
+        // menu_state is asked for — and the spelling round-trips.
+        assert_eq!(MenuState::Disabled.aspect(), MenuAspect::Enablement);
+        assert_eq!(MenuState::Unchecked.aspect(), MenuAspect::Checkedness);
+        assert_eq!(MenuState::Value(0).aspect(), MenuAspect::Value);
+        assert_eq!(MenuState::Value(2).spelling(), "value 2");
+    }
+
+    /// Malformed paths die at parse, not as a bewildering "no such
+    /// item" at runtime: empty, empty segments (leading/trailing/`>>`),
+    /// whitespace-padded segments (labels compare byte-for-byte), an
+    /// unquoted path, and an unterminated quote.
+    #[test]
+    fn malformed_menu_paths_rejected() {
+        for bad in [
+            "menu_activate \"\"",
+            "menu_activate \"File>\"",
+            "menu_activate \">File\"",
+            "menu_activate \"File>>Save\"",
+            "menu_activate \"File> Save\"",
+            "menu_activate \"File >Save\"",
+            "menu_activate File>Save",
+            "menu_activate",
+            "expect_menu \"\" enabled",
+            "expect_menu \"File>\" enabled",
+            "expect_menu \"File>Save disabled",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// Malformed states die at parse too: unknown tokens, a bare
+    /// `value`, a non-numeric or negative index, trailing junk after a
+    /// bare state, and a missing state altogether.
+    #[test]
+    fn malformed_menu_states_rejected() {
+        for bad in [
+            "expect_menu \"File>Save\" toggled",
+            "expect_menu \"File>Save\" value",
+            "expect_menu \"File>Save\" value x",
+            "expect_menu \"File>Save\" value -1",
+            "expect_menu \"File>Save\" value 1 junk",
+            "expect_menu \"File>Save\" enabled junk",
+            "expect_menu \"File>Save\"",
+            "expect_menus",
+            "expect_menus x",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// The shortcut verb's GRAMMAR floor: emptiness and whitespace are
+    /// line noise, rejected here. The policy floor (modifier rules,
+    /// the named-key set, the reserved union) is the root's one
+    /// checker in scene.rs — a spelling it rejects never reaches a
+    /// dispatch table, so the harness does not re-implement it.
+    #[test]
+    fn shortcut_grammar_rejects_line_noise() {
+        assert!(parse("shortcut \"\"").is_err());
+        assert!(parse("shortcut \"primary +s\"").is_err());
+        assert!(parse("shortcut primary+s").is_err());
+        assert!(parse("shortcut").is_err());
+    }
+
+    /// expect_menus and expect_menu poll the stage's real-chrome
+    /// reads and join the byte-identical pass observations into the
+    /// verdict; a state mismatch fails with the read-vs-want text.
+    #[test]
+    fn menu_expects_poll_the_real_chrome() {
+        let steps = parse(
+            "expect label#0 \"ok-text\"\n\
+             expect_menus 3\n\
+             expect_menu \"File>Save\" disabled\n\
+             expect_menu \"View>Details\" checked\n\
+             expect_menu \"Sort\" value 1",
+        )
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(
+            verdict,
+            "KAYA_SELFTEST: OK (ok-text, 3 menus, menu \"File>Save\" disabled, \
+             menu \"View>Details\" checked, menu \"Sort\" value 1)"
+        );
+        // The mismatch half: the mock's enablement reads "disabled",
+        // so asserting enabled fails with the last read's text.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect label#0 \"ok-text\"\nexpect_menu \"File>Save\" enabled").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(
+            verdict.contains("menu \"File>Save\" reads \"disabled\", wanted \"enabled\""),
+            "{verdict}"
+        );
+    }
+
+    /// The action verbs drive their Stage methods, in step order, with
+    /// the parsed path/target/spelling — what the backends build
+    /// against. A dedicated registry: SEEN is shared across parallel
+    /// tests.
+    #[test]
+    fn menu_actions_drive_the_stage() {
+        static MENU_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let steps = parse(
+            "context_open label#1\n\
+             menu_activate \"Rename\"\n\
+             shortcut \"primary+s\"\n\
+             expect label#0 \"ok-text\"",
+        )
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &MENU_SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(
+            *MENU_SEEN.lock().unwrap(),
+            vec![
+                "context_open Target { kind: Label, index: 1 }".to_owned(),
+                "menu_activate Rename".to_owned(),
+                "shortcut primary+s".to_owned(),
+            ]
+        );
+    }
+
+    /// context_open on editable text fails loudly: v1's context menus
+    /// on entry/textarea are dress (scene.rs refuses the attach), so
+    /// the gesture would probe a menu that cannot exist — the
+    /// false-verdict class. Parse accepts the target (the grammar is
+    /// kind-agnostic, like choose and scroll_end); the run arm holds
+    /// the line.
+    #[test]
+    fn context_open_rejects_editable_text() {
+        for bad in ["context_open entry#0", "context_open textarea#0"] {
+            let script = format!("{bad}\nexpect label#0 \"ok-text\"");
+            let (tx, rx) = std::sync::mpsc::channel();
+            run(parse(&script).unwrap(), MockStage { seen: &SEEN, verdict: tx });
+            let (code, verdict) = rx.recv().unwrap();
+            assert_eq!(code, 1, "{verdict}");
+            assert!(verdict.contains("not a context_open target"), "{verdict}");
+        }
     }
 }

@@ -147,6 +147,74 @@ public final class AbortCheck {
             }
         });
 
+        // The menu surface, JVM shape: the record list is private to
+        // the Tx, so the record-level emission asserts live in the
+        // desktop fixtures (ledgered for the JVM). What this pure-JVM
+        // fixture pins is the surface's guard behavior — the chain
+        // constructs, the binding's ONE shortcut parser rejects
+        // aliases at record time, a context chain rejects shortcuts,
+        // and an aborted menu transaction propagates and leaves the
+        // app usable. Menu records are records, so every one of these
+        // transactions must abort (submitIfAny would hit KayaRing's
+        // natives otherwise — the file-header rule).
+        KayaApp.MenuItem[] file = new KayaApp.MenuItem[1];
+        Consumer<KayaApp.Tx> menuBuild = tx -> {
+            file[0] = tx.window(0).menu("File");
+            file[0].item("Save").shortcut("PRIMARY+S").onActivate(t -> { });
+            KayaApp.MenuItem sort = tx.window(0).radioGroup("Sort");
+            sort.option("Name");
+            sort.option("Date");
+            sort.value(1);
+
+            boolean menuThrew = false;
+            try {
+                file[0].item("Bad").shortcut("ctrl+s");
+            } catch (IllegalArgumentException e) {
+                menuThrew = true;
+            }
+            if (!menuThrew) {
+                throw new AssertionError(
+                        "an alias shortcut must die in the binding's one parser");
+            }
+
+            menuThrew = false;
+            try {
+                tx.contextMenu(tx.label("noun")).item("Rename").shortcut("primary+r");
+            } catch (IllegalStateException e) {
+                menuThrew = e.getMessage().contains("context");
+            }
+            if (!menuThrew) {
+                throw new AssertionError("a context item accepted a shortcut");
+            }
+            throw new RuntimeException("handler bug");
+        };
+        propagated = false;
+        try {
+            app.build(menuBuild);
+        } catch (RuntimeException e) {
+            propagated = "handler bug".equals(e.getMessage());
+        }
+        if (!propagated) {
+            throw new AssertionError("menu abort: build must propagate");
+        }
+        // The app continues, and the retained handle reopens through
+        // tx.menu (append-at-any-time) in a fresh — again aborting,
+        // pure JVM — transaction without tripping the closed-chain
+        // guard.
+        Consumer<KayaApp.Tx> reopen = tx -> {
+            tx.menu(file[0]).item("Publish");
+            throw new RuntimeException("handler bug");
+        };
+        propagated = false;
+        try {
+            app.build(reopen);
+        } catch (RuntimeException e) {
+            propagated = "handler bug".equals(e.getMessage());
+        }
+        if (!propagated) {
+            throw new AssertionError("menu reopen: build must propagate");
+        }
+
         System.out.println("java abort check: OK");
     }
 }

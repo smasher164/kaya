@@ -20,7 +20,8 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use crate::protocol::{
     AlertChoice, AlertId, AlertSpec,
-    CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, Occurrence, Path, Prop, PropValue,
+    CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind, MenuProp,
+    Occurrence, Path, Prop, PropValue,
     Record, SectionProp, SignalId, WindowId, WindowProp,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
@@ -406,6 +407,9 @@ pub struct AppCtx {
     next_alert: Cell<u64>,
     next_collection: Cell<u64>,
     next_node: Cell<u64>,
+    // Menu items get their OWN id space (the c_menu_item discipline):
+    // dispatch tables key by item id, separate from every other table.
+    next_menu_item: Cell<u64>,
     model: RefCell<HashMap<CollectionId, Vec<Instance>>>,
     // Collections declared inside a For's template: removing a parent
     // entry tears down the copy and every instance inside it, so the
@@ -425,6 +429,7 @@ impl AppCtx {
             next_alert: Cell::new(1),
             next_collection: Cell::new(1),
             next_node: Cell::new(1),
+            next_menu_item: Cell::new(1),
             model: RefCell::new(HashMap::new()),
             children: RefCell::new(HashMap::new()),
             open_fors: RefCell::new(Vec::new()),
@@ -494,6 +499,12 @@ impl AppCtx {
         let id = self.next_node.get();
         self.next_node.set(id + 1);
         TemplateNodeId(id)
+    }
+
+    fn alloc_menu_item(&self) -> MenuItemId {
+        let id = self.next_menu_item.get();
+        self.next_menu_item.set(id + 1);
+        MenuItemId(id)
     }
 
     /// A collection declared inside a For's template is torn down with
@@ -763,27 +774,21 @@ impl<'a> Tx<'a> {
     /// for computed values. This is a compile error, pinned here:
     ///
     /// ```compile_fail
-    /// let (_occ_tx, occ_rx) = std::sync::mpsc::channel();
-    /// let (tx_tx, _tx_rx) = std::sync::mpsc::channel();
-    /// let ctx = kaya::AppCtx::new(occ_rx, tx_tx);
-    /// let mut tx = ctx.begin();
-    /// let todos = tx.collection::<String>();
-    /// tx.for_each(&todos, |_t| {
-    ///     tx.len(&todos); // cannot borrow `tx`: the body records a blueprint
-    /// });
+    /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
+    ///     tx.for_each(todos, |_t| {
+    ///         tx.len(todos); // cannot borrow `tx`: the body records a blueprint
+    ///     });
+    /// }
     /// ```
     ///
     /// The for-statement tracer holds the same wall — a `Row` borrows
     /// the transaction for as long as it lives:
     ///
     /// ```compile_fail
-    /// let (_occ_tx, occ_rx) = std::sync::mpsc::channel();
-    /// let (tx_tx, _tx_rx) = std::sync::mpsc::channel();
-    /// let ctx = kaya::AppCtx::new(occ_rx, tx_tx);
-    /// let mut tx = ctx.begin();
-    /// let todos = tx.collection::<String>();
-    /// for _row in todos.rows(&mut tx) {
-    ///     tx.items(&todos); // cannot borrow `tx`: the trace is recording
+    /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
+    ///     for _row in todos.rows(tx) {
+    ///         tx.items(todos); // cannot borrow `tx`: the trace is recording
+    ///     }
     /// }
     /// ```
     pub fn items<T: KayaSum>(&self, instance: &Collection<T>) -> Vec<(Value, T)> {
@@ -1632,6 +1637,149 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::Mount { window, root });
     }
 
+    // --- Menus: the dynamic floor and the transaction-level sugar ------
+    //
+    // Menu items live in their OWN guest-allocated id space (the
+    // c_menu_item counter): a [`MenuItemId`] is not a widget, node, or
+    // surface id, so cross-use is a compile error. Items never host
+    // content and never participate in layout — declaring one inside a
+    // container body parents NOTHING through the ambient stack.
+    // Topology is append-only and live: items may be created and
+    // appended at any time, all applicable props stay mutable, and
+    // nothing is ever removed in v1 (DESIGN.md, Menus).
+
+    /// The floor: create a menu item of `kind` in the menu-item id
+    /// space. The chains above ([`WindowRef::menu`],
+    /// [`Tx::context_menu`], [`Tx::menu`]) ride exactly this.
+    pub fn menu_item(&mut self, kind: MenuItemKind) -> MenuItemId {
+        let item = self.ctx.alloc_menu_item();
+        self.ops.push(TxOp::MenuItemCreate { item, kind });
+        item
+    }
+
+    /// The floor: append `child` under grouping node `parent`
+    /// (single-parent — an item acquires exactly one parent or anchor).
+    /// The closed parent/child grammar and the depth cap are root
+    /// errors.
+    pub fn append_menu_item(&mut self, parent: MenuItemId, child: MenuItemId) {
+        self.ops.push(TxOp::MenuItemAppend { parent, child });
+    }
+
+    /// The floor: append a top-level grouping node (`menu` or
+    /// `radio_group`) to `window`'s command catalog — the window
+    /// anchor. The sugar spelling is [`WindowRef::menu`] /
+    /// [`WindowRef::radio_group`]: menu bars ride the window construct.
+    pub fn menubar_append(&mut self, window: WindowId, item: MenuItemId) {
+        self.ops.push(TxOp::MenubarAppend { window, item });
+    }
+
+    /// Set a menu property to a constant ([`MenuProp`]; the floor the
+    /// menu chains ride). A `shortcut` set through the floor must
+    /// already be the CANONICAL wire spelling — the core validates and
+    /// rejects a non-canonical spelling, it never rewrites guest data
+    /// (the C-floor contract). The chains normalize case and modifier
+    /// order before emitting.
+    pub fn set_menu_prop(&mut self, item: MenuItemId, prop: MenuProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetMenuProp {
+            item,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
+    /// Bind a signal-bindable menu property (`label`, `enabled`,
+    /// `checked`, `value`) to a signal. `icon`, `primary`, and
+    /// `shortcut` are const-only — the root rejects a signal source on
+    /// them, and the chains do not even spell it.
+    pub fn bind_menu_prop(&mut self, item: MenuItemId, prop: MenuProp, signal: SignalId) {
+        self.ops.push(TxOp::SetMenuProp {
+            item,
+            prop,
+            value: PropValue::Signal(signal),
+        });
+    }
+
+    /// The floor: attach context-catalog root `item` to a live widget.
+    /// Entry and Textarea reject attachment at the root — the editable
+    /// text controls keep their native edit menus (dress).
+    pub fn context_attach(&mut self, widget: WidgetId, item: MenuItemId) {
+        self.ops.push(TxOp::ContextAttach { widget, item });
+    }
+
+    /// A context menu on a LIVE widget: the body declares the catalog's
+    /// root items — the same item vocabulary as the bar (the anchor
+    /// decides the spelling, never the kinds) — each created and
+    /// attached eagerly. Returns the body's result, the way container
+    /// bodies hand their handles out:
+    /// `let rename = tx.context_menu(target, |m| m.item("Rename").id());`
+    /// Calling it again on the same widget appends more roots — the
+    /// append-at-any-time discipline.
+    ///
+    /// Zone rules: this is the live-widget anchor. A template node
+    /// takes [`Tx::context_catalog`] + [`Tpl::context_menu`] instead —
+    /// items are live and shared across stamped copies, so the catalog
+    /// is built before the template and only the attachment happens
+    /// inside it. Context items take no shortcuts (a shortcut needs a
+    /// window catalog home) — spelled one is a compile error here, not
+    /// a runtime one.
+    pub fn context_menu<R>(
+        &mut self,
+        widget: WidgetId,
+        body: impl FnOnce(&mut MenuItems<'_, 'a, ContextAnchor>) -> R,
+    ) -> R {
+        let mut items = MenuItems {
+            tx: self,
+            slot: ItemSlot::Widget(widget),
+            roots: Vec::new(),
+            _anchor: PhantomData,
+        };
+        body(&mut items)
+    }
+
+    /// Build a context catalog UNANCHORED — free root items for a
+    /// template-node anchor. Menu items are live and shared across
+    /// stamped copies (v1 does not stamp items), and the protocol
+    /// forbids creating them inside a template scope: the catalog is
+    /// built here, in the live zone, and [`Tpl::context_menu`] attaches
+    /// it inside the template, where activations carry the stamped
+    /// copy's key path (the `on_click_node` encoding — the keys ARE the
+    /// noun). The borrow checker already holds the zone wall — a
+    /// template body cannot reach the transaction to build items:
+    ///
+    /// ```compile_fail
+    /// fn zone_rule(tx: &mut kaya::Tx<'_>, groups: &kaya::Collection<String>) {
+    ///     tx.for_each(groups, |t| {
+    ///         tx.context_catalog(|m| {}); // cannot borrow `tx`: the body records a blueprint
+    ///     });
+    /// }
+    /// ```
+    pub fn context_catalog<R>(
+        &mut self,
+        body: impl FnOnce(&mut MenuItems<'_, 'a, ContextAnchor>) -> R,
+    ) -> ContextCatalog<R> {
+        let mut items = MenuItems {
+            tx: self,
+            slot: ItemSlot::Free,
+            roots: Vec::new(),
+            _anchor: PhantomData,
+        };
+        let out = body(&mut items);
+        let roots = std::mem::take(&mut items.roots);
+        ContextCatalog { out, roots }
+    }
+
+    /// The prop/append proxy for a RETAINED menu item — the
+    /// [`Tx::window`] precedent, and the append-at-any-time spelling:
+    /// `tx.menu(file).label("Document").append(|m| m.item("Publish").primary(true).id());`
+    /// Props mutate freely on every kind the prop applies to; the root
+    /// rejects a misapplied prop (kind and anchor rules), exactly as it
+    /// does for the floor. Programmatic `checked`/`value` writes are
+    /// configuration and stay QUIET — no occurrence echoes back (the
+    /// echo doctrine).
+    pub fn menu(&mut self, item: MenuItemId) -> MenuItemRef<'_, 'a> {
+        MenuItemRef { tx: self, item }
+    }
+
     /// Send the batch and wake the main loop to apply it. The model
     /// edits stand: they are exactly what was sent.
     pub fn commit(mut self) {
@@ -1759,6 +1907,9 @@ pub struct Messages<M> {
     // spaces, two tables.
     widgets: RefCell<HashMap<u64, Mapper<M>>>,
     nodes: RefCell<HashMap<u64, Mapper<M>>>,
+    // Menu items are their own id space — their own table ("two
+    // tables, always" is N tables by now, still always).
+    menu_items: RefCell<HashMap<u64, Mapper<M>>>,
     // Window lifecycle: one handler each, receiving the window id —
     // close events are app-global grammar, not per-widget wiring.
     close_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
@@ -1782,6 +1933,7 @@ impl<M> Messages<M> {
         Messages {
             widgets: RefCell::new(HashMap::new()),
             nodes: RefCell::new(HashMap::new()),
+            menu_items: RefCell::new(HashMap::new()),
             close_requested: RefCell::new(HashMap::new()),
             window_closed: RefCell::new(HashMap::new()),
             back_requested: RefCell::new(HashMap::new()),
@@ -1886,6 +2038,96 @@ impl<M> Messages<M> {
             Box::new(move |occ| match occ {
                 Occurrence::InstanceValueChanged { path, value, .. } => {
                     Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A menu action's activation means this message (cloned per
+    /// fire). Handlers scope to their creator: the handle comes from
+    /// the action's own chain (`m.item("Save").id()`), never from
+    /// inspecting ids — no app-global menu dispatcher exists. The
+    /// action's click and its shortcut are ONE occurrence on one
+    /// dispatch path, so this handler covers both.
+    pub fn on_menu_item(&self, item: MenuItemId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.menu_items.borrow_mut().insert(
+            item.0,
+            Box::new(move |occ| match occ {
+                Occurrence::MenuActivated { .. } => Some(msg.clone()),
+                _ => None,
+            }),
+        );
+    }
+
+    /// A menu toggle's user flips map through `f` with the new state —
+    /// `msgs.on_menu_toggle(details, Msg::Details)`. Programmatic
+    /// `checked` writes are quiet (the Checkbox contract), so a
+    /// handler's own writes cannot loop back at it.
+    pub fn on_menu_toggle(&self, item: MenuItemId, f: impl Fn(bool) -> M + 'static) {
+        self.menu_items.borrow_mut().insert(
+            item.0,
+            Box::new(move |occ| match occ {
+                Occurrence::MenuToggled { checked, .. } => Some(f(*checked)),
+                _ => None,
+            }),
+        );
+    }
+
+    /// A menu radio group's user picks: the new 0-based option index
+    /// (the Choice contract — [`Messages::on_select`] for menus,
+    /// registered on the GROUP handle). Programmatic `value` writes
+    /// are quiet.
+    pub fn on_menu_select(&self, group: MenuItemId, f: impl Fn(usize) -> M + 'static) {
+        self.menu_items.borrow_mut().insert(
+            group.0,
+            Box::new(move |occ| match occ {
+                Occurrence::MenuValueChanged { index, .. } => Some(f(*index as usize)),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The Tpl-zone flavor of [`Messages::on_menu_item`], for items
+    /// attached to a template node ([`Tpl::context_menu`]): the
+    /// occurrence carries the stamped copy's key path, outermost first
+    /// — the `on_click_node` pattern; the keys ARE the noun the
+    /// command acts on.
+    pub fn on_menu_item_node(&self, item: MenuItemId, f: impl Fn(Path) -> M + 'static) {
+        self.menu_items.borrow_mut().insert(
+            item.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceMenuActivated { path, .. } => Some(f(path.clone())),
+                _ => None,
+            }),
+        );
+    }
+
+    /// The Tpl-zone flavor of [`Messages::on_menu_toggle`]: the copy's
+    /// key path plus the new state.
+    pub fn on_menu_toggle_node(&self, item: MenuItemId, f: impl Fn(Path, bool) -> M + 'static) {
+        self.menu_items.borrow_mut().insert(
+            item.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceMenuToggled { path, checked, .. } => {
+                    Some(f(path.clone(), *checked))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// The Tpl-zone flavor of [`Messages::on_menu_select`]: the copy's
+    /// key path plus the new 0-based option index.
+    pub fn on_menu_select_node(&self, group: MenuItemId, f: impl Fn(Path, usize) -> M + 'static) {
+        self.menu_items.borrow_mut().insert(
+            group.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstanceMenuValueChanged { path, index, .. } => {
+                    Some(f(path.clone(), *index as usize))
                 }
                 _ => None,
             }),
@@ -2024,6 +2266,21 @@ impl<M> Messages<M> {
                     // scope to their creator).
                     self.section_selected.borrow().get(&section.0).map(|f| f())
                 }
+                // Menu occurrences key the menu-item table — their own
+                // id space, their own table. Direct and node-anchored
+                // variants share the table: an item has exactly one
+                // anchor, so its registered mapper matches the one
+                // variant its anchor can emit.
+                Occurrence::MenuActivated { item }
+                | Occurrence::InstanceMenuActivated { item, .. }
+                | Occurrence::MenuToggled { item, .. }
+                | Occurrence::InstanceMenuToggled { item, .. } => {
+                    self.menu_items.borrow().get(&item.0).and_then(|f| f(&occ))
+                }
+                Occurrence::MenuValueChanged { group, .. }
+                | Occurrence::InstanceMenuValueChanged { group, .. } => {
+                    self.menu_items.borrow().get(&group.0).and_then(|f| f(&occ))
+                }
             };
             if let Some(m) = mapped {
                 return Some(m);
@@ -2097,6 +2354,73 @@ impl AlertRef<'_, '_> {
 pub struct WindowRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     window: WindowId,
+}
+
+impl<'t, 'a> WindowRef<'t, 'a> {
+    /// Append a top-level menu to this window's command catalog — menu
+    /// bars ride the window construct like every window attribute (the
+    /// window-attribute unification rule; DESIGN.md, Menus). `label` is
+    /// constant text or a bound Str signal, like every menu label. The
+    /// body declares the children through the [`MenuItems`] proxy; the
+    /// returned chain carries the grouping node's own props and ends
+    /// with [`MenuRef::id`] (or [`MenuRef::into_parts`] to keep the
+    /// body's handles):
+    /// `let (file, save) = tx.window(0)
+    ///      .menu("File", |m| m.item("Save").shortcut("primary+s").id())
+    ///      .into_parts();`
+    ///
+    /// Append-only and live: call this again for another top-level
+    /// menu, and reopen a retained grouping item with [`Tx::menu`] to
+    /// rename it or append children — every catalog mutation recomputes
+    /// the phones' promoted set. The bar accepts only grouping nodes;
+    /// leaf items hang off a menu (or use [`WindowRef::radio_group`]).
+    pub fn menu<R>(
+        self,
+        label: impl Into<MenuSource<StrKind>>,
+        body: impl FnOnce(&mut MenuItems<'_, 'a, BarAnchor>) -> R,
+    ) -> MenuRef<'t, 'a, R> {
+        let WindowRef { tx, window } = self;
+        let item = tx.menu_item(MenuItemKind::Menu);
+        label.into().apply(tx, item, MenuProp::Label);
+        tx.ops.push(TxOp::MenubarAppend { window, item });
+        let out = {
+            let mut children = MenuItems {
+                tx: &mut *tx,
+                slot: ItemSlot::Parent(item),
+                roots: Vec::new(),
+                _anchor: PhantomData,
+            };
+            body(&mut children)
+        };
+        MenuRef { out, item, tx }
+    }
+
+    /// Append a top-level radio group to this window's command catalog
+    /// — a `radio_group` is admissible wherever a `menu` grouping node
+    /// is, including at bar level, where it materializes as a top-level
+    /// menu with the platform's checkmark idiom. The body declares only
+    /// options (the closed grammar, held by the [`RadioOptions`] type);
+    /// chain [`RadioGroupRef::value`] AFTER the body so the selected
+    /// index has options to address:
+    /// `let sort = tx.window(0)
+    ///      .radio_group("Sort", |o| { o.option("Name"); o.option("Date"); })
+    ///      .value(0)
+    ///      .id();`
+    pub fn radio_group<R>(
+        self,
+        label: impl Into<MenuSource<StrKind>>,
+        body: impl FnOnce(&mut RadioOptions<'_, 'a>) -> R,
+    ) -> RadioGroupRef<'t, 'a, R> {
+        let WindowRef { tx, window } = self;
+        let item = tx.menu_item(MenuItemKind::RadioGroup);
+        label.into().apply(tx, item, MenuProp::Label);
+        tx.ops.push(TxOp::MenubarAppend { window, item });
+        let out = {
+            let mut options = RadioOptions { tx: &mut *tx, group: item };
+            body(&mut options)
+        };
+        RadioGroupRef { out, item, tx }
+    }
 }
 
 impl WindowRef<'_, '_> {
@@ -2197,6 +2521,687 @@ impl SectionRef<'_, '_> {
     pub fn id(&self) -> WindowId {
         self.section
     }
+}
+
+// --- Menus: the command vocabulary's construction sugar ------------------
+//
+// One item vocabulary, two anchors (DESIGN.md, Menus): the window bar
+// and a widget/node context menu. The anchor decides the SPELLING —
+// [`WindowRef::menu`]/[`WindowRef::radio_group`] for the bar,
+// [`Tx::context_menu`] for a live widget, [`Tx::context_catalog`] +
+// [`Tpl::context_menu`] for a template node — never the item kinds.
+// Chains are ephemeral borrow-checked proxies: they reborrow the
+// transaction, die with their statement, and end with `.id()` where the
+// durable handle must outlive them. Handlers scope to their creator:
+// bind the returned item handles with [`Messages::on_menu_item`],
+// [`Messages::on_menu_toggle`], and [`Messages::on_menu_select`] — no
+// app-global menu dispatcher exists.
+
+/// The one shortcut-spelling parser in the Rust binding (layer 1: the
+/// parser lives in ONE place per binding, never at call sites). Accepts
+/// ASCII case variants and any ordering of the modifiers before the
+/// final key, and canonicalizes to the wire spelling — lowercase, in
+/// `primary`, `shift`, `alt`, key order (`primary+shift+s`). Rejects
+/// whitespace, repeated modifiers, the platform aliases (`ctrl`, `cmd`,
+/// `option`, ...), and multiple or missing keys. POLICY stays at the
+/// root: the key floor, the shift/alphanumeric modifier rules,
+/// `escape`, and the reserved union are the scene's deterministic
+/// errors — the binding spells, the root judges.
+fn normalize_shortcut(spelling: &str) -> String {
+    assert!(!spelling.is_empty(), "kaya: shortcut spelling is empty");
+    assert!(
+        !spelling.chars().any(|c| c.is_whitespace()),
+        "kaya: shortcut {spelling:?} contains whitespace"
+    );
+    let lower = spelling.to_ascii_lowercase();
+    let parts: Vec<&str> = lower.split('+').collect();
+    assert!(
+        parts.iter().all(|p| !p.is_empty()),
+        "kaya: shortcut {spelling:?} has an empty token"
+    );
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let key = key[0];
+    let (mut primary, mut shift, mut alt) = (false, false, false);
+    for m in mods {
+        let slot = match *m {
+            "primary" => &mut primary,
+            "shift" => &mut shift,
+            "alt" => &mut alt,
+            "ctrl" | "control" | "cmd" | "command" | "option" | "opt" | "meta" | "super"
+            | "win" => panic!(
+                "kaya: shortcut {spelling:?}: {m:?} is a platform alias — spell the \
+                 platform-decided modifier \"primary\" (cmd on Apple hosts, ctrl elsewhere)"
+            ),
+            other => panic!(
+                "kaya: shortcut {spelling:?} has an unknown modifier {other:?} \
+                 (the portable modifiers are primary, shift, alt)"
+            ),
+        };
+        assert!(!*slot, "kaya: shortcut {spelling:?} repeats modifier {m:?}");
+        *slot = true;
+    }
+    assert!(
+        !matches!(key, "primary" | "shift" | "alt"),
+        "kaya: shortcut {spelling:?} has no key (modifiers only)"
+    );
+    let mut canonical = String::new();
+    if primary {
+        canonical.push_str("primary+");
+    }
+    if shift {
+        canonical.push_str("shift+");
+    }
+    if alt {
+        canonical.push_str("alt+");
+    }
+    canonical.push_str(key);
+    canonical
+}
+
+/// One of the TWO addressable sources a menu property binds to: a
+/// constant or a signal — the [`TplSource`] shape minus the element
+/// arm, because menu items are not collection elements. The missing
+/// `Field` conversion IS the rule, at compile time:
+///
+/// ```compile_fail
+/// fn zone_rule(title: kaya::Field<<String as kaya::KayaField>::Kind>) {
+///     let _: kaya::MenuSource<_> = title.into(); // no element sources on menu props
+/// }
+/// ```
+///
+/// Everywhere a label (or other bindable prop) appears in the menu
+/// chains, both spellings work: `m.item("Save")` and
+/// `m.item(title_signal)`.
+pub struct MenuSource<K> {
+    inner: MenuSourceInner,
+    _kind: PhantomData<K>,
+}
+
+enum MenuSourceInner {
+    Const(Value),
+    Signal(SignalId),
+}
+
+impl From<&str> for MenuSource<StrKind> {
+    fn from(s: &str) -> Self {
+        MenuSource {
+            inner: MenuSourceInner::Const(Value::Str(s.to_owned())),
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl From<bool> for MenuSource<BoolKind> {
+    fn from(b: bool) -> Self {
+        MenuSource {
+            inner: MenuSourceInner::Const(Value::Bool(b)),
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl From<f64> for MenuSource<F64Kind> {
+    fn from(x: f64) -> Self {
+        MenuSource {
+            inner: MenuSourceInner::Const(Value::F64(x)),
+            _kind: PhantomData,
+        }
+    }
+}
+
+/// A radio group's `value` is a 0-based option index; the integer
+/// spelling (`.value(1)`) is the natural one.
+impl From<usize> for MenuSource<F64Kind> {
+    fn from(n: usize) -> Self {
+        MenuSource {
+            inner: MenuSourceInner::Const(Value::F64(n as f64)),
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<K> From<SignalId> for MenuSource<K> {
+    fn from(s: SignalId) -> Self {
+        MenuSource {
+            inner: MenuSourceInner::Signal(s),
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<K> MenuSource<K> {
+    fn apply(self, tx: &mut Tx<'_>, item: MenuItemId, prop: MenuProp) {
+        let value = match self.inner {
+            MenuSourceInner::Const(v) => PropValue::Const(v),
+            MenuSourceInner::Signal(s) => PropValue::Signal(s),
+        };
+        tx.ops.push(TxOp::SetMenuProp { item, prop, value });
+    }
+}
+
+mod menu_sealed {
+    pub trait Sealed {}
+}
+
+/// The anchor a catalog under construction belongs to — a zero-sized
+/// marker threaded through [`MenuItems`] so the type system can carry
+/// the one anchor-dependent rule (shortcuts) where the anchor is known
+/// at build time. Sealed: the three anchors below are the vocabulary.
+pub trait MenuAnchor: menu_sealed::Sealed {}
+
+/// The anchors where a shortcut may be spelled: a shortcut needs a
+/// window catalog as its native dispatch home, so [`ContextAnchor`]
+/// deliberately lacks this — a shortcut on a context item is a COMPILE
+/// error where the anchor is known:
+///
+/// ```compile_fail
+/// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
+///     m.item("Rename").shortcut("primary+r"); // no catalog home on a context anchor
+/// }
+/// ```
+///
+/// [`AnyAnchor`] (reopened chains) keeps the method and defers the same
+/// judgment to the root, which knows the retained item's real anchor.
+pub trait ShortcutHome: MenuAnchor {}
+
+/// The window catalog (the bar): a shortcut home.
+pub struct BarAnchor;
+/// A widget/node context menu: no shortcuts, held by the type.
+pub struct ContextAnchor;
+/// A reopened chain over a retained item ([`Tx::menu`]): the anchor is
+/// known to the root, not the type — shortcut stays spellable and the
+/// root judges.
+pub struct AnyAnchor;
+
+impl menu_sealed::Sealed for BarAnchor {}
+impl MenuAnchor for BarAnchor {}
+impl ShortcutHome for BarAnchor {}
+impl menu_sealed::Sealed for ContextAnchor {}
+impl MenuAnchor for ContextAnchor {}
+impl menu_sealed::Sealed for AnyAnchor {}
+impl MenuAnchor for AnyAnchor {}
+impl ShortcutHome for AnyAnchor {}
+
+/// Where a builder seats the items it creates: under a grouping parent,
+/// attached to a live widget's context anchor, or collected free for a
+/// later template-node attach.
+enum ItemSlot {
+    Parent(MenuItemId),
+    Widget(WidgetId),
+    Free,
+}
+
+/// The menu-children builder: the body-closure proxy every grouping
+/// slot hands out ([`WindowRef::menu`], [`Tx::context_menu`],
+/// [`Tx::context_catalog`], nested [`MenuItems::menu`],
+/// [`MenuItemRef::append`]). Its creators are the closed child grammar
+/// for a `menu`/anchor slot — `item` (action), `toggle`, `menu`,
+/// `radio_group`, `separator`; a radio option is NOT in this
+/// vocabulary, so a loose option is a compile error:
+///
+/// ```compile_fail
+/// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::BarAnchor>) {
+///     m.option("Loose"); // options exist only inside a radio_group body
+/// }
+/// ```
+///
+/// Every creator emits the item, its label, and its seating record
+/// eagerly, then returns the kind's chain proxy for the remaining
+/// props. Labels take constant text or a Str signal ([`MenuSource`]).
+pub struct MenuItems<'t, 'b, A: MenuAnchor> {
+    tx: &'t mut Tx<'b>,
+    slot: ItemSlot,
+    roots: Vec<MenuItemId>,
+    _anchor: PhantomData<A>,
+}
+
+impl<'t, 'b, A: MenuAnchor> MenuItems<'t, 'b, A> {
+    fn create(&mut self, kind: MenuItemKind, label: Option<MenuSource<StrKind>>) -> MenuItemId {
+        let item = self.tx.menu_item(kind);
+        if let Some(label) = label {
+            label.apply(self.tx, item, MenuProp::Label);
+        }
+        match self.slot {
+            ItemSlot::Parent(parent) => {
+                self.tx.ops.push(TxOp::MenuItemAppend { parent, child: item })
+            }
+            ItemSlot::Widget(widget) => {
+                self.tx.ops.push(TxOp::ContextAttach { widget, item })
+            }
+            ItemSlot::Free => self.roots.push(item),
+        }
+        item
+    }
+
+    /// An action — a leaf command firing exactly one `menu_activated`
+    /// occurrence (click OR shortcut: one occurrence, one dispatch
+    /// path). End with `.id()` and bind [`Messages::on_menu_item`] to
+    /// the handle.
+    pub fn item(&mut self, label: impl Into<MenuSource<StrKind>>) -> ActionRef<'_, 'b, A> {
+        let item = self.create(MenuItemKind::Action, Some(label.into()));
+        ActionRef {
+            tx: &mut *self.tx,
+            item,
+            _anchor: PhantomData,
+        }
+    }
+
+    /// A toggle — a stateful leaf reusing the Checkbox contract: user
+    /// flips emit `menu_toggled`; programmatic `checked` writes are
+    /// quiet. Bind [`Messages::on_menu_toggle`] to the handle.
+    pub fn toggle(&mut self, label: impl Into<MenuSource<StrKind>>) -> ToggleRef<'_, 'b> {
+        let item = self.create(MenuItemKind::Toggle, Some(label.into()));
+        ToggleRef {
+            tx: &mut *self.tx,
+            item,
+        }
+    }
+
+    /// A nested menu — grouping, never navigation. One nested grouping
+    /// level is the cap (root-checked): bar > menu > menu > leaf is the
+    /// deepest legal bar shape.
+    pub fn menu<R>(
+        &mut self,
+        label: impl Into<MenuSource<StrKind>>,
+        body: impl FnOnce(&mut MenuItems<'_, 'b, A>) -> R,
+    ) -> MenuRef<'_, 'b, R> {
+        let item = self.create(MenuItemKind::Menu, Some(label.into()));
+        let out = {
+            let mut children = MenuItems {
+                tx: &mut *self.tx,
+                slot: ItemSlot::Parent(item),
+                roots: Vec::new(),
+                _anchor: PhantomData,
+            };
+            body(&mut children)
+        };
+        MenuRef {
+            out,
+            item,
+            tx: &mut *self.tx,
+        }
+    }
+
+    /// A nested radio group — the Choice contract inline, with the
+    /// platform's checkmark idiom. The body declares only options;
+    /// chain [`RadioGroupRef::value`] after it. Bind
+    /// [`Messages::on_menu_select`] to the group handle.
+    pub fn radio_group<R>(
+        &mut self,
+        label: impl Into<MenuSource<StrKind>>,
+        body: impl FnOnce(&mut RadioOptions<'_, 'b>) -> R,
+    ) -> RadioGroupRef<'_, 'b, R> {
+        let item = self.create(MenuItemKind::RadioGroup, Some(label.into()));
+        let out = {
+            let mut options = RadioOptions {
+                tx: &mut *self.tx,
+                group: item,
+            };
+            body(&mut options)
+        };
+        RadioGroupRef {
+            out,
+            item,
+            tx: &mut *self.tx,
+        }
+    }
+
+    /// Native grouping chrome: no label, no props, no handle.
+    pub fn separator(&mut self) {
+        let _ = self.create(MenuItemKind::Separator, None);
+    }
+}
+
+/// The radio-group-children builder: a `radio_group` accepts ONLY
+/// `radio_option` children, so this proxy has exactly one creator — any
+/// other item kind inside a radio group is a compile error:
+///
+/// ```compile_fail
+/// fn zone_rule(o: &mut kaya::RadioOptions<'_, '_>) {
+///     o.item("Save"); // a radio group admits only options
+/// }
+/// ```
+pub struct RadioOptions<'t, 'b> {
+    tx: &'t mut Tx<'b>,
+    group: MenuItemId,
+}
+
+impl<'t, 'b> RadioOptions<'t, 'b> {
+    /// One labeled option, appended in declaration order — the order
+    /// IS the index vocabulary the group's `value` selects over.
+    pub fn option(&mut self, label: impl Into<MenuSource<StrKind>>) -> OptionRef<'_, 'b> {
+        let item = self.tx.menu_item(MenuItemKind::RadioOption);
+        label.into().apply(self.tx, item, MenuProp::Label);
+        self.tx.ops.push(TxOp::MenuItemAppend {
+            parent: self.group,
+            child: item,
+        });
+        OptionRef {
+            tx: &mut *self.tx,
+            item,
+        }
+    }
+}
+
+/// A just-built action's chain: `enabled`/`icon`/`primary`, plus
+/// `shortcut` where the anchor is a catalog home ([`ShortcutHome`]).
+/// `primary` and `shortcut` are const-only by signature — no signal
+/// spelling exists. Ends with [`ActionRef::id`].
+#[must_use = "end the chain with .id() — handlers bind to the item handle"]
+pub struct ActionRef<'t, 'b, A: MenuAnchor> {
+    tx: &'t mut Tx<'b>,
+    item: MenuItemId,
+    _anchor: PhantomData<A>,
+}
+
+impl<A: MenuAnchor> ActionRef<'_, '_, A> {
+    /// Whether the item is enabled (default true): a constant or a
+    /// bound Bool signal. Enablement writes never emit anything.
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// An optional icon (the blob channel): used by phone promotion,
+    /// ignored where native menu dress has no icons. Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// The phone-bar promotion hint (default false): promoted actions
+    /// become real top-bar actions in catalog preorder, the rest stay
+    /// in overflow. INERT on desktops — not a toolbar grammar.
+    /// Const-only.
+    pub fn primary(self, on: bool) -> Self {
+        self.tx.set_menu_prop(self.item, MenuProp::Primary, on);
+        self
+    }
+
+    /// End the chain: the durable handle, releasing the transaction
+    /// borrow.
+    pub fn id(self) -> MenuItemId {
+        self.item
+    }
+}
+
+impl<A: ShortcutHome> ActionRef<'_, '_, A> {
+    /// The action's shortcut. Any ASCII case and modifier order is
+    /// accepted and canonicalized here (the binding's ONE parser);
+    /// policy — the key floor, shift rules, `escape`, the reserved
+    /// union, duplicates within the window catalog — is judged at the
+    /// root. The shortcut is another affordance of the same item: it
+    /// fires the SAME `menu_activated` occurrence as a click.
+    /// Const-only, window-anchored actions only.
+    pub fn shortcut(self, spelling: &str) -> Self {
+        let canonical = normalize_shortcut(spelling);
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Shortcut, canonical);
+        self
+    }
+}
+
+/// A just-built toggle's chain: `enabled`, `checked`, `icon`. Ends with
+/// [`ToggleRef::id`].
+#[must_use = "end the chain with .id() — handlers bind to the item handle"]
+pub struct ToggleRef<'t, 'b> {
+    tx: &'t mut Tx<'b>,
+    item: MenuItemId,
+}
+
+impl ToggleRef<'_, '_> {
+    /// Whether the item is enabled (default true): constant or bound.
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// The toggle's state — the Checkbox contract: a constant or a
+    /// signal bound both ways. User flips emit `menu_toggled`;
+    /// programmatic writes through the signal are quiet.
+    pub fn checked(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Checked);
+        self
+    }
+
+    /// An optional icon (the blob channel). Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// End the chain: the durable handle.
+    pub fn id(self) -> MenuItemId {
+        self.item
+    }
+}
+
+/// A just-built radio option's chain: `enabled`, `icon`. Options carry
+/// no state of their own — selection lives on the group (`value`).
+pub struct OptionRef<'t, 'b> {
+    tx: &'t mut Tx<'b>,
+    item: MenuItemId,
+}
+
+impl OptionRef<'_, '_> {
+    /// Whether the option is enabled (default true): constant or bound.
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// An optional icon (the blob channel). Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// End the chain: the durable handle.
+    pub fn id(self) -> MenuItemId {
+        self.item
+    }
+}
+
+/// A just-built menu grouping node's chain (bar-level or nested):
+/// `enabled`, `icon`, and the body's result riding along as `out` — the
+/// [`Widget`] shape. End with [`MenuRef::id`] or
+/// [`MenuRef::into_parts`].
+#[must_use = "end the chain with .id()/.into_parts() — the handle reopens the menu later"]
+pub struct MenuRef<'t, 'b, R = ()> {
+    /// The children body's own result, threaded out unchanged.
+    pub out: R,
+    item: MenuItemId,
+    tx: &'t mut Tx<'b>,
+}
+
+impl<R> MenuRef<'_, '_, R> {
+    /// Whether the whole grouping node is enabled (default true):
+    /// constant or bound. Disabling a menu disables its subtree on
+    /// every platform (the inherited-disabled contract).
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// An optional icon (the blob channel). Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// End the chain: the durable handle — what [`Tx::menu`] reopens.
+    pub fn id(self) -> MenuItemId {
+        self.item
+    }
+
+    /// End the chain keeping the body's result too.
+    pub fn into_parts(self) -> (MenuItemId, R) {
+        (self.item, self.out)
+    }
+}
+
+/// A just-built radio group's chain: `value` (chain it AFTER the body
+/// so the index has options to address), `enabled`, `icon`, and the
+/// body's result as `out`.
+#[must_use = "end the chain with .id()/.into_parts() — on_menu_select binds to the group handle"]
+pub struct RadioGroupRef<'t, 'b, R = ()> {
+    /// The options body's own result, threaded out unchanged.
+    pub out: R,
+    item: MenuItemId,
+    tx: &'t mut Tx<'b>,
+}
+
+impl<R> RadioGroupRef<'_, '_, R> {
+    /// The selected option index (0-based, in option declaration
+    /// order) — the Choice contract: a constant or a signal bound both
+    /// ways. User picks emit `menu_value_changed`; programmatic writes
+    /// are quiet.
+    pub fn value(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Value);
+        self
+    }
+
+    /// Whether the group is enabled (default true): constant or bound.
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// An optional icon (the blob channel). Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// End the chain: the durable handle [`Messages::on_menu_select`]
+    /// binds to.
+    pub fn id(self) -> MenuItemId {
+        self.item
+    }
+
+    /// End the chain keeping the body's result too.
+    pub fn into_parts(self) -> (MenuItemId, R) {
+        (self.item, self.out)
+    }
+}
+
+/// The reopening chain for a RETAINED item ([`Tx::menu`]): every
+/// mutable prop, each judged by the root against the item's kind and
+/// anchor (the dynamic tier — [`Tx::set_menu_prop`] is the floor it
+/// rides), plus [`MenuItemRef::append`]/[`MenuItemRef::options`] for
+/// the append-at-any-time discipline on grouping nodes.
+pub struct MenuItemRef<'t, 'b> {
+    tx: &'t mut Tx<'b>,
+    item: MenuItemId,
+}
+
+impl<'t, 'b> MenuItemRef<'t, 'b> {
+    /// Rename the item: constant text or a bound Str signal. Label
+    /// writes never emit anything.
+    pub fn label(self, src: impl Into<MenuSource<StrKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Label);
+        self
+    }
+
+    /// Whether the item is enabled: constant or bound.
+    pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
+        self
+    }
+
+    /// A toggle's state (toggle items only — root-checked). The
+    /// programmatic write is configuration: QUIET, no `menu_toggled`
+    /// echo (the echo doctrine).
+    pub fn checked(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Checked);
+        self
+    }
+
+    /// A radio group's selected option index (radio groups only —
+    /// root-checked). QUIET, like `checked`.
+    pub fn value(self, src: impl Into<MenuSource<F64Kind>>) -> Self {
+        src.into().apply(&mut *self.tx, self.item, MenuProp::Value);
+        self
+    }
+
+    /// The item's icon (the blob channel). Const-only.
+    pub fn icon(self, bytes: &[u8]) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// The phone-bar promotion hint (actions only — root-checked).
+    /// Flipping it recomputes the promoted set deterministically.
+    pub fn primary(self, on: bool) -> Self {
+        self.tx.set_menu_prop(self.item, MenuProp::Primary, on);
+        self
+    }
+
+    /// The action's shortcut (window-anchored actions only — the root
+    /// knows the retained item's anchor and judges). Normalized here,
+    /// like [`ActionRef::shortcut`]; a re-set replaces the item's
+    /// previous spelling.
+    pub fn shortcut(self, spelling: &str) -> Self {
+        let canonical = normalize_shortcut(spelling);
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Shortcut, canonical);
+        self
+    }
+
+    /// Reopen a retained `menu` grouping node and append more children
+    /// — the terminal of the chain, returning the body's result:
+    /// `let publish = tx.menu(file).label("Document")
+    ///      .append(|m| m.item("Publish").primary(true).id());`
+    /// The root re-validates each appended subtree in the retained
+    /// item's real anchor context (depth, shortcuts, duplicates).
+    pub fn append<R>(self, body: impl FnOnce(&mut MenuItems<'_, 'b, AnyAnchor>) -> R) -> R {
+        let mut children = MenuItems {
+            tx: self.tx,
+            slot: ItemSlot::Parent(self.item),
+            roots: Vec::new(),
+            _anchor: PhantomData,
+        };
+        body(&mut children)
+    }
+
+    /// Reopen a retained `radio_group` and append more options — the
+    /// option-flavored terminal.
+    pub fn options<R>(self, body: impl FnOnce(&mut RadioOptions<'_, 'b>) -> R) -> R {
+        let mut options = RadioOptions {
+            tx: self.tx,
+            group: self.item,
+        };
+        body(&mut options)
+    }
+}
+
+/// A context catalog built free of any anchor ([`Tx::context_catalog`])
+/// for a template node: the body's result rides as `out`, and the
+/// catalog moves INTO [`Tpl::context_menu`] — an item takes exactly one
+/// anchor, so attaching the same catalog twice is a compile error:
+///
+/// ```compile_fail
+/// fn zone_rule(
+///     t: &mut kaya::Tpl<'_, '_>,
+///     a: kaya::TemplateNodeId,
+///     b: kaya::TemplateNodeId,
+///     catalog: kaya::ContextCatalog<()>,
+/// ) {
+///     t.context_menu(a, catalog);
+///     t.context_menu(b, catalog); // moved: one catalog, one anchor
+/// }
+/// ```
+#[must_use = "a context catalog attaches nowhere until Tpl::context_menu"]
+pub struct ContextCatalog<R = ()> {
+    /// The builder body's own result, threaded out unchanged.
+    pub out: R,
+    roots: Vec<MenuItemId>,
 }
 
 pub struct Tpl<'a, 'b> {
@@ -2405,6 +3410,30 @@ impl Tpl<'_, '_> {
             });
         }
         (id, out)
+    }
+
+    /// Attach a live-built context catalog to a template node — the
+    /// Tpl-zone anchor. Zone rules: menu items are LIVE and shared
+    /// across stamped copies (v1 does not stamp items), so the catalog
+    /// is built BEFORE the template with [`Tx::context_catalog`] and
+    /// only the attachment is declared here; the node must belong to
+    /// this template case (root-checked). Every stamped copy shows the
+    /// same catalog, and an activation carries the copy's key path —
+    /// the `on_click_node` encoding, received by the `_node` handler
+    /// flavors ([`Messages::on_menu_item_node`] and siblings): the keys
+    /// ARE the noun. The catalog moves in (one catalog, one anchor) and
+    /// its body result comes back out.
+    pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
+        let ContextCatalog { out, roots } = catalog;
+        for item in roots {
+            self.tx.ops.push(TxOp::ContextAttachNode { node, item });
+        }
+        out
+    }
+
+    /// The floor: attach one context-catalog root to a template node.
+    pub fn context_attach(&mut self, node: TemplateNodeId, item: MenuItemId) {
+        self.tx.ops.push(TxOp::ContextAttachNode { node, item });
     }
 }
 
@@ -2740,7 +3769,13 @@ mod tests {
                     | Occurrence::BackRequested { .. }
                     | Occurrence::SectionSelected { .. }
                     | Occurrence::ValueChanged { .. }
-                    | Occurrence::InstanceValueChanged { .. } => {}
+                    | Occurrence::InstanceValueChanged { .. }
+                    | Occurrence::MenuActivated { .. }
+                    | Occurrence::InstanceMenuActivated { .. }
+                    | Occurrence::MenuToggled { .. }
+                    | Occurrence::InstanceMenuToggled { .. }
+                    | Occurrence::MenuValueChanged { .. }
+                    | Occurrence::InstanceMenuValueChanged { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }
@@ -2821,5 +3856,431 @@ mod tests {
         let mut tx = ctx.begin();
         let c = tx.collection::<String>();
         let _ = tx.for_each(&c.at("g1"), |_| ());
+    }
+
+    // --- Menus ----------------------------------------------------------
+
+    /// The bar chain's emission shape, record by record: create, label,
+    /// bar-append (the anchor), then each child's create + label +
+    /// append + chained props — and the chain's shortcut goes out
+    /// CANONICALIZED (case and modifier order), the binding's one
+    /// parser at work.
+    #[test]
+    fn menu_chains_emit_the_wire_shapes() {
+        use crate::protocol::{DEFAULT_WINDOW, MenuItemKind, MenuProp, PropValue, TxOp};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let can_save = tx.signal(false);
+        let start = tx.ops.len();
+        let (file, save) = tx
+            .window(DEFAULT_WINDOW)
+            .menu("File", |m| {
+                m.item("Save").shortcut("Shift+PRIMARY+s").enabled(can_save).id()
+            })
+            .into_parts();
+
+        let ops = &tx.ops[start..];
+        assert_eq!(ops.len(), 8, "got {ops:?}");
+        assert!(matches!(ops[0],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::Menu } if item == file));
+        assert!(matches!(&ops[1],
+            TxOp::SetMenuProp { item, prop: MenuProp::Label, value: PropValue::Const(Value::Str(s)) }
+                if *item == file && s == "File"));
+        assert!(matches!(ops[2],
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item } if item == file));
+        assert!(matches!(ops[3],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::Action } if item == save));
+        assert!(matches!(&ops[4],
+            TxOp::SetMenuProp { item, prop: MenuProp::Label, value: PropValue::Const(Value::Str(s)) }
+                if *item == save && s == "Save"));
+        assert!(matches!(ops[5],
+            TxOp::MenuItemAppend { parent, child } if parent == file && child == save));
+        assert!(matches!(&ops[6],
+            TxOp::SetMenuProp { item, prop: MenuProp::Shortcut, value: PropValue::Const(Value::Str(s)) }
+                if *item == save && s == "primary+shift+s"));
+        assert!(matches!(&ops[7],
+            TxOp::SetMenuProp { item, prop: MenuProp::Enabled, value: PropValue::Signal(sig) }
+                if *item == save && *sig == can_save));
+    }
+
+    /// The two stateful contracts: a toggle's `checked` binds a signal
+    /// (the Checkbox contract), and a radio group emits its options in
+    /// declaration order with `value` chained AFTER the body — a const
+    /// integral index.
+    #[test]
+    fn toggle_and_radio_group_chains_emit_their_contracts() {
+        use crate::protocol::{DEFAULT_WINDOW, MenuItemKind, MenuProp, PropValue, TxOp};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let details_on = tx.signal(false);
+        let start = tx.ops.len();
+        let details = tx
+            .window(DEFAULT_WINDOW)
+            .menu("View", |m| m.toggle("Details").checked(details_on).id())
+            .out;
+        let ops = &tx.ops[start..];
+        assert_eq!(ops.len(), 7, "got {ops:?}");
+        assert!(matches!(ops[3],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::Toggle } if item == details));
+        assert!(matches!(&ops[6],
+            TxOp::SetMenuProp { item, prop: MenuProp::Checked, value: PropValue::Signal(sig) }
+                if *item == details && *sig == details_on));
+
+        let start = tx.ops.len();
+        let sort = tx
+            .window(DEFAULT_WINDOW)
+            .radio_group("Sort", |o| {
+                o.option("Name");
+                o.option("Date");
+            })
+            .value(1)
+            .id();
+        let ops = &tx.ops[start..];
+        assert_eq!(ops.len(), 10, "got {ops:?}");
+        assert!(matches!(ops[0],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::RadioGroup } if item == sort));
+        assert!(matches!(ops[2],
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item } if item == sort));
+        assert!(matches!(ops[3], TxOp::MenuItemCreate { kind: MenuItemKind::RadioOption, .. }));
+        assert!(matches!(ops[5],
+            TxOp::MenuItemAppend { parent, .. } if parent == sort));
+        assert!(matches!(ops[6], TxOp::MenuItemCreate { kind: MenuItemKind::RadioOption, .. }));
+        assert!(matches!(&ops[9],
+            TxOp::SetMenuProp { item, prop: MenuProp::Value, value: PropValue::Const(Value::F64(x)) }
+                if *item == sort && *x == 1.0));
+    }
+
+    /// A live-widget context menu: each body root is created and
+    /// attached eagerly (the anchor decides the spelling, never the
+    /// kinds), and a separator carries no label record.
+    #[test]
+    fn context_menu_attaches_roots_to_a_live_widget() {
+        use crate::protocol::{MenuItemKind, TxOp};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let status = tx.signal("ready");
+        let target = tx.label(status).id();
+        let start = tx.ops.len();
+        let rename = tx.context_menu(target, |m| {
+            let rename = m.item("Rename").id();
+            m.separator();
+            rename
+        });
+        let ops = &tx.ops[start..];
+        assert_eq!(ops.len(), 5, "got {ops:?}");
+        assert!(matches!(ops[0],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::Action } if item == rename));
+        assert!(matches!(ops[2],
+            TxOp::ContextAttach { widget, item } if widget == target && item == rename));
+        assert!(matches!(ops[3], TxOp::MenuItemCreate { kind: MenuItemKind::Separator, .. }));
+        assert!(matches!(ops[4],
+            TxOp::ContextAttach { widget, .. } if widget == target));
+    }
+
+    /// The Tpl-zone split the protocol forces: the catalog's items are
+    /// LIVE — created before the template opens — and only the
+    /// attachment record sits between CreateFor and TemplateEnd.
+    #[test]
+    fn node_context_catalogs_build_live_and_attach_in_template() {
+        use crate::protocol::TxOp;
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let catalog = tx.context_catalog(|m| m.item("Remove").id());
+        let remove = catalog.out;
+        let groups = tx.collection::<String>();
+        let (_list, returned) = tx.for_each(&groups, |t| {
+            let name = t.label("g");
+            t.context_menu(name, catalog)
+        });
+        assert_eq!(returned, remove, "the catalog's out threads back through the attach");
+
+        let at = |pred: &dyn Fn(&TxOp) -> bool| tx.ops.iter().position(|op| pred(op)).unwrap();
+        let create_at = at(&|op| matches!(op, TxOp::MenuItemCreate { .. }));
+        let for_at = at(&|op| matches!(op, TxOp::CreateFor { .. }));
+        let attach_at =
+            at(&|op| matches!(op, TxOp::ContextAttachNode { item, .. } if *item == remove));
+        let end_at = at(&|op| matches!(op, TxOp::TemplateEnd));
+        assert!(
+            create_at < for_at && for_at < attach_at && attach_at < end_at,
+            "items live, attach templated: {create_at} < {for_at} < {attach_at} < {end_at}"
+        );
+    }
+
+    /// The append-at-any-time reopening chain: rename the retained
+    /// grouping item, append a child with its own chained props, and
+    /// mutate a sibling's prop — each one record, in call order.
+    #[test]
+    fn reopening_retained_items_chains_props_and_appends() {
+        use crate::protocol::{DEFAULT_WINDOW, MenuItemKind, MenuProp, PropValue, TxOp};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let (file, save) = tx
+            .window(DEFAULT_WINDOW)
+            .menu("File", |m| m.item("Save").id())
+            .into_parts();
+        let start = tx.ops.len();
+        let publish = tx
+            .menu(file)
+            .label("Document")
+            .append(|m| m.item("Publish").primary(true).id());
+        tx.menu(save).primary(false);
+
+        let ops = &tx.ops[start..];
+        assert_eq!(ops.len(), 6, "got {ops:?}");
+        assert!(matches!(&ops[0],
+            TxOp::SetMenuProp { item, prop: MenuProp::Label, value: PropValue::Const(Value::Str(s)) }
+                if *item == file && s == "Document"));
+        assert!(matches!(ops[1],
+            TxOp::MenuItemCreate { item, kind: MenuItemKind::Action } if item == publish));
+        assert!(matches!(ops[3],
+            TxOp::MenuItemAppend { parent, child } if parent == file && child == publish));
+        assert!(matches!(&ops[4],
+            TxOp::SetMenuProp { item, prop: MenuProp::Primary, value: PropValue::Const(Value::Bool(true)) }
+                if *item == publish));
+        assert!(matches!(&ops[5],
+            TxOp::SetMenuProp { item, prop: MenuProp::Primary, value: PropValue::Const(Value::Bool(false)) }
+                if *item == save));
+    }
+
+    /// The whole sugar surface against the real root: the scene accepts
+    /// the canonical catalog, a stamp attaches the shared node catalog
+    /// carrying the copy's key path (the noun), and a later transaction
+    /// reopens the catalog live.
+    #[test]
+    fn menu_construction_round_trips_the_root() {
+        use crate::protocol::{ApplyOp, DEFAULT_WINDOW};
+
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let mut tx = ctx.begin();
+        let can_save = tx.signal(false);
+        let details_on = tx.signal(false);
+        let status = tx.signal("ready");
+        let groups = tx.collection::<String>();
+        let (root, (target, remove)) = tx
+            .column(|tx| {
+                let target = tx.label(status).id();
+                let catalog = tx.context_catalog(|m| m.item("Remove").id());
+                let remove = catalog.out;
+                let _ = tx.for_each(&groups, |t| {
+                    let name = t.label("g");
+                    t.context_menu(name, catalog);
+                });
+                (target, remove)
+            })
+            .into_parts();
+        tx.mount(root);
+        let (file, save) = tx
+            .window(DEFAULT_WINDOW)
+            .menu("File", |m| {
+                m.item("Save").shortcut("Primary+S").enabled(can_save).id()
+            })
+            .into_parts();
+        let _details = tx
+            .window(DEFAULT_WINDOW)
+            .menu("View", |m| m.toggle("Details").checked(details_on).id())
+            .out;
+        let _sort = tx
+            .window(DEFAULT_WINDOW)
+            .radio_group("Sort", |o| {
+                o.option("Name");
+                o.option("Date");
+            })
+            .value(0)
+            .id();
+        let _rename = tx.context_menu(target, |m| m.item("Rename").id());
+        tx.commit();
+
+        let mut scene = Scene::new();
+        let applied = scene.apply(tx_rx.recv().unwrap());
+        assert_eq!(
+            applied
+                .iter()
+                .filter(|op| matches!(op, ApplyOp::MenubarAppend { .. }))
+                .count(),
+            3
+        );
+        assert_eq!(
+            applied
+                .iter()
+                .filter(|op| matches!(op, ApplyOp::ContextAttach { .. }))
+                .count(),
+            1
+        );
+
+        // Stamping an entry attaches the SHARED catalog to the copy,
+        // carrying the copy's key path.
+        let mut tx = ctx.begin();
+        tx.insert(&groups, "g2", "Home");
+        tx.commit();
+        let applied = scene.apply(tx_rx.recv().unwrap());
+        let (item, path) = applied
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::ContextAttachNode { item, path, .. } => Some((*item, path.clone())),
+                _ => None,
+            })
+            .expect("the stamp attached the shared catalog");
+        assert_eq!(item, remove);
+        assert_eq!(path, vec![Value::from("g2")]);
+
+        // Reopen live: rename File, append Publish, add a fourth
+        // top-level menu, demote Save — the root re-validates each
+        // against the retained anchors.
+        let mut tx = ctx.begin();
+        let publish = tx
+            .menu(file)
+            .label("Document")
+            .append(|m| m.item("Publish").primary(true).id());
+        let _tools = tx
+            .window(DEFAULT_WINDOW)
+            .menu("Tools", |m| m.item("Inspect").id())
+            .id();
+        tx.menu(save).primary(false);
+        tx.commit();
+        let applied = scene.apply(tx_rx.recv().unwrap());
+        assert!(applied.iter().any(
+            |op| matches!(op, ApplyOp::MenuItemAppend { child, .. } if *child == publish)
+        ));
+        assert_eq!(
+            applied
+                .iter()
+                .filter(|op| matches!(op, ApplyOp::MenubarAppend { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// The Msg tier over menus: one table keyed by item id, all three
+    /// contracts, and the node flavors carrying the copy's key path.
+    /// Unmapped items fold into nothing.
+    #[test]
+    fn menu_messages_map_the_three_contracts_and_node_flavors() {
+        use super::Messages;
+        use crate::protocol::{MenuItemId, Occurrence, Path};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _keep) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx);
+
+        let save = MenuItemId(1);
+        let details = MenuItemId(2);
+        let sort = MenuItemId(3);
+        let remove = MenuItemId(4);
+        let unmapped = MenuItemId(9);
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum Msg {
+            Save,
+            Details(bool),
+            Sorted(usize),
+            Removed(Path),
+        }
+        let msgs = Messages::new();
+        msgs.on_menu_item(save, Msg::Save);
+        msgs.on_menu_toggle(details, Msg::Details);
+        msgs.on_menu_select(sort, Msg::Sorted);
+        msgs.on_menu_item_node(remove, Msg::Removed);
+
+        let keys: Path = vec![Value::from("g2"), Value::from("a")];
+        occ_tx.send(Occurrence::MenuActivated { item: unmapped }).unwrap();
+        occ_tx.send(Occurrence::MenuActivated { item: save }).unwrap();
+        occ_tx
+            .send(Occurrence::MenuToggled { item: details, checked: true })
+            .unwrap();
+        occ_tx
+            .send(Occurrence::MenuValueChanged { group: sort, index: 1.0 })
+            .unwrap();
+        occ_tx
+            .send(Occurrence::InstanceMenuActivated { item: remove, path: keys.clone() })
+            .unwrap();
+        occ_tx.send(Occurrence::Shutdown).unwrap();
+
+        assert_eq!(msgs.next(&ctx), Some(Msg::Save));
+        assert_eq!(msgs.next(&ctx), Some(Msg::Details(true)));
+        assert_eq!(msgs.next(&ctx), Some(Msg::Sorted(1)));
+        assert_eq!(msgs.next(&ctx), Some(Msg::Removed(keys)));
+        assert_eq!(msgs.next(&ctx), None);
+    }
+
+    /// The binding's one shortcut parser: ASCII case variants and any
+    /// modifier order canonicalize to lowercase primary, shift, alt,
+    /// key. Policy (key floor, shift rules, escape, the reserved
+    /// union) is the root's — not re-judged here.
+    #[test]
+    fn shortcut_spellings_canonicalize() {
+        for (raw, canonical) in [
+            ("primary+s", "primary+s"),
+            ("PRIMARY+S", "primary+s"),
+            ("Shift+Primary+s", "primary+shift+s"),
+            ("alt+SHIFT+primary+F5", "primary+shift+alt+f5"),
+            ("Alt+Enter", "alt+enter"),
+            ("delete", "delete"),
+        ] {
+            assert_eq!(super::normalize_shortcut(raw), canonical, "spelling {raw:?}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "contains whitespace")]
+    fn shortcut_whitespace_is_rejected() {
+        super::normalize_shortcut("primary + s");
+    }
+
+    #[test]
+    #[should_panic(expected = "platform alias")]
+    fn shortcut_aliases_are_rejected() {
+        super::normalize_shortcut("Ctrl+S");
+    }
+
+    #[test]
+    #[should_panic(expected = "repeats modifier")]
+    fn shortcut_repeated_modifiers_are_rejected() {
+        super::normalize_shortcut("primary+primary+s");
+    }
+
+    #[test]
+    #[should_panic(expected = "has no key")]
+    fn shortcut_without_a_key_is_rejected() {
+        super::normalize_shortcut("primary+shift");
+    }
+
+    #[test]
+    #[should_panic(expected = "empty token")]
+    fn shortcut_with_an_empty_token_is_rejected() {
+        super::normalize_shortcut("primary+");
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown modifier")]
+    fn shortcut_with_two_keys_is_rejected() {
+        super::normalize_shortcut("primary+s+t");
     }
 }

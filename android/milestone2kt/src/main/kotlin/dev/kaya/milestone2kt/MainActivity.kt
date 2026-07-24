@@ -2,6 +2,7 @@ package dev.kaya.milestone2kt
 
 import android.os.Bundle
 import android.system.Os
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import dev.kaya.KayaCompose
 import dev.kaya.KayaRing
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
             "grid" -> GridScene::app
             "textarea" -> TextareaScene::app
             "sections" -> Sections::app
+            "menus" -> Menus::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.
@@ -62,4 +64,11 @@ class MainActivity : ComponentActivity() {
         }
         Thread(scene, "kaya-app").start()
     }
+
+    // The hardware-keyboard route for menu shortcuts; see the
+    // milestone2 module for the reasoning. Identical in both hosts on
+    // purpose: the guest language never changes how a chord reaches
+    // the catalog.
+    override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
+        KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 }

@@ -203,11 +203,64 @@ private struct KayaInstance {
     var entries: [(key: KayaValue, value: Any)]
 }
 
+/// A live menu item: its OWN id space (the c_menu_item counter)
+/// behind its own type, so cross-use with widget or node handles is a
+/// compile error. One command identity: exactly one parent or anchor,
+/// forever (append-only; nothing is removed in v1). The id alone is
+/// the durable name — reopen a retained item with tx.menu(item, ...).
+struct KayaMenuItem {
+    let id: UInt64
+}
+
+/// A context catalog built UNANCHORED (tx.contextCatalog) for a
+/// template node: menu items are live and shared across stamped
+/// copies, so the catalog is built in the live zone and
+/// KayaTpl.contextMenu attaches it inside the template, where each
+/// activation carries the copy's key path. An item takes exactly one
+/// anchor — a second attach traps.
+final class KayaContextCatalog {
+    let roots: [KayaMenuItem]
+    var attached = false
+
+    init(_ roots: [KayaMenuItem]) {
+        self.roots = roots
+    }
+}
+
+/// One of the TWO addressable sources a menu text property binds to —
+/// constant text or a Str signal (menu items are not collection
+/// elements, so there is no element arm). Conformance is the sealed
+/// union: only String and KayaSignal conform, so a Bool label is a
+/// compile error — one parameter name per property, compile-checked.
+protocol KayaMenuText {}
+
+extension String: KayaMenuText {}
+
+extension KayaSignal: KayaMenuText {}
+
+/// The Bool twin, for enabled/checked.
+protocol KayaMenuBool {}
+
+extension Bool: KayaMenuBool {}
+
+extension KayaSignal: KayaMenuBool {}
+
+/// The index twin, for a radio group's value (a 0-based option index
+/// under the Choice contract).
+protocol KayaMenuIndex {}
+
+extension Int: KayaMenuIndex {}
+
+extension Double: KayaMenuIndex {}
+
+extension KayaSignal: KayaMenuIndex {}
+
 final class KayaApp {
     private var signals: UInt64 = 0
     private var widgets: UInt64 = 0
     private var collections: UInt64 = 0
     private var nodes: UInt64 = 0
+    private var menuItems: UInt64 = 0
     private var widgetHandlers: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
@@ -223,6 +276,16 @@ final class KayaApp {
     private var nextAlert: UInt64 = 0
     private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
+    // Menu dispatch tables, keyed by MENU ITEM id — their own id
+    // space, separate from every widget/node table ("two tables,
+    // always" — now N tables, still always). The node flavors receive
+    // the stamped copy's key path (the keys ARE the noun).
+    var menuActivated: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    var menuActivatedNode: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
+    var menuToggled: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
+    var menuToggledNode: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
+    var menuSelected: [UInt64: (KayaAppTx, Int) throws -> Void] = [:]
+    var menuSelectedNode: [UInt64: (KayaAppTx, [KayaValue], Int) throws -> Void] = [:]
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -406,6 +469,11 @@ final class KayaApp {
     func nextCollection() -> KayaCollection {
         collections += 1
         return KayaCollection(id: collections, path: [])
+    }
+
+    func nextMenuItem() -> KayaMenuItem {
+        menuItems += 1
+        return KayaMenuItem(id: menuItems)
     }
 
     /// Run `build` with a fresh transaction and submit it atomically.
@@ -613,6 +681,35 @@ final class KayaApp {
                 if let handler = alerts.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
                 }
+            // Menu occurrences key the menu-item tables — their own id
+            // space, so neither widget nor node ids can collide with
+            // them. Node-anchored context items carry the stamped
+            // copy's keys (the keys ARE the noun); toggles carry the
+            // new state, radio groups the new 0-based index.
+            case (UInt16(KAYA_OCCURRENCE_MENU_ACTIVATED), true):
+                if let handler = menuActivated[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_MENU_ACTIVATED), false):
+                if let handler = menuActivatedNode[id] {
+                    dispatch { try build { tx in try handler(tx, keys) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_MENU_TOGGLED), true):
+                if let handler = menuToggled[id] {
+                    dispatch { try build { tx in try handler(tx, checked) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_MENU_TOGGLED), false):
+                if let handler = menuToggledNode[id] {
+                    dispatch { try build { tx in try handler(tx, keys, checked) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED), true):
+                if let handler = menuSelected[id] {
+                    dispatch { try build { tx in try handler(tx, Int(value)) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED), false):
+                if let handler = menuSelectedNode[id] {
+                    dispatch { try build { tx in try handler(tx, keys, Int(value)) } }
+                }
             default:
                 break
             }
@@ -655,6 +752,11 @@ enum KayaChildren {
         _ = n
     }
 
+    // Void statements are legal in a body: an inline attachment
+    // (tx.contextMenu(target, items:)) or a command declares beside
+    // the widgets it concerns — nothing rides on expression position.
+    static func buildExpression(_: Void) {}
+
     static func buildBlock(_: Void...) {}
 
     static func buildArray(_: [Void]) {}
@@ -666,6 +768,8 @@ enum KayaNodeChildren {
     static func buildExpression(_ n: KayaNodeHandle) {
         _ = n
     }
+
+    static func buildExpression(_: Void) {}
 
     static func buildBlock(_: Void...) {}
 
@@ -1382,13 +1486,15 @@ final class KayaAppTx {
         height: Double? = nil, vetoClose: Bool? = nil,
         sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
-        onClosed: ((KayaAppTx) throws -> Void)? = nil
+        onClosed: ((KayaAppTx) throws -> Void)? = nil,
+        menus: [KayaMenuItem]? = nil
     ) {
         tx.createWindow(id)
         window(
             id, title: title, width: width, height: height,
             vetoClose: vetoClose, sectionsPresentation: sectionsPresentation,
-            onCloseRequested: onCloseRequested, onClosed: onClosed)
+            onCloseRequested: onCloseRequested, onClosed: onClosed,
+            menus: menus)
     }
 
     /// Set a window's attributes in one construct — the attribute set
@@ -1402,7 +1508,8 @@ final class KayaAppTx {
         height: Double? = nil, vetoClose: Bool? = nil,
         sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
-        onClosed: ((KayaAppTx) throws -> Void)? = nil
+        onClosed: ((KayaAppTx) throws -> Void)? = nil,
+        menus: [KayaMenuItem]? = nil
     ) {
         if let title { tx.setWindowTitle(id, title) }
         if let width { tx.setWindowWidth(id, width) }
@@ -1413,6 +1520,237 @@ final class KayaAppTx {
         }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
+        // The menubar rides the window construct (the window-attribute
+        // unification rule): menus: appends top-level grouping nodes
+        // (menu or radioGroup) to this window's command catalog, in
+        // order — append-only, at any time.
+        if let menus {
+            for m in menus { tx.menubarAppend(id, m.id) }
+        }
+    }
+
+    // --- Menus: the command vocabulary (DESIGN.md, Menus) ------------
+    //
+    // Named-args constructors nested by argument lists: children are
+    // arguments (evaluated first, unanchored), the grouping construct
+    // appends them, and the window construct's menus: parameter is the
+    // bar anchor. Items are live-zone only; a retained item reopens
+    // through tx.menu(item, ...) — the append-at-any-time discipline.
+
+    private func newMenuItem(_ kind: Int32, _ label: KayaMenuText?) -> KayaMenuItem {
+        precondition(
+            app.tplDepth == 0,
+            "kaya: menu items are live — build the context catalog in the live "
+                + "zone (tx.contextCatalog) and attach it inside the template "
+                + "with KayaTpl.contextMenu")
+        let m = app.nextMenuItem()
+        tx.menuItemCreate(m.id, UInt32(kind))
+        if let label { menuLabel(m, label) }
+        return m
+    }
+
+    private func menuLabel(_ m: KayaMenuItem, _ src: KayaMenuText) {
+        if let s = src as? KayaSignal {
+            tx.bindMenuLabel(m.id, s.id)
+        } else {
+            tx.setMenuLabel(m.id, src as! String)
+        }
+    }
+
+    private func menuEnabled(_ m: KayaMenuItem, _ src: KayaMenuBool) {
+        if let s = src as? KayaSignal {
+            tx.bindMenuEnabled(m.id, s.id)
+        } else {
+            tx.setMenuEnabled(m.id, src as! Bool)
+        }
+    }
+
+    private func menuChecked(_ m: KayaMenuItem, _ src: KayaMenuBool) {
+        if let s = src as? KayaSignal {
+            tx.bindMenuChecked(m.id, s.id)
+        } else {
+            tx.setMenuChecked(m.id, src as! Bool)
+        }
+    }
+
+    private func menuValue(_ m: KayaMenuItem, _ src: KayaMenuIndex) {
+        if let s = src as? KayaSignal {
+            tx.bindMenuValue(m.id, s.id)
+        } else if let i = src as? Int {
+            tx.setMenuValue(m.id, Double(i))
+        } else {
+            tx.setMenuValue(m.id, src as! Double)
+        }
+    }
+
+    private func menuTail(_ m: KayaMenuItem, _ enabled: KayaMenuBool?, _ icon: Data?) {
+        if let enabled { menuEnabled(m, enabled) }
+        if let icon { tx.setMenuIcon(m.id, kayaRegisterBlob(icon)) }
+    }
+
+    /// An action — a leaf command firing exactly one menu_activated
+    /// occurrence (menu click OR its shortcut: ONE occurrence, one
+    /// dispatch path; the handler rides the declaration and covers
+    /// both). The shortcut is canonicalized by the binding's one
+    /// parser; the root judges its anchor (window catalogs only).
+    func item(
+        _ label: KayaMenuText, shortcut: String? = nil,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil, primary: Bool = false,
+        onActivate: ((KayaAppTx) throws -> Void)? = nil
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
+        if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
+        menuTail(m, enabled, icon)
+        if primary { tx.setMenuPrimary(m.id, true) }
+        if let onActivate { app.menuActivated[m.id] = onActivate }
+        return m
+    }
+
+    /// The template-node flavor: an item attached to a stamped copy
+    /// (tx.contextCatalog + KayaTpl.contextMenu) reports the copy's
+    /// key path, outermost first — the keys ARE the noun the command
+    /// acts on. Context items take no shortcuts (root-checked).
+    func item(
+        _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        onActivate: @escaping (KayaAppTx, [KayaValue]) throws -> Void
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
+        menuTail(m, enabled, icon)
+        app.menuActivatedNode[m.id] = onActivate
+        return m
+    }
+
+    /// A toggle — a stateful leaf reusing the Checkbox contract: user
+    /// flips emit menu_toggled (the handler receives the new state);
+    /// programmatic checked writes are QUIET (the echo doctrine).
+    func toggle(
+        _ label: KayaMenuText, checked: KayaMenuBool? = nil,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_TOGGLE, label)
+        if let checked { menuChecked(m, checked) }
+        menuTail(m, enabled, icon)
+        if let onToggle { app.menuToggled[m.id] = onToggle }
+        return m
+    }
+
+    /// The template-node flavor of toggle: the copy's keys, then the
+    /// new state.
+    func toggle(
+        _ label: KayaMenuText, checked: KayaMenuBool? = nil,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        onToggle: @escaping (KayaAppTx, [KayaValue], Bool) throws -> Void
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_TOGGLE, label)
+        if let checked { menuChecked(m, checked) }
+        menuTail(m, enabled, icon)
+        app.menuToggledNode[m.id] = onToggle
+        return m
+    }
+
+    /// One labeled radio option, appended in declaration order — the
+    /// order IS the index vocabulary the group's value selects over.
+    func option(
+        _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_RADIO_OPTION, label)
+        menuTail(m, enabled, icon)
+        return m
+    }
+
+    /// Native grouping chrome: no label, no props, no handler.
+    func separator() -> KayaMenuItem {
+        newMenuItem(KAYA_MENU_KIND_SEPARATOR, nil)
+    }
+
+    /// A menu grouping node — at bar level (seat it through the window
+    /// construct's menus: parameter) or nested (pass it in a parent's
+    /// items:). Children arrive as arguments, already created; the
+    /// menu appends them in order. Disabling a menu disables its
+    /// subtree (the inherited-disabled contract).
+    func menu(
+        _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        items: [KayaMenuItem] = []
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_MENU, label)
+        for child in items { tx.menuItemAppend(m.id, child.id) }
+        menuTail(m, enabled, icon)
+        return m
+    }
+
+    /// Reopen a RETAINED menu item — the append-at-any-time
+    /// discipline: tx.menu(file, label: "Document", items: [publish]).
+    /// Props mutate freely on every kind the prop applies to (the root
+    /// judges kind and anchor rules); programmatic checked/value
+    /// writes are configuration and stay QUIET.
+    func menu(
+        _ item: KayaMenuItem, label: KayaMenuText? = nil,
+        enabled: KayaMenuBool? = nil, checked: KayaMenuBool? = nil,
+        value: KayaMenuIndex? = nil, icon: Data? = nil, primary: Bool? = nil,
+        shortcut: String? = nil, items: [KayaMenuItem] = []
+    ) {
+        for child in items { tx.menuItemAppend(item.id, child.id) }
+        if let label { menuLabel(item, label) }
+        if let enabled { menuEnabled(item, enabled) }
+        if let checked { menuChecked(item, checked) }
+        if let value { menuValue(item, value) }
+        if let icon { tx.setMenuIcon(item.id, kayaRegisterBlob(icon)) }
+        if let primary { tx.setMenuPrimary(item.id, primary) }
+        if let shortcut { tx.setMenuShortcut(item.id, shortcut) }
+    }
+
+    /// A radio group — the Choice contract with the platform's
+    /// checkmark idiom, admissible wherever a menu grouping node is
+    /// (bar level via the window construct, nested via a parent's
+    /// items:). options: only option children (the closed grammar,
+    /// root-checked); value is the selected 0-based index
+    /// (programmatic writes are quiet); onSelect receives each USER
+    /// pick's new index.
+    func radioGroup(
+        _ label: KayaMenuText, options: [KayaMenuItem],
+        value: KayaMenuIndex? = nil, enabled: KayaMenuBool? = nil,
+        icon: Data? = nil, onSelect: ((KayaAppTx, Int) throws -> Void)? = nil
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_RADIO_GROUP, label)
+        for child in options { tx.menuItemAppend(m.id, child.id) }
+        if let value { menuValue(m, value) }
+        menuTail(m, enabled, icon)
+        if let onSelect { app.menuSelected[m.id] = onSelect }
+        return m
+    }
+
+    /// The template-node flavor of radioGroup: the copy's keys, then
+    /// the new index.
+    func radioGroup(
+        _ label: KayaMenuText, options: [KayaMenuItem],
+        value: KayaMenuIndex? = nil, enabled: KayaMenuBool? = nil,
+        icon: Data? = nil,
+        onSelect: @escaping (KayaAppTx, [KayaValue], Int) throws -> Void
+    ) -> KayaMenuItem {
+        let m = newMenuItem(KAYA_MENU_KIND_RADIO_GROUP, label)
+        for child in options { tx.menuItemAppend(m.id, child.id) }
+        if let value { menuValue(m, value) }
+        menuTail(m, enabled, icon)
+        app.menuSelectedNode[m.id] = onSelect
+        return m
+    }
+
+    /// A context menu on a LIVE widget: the same item vocabulary
+    /// scoped to a NOUN, with the platform's own gesture (right-click,
+    /// long-press). Calling it again appends more roots. The editable
+    /// text controls (entry, textarea) reject attachment at the root;
+    /// context items take no shortcuts.
+    func contextMenu(_ target: KayaWidget, items: [KayaMenuItem]) {
+        for item in items { tx.contextAttach(target.id, item.id) }
+    }
+
+    /// Build a context catalog UNANCHORED — free root items for a
+    /// template-node anchor (menu items are live and shared across
+    /// stamped copies): KayaTpl.contextMenu attaches it inside the
+    /// template, and each activation carries the copy's key path.
+    func contextCatalog(items: [KayaMenuItem]) -> KayaContextCatalog {
+        KayaContextCatalog(items)
     }
 
     /// Close and forget an auxiliary window — also the veto grammar's
@@ -1607,6 +1945,21 @@ final class KayaTpl {
 
     func addChild(_ parent: KayaNodeHandle, _ child: KayaNodeHandle) {
         tx.tx.addChild(parent.id, child.id)
+    }
+
+    /// Attach a live-built context catalog (tx.contextCatalog) to a
+    /// template node: every stamped copy shows the same catalog, and
+    /// each activation carries that copy's key path — the keys ARE
+    /// the noun (received by the node-flavor handlers). An item takes
+    /// exactly one anchor, so a second attach of the same catalog
+    /// traps here.
+    func contextMenu(_ node: KayaNodeHandle, _ catalog: KayaContextCatalog) {
+        precondition(
+            !catalog.attached, "kaya: a context catalog takes exactly one anchor")
+        catalog.attached = true
+        for root in catalog.roots {
+            tx.tx.contextAttachNode(node.id, root.id)
+        }
     }
 
     func collection() -> KayaCollection {

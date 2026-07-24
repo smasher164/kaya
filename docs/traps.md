@@ -290,6 +290,66 @@ the same patterns return through interpreter drop-downs
   controlTextDidChange — re-fire the delegate's emit explicitly (UIKit
   `setText` likewise needs `sendActionsForControlEvents`); GTK, WinUI,
   and Android fire their change paths on programmatic set.
+- **AppKit menus auto-enable through the responder chain by default.**
+  Every Kaya-owned `NSMenu` sets `autoenablesItems = false`; otherwise
+  AppKit silently disables an item whose bridge target is not in the
+  responder chain, fighting the menu item's live `enabled` property.
+  The interpreter owns a segment of `NSApp.mainMenu`, not the whole
+  bar, and re-synchronizes it after SwiftUI rebuilds and key-window
+  changes — a one-shot insertion races the same asynchronous scene
+  machinery as a one-shot window registration.
+- **A native menu rebuild must start from the post-user mirror.**
+  Toggle/radio chrome owns the immediate user change, so its callback
+  updates the backend's retained `checked`/`value` mirror before it
+  emits. Rebuilding later from the pre-click model silently reverts
+  the choice. Enablement is likewise inherited: every descendant,
+  shortcut, automation route, and harness activation uses the AND of
+  its own flag and every grouping ancestor. The menus scene disables
+  File, changes View/Sort, then enables File to force an unrelated
+  rebuild and pins both rules.
+- **WinUI `MenuFlyout.ShowAt` is a request, not a readiness
+  boundary.** Invoking a menu-item automation peer on the next
+  dispatcher hop can return successfully before the flyout presenter
+  is live and silently drop the routed Click; opening another context
+  flyout can likewise overtake the prior close animation. The harness
+  registers `Opened` before `ShowAt` and does not activate until that
+  event arrives, then registers and awaits `Closed` around the native
+  item invocation before another open may start. Keep that native
+  flyout handle through `Closed`: the item's occurrence may remove its
+  stamped anchor (and therefore its entry in the live-widget map)
+  before event cleanup runs. The menus scene's consecutive Rename and
+  row-removing Remove activations are the integration guard. A sleep is
+  not a substitute for either lifecycle edge (2026-07-23).
+- **WinUI shortcut injection is OS-global, so Windows menu legs cannot
+  share the suite pool.** The harness foregrounds the guest and uses
+  `keybd_event` to exercise the real `KeyboardAccelerator` path; with
+  four guests in flight, their `SetForegroundWindow` calls steal focus
+  and another process receives the chord. The formerly tautological
+  shortcut check hid this until the menus scene required `ready` to
+  become `saved`. `deploy-win` now runs every menu leg through a
+  drain/run/drain barrier, and `check-steps` pins both the serial calls
+  and that barrier. Do not replace it with sleeps or weaken the
+  pre-shortcut assertion (2026-07-23).
+- **A flat per-item menu-native map is the wrong-noun bug.** A
+  template context catalog attaches the SAME item ids to every
+  stamped copy, and the copy's keys ARE the noun (DESIGN.md, Menus) —
+  so a map keyed by item id alone keeps only the last-built copy's
+  native, in whatever order the rebuild iterates the anchors, and the
+  harness then invokes THAT row's chrome (emitting its noun) from
+  every other row, nondeterministically. Natives are keyed per
+  attachment (`protocol::MenuAttachment`), the noun resolves at
+  dispatch from the firing copy's own anchor (the SwiftUI parity
+  rule), and the Destroy arm purges the dead attachment's instances —
+  a detached item still raises Click through its automation peer (the
+  menu probe proves it), so a stale entry stays invoke-capable with
+  the dead row's noun. GTK reaches the same invariant with
+  per-attachment action instances retained out at Destroy. The
+  frozen menus scene stamps ONE row, so no scene leg can see the
+  collision: the negative tests are protocol.rs's
+  `stamped_copies_keep_one_native_per_attachment` and
+  `destroying_an_anchor_purges_only_its_natives`, and the composite
+  key makes an anchor-less lookup a compile error on the
+  check-targets windows cross-compile (2026-07-24).
 - **GTK: a focused GtkEntry delegates to its inner GtkText** —
   `is_focus()` on the entry is always false; read
   `state_flags() & (FOCUSED|FOCUS_WITHIN)`.

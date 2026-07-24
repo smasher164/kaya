@@ -92,6 +92,7 @@ def _text_value(what, text):
 _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
 _parents = []  # the container stack; None marks a template body's floor
+_menu_scopes = []  # open menu scopes: creators seat under the top
 _for_stack = []  # depth indices of enclosing Fors, for element levels
 # for-statement tracers whose template scope is still open; a break
 # leaves one behind, caught at transaction exit.
@@ -329,6 +330,15 @@ class Widget:
         argument at construction; this is the dynamic path."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
+    def context_menu(self):
+        """The live-widget context anchor: `with target.context_menu():`
+        declares the catalog — the same command vocabulary scoped to a
+        NOUN, with the platform's own gesture (right-click, long-press).
+        No shortcuts here (a shortcut needs a window catalog as its
+        native dispatch home — record-time checked); the editable text
+        controls (entry, textarea) reject attachment at the root."""
+        return _MenuScope(("widget", self.id), shortcut_ok=False)
+
 
 class Node:
     """A template node: a blueprint entry, stamped per collection entry.
@@ -337,6 +347,21 @@ class Node:
 
     def __init__(self, id):
         self.id = id
+
+    def context_menu(self, catalog):
+        """Attach a live-zone-built context catalog
+        (kaya.context_catalog) to this template node: every stamped
+        copy shows the same catalog, and each activation carries that
+        copy's key path — the keys ARE the noun (the on_click_node
+        encoding). An item takes exactly one anchor, so a second
+        attach of the same catalog raises here."""
+        if catalog._attached:
+            raise RuntimeError(
+                "kaya: a context catalog takes exactly one anchor"
+            )
+        catalog._attached = True
+        for root in catalog._roots:
+            _records().append(wire.tx_context_attach_node(self.id, root))
 
 
 class Element:
@@ -968,6 +993,287 @@ def show_alert(title="", message="", actions=(), cancel=None,
     return alert_id
 
 
+# --- Menus: the command vocabulary (DESIGN.md, Menus) --------------
+#
+# One item vocabulary, two anchors. The window bar rides the window
+# construct (`with app.menu("File") as file:`); a context menu scopes
+# the same verbs to a noun (`with target.context_menu():` on a live
+# widget, kaya.context_catalog() + node.context_menu(catalog) for a
+# template node). Creators declare into the open with-scope; handlers
+# ride the declarations (on_activate=, on_toggle=, on_select=) — no
+# app-global menu dispatcher exists. Node-anchored handlers receive
+# the stamped copy's keys first (the keys ARE the noun).
+
+
+class MenuItem:
+    """A live menu item — its OWN id space (the c_menu_item counter),
+    never a widget or node id. One command identity: exactly one
+    parent or anchor, forever (append-only; nothing is removed in v1).
+    The methods are the dynamic tier — every mutable prop, each judged
+    by the root against the item's kind and anchor — plus append(),
+    the reopening scope for a retained grouping node."""
+
+    def __init__(self, id):
+        self.id = id
+
+    def label(self, value):
+        """Rename the item: constant text or a bound Str signal.
+        Label writes never emit anything."""
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_menu_label(self.id, value.id))
+        else:
+            _records().append(
+                wire.tx_set_menu_label(self.id, _text_value("menu label", value)))
+
+    def enabled(self, value):
+        """Whether the item is enabled (default true): a constant or a
+        bound Bool signal. Enablement writes never emit anything;
+        disabling a grouping node disables its subtree everywhere."""
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_menu_enabled(self.id, value.id))
+        else:
+            _records().append(wire.tx_set_menu_enabled(self.id, bool(value)))
+
+    def checked(self, value):
+        """A toggle's state (toggle items only — root-checked): the
+        Checkbox contract. The programmatic write is configuration:
+        QUIET, no menu_toggled echo (the echo doctrine)."""
+        if isinstance(value, Signal):
+            _records().append(wire.tx_bind_menu_checked(self.id, value.id))
+        else:
+            _records().append(wire.tx_set_menu_checked(self.id, bool(value)))
+
+    def value(self, v):
+        """A radio group's selected option index (radio groups only —
+        root-checked): the Choice contract. QUIET, like checked."""
+        if isinstance(v, Signal):
+            _records().append(wire.tx_bind_menu_value(self.id, v.id))
+        else:
+            _records().append(wire.tx_set_menu_value(self.id, float(v)))
+
+    def icon(self, data):
+        """The item's icon (the blob channel): used by phone promotion,
+        ignored where native menu dress has no icons. Const-only."""
+        _records().append(
+            wire.tx_set_menu_icon(self.id, runtime.register_blob(data)))
+
+    def primary(self, on):
+        """The phone-bar promotion hint (actions only — root-checked).
+        Flipping it recomputes the promoted set deterministically;
+        INERT on desktops — not a toolbar grammar. Const-only."""
+        _records().append(wire.tx_set_menu_primary(self.id, bool(on)))
+
+    def shortcut(self, spelling):
+        """The action's shortcut (window-anchored actions only — the
+        root knows the retained item's anchor and judges). Canonicalized
+        by the binding's one parser (wire.canonicalize_shortcut); the
+        shortcut is another affordance of the same item — it fires the
+        SAME menu_activated occurrence as a click. Const-only."""
+        _records().append(wire.tx_set_menu_shortcut(self.id, spelling))
+
+    def append(self):
+        """Reopen this RETAINED grouping node — the append-at-any-time
+        discipline: `with file.append():` declares more children
+        (kaya.item/kaya.toggle/...; kaya.option for a radio group).
+        The root re-validates each appended subtree in the item's real
+        anchor context (depth, shortcuts, duplicates)."""
+        return _MenuScope(("item", self.id), shortcut_ok=True, value=self)
+
+
+class ContextCatalog:
+    """A context catalog built free of any anchor
+    (kaya.context_catalog) for a template node: menu items are live
+    and shared across stamped copies, so the catalog is built HERE, in
+    the live zone, and node.context_menu(catalog) attaches it inside
+    the template. An item takes exactly one anchor — a second attach
+    raises."""
+
+    def __init__(self):
+        self._roots = []
+        self._attached = False
+
+
+class _MenuScope(_Scope):
+    """A with-block whose creators seat under one menu anchor: a
+    grouping item (bar menus, submenus, radio groups, reopened
+    chains), a live widget's context anchor, or a free context
+    catalog. shortcut_ok carries the one anchor-dependent rule to
+    record time — a shortcut needs a window catalog as its native
+    dispatch home — with the root as the floor beneath. on_exit runs
+    after the block's children recorded — the radio value's seat: the
+    selected index must land AFTER the options it addresses (the root
+    judges the index against the option count at the record)."""
+
+    def __init__(self, seat, shortcut_ok, value=None, on_exit=None):
+        self._seat = seat  # ("item", id) | ("widget", id) | ("free", catalog)
+        self._shortcut_ok = shortcut_ok
+        self._value = value
+        self._on_exit = on_exit
+
+    def _enter(self):
+        _menu_scopes.append(self)
+        return self._value
+
+    def _exit(self):
+        _menu_scopes.pop()
+        if self._on_exit is not None:
+            self._on_exit()
+
+
+def _menu_create(kind, label=None):
+    """Create one menu item in its own id space; menu records are
+    live-zone only (a template body records a blueprint — build the
+    catalog outside and attach with node.context_menu)."""
+    if _tpl_depth > 0:
+        raise RuntimeError(
+            "kaya: menu items are live — build the context catalog in "
+            "the live zone (kaya.context_catalog) and attach it inside "
+            "the template with node.context_menu(catalog)"
+        )
+    item = MenuItem(_app._next("menu_item"))
+    _records().append(wire.tx_menu_item_create(item.id, kind))
+    if label is not None:
+        if isinstance(label, Signal):
+            _records().append(wire.tx_bind_menu_label(item.id, label.id))
+        else:
+            _records().append(
+                wire.tx_set_menu_label(item.id, _text_value("menu label", label)))
+    return item
+
+
+def _menu_seat(item):
+    """Seat a just-created item under the open scope's anchor and
+    return the scope (for the shortcut rule)."""
+    if not _menu_scopes:
+        raise RuntimeError(
+            "kaya: menu items declare inside a menu scope — "
+            "app.menu()/app.radio_group() for the window catalog, "
+            "widget.context_menu() or kaya.context_catalog() for a "
+            "context anchor"
+        )
+    scope = _menu_scopes[-1]
+    kind, target = scope._seat
+    if kind == "item":
+        _records().append(wire.tx_menu_item_append(target, item.id))
+    elif kind == "widget":
+        _records().append(wire.tx_context_attach(target, item.id))
+    else:  # free roots, collected for a later template-node attach
+        target._roots.append(item.id)
+    return scope
+
+
+def item(label, shortcut=None, enabled=None, icon=None, primary=None,
+         on_activate=None):
+    """An action — a leaf command firing exactly one menu_activated
+    occurrence (menu click OR its shortcut: ONE occurrence, one
+    dispatch path). The handler rides the declaration; on a
+    template-node catalog it receives the stamped copy's keys as
+    arguments (`def on_remove(group, item):`)."""
+    it = _menu_create(wire.MENU_KIND_ACTION, label)
+    scope = _menu_seat(it)
+    if shortcut is not None:
+        if not scope._shortcut_ok:
+            raise ValueError(
+                "kaya: a context item takes no shortcut — a shortcut "
+                "needs a window catalog as its native dispatch home"
+            )
+        it.shortcut(shortcut)
+    if enabled is not None:
+        it.enabled(enabled)
+    if icon is not None:
+        it.icon(icon)
+    if primary is not None:
+        it.primary(primary)
+    if on_activate is not None:
+        _app._menu_handlers[(wire.OCC_MENU_ACTIVATED, it.id)] = on_activate
+    return it
+
+
+def toggle(label, checked=None, enabled=None, icon=None, on_toggle=None):
+    """A toggle — a stateful leaf reusing the Checkbox contract: user
+    flips emit menu_toggled (the handler receives the new state;
+    template-node copies get the stamped keys first); programmatic
+    checked writes are quiet."""
+    it = _menu_create(wire.MENU_KIND_TOGGLE, label)
+    _menu_seat(it)
+    if checked is not None:
+        it.checked(checked)
+    if enabled is not None:
+        it.enabled(enabled)
+    if icon is not None:
+        it.icon(icon)
+    if on_toggle is not None:
+        _app._menu_handlers[(wire.OCC_MENU_TOGGLED, it.id)] = on_toggle
+    return it
+
+
+def option(label, enabled=None, icon=None):
+    """One labeled radio option, appended in declaration order — the
+    order IS the index vocabulary the group's value selects over.
+    Options carry no state of their own; selection lives on the
+    group."""
+    it = _menu_create(wire.MENU_KIND_RADIO_OPTION, label)
+    _menu_seat(it)
+    if enabled is not None:
+        it.enabled(enabled)
+    if icon is not None:
+        it.icon(icon)
+    return it
+
+
+def separator():
+    """Native grouping chrome: no label, no props, no handle kept."""
+    it = _menu_create(wire.MENU_KIND_SEPARATOR)
+    _menu_seat(it)
+
+
+def menu(label, enabled=None, icon=None):
+    """A NESTED menu — grouping, never navigation: `with
+    kaya.menu("Sub"):` inside an open menu scope (one nested grouping
+    level is the cap, root-checked). Bar-level menus are `app.menu` —
+    the menubar rides the window construct."""
+    it = _menu_create(wire.MENU_KIND_MENU, label)
+    scope = _menu_seat(it)
+    if enabled is not None:
+        it.enabled(enabled)
+    if icon is not None:
+        it.icon(icon)
+    return _MenuScope(("item", it.id), scope._shortcut_ok, value=it)
+
+
+def radio_group(label, value=None, enabled=None, icon=None, on_select=None):
+    """A NESTED radio group — the Choice contract inline, with the
+    platform's checkmark idiom: `with kaya.radio_group("Sort"):`
+    declares only kaya.option children. `value` is the selected
+    0-based option index (an int or a bound signal; programmatic
+    writes are quiet); on_select receives each USER pick's new index.
+    Bar-level groups are `app.radio_group`."""
+    it = _menu_create(wire.MENU_KIND_RADIO_GROUP, label)
+    scope = _menu_seat(it)
+    if enabled is not None:
+        it.enabled(enabled)
+    if icon is not None:
+        it.icon(icon)
+    if on_select is not None:
+        _app._menu_handlers[(wire.OCC_MENU_VALUE_CHANGED, it.id)] = on_select
+    # value= lands at block exit, AFTER the option children: the index
+    # addresses options, and the root judges its domain at the record.
+    on_exit = (lambda: it.value(value)) if value is not None else None
+    return _MenuScope(("item", it.id), scope._shortcut_ok, value=it,
+                      on_exit=on_exit)
+
+
+def context_catalog():
+    """Build a context catalog UNANCHORED — free root items for a
+    template-node anchor: `with kaya.context_catalog() as catalog:`.
+    Menu items are live and shared across stamped copies, so the
+    catalog is built here, in the live zone; node.context_menu(catalog)
+    attaches it inside the template, and each activation carries the
+    copy's key path. Context items take no shortcuts."""
+    catalog = ContextCatalog()
+    return _MenuScope(("free", catalog), shortcut_ok=False, value=catalog)
+
+
 def window_size(width, height):
     """Request the primary surface's content size (DIP). ADVISORY on
     every platform: honored where the window manager permits (the
@@ -1462,10 +1768,25 @@ class _TxScope:
                 if records:
                     runtime.submit(*records)
             return False
+        global _tpl_depth
         _recording = False
         records, _tx = _tx, None
         journal, _journal = _journal, None
         abandoned, _open_traces[:] = list(_open_traces), []
+        # An abandoned transaction must not leave a menu scope armed
+        # for the next one (the poisoned-zone rule the template depth
+        # already follows).
+        _menu_scopes[:] = []
+        if exc_type is not None or abandoned:
+            # Any abort (a raising body, a broken trace) resets the
+            # zone state — the surviving app must not inherit a
+            # poisoned template depth or parent stack (the rule every
+            # binding's abort path follows; pinned by the menu
+            # emission checks running after the break-trace check).
+            _tpl_depth = 0
+            _parents[:] = []
+            _for_stack[:] = []
+            _for_collections[:] = []
         if exc_type is not None:
             # The records are abandoned; the mirrors abandon them too.
             for restore in journal.values():
@@ -1475,6 +1796,8 @@ class _TxScope:
             # A break (or early return) left a For template open: the
             # body must run to completion — it authors the blueprint,
             # it does not iterate entries.
+            for restore in journal.values():
+                restore()
             raise RuntimeError(
                 "kaya: a `for t in coll:` template never closed — the "
                 "loop body must run to completion (no break/return); "
@@ -1494,11 +1817,15 @@ class App:
     def __init__(self):
         global _app
         self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0,
-                          "alert": 0}
+                          "alert": 0, "menu_item": 0}
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
+        # Menu items are their own id space — their own table ("two
+        # tables, always" — now N tables, still always), keyed by
+        # (occurrence kind, item id).
+        self._menu_handlers = {}
         # Per-entry navigation handlers, keyed by entry surface id
         # (the request-bound alert precedent).
         self._entry_popped = {}
@@ -1609,6 +1936,47 @@ class App:
             self, mount_on_exit=True, window=section_id, section=True,
             title=title, on_selected=on_selected)
 
+    def menu(self, label, enabled=None, icon=None, window=0):
+        """A top-level menu in `window`'s command catalog — the
+        menubar rides the window construct (DESIGN.md, Menus):
+        `with app.menu("File", enabled=can_export) as file:` declares
+        the children (kaya.item/kaya.toggle/nested kaya.menu/
+        kaya.radio_group/kaya.separator) and yields the retained
+        handle, which file.append() reopens at any time. `label` is
+        constant text or a bound Str signal; `enabled` a bool or a
+        bound Bool signal — disabling the menu disables its subtree
+        (the inherited-disabled contract)."""
+        it = _menu_create(wire.MENU_KIND_MENU, label)
+        _records().append(wire.tx_menubar_append(int(window), it.id))
+        if enabled is not None:
+            it.enabled(enabled)
+        if icon is not None:
+            it.icon(icon)
+        return _MenuScope(("item", it.id), shortcut_ok=True, value=it)
+
+    def radio_group(self, label, value=None, enabled=None, icon=None,
+                    on_select=None, window=0):
+        """A BAR-LEVEL radio group — admissible wherever a menu
+        grouping node is (it materializes as a top-level menu with the
+        platform's checkmark idiom): `with app.radio_group("Sort",
+        value=sort, on_select=f):` declares only kaya.option children.
+        `value` is the selected 0-based index (the Choice contract:
+        int or bound signal; programmatic writes are quiet), and
+        on_select receives each USER pick's new index."""
+        it = _menu_create(wire.MENU_KIND_RADIO_GROUP, label)
+        _records().append(wire.tx_menubar_append(int(window), it.id))
+        if enabled is not None:
+            it.enabled(enabled)
+        if icon is not None:
+            it.icon(icon)
+        if on_select is not None:
+            self._menu_handlers[(wire.OCC_MENU_VALUE_CHANGED, it.id)] = on_select
+        # value= lands at block exit, AFTER the option children: the
+        # index addresses options, and the root judges its domain at
+        # the record.
+        on_exit = (lambda: it.value(value)) if value is not None else None
+        return _MenuScope(("item", it.id), shortcut_ok=True, value=it,
+                          on_exit=on_exit)
 
     def _dispatch_loop(self):
         while occurrence := runtime.next_occurrence():
@@ -1671,6 +2039,32 @@ class App:
                         handler(payload)
                     except Exception:
                         traceback.print_exc()
+                continue
+            if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
+                        wire.OCC_MENU_VALUE_CHANGED):
+                # Menu occurrences key the menu-item table — their own
+                # id space, so neither widget nor node ids can collide
+                # with them. Node-anchored context items carry the
+                # stamped copy's keys, passed first (the keys ARE the
+                # noun); toggles append the new state, radio groups the
+                # new 0-based index.
+                handler = self._menu_handlers.get((kind, ident))
+                if handler is None:
+                    continue
+                args = list(keys)
+                if kind == wire.OCC_MENU_TOGGLED:
+                    args.append(payload)
+                elif kind == wire.OCC_MENU_VALUE_CHANGED:
+                    args.append(int(payload))
+                try:
+                    with self.build():
+                        handler(*args)
+                except Exception:
+                    traceback.print_exc()
+                    print(
+                        "kaya: handler raised (transaction rolled back)",
+                        file=sys.stderr,
+                    )
                 continue
             if keys:
                 handler = self._node_handlers.get((kind, ident))

@@ -53,6 +53,15 @@ pub const KAYA_OCCURRENCE_ALERT_RESULT: u16 = 7;
 pub const KAYA_OCCURRENCE_ENTRY_POPPED: u16 = 8;
 pub const KAYA_OCCURRENCE_BACK_REQUESTED: u16 = 9;
 pub const KAYA_OCCURRENCE_SECTION_SELECTED: u16 = 10;
+/// Menu occurrences (core -> guest). Each carries the BUTTON_CLICKED
+/// body shape: u64 item id, u32 path_len, u32 reserved, then path_len
+/// key values (the on_click_node encoding — empty for a bar or
+/// live-widget activation, the anchor copy's key path for a
+/// node-anchored context item), then the payload for the stateful pair
+/// (a Bool value for TOGGLED, an F64 index for VALUE_CHANGED).
+pub const KAYA_OCCURRENCE_MENU_ACTIVATED: u16 = 11;
+pub const KAYA_OCCURRENCE_MENU_TOGGLED: u16 = 12;
+pub const KAYA_OCCURRENCE_MENU_VALUE_CHANGED: u16 = 13;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -65,6 +74,9 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_ENTRY_POPPED == ring::REC_ENTRY_POPPED
         && KAYA_OCCURRENCE_BACK_REQUESTED == ring::REC_BACK_REQUESTED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
+        && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
+        && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
+        && KAYA_OCCURRENCE_MENU_VALUE_CHANGED == ring::REC_MENU_VALUE_CHANGED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -132,6 +144,23 @@ pub const KAYA_TX_SET_ENTRY_PROP: u16 = 24;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
+/// MENU_ITEM_CREATE: u64 item, u32 menu_kind, u32 pad — create a menu
+/// item in its own id space (c_menu_item). MENU_ITEM_APPEND: u64
+/// parent, u64 child — append under a grouping node (closed grammar,
+/// single-parent). MENUBAR_APPEND: u64 window, u64 item — a top-level
+/// grouping node into the window catalog. CONTEXT_ATTACH: u64 widget,
+/// u64 item — a context catalog on a live widget (entry/textarea
+/// rejected). CONTEXT_ATTACH_NODE: u64 node, u64 item — a context
+/// catalog on a template node (Tpl zone; activations carry the copy's
+/// keys). SET_MENU_PROP: u64 item, u32 mprop, u32 source, then the
+/// SET_PROPERTY tail (element rejected; icon/primary/shortcut reject
+/// signal sources).
+pub const KAYA_TX_MENU_ITEM_CREATE: u16 = 28;
+pub const KAYA_TX_MENU_ITEM_APPEND: u16 = 29;
+pub const KAYA_TX_MENUBAR_APPEND: u16 = 30;
+pub const KAYA_TX_CONTEXT_ATTACH: u16 = 31;
+pub const KAYA_TX_CONTEXT_ATTACH_NODE: u16 = 32;
+pub const KAYA_TX_SET_MENU_PROP: u16 = 33;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -186,6 +215,15 @@ const _: () = assert!(
         && KAYA_TX_PUSH_ENTRY == wire::TX_PUSH_ENTRY
         && KAYA_TX_POP_ENTRY == wire::TX_POP_ENTRY
         && KAYA_TX_SET_ENTRY_PROP == wire::TX_SET_ENTRY_PROP
+        && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
+        && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
+        && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
+        && KAYA_TX_MENU_ITEM_CREATE == wire::TX_MENU_ITEM_CREATE
+        && KAYA_TX_MENU_ITEM_APPEND == wire::TX_MENU_ITEM_APPEND
+        && KAYA_TX_MENUBAR_APPEND == wire::TX_MENUBAR_APPEND
+        && KAYA_TX_CONTEXT_ATTACH == wire::TX_CONTEXT_ATTACH
+        && KAYA_TX_CONTEXT_ATTACH_NODE == wire::TX_CONTEXT_ATTACH_NODE
+        && KAYA_TX_SET_MENU_PROP == wire::TX_SET_MENU_PROP
 );
 
 /// Apply record kinds (core -> presentation pump, via kaya_next_commands).
@@ -234,6 +272,18 @@ pub const KAYA_APPLY_SET_ENTRY_PROP: u16 = 14;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
+/// MENU_ITEM_CREATE: u64 item, u32 menu_kind, u32 pad. MENU_ITEM_APPEND:
+/// u64 parent, u64 child. MENUBAR_APPEND: u64 window, u64 item.
+/// CONTEXT_ATTACH: u64 widget, u64 item. CONTEXT_ATTACH_NODE: u64
+/// widget, u64 item, then the anchor copy's key path { u32 count; u32
+/// reserved; count values } — the noun stamped into every activation.
+/// SET_MENU_PROP: u64 item, u32 mprop, u32 pad, value (resolved).
+pub const KAYA_APPLY_MENU_ITEM_CREATE: u16 = 18;
+pub const KAYA_APPLY_MENU_ITEM_APPEND: u16 = 19;
+pub const KAYA_APPLY_MENUBAR_APPEND: u16 = 20;
+pub const KAYA_APPLY_CONTEXT_ATTACH: u16 = 21;
+pub const KAYA_APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
+pub const KAYA_APPLY_SET_MENU_PROP: u16 = 23;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -249,6 +299,15 @@ const _: () = assert!(
         && KAYA_APPLY_PUSH_ENTRY == wire::APPLY_PUSH_ENTRY
         && KAYA_APPLY_POP_ENTRY == wire::APPLY_POP_ENTRY
         && KAYA_APPLY_SET_ENTRY_PROP == wire::APPLY_SET_ENTRY_PROP
+        && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
+        && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
+        && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
+        && KAYA_APPLY_MENU_ITEM_CREATE == wire::APPLY_MENU_ITEM_CREATE
+        && KAYA_APPLY_MENU_ITEM_APPEND == wire::APPLY_MENU_ITEM_APPEND
+        && KAYA_APPLY_MENUBAR_APPEND == wire::APPLY_MENUBAR_APPEND
+        && KAYA_APPLY_CONTEXT_ATTACH == wire::APPLY_CONTEXT_ATTACH
+        && KAYA_APPLY_CONTEXT_ATTACH_NODE == wire::APPLY_CONTEXT_ATTACH_NODE
+        && KAYA_APPLY_SET_MENU_PROP == wire::APPLY_SET_MENU_PROP
 );
 
 /// One-shot commands (the widget_command tx record / COMMAND apply
@@ -375,6 +434,71 @@ pub const KAYA_EPROP_INTERCEPT_BACK: u32 = 2;
 pub const KAYA_SPROP_TITLE: u32 = 1;
 pub const KAYA_SPROP_ICON: u32 = 2;
 
+/// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
+/// and `radio_group` are the grouping nodes; the rest are leaves.
+pub const KAYA_MENU_KIND_MENU: u32 = 1;
+pub const KAYA_MENU_KIND_ACTION: u32 = 2;
+pub const KAYA_MENU_KIND_TOGGLE: u32 = 3;
+pub const KAYA_MENU_KIND_RADIO_GROUP: u32 = 4;
+pub const KAYA_MENU_KIND_RADIO_OPTION: u32 = 5;
+pub const KAYA_MENU_KIND_SEPARATOR: u32 = 6;
+const _: () = assert!(
+    KAYA_MENU_KIND_MENU == wire::MENU_KIND_MENU
+        && KAYA_MENU_KIND_ACTION == wire::MENU_KIND_ACTION
+        && KAYA_MENU_KIND_TOGGLE == wire::MENU_KIND_TOGGLE
+        && KAYA_MENU_KIND_RADIO_GROUP == wire::MENU_KIND_RADIO_GROUP
+        && KAYA_MENU_KIND_RADIO_OPTION == wire::MENU_KIND_RADIO_OPTION
+        && KAYA_MENU_KIND_SEPARATOR == wire::MENU_KIND_SEPARATOR
+);
+// Completeness, not just agreement (the KAYA_KIND count-pin precedent):
+// a new menu_kind trips this count and walks you to export its
+// KAYA_MENU_KIND_* constant, extend the pin, and bump the count.
+const _: () = {
+    let variants = {
+        let mut n = 0;
+        let mut i = 0;
+        while i < crate::spec::SPEC.enums.len() {
+            if konst_eq(crate::spec::SPEC.enums[i].name, "menu_kind") {
+                n = crate::spec::SPEC.enums[i].variants.len();
+            }
+            i += 1;
+        }
+        n
+    };
+    assert!(
+        variants == 6,
+        "the spec menu_kind enum grew: export the new KAYA_MENU_KIND_* above, extend the pin, \
+         and bump this count"
+    );
+};
+
+/// Menu properties (spec::MENU_PROPS) — the fifth typed surface table
+/// (DESIGN.md, Menus). `label`/`enabled`/`checked`/`value` are
+/// signal-bindable; `icon`/`primary`/`shortcut` are const-only.
+pub const KAYA_MPROP_LABEL: u32 = 1;
+pub const KAYA_MPROP_ENABLED: u32 = 2;
+pub const KAYA_MPROP_CHECKED: u32 = 3;
+pub const KAYA_MPROP_VALUE: u32 = 4;
+pub const KAYA_MPROP_ICON: u32 = 5;
+pub const KAYA_MPROP_PRIMARY: u32 = 6;
+pub const KAYA_MPROP_SHORTCUT: u32 = 7;
+const _: () = assert!(
+    KAYA_MPROP_LABEL == wire::MPROP_LABEL
+        && KAYA_MPROP_ENABLED == wire::MPROP_ENABLED
+        && KAYA_MPROP_CHECKED == wire::MPROP_CHECKED
+        && KAYA_MPROP_VALUE == wire::MPROP_VALUE
+        && KAYA_MPROP_ICON == wire::MPROP_ICON
+        && KAYA_MPROP_PRIMARY == wire::MPROP_PRIMARY
+        && KAYA_MPROP_SHORTCUT == wire::MPROP_SHORTCUT
+);
+// Completeness for the menu-prop exports (the SECTION_PROPS count-pin
+// sibling): a new MENU_PROPS row trips this count.
+const _: () = assert!(
+    crate::spec::MENU_PROPS.len() == 7,
+    "spec::MENU_PROPS grew: export the new KAYA_MPROP_* above, extend the pin, and bump this \
+     count"
+);
+
 /// The window prop naming how sections present, and its enum values
 /// (spec enum "sections_presentation") — ADVISORY, the width/height
 /// precedent; auto is the default and each platform's dominant idiom.
@@ -396,7 +520,7 @@ const _: () = assert!(
 // thing to notice (the spacing-prop lesson, occurrence spelling). A
 // new spec occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 10,
+    crate::spec::SPEC.occurrence.len() == 13,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1032,6 +1156,79 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
         .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
 }
 
+/// The noun path bytes an emit_menu_* call carries: the wire path
+/// encoding CONTEXT_ATTACH_NODE handed the backend for a node-anchored
+/// context item, or empty for a bar / live-widget activation.
+///
+/// # Safety
+/// `noun`/`noun_len` must describe a valid byte range, or be NULL/0.
+unsafe fn menu_noun<'a>(noun: *const u8, noun_len: usize) -> &'a [u8] {
+    if noun.is_null() || noun_len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(noun, noun_len) }
+    }
+}
+
+/// Presentation side: a menu action fired — a bar/overflow click, a
+/// context-menu selection, OR a shortcut. ONE occurrence, one dispatch
+/// path: the shortcut is another affordance of the same item. `item` is
+/// the menu item id; `noun`/`noun_len` carry the anchor copy's key path
+/// (the wire path CONTEXT_ATTACH_NODE handed the backend) for a
+/// node-anchored context item, or NULL/0 for a bar or live-widget
+/// activation. One entry serves both routes. Do not combine with
+/// kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_menu_activated(item: u64, noun: *const u8, noun_len: usize) {
+    let tag = wire::menu_tag(item, unsafe { menu_noun(noun, noun_len) });
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_menu_activated_tag(&tag);
+        return;
+    }
+    state().ring.push_record(ring::REC_MENU_ACTIVATED, &tag);
+}
+
+/// Presentation side: a toggle item flipped; `checked` is the new state
+/// (0 or 1). Same `item`/`noun` identity as kaya_emit_menu_activated.
+/// Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_menu_toggled(
+    item: u64,
+    noun: *const u8,
+    noun_len: usize,
+    checked: u8,
+) {
+    let tag = wire::menu_tag(item, unsafe { menu_noun(noun, noun_len) });
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_menu_toggled_tag(&tag, checked != 0);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_MENU_TOGGLED, &wire::toggled_body(&tag, checked != 0));
+}
+
+/// Presentation side: a radio group's selected option changed;
+/// `index` is the new 0-based option index (integral). Same
+/// `item`/`noun` identity as kaya_emit_menu_activated, keyed by the
+/// group. Do not combine with kaya_run.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_menu_value_changed(
+    item: u64,
+    noun: *const u8,
+    noun_len: usize,
+    index: f64,
+) {
+    let tag = wire::menu_tag(item, unsafe { menu_noun(noun, noun_len) });
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_menu_value_tag(&tag, index);
+        return;
+    }
+    state()
+        .ring
+        .push_record(ring::REC_MENU_VALUE_CHANGED, &wire::value_changed_body(&tag, index));
+}
+
 /// Presentation side: block until the next transaction, resolve it
 /// through the scene, and write the apply-op records into `buf`.
 /// Returns the byte length written, or 0 when the core has shut down.
@@ -1150,6 +1347,12 @@ mod tests {
             ("add_section", KAYA_TX_ADD_SECTION),
             ("select_section", KAYA_TX_SELECT_SECTION),
             ("set_section_prop", KAYA_TX_SET_SECTION_PROP),
+            ("menu_item_create", KAYA_TX_MENU_ITEM_CREATE),
+            ("menu_item_append", KAYA_TX_MENU_ITEM_APPEND),
+            ("menubar_append", KAYA_TX_MENUBAR_APPEND),
+            ("context_attach", KAYA_TX_CONTEXT_ATTACH),
+            ("context_attach_node", KAYA_TX_CONTEXT_ATTACH_NODE),
+            ("set_menu_prop", KAYA_TX_SET_MENU_PROP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -1169,6 +1372,12 @@ mod tests {
             ("add_section", KAYA_APPLY_ADD_SECTION),
             ("select_section", KAYA_APPLY_SELECT_SECTION),
             ("set_section_prop", KAYA_APPLY_SET_SECTION_PROP),
+            ("menu_item_create", KAYA_APPLY_MENU_ITEM_CREATE),
+            ("menu_item_append", KAYA_APPLY_MENU_ITEM_APPEND),
+            ("menubar_append", KAYA_APPLY_MENUBAR_APPEND),
+            ("context_attach", KAYA_APPLY_CONTEXT_ATTACH),
+            ("context_attach_node", KAYA_APPLY_CONTEXT_ATTACH_NODE),
+            ("set_menu_prop", KAYA_APPLY_SET_MENU_PROP),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

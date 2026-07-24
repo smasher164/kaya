@@ -13,11 +13,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::Receiver;
 
+use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind, WindowProp, WindowId,
+    ApplyOp, CommandKind, MenuItemKind, MenuProp, OccSink, Occurrence, Prop, Transaction, Value,
+    WidgetId, WidgetKind, WindowProp, WindowId,
 };
 use crate::scene::Scene;
 
@@ -513,6 +515,28 @@ struct CoreState {
     /// plus the REAL dialog object for the runner's reads. Shared with
     /// the choose callback, which clears it when the one result fires.
     live_alert: std::rc::Rc<RefCell<Option<GtkLiveAlert>>>,
+    /// The command-catalog registry (DESIGN.md, Menus): items, bars,
+    /// anchors. Rc'd so the GSimpleAction handlers reach the mirror
+    /// without borrowing CORE (see the menus section comment).
+    menus: Rc<RefCell<MenuRegistry>>,
+    /// The GMenu model per window — the object the PopoverMenuBar
+    /// renders and menu_count reads; rebuilt in place on catalog
+    /// mutations.
+    menu_models: HashMap<u64, gio::Menu>,
+    /// The bar strip per window: (strip, content slot). Present only
+    /// once a catalog anchored; set_window_content routes through it.
+    menu_strips: HashMap<u64, (gtk4::Box, gtk4::Box)>,
+    /// Auxiliary windows' "win"-prefixed action groups (the primary is
+    /// a GtkApplicationWindow and exports "win" itself).
+    menu_action_groups: HashMap<u64, gio::SimpleActionGroup>,
+    /// Context attachments by anchor widget id.
+    context_menus: HashMap<u64, GtkContextMenu>,
+    /// The OPEN context menu's anchor: taken by the gesture and the
+    /// context_open verb, cleared by activation or chrome dismissal.
+    /// While set it owns path resolution EXCLUSIVELY (the
+    /// interpreters' rule). Rc'd: the popover's closed handler clears
+    /// it without borrowing CORE.
+    open_context: Rc<RefCell<Option<u64>>>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -689,13 +713,14 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
-            if let Some(root) = &entry.root {
-                target.set_child(Some(root));
+            if let Some(root) = entry.root.clone() {
+                set_window_content(core, window, Some(&root));
             }
-            target.set_title(Some(&entry.title));
+            let title = entry.title.clone();
+            target.set_title(Some(&title));
         }
         None => {
-            target.set_child(core.window_roots.get(&window));
+            set_window_content(core, window, core.window_roots.get(&window).cloned().as_ref());
             let own = core.window_titles.get(&window).cloned().unwrap_or_default();
             target.set_title(Some(&own));
         }
@@ -713,7 +738,7 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
 /// a switcher click lands there unguarded, reconciles the core, and
 /// emits; programmatic selection rides the echo guard.
 fn refresh_sections(core: &mut CoreState, window: u64) {
-    use gtk4::prelude::{BoxExt, Cast, GtkWindowExt, ObjectExt, WidgetExt};
+    use gtk4::prelude::{BoxExt, Cast, ObjectExt, WidgetExt};
     let ids = core.sections.get(&window).cloned().unwrap_or_default();
     if ids.is_empty() {
         return;
@@ -792,8 +817,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
         core.section_chrome.insert(window, (hint, chrome));
     }
     let chrome = core.section_chrome[&window].1.clone();
-    let target = gtk_window(core, window);
-    target.set_child(Some(&chrome));
+    set_window_content(core, window, Some(chrome.upcast_ref()));
     if let Some(sel) = core.selected_sections.get(&window).copied() {
         core.apply_quiet.set(true);
         stack.set_visible_child_name(&sel.to_string());
@@ -841,6 +865,683 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     for (i, child) in children.iter().enumerate() {
         let i = i as i32;
         grid.attach(child, i % cols, i / cols, 1, 1);
+    }
+}
+
+// --- Menus: the command vocabulary (DESIGN.md, Menus) -----------------
+//
+// The ratified GTK lowering: one GMenu model per window, rendered by a
+// PopoverMenuBar in a strip ABOVE the mounted root (the header bar
+// already carries nav chrome; the bar is its own row, the traditional
+// Linux shape). Every actionable item is a real window-scoped
+// GSimpleAction (`win.kmi-<id>`): enablement is set_enabled, a toggle
+// is a stateful bool action, a radio group is ONE stateful action
+// whose options are int targets — checkmarks and radio rendering come
+// free from GMenu — and shortcuts ride set_accels_for_action, so
+// accel display and key dispatch are both native. A context catalog is
+// GtkPopoverMenu::from_model on a right-click GestureClick, its
+// actions in a per-anchor group ("kayactx" on the anchor widget) so a
+// stamped copy's occurrence carries THAT copy's key path — the noun is
+// baked into the action's tag at attach time, exactly as stamped
+// click tags are (the on_click_node encoding).
+//
+// One dispatch path: bar chrome, the context popover, accelerators,
+// and the harness verbs all activate the same GSimpleAction, whose
+// handler mirrors user state FIRST and then emits (docs/traps.md's
+// post-user-mirror rule). Programmatic checked/value writes go through
+// set_state, which never fires `activate` — the echo doctrine holds
+// with no quiet guard. The handlers capture the Rc'd registry and the
+// sink, never CORE, so a stage verb may activate them while it holds
+// the CORE borrow (the same discipline as every widget signal here).
+
+/// One menu item's retained state: the props mirror (the post-user
+/// mirror toggles/radios update BEFORE emitting), the semantic tree,
+/// and every live GSimpleAction instance materialized for the item —
+/// the bar's window-scoped one, plus one per context attachment — so
+/// enabled/checked/value writes reach all of them.
+struct MenuItemState {
+    kind: MenuItemKind,
+    label: String,
+    /// The item's OWN flag; what chrome and dispatch honor is the AND
+    /// of this and every grouping ancestor's (docs/traps.md).
+    enabled: bool,
+    checked: bool,
+    value: f64,
+    /// The phone-promotion hint, mirrored for the record: INERT on
+    /// desktop by design (DESIGN.md, Menus), so nothing here reads it.
+    #[allow(dead_code)]
+    primary: bool,
+    shortcut: String,
+    parent: Option<u64>,
+    children: Vec<u64>,
+    actions: Vec<gio::SimpleAction>,
+}
+
+/// The command-catalog registry. Rc'd so action handlers can reach the
+/// mirror without touching CORE (see the section comment).
+#[derive(Default)]
+struct MenuRegistry {
+    items: HashMap<u64, MenuItemState>,
+    /// Top-level grouping nodes per window, in menubar-append order.
+    bars: HashMap<u64, Vec<u64>>,
+    /// Root item id -> the window whose bar holds it.
+    bar_of: HashMap<u64, u64>,
+    /// Root item id -> every widget carrying a context attachment
+    /// rooted at it (a template catalog attaches to every stamped
+    /// copy; a live-widget catalog to exactly one).
+    context_of: HashMap<u64, Vec<u64>>,
+}
+
+/// One widget's context attachment: its own GMenu + popover + action
+/// group, and the anchor copy's key path (empty on a live widget).
+struct GtkContextMenu {
+    roots: Vec<u64>,
+    noun: Vec<Value>,
+    model: gio::Menu,
+    popover: gtk4::PopoverMenu,
+    group: gio::SimpleActionGroup,
+    /// This attachment's action instances by item id — the ones whose
+    /// tags carry this anchor's noun.
+    actions: HashMap<u64, gio::SimpleAction>,
+}
+
+/// Enablement is the AND of the item's own flag and every grouping
+/// ancestor's — the inherited rule every read, render, accel, and
+/// activation route shares (docs/traps.md).
+fn menu_effective_enabled(reg: &MenuRegistry, id: u64) -> bool {
+    let mut enabled = true;
+    let mut current = Some(id);
+    while let Some(item) = current {
+        let state = &reg.items[&item];
+        enabled = enabled && state.enabled;
+        current = state.parent;
+    }
+    enabled
+}
+
+fn menu_root_of(reg: &MenuRegistry, id: u64) -> u64 {
+    let mut current = id;
+    while let Some(parent) = reg.items[&current].parent {
+        current = parent;
+    }
+    current
+}
+
+fn menu_preorder(reg: &MenuRegistry, root: u64) -> Vec<u64> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        out.push(id);
+        for &child in reg.items[&id].children.iter().rev() {
+            stack.push(child);
+        }
+    }
+    out
+}
+
+/// Resolve a `>`-joined label path SEMANTICALLY against root items,
+/// labels compared byte-for-byte (the shared-scene contract). A
+/// grouping root's label is a path segment whether or not the
+/// materialization mints a titled row — an inline nested radio group
+/// has none, yet "View>Sort>Date" still lands on Date. `"Sort>Date"`
+/// is option Date inside group Sort; `"Sort"` is the group itself.
+fn menu_resolve_path(reg: &MenuRegistry, roots: &[u64], path: &str) -> Option<u64> {
+    let mut current: Vec<u64> = roots.to_vec();
+    let mut found = None;
+    for seg in path.split('>') {
+        let id = current
+            .iter()
+            .copied()
+            .find(|id| reg.items[id].label == seg)?;
+        found = Some(id);
+        current = reg.items[&id].children.clone();
+    }
+    found
+}
+
+/// Push inherited enablement into the REAL actions: every instance of
+/// every item under `id` carries the AND of its own flag and its
+/// ancestors', so native rendering (grayed rows), native dispatch (a
+/// disabled GSimpleAction refuses activation), accelerators, and the
+/// harness verbs all gate on one state. Grouping `menu` nodes have no
+/// GAction (GMenu cannot gray a submenu header — GTK's spelling, same
+/// semantics: no descendant stays activatable); their reads come from
+/// the registry.
+fn menu_sync_enabled(reg: &MenuRegistry, id: u64) {
+    fn walk(reg: &MenuRegistry, id: u64, inherited: bool) {
+        let item = &reg.items[&id];
+        let effective = inherited && item.enabled;
+        for action in &item.actions {
+            action.set_enabled(effective);
+        }
+        for &child in &item.children {
+            walk(reg, child, effective);
+        }
+    }
+    let inherited = reg.items[&id]
+        .parent
+        .map_or(true, |parent| menu_effective_enabled(reg, parent));
+    walk(reg, id, inherited);
+}
+
+/// Create the GSimpleAction for one item — the shared dispatch path's
+/// one entry: chrome clicks, accelerators, and harness verbs all
+/// activate THIS object, and only its handler emits. `noun` is the
+/// anchor's key path (empty for the bar and live-widget anchors).
+fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::SimpleAction> {
+    use gtk4::glib::prelude::ToVariant;
+    let reg = core.menus.borrow();
+    let item = &reg.items[&id];
+    // GAction names reject underscores; kmi-<id> stays inside the
+    // [a-zA-Z0-9.-] floor for every id.
+    let name = format!("kmi-{id}");
+    debug_assert!(gio::Action::name_is_valid(&name));
+    let menus = core.menus.clone();
+    let sink = core.occurrences.clone();
+    let tag = crate::wire::click_tag(id, noun);
+    match item.kind {
+        MenuItemKind::Action => {
+            let action = gio::SimpleAction::new(&name, None);
+            action.connect_activate(move |_, _| {
+                sink.send_menu_activated_tag(&tag);
+            });
+            Some(action)
+        }
+        MenuItemKind::Toggle => {
+            let action = gio::SimpleAction::new_stateful(&name, None, &item.checked.to_variant());
+            action.connect_activate(move |_, _| {
+                // Post-user mirror FIRST (docs/traps.md): the registry
+                // and every sibling instance move, then the occurrence
+                // goes up — a later rebuild starts from the user's
+                // state.
+                let checked = {
+                    let mut reg = menus.borrow_mut();
+                    let item = reg.items.get_mut(&id).expect("menu items are never removed");
+                    item.checked = !item.checked;
+                    let checked = item.checked;
+                    for action in &item.actions {
+                        action.set_state(&checked.to_variant());
+                    }
+                    checked
+                };
+                sink.send_menu_toggled_tag(&tag, checked);
+            });
+            Some(action)
+        }
+        MenuItemKind::RadioGroup => {
+            let action = gio::SimpleAction::new_stateful(
+                &name,
+                Some(gtk4::glib::VariantTy::INT32),
+                &(item.value as i32).to_variant(),
+            );
+            action.connect_activate(move |_, param| {
+                let Some(index) = param.and_then(|value| value.get::<i32>()) else {
+                    return;
+                };
+                // The choice contract: re-selecting the selected
+                // option is NOT a change and emits nothing. A disabled
+                // option is inert here — GMenu cannot gray one option
+                // of a shared stateful action, so the gate lives in
+                // the handler (GTK's spelling, same semantics).
+                let changed = {
+                    let mut reg = menus.borrow_mut();
+                    let group = &reg.items[&id];
+                    let selectable = (index as usize) < group.children.len()
+                        && group.value as i32 != index
+                        && menu_effective_enabled(&reg, group.children[index as usize]);
+                    if selectable {
+                        let group = reg.items.get_mut(&id).expect("menu items are never removed");
+                        group.value = f64::from(index);
+                        for action in &group.actions {
+                            action.set_state(&index.to_variant());
+                        }
+                    }
+                    selectable
+                };
+                if changed {
+                    sink.send_menu_value_tag(&tag, f64::from(index));
+                }
+            });
+            Some(action)
+        }
+        MenuItemKind::Menu | MenuItemKind::RadioOption | MenuItemKind::Separator => None,
+    }
+}
+
+/// The window-scoped action home: the primary IS a
+/// GtkApplicationWindow, whose own ActionMap exports the "win" prefix;
+/// an auxiliary window is plain, so CreateWindow inserted a group
+/// under the same prefix (only GtkApplicationWindow reserves it).
+fn add_window_action(core: &CoreState, window: u64, action: &gio::SimpleAction) {
+    use gtk4::gio::prelude::ActionMapExt;
+    if window == 0 {
+        core.window
+            .clone()
+            .downcast::<gtk4::ApplicationWindow>()
+            .expect("the primary window is the ApplicationWindow")
+            .add_action(action);
+    } else {
+        core.menu_action_groups
+            .get(&window)
+            .expect("scene validated the window id")
+            .add_action(action);
+    }
+}
+
+/// Give every actionable item under `root` its window-scoped
+/// GSimpleAction. Items keep exactly one bar instance (single-anchor
+/// rule); re-walks after later appends skip the registered ones.
+fn register_bar_actions(core: &CoreState, window: u64, root: u64) {
+    let ids = {
+        let reg = core.menus.borrow();
+        menu_preorder(&reg, root)
+    };
+    for id in ids {
+        let registered = !core.menus.borrow().items[&id].actions.is_empty();
+        if registered {
+            continue;
+        }
+        let Some(action) = make_menu_action(core, id, &[]) else {
+            continue;
+        };
+        add_window_action(core, window, &action);
+        core.menus
+            .borrow_mut()
+            .items
+            .get_mut(&id)
+            .expect("menu items are never removed")
+            .actions
+            .push(action);
+    }
+    let reg = core.menus.borrow();
+    menu_sync_enabled(&reg, root);
+}
+
+/// Give every actionable item under `root` an instance in the
+/// attachment's own group — the one whose tags carry this anchor's
+/// noun (stamped copies each get their own, so the keys ARE the noun).
+fn register_context_actions(core: &mut CoreState, widget: u64, root: u64) {
+    use gtk4::gio::prelude::ActionMapExt;
+    let ids = {
+        let reg = core.menus.borrow();
+        menu_preorder(&reg, root)
+    };
+    let noun = core.context_menus[&widget].noun.clone();
+    for id in ids {
+        if core.context_menus[&widget].actions.contains_key(&id) {
+            continue;
+        }
+        let Some(action) = make_menu_action(core, id, &noun) else {
+            continue;
+        };
+        core.context_menus[&widget].group.add_action(&action);
+        core.context_menus
+            .get_mut(&widget)
+            .expect("attachment exists")
+            .actions
+            .insert(id, action.clone());
+        core.menus
+            .borrow_mut()
+            .items
+            .get_mut(&id)
+            .expect("menu items are never removed")
+            .actions
+            .push(action);
+    }
+    let reg = core.menus.borrow();
+    menu_sync_enabled(&reg, root);
+}
+
+fn flush_menu_section(into: &gio::Menu, section: &mut gio::Menu) {
+    use gtk4::gio::prelude::MenuModelExt;
+    if section.n_items() > 0 {
+        into.append_section(None, &*section);
+        *section = gio::Menu::new();
+    }
+}
+
+/// A radio group's option rows: one shared stateful action, one int
+/// target per option — GMenu renders the radio/checkmark idiom from
+/// exactly this shape.
+fn append_radio_options(reg: &MenuRegistry, group: u64, prefix: &str, into: &gio::Menu) {
+    use gtk4::glib::prelude::ToVariant;
+    for (index, &option) in reg.items[&group].children.iter().enumerate() {
+        let row = gio::MenuItem::new(Some(&reg.items[&option].label), None);
+        row.set_action_and_target_value(
+            Some(&format!("{prefix}.kmi-{group}")),
+            Some(&(index as i32).to_variant()),
+        );
+        into.append_item(&row);
+    }
+}
+
+/// Materialize a child list into a GMenu: plain leaves accumulate in
+/// an anonymous section, a separator starts the next one, a nested
+/// menu cascades as a real submenu, and a nested radio group lands
+/// INLINE as its own labeled section (the ratified compact-grouping
+/// shape; its checkmarks ride the group action's targets).
+fn build_menu_items(reg: &MenuRegistry, children: &[u64], prefix: &str, into: &gio::Menu) {
+    let mut section = gio::Menu::new();
+    for &child in children {
+        let item = &reg.items[&child];
+        match item.kind {
+            MenuItemKind::Separator => flush_menu_section(into, &mut section),
+            MenuItemKind::Action | MenuItemKind::Toggle => {
+                section.append(Some(&item.label), Some(&format!("{prefix}.kmi-{child}")));
+            }
+            MenuItemKind::Menu => {
+                let submenu = gio::Menu::new();
+                build_menu_items(reg, &item.children, prefix, &submenu);
+                section.append_submenu(Some(&item.label), &submenu);
+            }
+            MenuItemKind::RadioGroup => {
+                flush_menu_section(into, &mut section);
+                let options = gio::Menu::new();
+                append_radio_options(reg, child, prefix, &options);
+                into.append_section(Some(&item.label), &options);
+            }
+            MenuItemKind::RadioOption => {
+                unreachable!("scene validated: options live under radio groups")
+            }
+        }
+    }
+    flush_menu_section(into, &mut section);
+}
+
+/// Rebuild a window's GMenu from the registry: catalogs are small and
+/// GMenu items are immutable snapshots, so a full rebuild is the
+/// live-label/topology path (the PopoverMenuBar tracks the model
+/// OBJECT, which stays). Action state never lives in the model, so a
+/// rebuild cannot revert a toggle or radio pick — the post-user-mirror
+/// rule holds by construction.
+fn rebuild_menubar(core: &CoreState, window: u64) {
+    let Some(model) = core.menu_models.get(&window) else {
+        return;
+    };
+    {
+        let reg = core.menus.borrow();
+        model.remove_all();
+        for &root in reg.bars.get(&window).map(Vec::as_slice).unwrap_or(&[]) {
+            let item = &reg.items[&root];
+            let submenu = gio::Menu::new();
+            if item.kind == MenuItemKind::RadioGroup {
+                // A bar-level radio group IS a top-level menu whose
+                // options wear the checkmark idiom.
+                append_radio_options(&reg, root, "win", &submenu);
+            } else {
+                build_menu_items(&reg, &item.children, "win", &submenu);
+            }
+            model.append_submenu(Some(&item.label), &submenu);
+        }
+    }
+    refresh_menu_accels(core, window);
+}
+
+/// Rebuild one context attachment's model from its root list.
+fn rebuild_context(core: &CoreState, widget: u64) {
+    let Some(attachment) = core.context_menus.get(&widget) else {
+        return;
+    };
+    let reg = core.menus.borrow();
+    attachment.model.remove_all();
+    build_menu_items(&reg, &attachment.roots, "kayactx", &attachment.model);
+}
+
+/// Rebuild whatever anchors present the tree `id` lives in — the bar
+/// and/or every stamped attachment (live labels, live topology).
+fn rebuild_menu_anchors(core: &CoreState, id: u64) {
+    let (bar, contexts) = {
+        let reg = core.menus.borrow();
+        let root = menu_root_of(&reg, id);
+        (
+            reg.bar_of.get(&root).copied(),
+            reg.context_of.get(&root).cloned().unwrap_or_default(),
+        )
+    };
+    if let Some(window) = bar {
+        rebuild_menubar(core, window);
+    }
+    for widget in contexts {
+        rebuild_context(core, widget);
+    }
+}
+
+/// The canonical shortcut spelling onto GTK's accelerator syntax:
+/// `primary` IS GTK's <Primary> (kaya adopted the name from GTK), and
+/// named keys map onto their keysym names. Total — the root already
+/// rejected everything outside the floor, and accelerator_parse
+/// validates whatever else a steps script could carry.
+fn menu_accel(spelling: &str) -> Option<String> {
+    let mut accel = String::new();
+    let mut key = None;
+    for part in spelling.split('+') {
+        match part {
+            "primary" => accel.push_str("<Primary>"),
+            "shift" => accel.push_str("<Shift>"),
+            "alt" => accel.push_str("<Alt>"),
+            other => key = Some(other),
+        }
+    }
+    let keysym = match key? {
+        "enter" => "Return".to_owned(),
+        "escape" => "Escape".to_owned(),
+        "delete" => "Delete".to_owned(),
+        "left" => "Left".to_owned(),
+        "right" => "Right".to_owned(),
+        "up" => "Up".to_owned(),
+        "down" => "Down".to_owned(),
+        f if f.len() > 1 && f.starts_with('f') && f[1..].chars().all(|c| c.is_ascii_digit()) => {
+            f.to_uppercase()
+        }
+        k => k.to_owned(),
+    };
+    accel.push_str(&keysym);
+    Some(accel)
+}
+
+/// (Re)register the window catalog's accelerators with the
+/// application: accel display beside the items and key dispatch are
+/// both native. Item ids are globally unique, so registrations never
+/// collide across windows; shortcuts are const-only and items never
+/// removed, so nothing needs unregistering.
+fn refresh_menu_accels(core: &CoreState, window: u64) {
+    let Some(app) = core.app.as_ref() else { return };
+    let reg = core.menus.borrow();
+    for &root in reg.bars.get(&window).map(Vec::as_slice).unwrap_or(&[]) {
+        for id in menu_preorder(&reg, root) {
+            let item = &reg.items[&id];
+            if item.kind != MenuItemKind::Action || item.shortcut.is_empty() {
+                continue;
+            }
+            if let Some(accel) = menu_accel(&item.shortcut) {
+                app.set_accels_for_action(&format!("win.kmi-{id}"), &[&accel]);
+            }
+        }
+    }
+}
+
+/// Materialize the window's menu chrome on first use: the
+/// PopoverMenuBar over the window's GMenu model in a strip above the
+/// content. The window's current child moves into the strip's content
+/// slot, and every later content change routes through
+/// set_window_content.
+fn ensure_menu_strip(core: &mut CoreState, window: u64) {
+    if core.menu_strips.contains_key(&window) {
+        return;
+    }
+    let model = core
+        .menu_models
+        .entry(window)
+        .or_insert_with(gio::Menu::new)
+        .clone();
+    let bar = gtk4::PopoverMenuBar::from_model(Some(&model));
+    let strip = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.set_hexpand(true);
+    content.set_vexpand(true);
+    strip.append(&bar);
+    strip.append(&content);
+    let target = gtk_window(core, window);
+    if let Some(existing) = target.child() {
+        target.set_child(gtk4::Widget::NONE);
+        existing.set_hexpand(true);
+        existing.set_vexpand(true);
+        content.append(&existing);
+    }
+    target.set_child(Some(&strip));
+    core.menu_strips.insert(window, (strip, content));
+}
+
+/// Route a window's content through the menu strip when one exists:
+/// the bar is chrome above the content, so everything that used to be
+/// the window's child — the mounted root, a nav entry's root, the
+/// sections chrome — fills the strip's content slot instead. No strip
+/// means no menus were declared, and the window keeps GTK's own child
+/// slot.
+fn set_window_content(core: &CoreState, window: u64, child: Option<&gtk4::Widget>) {
+    if let Some((_, content)) = core.menu_strips.get(&window) {
+        while let Some(old) = content.first_child() {
+            content.remove(&old);
+        }
+        if let Some(widget) = child {
+            // Expansion is opt-in inside a Box (a bare window child
+            // fills by construction): without it the mounted root
+            // hugs and every grow weight divides nothing.
+            widget.set_hexpand(true);
+            widget.set_vexpand(true);
+            content.append(widget);
+        }
+    } else {
+        gtk_window(core, window).set_child(child);
+    }
+}
+
+/// Attach a context catalog root to a live or stamped widget: a
+/// GtkPopoverMenu over the attachment's own model, opened by the
+/// platform's own gesture (right-click, button 3), its actions in a
+/// per-anchor group so each stamped copy's occurrences carry that
+/// copy's key path.
+fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>) {
+    if !core.context_menus.contains_key(&widget) {
+        let anchor = core
+            .widgets
+            .get(&WidgetId(widget))
+            .expect("scene validated the anchor id")
+            .widget();
+        let model = gio::Menu::new();
+        let popover = gtk4::PopoverMenu::from_model(Some(&model));
+        popover.set_parent(&anchor);
+        let group = gio::SimpleActionGroup::new();
+        anchor.insert_action_group("kayactx", Some(&group));
+        // The platform's own gesture: right-click pops the catalog at
+        // the pointer and takes the open-context claim.
+        let gesture = gtk4::GestureClick::new();
+        gesture.set_button(gtk4::gdk::BUTTON_SECONDARY);
+        let open = core.open_context.clone();
+        let popover_for_press = popover.clone();
+        gesture.connect_pressed(move |_, _, x, y| {
+            popover_for_press.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                x as i32, y as i32, 1, 1,
+            )));
+            *open.borrow_mut() = Some(widget);
+            popover_for_press.popup();
+        });
+        anchor.add_controller(gesture);
+        // Chrome dismissal (Esc, outside click) releases the claim;
+        // menu_activate clears it BEFORE its popdown, so this no-ops
+        // on the harness path. The Rc keeps this closure off CORE —
+        // popdown can run while a stage closure holds that borrow.
+        let open = core.open_context.clone();
+        popover.connect_closed(move |_| {
+            let mut open = open.borrow_mut();
+            if *open == Some(widget) {
+                *open = None;
+            }
+        });
+        core.context_menus.insert(
+            widget,
+            GtkContextMenu {
+                roots: Vec::new(),
+                noun,
+                model,
+                popover,
+                group,
+                actions: HashMap::new(),
+            },
+        );
+    }
+    core.context_menus
+        .get_mut(&widget)
+        .expect("attachment exists")
+        .roots
+        .push(item);
+    core.menus
+        .borrow_mut()
+        .context_of
+        .entry(item)
+        .or_default()
+        .push(widget);
+    register_context_actions(core, widget, item);
+    rebuild_context(core, widget);
+}
+
+/// The widget id behind a harness target — the reverse of the
+/// kind#index registries, by object identity (the registries hold the
+/// same native objects the widget map does).
+fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
+    use crate::harness::{resolve, TargetKind as K};
+    let widget: gtk4::Widget = match t.kind {
+        K::Button => core.buttons[resolve(t.index, core.buttons.len())].clone().upcast(),
+        K::Checkbox => core.checkboxes[resolve(t.index, core.checkboxes.len())].clone().upcast(),
+        K::Slider => core.sliders[resolve(t.index, core.sliders.len())].clone().upcast(),
+        K::Label => core.labels[resolve(t.index, core.labels.len())].clone().upcast(),
+        K::Column => core.columns[resolve(t.index, core.columns.len())].clone().upcast(),
+        K::Row => core.rows[resolve(t.index, core.rows.len())].clone().upcast(),
+        K::Image => core.images[resolve(t.index, core.images.len())].clone().upcast(),
+        K::Progress => core.progresses[resolve(t.index, core.progresses.len())].clone().upcast(),
+        K::Scroll => core.scrolls[resolve(t.index, core.scrolls.len())].clone().upcast(),
+        K::Select => core.selects[resolve(t.index, core.selects.len())].clone().upcast(),
+        K::Radio => core.radios[resolve(t.index, core.radios.len())].clone().upcast(),
+        K::Grid => core.grids[resolve(t.index, core.grids.len())].clone().upcast(),
+        // The harness rejects editable text before the stage sees it
+        // (their native context menus are dress).
+        K::Entry | K::Textarea => {
+            panic!("kaya: editable text is not a context anchor (v1)")
+        }
+    };
+    core.widgets
+        .iter()
+        .find_map(|(id, native)| (native.widget() == widget).then_some(id.0))
+        .expect("kaya: context target is not a live widget")
+}
+
+/// The REAL activation route for a resolved item: the GSimpleAction
+/// (and the option index for a radio pick). Grouping nodes and
+/// separators have none — chrome opens or ignores them, and so does
+/// the verb.
+fn menu_activation_route(
+    reg: &MenuRegistry,
+    item: u64,
+    attachment: Option<&GtkContextMenu>,
+) -> Option<(gio::SimpleAction, Option<i32>)> {
+    let instance = |id: u64| match attachment {
+        Some(cm) => cm.actions.get(&id).cloned(),
+        None => reg.items[&id].actions.first().cloned(),
+    };
+    match reg.items[&item].kind {
+        MenuItemKind::Action | MenuItemKind::Toggle => instance(item).map(|a| (a, None)),
+        MenuItemKind::RadioOption => {
+            let group = reg.items[&item]
+                .parent
+                .expect("scene validated option parentage");
+            let index = reg.items[&group]
+                .children
+                .iter()
+                .position(|c| *c == item)
+                .expect("options list under their group") as i32;
+            instance(group).map(|a| (a, Some(index)))
+        }
+        MenuItemKind::Menu | MenuItemKind::RadioGroup | MenuItemKind::Separator => None,
     }
 }
 
@@ -1082,6 +1783,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
         ApplyOp::Destroy { id } => {
+            // A destroyed anchor takes its context attachment with it
+            // (menu ITEMS are never destroyed): the popover unparents
+            // BEFORE the widget leaves its container, this
+            // attachment's action instances leave the registry's sync
+            // lists, and a dangling open-context claim is released —
+            // a Remove activation destroys its own anchor (the WinUI
+            // lifecycle precedent, docs/traps.md).
+            if let Some(attachment) = core.context_menus.remove(&id.0) {
+                {
+                    let mut open = core.open_context.borrow_mut();
+                    if *open == Some(id.0) {
+                        *open = None;
+                    }
+                }
+                let mut reg = core.menus.borrow_mut();
+                for (item, action) in &attachment.actions {
+                    if let Some(state) = reg.items.get_mut(item) {
+                        state.actions.retain(|a| a != action);
+                    }
+                }
+                for widgets in reg.context_of.values_mut() {
+                    widgets.retain(|w| *w != id.0);
+                }
+                attachment.popover.unparent();
+            }
             let widget = core
                 .widgets
                 .remove(&id)
@@ -1164,6 +1890,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.window_veto.clone(),
                 core.occurrences.clone(),
             );
+            // Window-scoped menu actions for a PLAIN window: the
+            // primary is a GtkApplicationWindow whose own ActionMap
+            // exports "win"; an auxiliary needs the group inserted by
+            // hand under the same prefix (safe here — only
+            // GtkApplicationWindow reserves it).
+            let actions = gio::SimpleActionGroup::new();
+            aux.insert_action_group("win", Some(&actions));
+            core.menu_action_groups.insert(window.0, actions);
             core.aux_windows.insert(window.0, aux);
         }
         ApplyOp::DestroyWindow { window } => {
@@ -1193,6 +1927,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.section_chrome.remove(&window.0);
             core.selected_sections.remove(&window.0);
             core.sections_presentation.remove(&window.0);
+            // ... and its menu chrome. The registry keeps the items
+            // (they are never destroyed); only this window's bar list
+            // and materialization go.
+            core.menu_models.remove(&window.0);
+            core.menu_strips.remove(&window.0);
+            core.menu_action_groups.remove(&window.0);
+            {
+                let mut reg = core.menus.borrow_mut();
+                reg.bars.remove(&window.0);
+                reg.bar_of.retain(|_, w| *w != window.0);
+            }
         }
         ApplyOp::PushEntry { window, entry } => {
             // Materializes covered/incoming: on the stack now, the
@@ -1294,6 +2039,168 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (p, v) => unreachable!("scene validated section prop {p:?}/{v:?}"),
             }
         }
+        ApplyOp::MenuItemCreate { item, kind } => {
+            // Registry only: actions and chrome materialize at anchor
+            // time, when the item's window (or anchor widget) is
+            // known.
+            core.menus.borrow_mut().items.insert(
+                item.0,
+                MenuItemState {
+                    kind,
+                    label: String::new(),
+                    enabled: true,
+                    checked: false,
+                    value: 0.0,
+                    primary: false,
+                    shortcut: String::new(),
+                    parent: None,
+                    children: Vec::new(),
+                    actions: Vec::new(),
+                },
+            );
+        }
+        ApplyOp::MenuItemAppend { parent, child } => {
+            {
+                let mut reg = core.menus.borrow_mut();
+                reg.items
+                    .get_mut(&child.0)
+                    .expect("scene validated the child id")
+                    .parent = Some(parent.0);
+                reg.items
+                    .get_mut(&parent.0)
+                    .expect("scene validated the parent id")
+                    .children
+                    .push(child.0);
+            }
+            // Append-at-any-time: a subtree landing under an anchored
+            // root materializes NOW (the rework path appends Publish
+            // under the retained Document and the steps activate it
+            // with no further nudge).
+            let (bar, contexts) = {
+                let reg = core.menus.borrow();
+                let root = menu_root_of(&reg, child.0);
+                (
+                    reg.bar_of.get(&root).copied(),
+                    reg.context_of.get(&root).cloned().unwrap_or_default(),
+                )
+            };
+            if let Some(window) = bar {
+                register_bar_actions(core, window, child.0);
+            }
+            for widget in &contexts {
+                register_context_actions(core, *widget, child.0);
+            }
+            rebuild_menu_anchors(core, child.0);
+        }
+        ApplyOp::MenubarAppend { window, item } => {
+            {
+                let mut reg = core.menus.borrow_mut();
+                reg.bars.entry(window.0).or_default().push(item.0);
+                reg.bar_of.insert(item.0, window.0);
+            }
+            ensure_menu_strip(core, window.0);
+            register_bar_actions(core, window.0, item.0);
+            rebuild_menubar(core, window.0);
+        }
+        ApplyOp::ContextAttach { widget, item } => {
+            context_attach(core, widget.0, item.0, Vec::new());
+        }
+        ApplyOp::ContextAttachNode { widget, item, path } => {
+            // The stamped copy's key path IS the noun: baked into the
+            // attachment's action tags (the on_click_node encoding).
+            context_attach(core, widget.0, item.0, path);
+        }
+        ApplyOp::SetMenuProp { item, prop, value } => {
+            use gtk4::glib::prelude::ToVariant;
+            match (prop, &value) {
+                (MenuProp::Label, Value::Str(label)) => {
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .label = label.clone();
+                    // Labels are live: whatever chrome presents the
+                    // tree re-renders (GMenu snapshots are immutable).
+                    rebuild_menu_anchors(core, item.0);
+                }
+                (MenuProp::Enabled, Value::Bool(on)) => {
+                    {
+                        let mut reg = core.menus.borrow_mut();
+                        reg.items
+                            .get_mut(&item.0)
+                            .expect("scene validated the item id")
+                            .enabled = *on;
+                    }
+                    // The inherited AND lands on every descendant's
+                    // REAL action; no model rebuild — enablement is
+                    // live action state. Enablement writes never emit.
+                    let reg = core.menus.borrow();
+                    menu_sync_enabled(&reg, item.0);
+                }
+                (MenuProp::Checked, Value::Bool(on)) => {
+                    // QUIET (the echo doctrine): set_state never fires
+                    // activate, so the write configures the native
+                    // checkmark without an occurrence.
+                    let mut reg = core.menus.borrow_mut();
+                    let state = reg
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id");
+                    state.checked = *on;
+                    for action in &state.actions {
+                        action.set_state(&on.to_variant());
+                    }
+                }
+                (MenuProp::Value, Value::F64(index)) => {
+                    // QUIET, same as checked (the choice contract's
+                    // programmatic side).
+                    let mut reg = core.menus.borrow_mut();
+                    let state = reg
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id");
+                    state.value = *index;
+                    for action in &state.actions {
+                        action.set_state(&(*index as i32).to_variant());
+                    }
+                }
+                (MenuProp::Primary, Value::Bool(on)) => {
+                    // The phone-promotion hint: INERT on desktop by
+                    // design (DESIGN.md, Menus) — recorded, never
+                    // materialized.
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .primary = *on;
+                }
+                (MenuProp::Shortcut, Value::Str(spelling)) => {
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .shortcut = spelling.clone();
+                    let window = {
+                        let reg = core.menus.borrow();
+                        reg.bar_of.get(&menu_root_of(&reg, item.0)).copied()
+                    };
+                    if let Some(window) = window {
+                        refresh_menu_accels(core, window);
+                    }
+                }
+                (MenuProp::Icon, Value::Blob(_)) => {
+                    // Day-one slot: accepted; GTK's menu dress carries
+                    // no item icons and phone promotion is not this
+                    // platform (DESIGN.md, Menus — ignored where the
+                    // dress has none).
+                }
+                (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
+            }
+        }
+
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps
             // the vocabulary 1:1 (buttons in order, cancel-button
@@ -1690,17 +2597,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     refresh_nav(core, host);
                 }
             } else if window.0 == 0 {
-                core.window.set_child(Some(&root_widget));
+                set_window_content(core, 0, Some(&root_widget));
                 core.window_roots.insert(0, root_widget);
             } else {
                 use gtk4::prelude::GtkWindowExt;
-                let aux = core
-                    .aux_windows
-                    .get(&window.0)
-                    .expect("scene validated the window id");
-                aux.set_child(Some(&root_widget));
+                set_window_content(core, window.0, Some(&root_widget));
                 // Mounting presents.
-                aux.present();
+                core.aux_windows
+                    .get(&window.0)
+                    .expect("scene validated the window id")
+                    .present();
                 core.window_roots.insert(window.0, root_widget);
             }
         }
@@ -1835,6 +2741,12 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     buttons
                 },
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
+                menus: Rc::new(RefCell::new(MenuRegistry::default())),
+                menu_models: HashMap::new(),
+                menu_strips: HashMap::new(),
+                menu_action_groups: HashMap::new(),
+                context_menus: HashMap::new(),
+                open_context: Rc::new(RefCell::new(None)),
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
                     {
@@ -1935,6 +2847,194 @@ impl GtkStage {
 }
 
 impl crate::harness::Stage for GtkStage {
+    fn menu_activate(&self, path: &str) {
+        let path = path.to_owned();
+        Self::on_main(move |core| {
+            use gtk4::gio::prelude::ActionExt;
+            use gtk4::glib::prelude::ToVariant;
+            // An OPEN context menu owns resolution EXCLUSIVELY while
+            // presented — no bar fallback (the interpreters' rule).
+            let open = *core.open_context.borrow();
+            if let Some(anchor) = open {
+                let attachment = core
+                    .context_menus
+                    .get(&anchor)
+                    .expect("kaya: the open context menu lost its attachment");
+                let route = {
+                    let reg = core.menus.borrow();
+                    let item = menu_resolve_path(&reg, &attachment.roots, &path)
+                        .unwrap_or_else(|| panic!("kaya: no such context item {path:?}"));
+                    menu_activation_route(&reg, item, Some(attachment))
+                };
+                // A leaf fires exactly once and the menu closes: the
+                // claim clears BEFORE popdown (the closed handler's
+                // equality check no-ops), and the REAL per-anchor
+                // action carries the noun.
+                *core.open_context.borrow_mut() = None;
+                attachment.popover.popdown();
+                match route {
+                    Some((action, None)) => action.activate(None),
+                    Some((action, Some(index))) => action.activate(Some(&index.to_variant())),
+                    None => {}
+                }
+                return;
+            }
+            // The bar route: resolve SEMANTICALLY over the model tree
+            // (a grouping root's label is a path segment whether or
+            // not materialization mints a titled row), then drive the
+            // REAL window-scoped GAction — the same object bar chrome
+            // and the accelerator hit. A disabled action refuses the
+            // activation natively, exactly as its grayed row would.
+            let route = {
+                let reg = core.menus.borrow();
+                let roots = reg.bars.get(&0).cloned().unwrap_or_default();
+                let item = menu_resolve_path(&reg, &roots, &path)
+                    .unwrap_or_else(|| panic!("kaya: no such menu item {path:?}"));
+                menu_activation_route(&reg, item, None)
+            };
+            match route {
+                Some((action, None)) => action.activate(None),
+                Some((action, Some(index))) => action.activate(Some(&index.to_variant())),
+                None => {}
+            }
+        });
+    }
+
+    fn context_open(&self, t: crate::harness::Target) {
+        Self::on_main(move |core| {
+            let anchor = context_anchor_id(core, t);
+            let attachment = core
+                .context_menus
+                .get(&anchor)
+                .unwrap_or_else(|| panic!("kaya: no context menu attached to {t:?}"));
+            // The claim, then the REAL chrome: the same popover the
+            // right-click gesture presents.
+            *core.open_context.borrow_mut() = Some(anchor);
+            attachment.popover.popup();
+        });
+    }
+
+    fn menu_count(&self) -> usize {
+        Self::on_main(|core| {
+            use gtk4::gio::prelude::MenuModelExt;
+            // The REAL materialized bar: the GMenu model the
+            // PopoverMenuBar renders — its top-level submenus ARE the
+            // catalog's grouping roots.
+            core.menu_models
+                .get(&0)
+                .map(|model| model.n_items() as usize)
+                .unwrap_or(0)
+        })
+    }
+
+    fn menu_state(&self, path: &str, aspect: crate::harness::MenuAspect) -> String {
+        let path = path.to_owned();
+        Self::on_main(move |core| {
+            use crate::harness::MenuAspect;
+            use gtk4::gio::prelude::ActionExt;
+            // TOTAL, the try_resolve style: a missing item is a
+            // retryable miss — expect_menu doubles as the wait for a
+            // catalog rebuild — never a panic. The OPEN context menu
+            // owns resolution exclusively while presented.
+            let reg = core.menus.borrow();
+            let open = *core.open_context.borrow();
+            let roots = match open {
+                Some(anchor) => match core.context_menus.get(&anchor) {
+                    Some(attachment) => attachment.roots.clone(),
+                    None => return "no such item".to_owned(),
+                },
+                None => reg.bars.get(&0).cloned().unwrap_or_default(),
+            };
+            let Some(id) = menu_resolve_path(&reg, &roots, &path) else {
+                return "no such item".to_owned();
+            };
+            let item = &reg.items[&id];
+            match aspect {
+                MenuAspect::Enablement => {
+                    // The REAL action's flag where one exists (it
+                    // carries the inherited AND); grouping `menu`
+                    // nodes and radio options have no GAction, so the
+                    // registry's same AND answers for them.
+                    let enabled = match item.actions.first() {
+                        Some(action) => action.is_enabled(),
+                        None => menu_effective_enabled(&reg, id),
+                    };
+                    if enabled { "enabled" } else { "disabled" }.to_owned()
+                }
+                MenuAspect::Checkedness => {
+                    // The stateful action's own bool — what GMenu
+                    // renders as the checkmark.
+                    match item
+                        .actions
+                        .first()
+                        .and_then(|action| action.state())
+                        .and_then(|state| state.get::<bool>())
+                    {
+                        Some(true) => "checked".to_owned(),
+                        Some(false) => "unchecked".to_owned(),
+                        None => "not a toggle".to_owned(),
+                    }
+                }
+                MenuAspect::Value => {
+                    // The group action's int state — the target GMenu
+                    // marks as the selected radio option.
+                    match item
+                        .actions
+                        .first()
+                        .and_then(|action| action.state())
+                        .and_then(|state| state.get::<i32>())
+                    {
+                        Some(index) => format!("value {index}"),
+                        None => "not a radio group".to_owned(),
+                    }
+                }
+            }
+        })
+    }
+
+    fn shortcut(&self, spelling: &str) {
+        let spelling = spelling.to_owned();
+        Self::on_main(move |core| {
+            // The platform's own table: the application accelerator
+            // map that set_accels_for_action filled — the exact table
+            // GtkApplicationWindow's accel controller walks for a
+            // real key press. A chord no catalog action owns is a
+            // SILENT no-op (the dress must never swallow it — the
+            // interpreters' rule), which the map gates structurally:
+            // only catalog actions are ever registered in it.
+            let Some(app) = core.app.as_ref() else { return };
+            let Some(accel) = menu_accel(&spelling) else { return };
+            let Some(want) = gtk4::accelerator_parse(&accel) else {
+                return;
+            };
+            for description in app.list_action_descriptions() {
+                let owns = app
+                    .accels_for_action(&description)
+                    .iter()
+                    .any(|a| gtk4::accelerator_parse(a) == Some(want));
+                if !owns {
+                    continue;
+                }
+                // The action machinery end to end: resolve the
+                // detailed name through the owning window's muxer —
+                // where the accel controller lands a key event — so
+                // the SAME GSimpleAction handler emits the SAME
+                // menu_activated a direct activation would.
+                let target = description
+                    .strip_prefix("win.kmi-")
+                    .and_then(|id| id.parse::<u64>().ok())
+                    .and_then(|id| {
+                        let reg = core.menus.borrow();
+                        reg.bar_of.get(&menu_root_of(&reg, id)).copied()
+                    })
+                    .map(|window| gtk_window(core, window))
+                    .unwrap_or_else(|| core.window.clone());
+                let _ = target.activate_action(&description, None);
+                return;
+            }
+        });
+    }
+
     fn click(&self, t: crate::harness::Target) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.buttons.len());

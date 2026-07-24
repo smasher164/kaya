@@ -11,6 +11,7 @@ use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encodeValue", "encodeValues", "encodeVariantSchemas", "beginRecord", "endRecord", "ParseOccurrence", "BlobHandle",
+    "CanonicalizeShortcut", "shortcutNamedKeys",
     "break", "case", "chan", "const", "continue", "default", "defer", "else", "fallthrough",
     "for", "func", "go", "goto", "if", "import", "interface", "map", "package", "range",
     "return", "select", "struct", "switch", "type", "var",
@@ -50,6 +51,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("import (");
     c.line("\t\"encoding/binary\"");
     c.line("\t\"math\"");
+    c.line("\t\"strconv\"");
+    c.line("\t\"strings\"");
     c.line(")");
     c.line("");
     c.line("const (");
@@ -321,6 +324,127 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
         c.line("\treturn endRecord(b)");
         c.line("}");
+    }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // TxSetMenuShortcut routes through it, so no call site can bypass
+    // canonicalization.
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\": true"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line("");
+    c.line(&format!("var shortcutNamedKeys = map[string]bool{{{named_keys}}}"));
+    c.line("");
+    c.line("// CanonicalizeShortcut canonicalizes a shortcut spelling to the wire");
+    c.line("// form: lowercase '+'-joined tokens, modifiers ordered primary,");
+    c.line("// shift, alt, then one key (a-z, 0-9, or the closed named set).");
+    c.line("// Accepts ASCII case variants and any modifier order; panics on");
+    c.line("// whitespace, empty tokens, repeated modifiers, aliases");
+    c.line("// (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY");
+    c.line("// stays at the core: escape, shift-only and bare alphanumerics, and");
+    c.line("// the reserved floor are validated there, on the canonical spelling,");
+    c.line("// never rewritten.");
+    c.line("func CanonicalizeShortcut(spelling string) string {");
+    c.line("\tif spelling == \"\" {");
+    c.line("\t\tpanic(\"kaya: shortcut is empty\")");
+    c.line("\t}");
+    c.line("\tif strings.ContainsAny(spelling, \" \\t\\n\\v\\f\\r\") {");
+    c.line("\t\tpanic(\"kaya: shortcut \" + strconv.Quote(spelling) + \" contains whitespace\")");
+    c.line("\t}");
+    c.line("\tparts := strings.Split(strings.ToLower(spelling), \"+\")");
+    c.line("\tfor _, p := range parts {");
+    c.line("\t\tif p == \"\" {");
+    c.line("\t\t\tpanic(\"kaya: shortcut \" + strconv.Quote(spelling) + \" has an empty token\")");
+    c.line("\t\t}");
+    c.line("\t}");
+    c.line("\tmods, key := parts[:len(parts)-1], parts[len(parts)-1]");
+    c.line("\tvar hasPrimary, hasShift, hasAlt bool");
+    c.line("\tfor _, m := range mods {");
+    c.line("\t\tvar slot *bool");
+    c.line("\t\tswitch m {");
+    c.line("\t\tcase \"primary\":");
+    c.line("\t\t\tslot = &hasPrimary");
+    c.line("\t\tcase \"shift\":");
+    c.line("\t\t\tslot = &hasShift");
+    c.line("\t\tcase \"alt\":");
+    c.line("\t\t\tslot = &hasAlt");
+    c.line("\t\tdefault:");
+    c.line("\t\t\tpanic(\"kaya: shortcut \" + strconv.Quote(spelling) + \" has an unknown modifier \" + strconv.Quote(m) + \" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\")");
+    c.line("\t\t}");
+    c.line("\t\tif *slot {");
+    c.line("\t\t\tpanic(\"kaya: shortcut \" + strconv.Quote(spelling) + \" repeats modifier \" + strconv.Quote(m))");
+    c.line("\t\t}");
+    c.line("\t\t*slot = true");
+    c.line("\t}");
+    c.line("\talnum := len(key) == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9'))");
+    c.line("\tif !alnum && !shortcutNamedKeys[key] {");
+    c.line("\t\tpanic(\"kaya: shortcut \" + strconv.Quote(spelling) + \" key \" + strconv.Quote(key) + \" is outside the floor (one of a-z, 0-9, or the closed named set)\")");
+    c.line("\t}");
+    c.line("\tout := \"\"");
+    c.line("\tif hasPrimary {");
+    c.line("\t\tout += \"primary+\"");
+    c.line("\t}");
+    c.line("\tif hasShift {");
+    c.line("\t\tout += \"shift+\"");
+    c.line("\t}");
+    c.line("\tif hasAlt {");
+    c.line("\t\tout += \"alt+\"");
+    c.line("\t}");
+    c.line("\treturn out + key");
+    c.line("}");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let pc = camel(prop);
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => (
+                param(prop),
+                "string",
+                format!("encodeValue(b, CanonicalizeShortcut({}))", param(prop)),
+            ),
+            crate::PropKind::Str => (param(prop), "string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Bool => (param(prop), "bool", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::F64 => (param(prop), "float64", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "uint64",
+                "encodeValue(b, BlobHandle(handle))".to_string(),
+            ),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line(&format!("// TxSetMenu{pc}: set_menu_prop with a constant {prop} value, canonicalized"));
+            c.line("// here (the one binding-tier shortcut parser — no call site bypasses it).");
+        } else {
+            c.line(&format!("// TxSetMenu{pc}: set_menu_prop with a constant {prop} value."));
+        }
+        c.line(&format!("func TxSetMenu{pc}(item uint64, {p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetMenuProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, item)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Mprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("// TxBindMenu{pc}: set_menu_prop with a signal-bound {prop} value."));
+            c.line(&format!("func TxBindMenu{pc}(item uint64, signalID uint64) []byte {{"));
+            c.line("\tb := beginRecord(txSetMenuProp)");
+            c.line("\tb = binary.LittleEndian.AppendUint64(b, item)");
+            c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Mprop{pc})"));
+            c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+            c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+            c.line("\treturn endRecord(b)");
+            c.line("}");
+        }
     }
     c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");

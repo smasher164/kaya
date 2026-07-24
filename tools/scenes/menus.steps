@@ -1,0 +1,75 @@
+# One command catalog, adapted by each host. The desktop backends expose
+# all three top-level groups in native menu chrome; phones put the same
+# catalog in overflow and initially promote File>Share into the top bar.
+expect label#0 "ready"
+expect_menus 3
+expect_menu "File>Save" disabled
+expect_menu "File>Export" disabled
+expect_menu "View>Details" unchecked
+expect_menu "Sort" value 0
+
+# The two stateful contracts use one creator-scoped occurrence path
+# each. The Rust depth guest deliberately does not write their bound
+# signals back: the native control owns user state.
+menu_activate "View>Details"
+expect_menu "View>Details" checked
+expect label#0 "details on"
+menu_activate "Sort>Date"
+expect_menu "Sort" value 1
+expect label#0 "sorted date"
+
+# Enablement is a live bound property. File owns the same signal as its
+# Export leaf, so this unrelated prop mutation rebuilds the catalog.
+# The stateful controls must survive from the backend's user-state
+# mirror, and the inherited disabled state must lift from Save.
+click button#0
+expect_menu "File>Save" enabled
+expect_menu "File>Export" enabled
+expect_menu "View>Details" checked
+expect_menu "Sort" value 1
+
+# Direct activation uses the action's creator-scoped occurrence.
+menu_activate "File>Save"
+expect label#0 "saved"
+
+# Programmatic checked/value writes are configuration and stay quiet.
+# This is the one deliberate absence-settle: the reset also writes the
+# frozen "ready" sentinel, which an illicit toggle/radio echo would
+# overwrite with "details off"/"sorted name".
+click button#1
+expect_menu "View>Details" unchecked
+expect_menu "Sort" value 0
+settle 700
+expect label#0 "ready"
+
+# The shortcut must traverse the platform dispatch table and land in
+# the exact same Save handler as menu activation. Starting from "ready"
+# makes this observation a delivery fence rather than a pre-satisfied
+# assertion that can let a late accelerator bleed into the next step.
+shortcut "primary+s"
+expect label#0 "saved"
+
+# Context commands scope the same vocabulary to a noun. The second
+# target is a stamped row, so its occurrence carries both collection
+# keys.
+context_open label#1
+menu_activate "Rename"
+expect label#0 "renamed"
+context_open label#2
+menu_activate "Remove"
+expect label#0 "removed g2/a"
+
+# Label and topology mutate in a later transaction: File is renamed,
+# Publish appends to that retained parent, Tools becomes a fourth bar
+# root, and the primary hint moves from Share to Publish. This proves
+# every backend's live label/append path and promotion recomputation.
+click button#2
+expect_menus 4
+expect_menu "Document>Publish" enabled
+expect_menu "Tools>Inspect" enabled
+
+# No More-open step precedes this: on phones the same helper consumed by
+# the rendered toolbar must now surface the late primary. Desktop
+# resolves the same semantic path through its full catalog.
+menu_activate "Document>Publish"
+expect label#0 "shared"

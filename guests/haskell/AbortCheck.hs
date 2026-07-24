@@ -58,4 +58,35 @@ main = do
   -- stored back only on commit), but appDerived is internal to
   -- KayaApp, so there is nothing to observe here — not pinned.
 
+  -- The menu surface: the record stream is internal to the Build
+  -- monad, so the record-level emission asserts live in the desktop
+  -- fixtures (ledgered for Haskell). What this fixture pins is that
+  -- the constructors run through the emitter — a committing buildTx
+  -- submits the catalog without error (a constructor that emitted
+  -- nothing could not fail here, but one that emits garbage dies in
+  -- the marshaller) — that the binding's ONE shortcut parser rejects
+  -- aliases (the throw crosses buildTx's evaluate/submit barrier,
+  -- aborting the transaction by purity), and that an aborted append
+  -- propagates and leaves the app usable (append-at-any-time: the
+  -- retained handle reopens through menuAppend).
+  file <- buildTx app $ do
+    f <- menu "File" [] [item "Save" [IShortcut "PRIMARY+S"]]
+    window 0 [WMenus [pure f]]
+    return f
+
+  badShortcut <-
+    try $ buildTx app $ menuAppend file [item "Bad" [IShortcut "ctrl+s"]]
+  case (badShortcut :: Either SomeException ()) of
+    Right () -> failWith "an alias shortcut must die in the binding's one parser"
+    Left _ -> return ()
+
+  menuAborted <-
+    try $ buildTx app $ do
+      menuAppend file [item "Doomed" []]
+      error "handler bug"
+  case (menuAborted :: Either SomeException ()) of
+    Right () -> failWith "menu abort: buildTx must propagate"
+    Left _ -> return ()
+  buildTx app (menuAppend file [item "Publish" [IPrimary True]])
+
   putStrLn "haskell abort check: OK"

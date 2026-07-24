@@ -156,6 +156,117 @@ pub(crate) fn section_prop_variants(
     kaya::spec::SECTION_PROPS
 }
 
+/// Menu-item properties — the fifth typed surface table (DESIGN.md,
+/// Menus). NOT plain duos: every prop gets a const setter, but only
+/// the menu_prop_bindable ones get a signal binder — icon, primary,
+/// and shortcut are const-only and the wire rejects SOURCE_SIGNAL on
+/// them at the root. The shortcut const setter is the one place the
+/// generated canonicalizer is invoked, so no call site can bypass it.
+pub(crate) fn menu_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::MENU_PROPS
+}
+
+/// Which menu props accept SOURCE_SIGNAL: label, enabled, checked,
+/// value. Mirrors scene.rs's is_bindable_menu_prop (the root guard —
+/// a drifted emitter dies at the root, never silently). The match is
+/// exhaustive over today's table, so a NEW menu prop fails generation
+/// loudly until its bindability is declared here in lockstep with the
+/// scene.
+pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
+    match prop {
+        "label" | "enabled" | "checked" | "value" => true,
+        "icon" | "primary" | "shortcut" => false,
+        other => panic!(
+            "menu prop {other:?}: declare its signal bindability here, in \
+             lockstep with scene.rs is_bindable_menu_prop"
+        ),
+    }
+}
+
+/// The shortcut spelling floor shared by every generated canonicalizer
+/// (DESIGN.md, Menus): the portable modifiers in canonical order, and
+/// the closed named-key set beyond a-z/0-9. f1..f12 are expanded so
+/// every binding does flat membership — no per-language function-key
+/// parsing to drift. `escape` is deliberately IN the set: the binding
+/// tier recognizes and canonicalizes it, and the CORE rejects it with
+/// the root error (recognized-but-rejected). Policy in general —
+/// escape, shift-only and bare alphanumerics, the reserved floor —
+/// lives at the core, which validates the canonical form and never
+/// rewrites; the canonicalizer owns SPELLING only.
+// (The modifier list is consumed by the reference below and, baked
+// into control flow, by every emitter's transcription — test-only from
+// rustc's point of view, hence the cfg_attr.)
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const SHORTCUT_MODIFIERS: &[&str] = &["primary", "shift", "alt"];
+pub(crate) const SHORTCUT_NAMED_KEYS: &[&str] = &[
+    "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5",
+    "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+];
+
+/// The normative canonicalizer every emitter transcribes into its
+/// language, kept here so the algorithm has ONE statement and the test
+/// table below is the shared vector set. Accepts ASCII case variants
+/// and any modifier order before the final key; emits lowercase
+/// canonical `primary`,`shift`,`alt`,key. Rejects whitespace, empty
+/// tokens, repeated modifiers, aliases (ctrl/cmd/option are just
+/// unknown modifiers), and unknown or multiple or missing keys (a
+/// missing key surfaces as a non-key final token). It does NOT reject
+/// escape, shift-only or bare alphanumerics, or the reserved floor:
+/// that is root policy, validated by the core on the canonical form.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn canonicalize_shortcut_reference(spelling: &str) -> Result<String, String> {
+    if spelling.is_empty() {
+        return Err("kaya: shortcut is empty".to_string());
+    }
+    if spelling.chars().any(|ch| " \t\n\x0b\x0c\r".contains(ch)) {
+        return Err(format!("kaya: shortcut \"{spelling}\" contains whitespace"));
+    }
+    let lower = spelling.to_lowercase();
+    let parts: Vec<&str> = lower.split('+').collect();
+    if parts.iter().any(|p| p.is_empty()) {
+        return Err(format!("kaya: shortcut \"{spelling}\" has an empty token"));
+    }
+    let (mods, key) = parts.split_at(parts.len() - 1);
+    let key = key[0];
+    let mut seen: Vec<&str> = Vec::new();
+    for &m in mods {
+        if !SHORTCUT_MODIFIERS.contains(&m) {
+            return Err(format!(
+                "kaya: shortcut \"{spelling}\" has an unknown modifier \"{m}\" \
+                 (the portable modifiers are primary, shift, alt; aliases like \
+                 ctrl, cmd, and option are not accepted)"
+            ));
+        }
+        if seen.contains(&m) {
+            return Err(format!(
+                "kaya: shortcut \"{spelling}\" repeats modifier \"{m}\""
+            ));
+        }
+        seen.push(m);
+    }
+    let alnum = key.len() == 1
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    if !alnum && !SHORTCUT_NAMED_KEYS.contains(&key) {
+        return Err(format!(
+            "kaya: shortcut \"{spelling}\" key \"{key}\" is outside the floor \
+             (one of a-z, 0-9, or the closed named set)"
+        ));
+    }
+    let mut out = String::new();
+    for &m in SHORTCUT_MODIFIERS {
+        if seen.contains(&m) {
+            out.push_str(m);
+            out.push('+');
+        }
+    }
+    out.push_str(key);
+    Ok(out)
+}
+
 /// Occurrence records, split by whether they carry a trailing payload
 /// value after the key path — a spec fact (Record::payload), so the
 /// generated parsers' kind lists derive rather than drift.
@@ -210,10 +321,128 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
+/// Click-shaped occurrences without a payload (button_clicked,
+/// menu_activated): {u64 id, u32 path_len, u32 reserved}, then the
+/// key path. The 7 generic parsers fall through to the click path via
+/// occurrence_names, but the C floor emits one named parser per
+/// record, so this list is DERIVED from the record shapes (the
+/// id_only stance) — a new click-shaped occurrence reaches the C
+/// parser with zero emitter edits.
+pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            r.payload.is_none()
+                && r.fields.len() == 3
+                && matches!(r.fields[0].ty, kaya::spec::FieldTy::U64)
+                && r.fields[1].name == "path_len"
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 pub(crate) fn record_params(rec: &Record) -> Vec<&'static Field> {
     rec.fields
         .iter()
         .filter(|f| f.name != "reserved" && f.name != "tag_len" && f.name != "path_len")
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shared vector table for the shortcut canonicalizer: every
+    /// emitter transcribes the SAME algorithm, and any per-language
+    /// negative check (kaya_app_checks.py, bindings/go's test) draws
+    /// its cases from here. Acceptance rows pin the canonical output;
+    /// note that `escape`, shift-only/bare alphanumerics, and the
+    /// reserved floor are ACCEPTED here on purpose — they canonicalize
+    /// fine and die at the core, which owns policy.
+    #[test]
+    fn shortcut_canonicalizer_accepts_and_canonicalizes() {
+        let accept: &[(&str, &str)] = &[
+            ("primary+s", "primary+s"),
+            ("PRIMARY+S", "primary+s"),
+            ("Primary+Shift+S", "primary+shift+s"),
+            ("shift+primary+s", "primary+shift+s"),
+            ("alt+shift+f5", "shift+alt+f5"),
+            ("ALT+ENTER", "alt+enter"),
+            ("primary+alt+0", "primary+alt+0"),
+            ("enter", "enter"),
+            ("f12", "f12"),
+            ("delete", "delete"),
+            ("left", "left"),
+            // Recognized here, rejected by the core (policy):
+            ("escape", "escape"),
+            ("Escape", "escape"),
+            ("shift+s", "shift+s"),
+            ("q", "q"),
+            ("primary+q", "primary+q"),
+            ("alt+f4", "alt+f4"),
+            ("shift+enter", "shift+enter"),
+        ];
+        for (input, want) in accept {
+            assert_eq!(
+                canonicalize_shortcut_reference(input).as_deref(),
+                Ok(*want),
+                "canonicalize({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn shortcut_canonicalizer_rejects_bad_spellings() {
+        let reject: &[&str] = &[
+            "",
+            "primary + s",
+            " primary+s",
+            "primary+s ",
+            "primary\t+s",
+            "ctrl+s",
+            "cmd+s",
+            "option+p",
+            "control+s",
+            "command+s",
+            "meta+s",
+            "primary+primary+s",
+            "primary+shift+shift+s",
+            "primary+",
+            "+s",
+            "primary++s",
+            "+",
+            "primary+s+k",
+            "s+primary",
+            "primary",
+            "shift+alt",
+            "primary+esc",
+            "primary+f13",
+            "primary+f0",
+            "primary+f01",
+            "primary+ss",
+            "primary+ß",
+            "primary-s",
+        ];
+        for input in reject {
+            assert!(
+                canonicalize_shortcut_reference(input).is_err(),
+                "canonicalize({input:?}) should be rejected"
+            );
+        }
+    }
+
+    /// The bindability split covers exactly the spec's menu-prop table
+    /// (a new prop panics inside menu_prop_bindable until declared,
+    /// and this test walks the whole table to trigger that panic in
+    /// CI rather than at someone's regeneration).
+    #[test]
+    fn every_menu_prop_declares_bindability() {
+        let bindable: Vec<&str> = kaya::spec::MENU_PROPS
+            .iter()
+            .filter(|(name, _, _)| menu_prop_bindable(name))
+            .map(|(name, _, _)| *name)
+            .collect();
+        assert_eq!(bindable, ["label", "enabled", "checked", "value"]);
+    }
 }
 

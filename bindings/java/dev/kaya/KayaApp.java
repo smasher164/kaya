@@ -48,8 +48,18 @@ public final class KayaApp {
         }
     }
 
-    private long signals, widgets, collections, nodes;
+    private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
+    // Menu dispatch tables, keyed by MENU ITEM id — their own id
+    // space, separate from every widget/node table ("two tables,
+    // always" — now N tables, still always). The node flavors receive
+    // the stamped copy's key path (the keys ARE the noun).
+    final Map<Long, Consumer<Tx>> menuActivated = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, List<Object>>> menuActivatedNode = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, Boolean>> menuToggled = new HashMap<>();
+    final Map<Long, ToggleHandler> menuToggledNode = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, Integer>> menuSelected = new HashMap<>();
+    final Map<Long, MenuSelectHandler> menuSelectedNode = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeHandlers = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, String>> widgetChanges = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
@@ -98,6 +108,12 @@ public final class KayaApp {
      * then the box's new state. */
     public interface ToggleHandler {
         void accept(Tx tx, List<Object> keys, boolean checked);
+    }
+
+    /** A node-anchored radio group's pick handler: the stamped copy's
+     * keys, then the new 0-based option index. */
+    public interface MenuSelectHandler {
+        void accept(Tx tx, List<Object> keys, int index);
     }
 
     // The collection is the model — the only copy: every mutation op
@@ -317,6 +333,350 @@ public final class KayaApp {
         public long id() {
             return id;
         }
+
+        /**
+         * A top-level menu in this window's command catalog — the
+         * menubar rides the window construct (DESIGN.md, Menus):
+         * tx.window(0).menu("File") returns the retained grouping
+         * handle, whose creators append the children:
+         * file.item("Save").shortcut("primary+s").onActivate(fn).
+         * Append-at-any-time: reopen the retained handle in a later
+         * transaction with tx.menu(file).
+         */
+        public MenuItem menu(String label) {
+            MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_MENU, label, false);
+            tx.records.add(KayaWire.txMenubarAppend(id, m.id));
+            return m;
+        }
+
+        /**
+         * A BAR-LEVEL radio group — admissible wherever a menu
+         * grouping node is (it materializes as a top-level menu with
+         * the platform's checkmark idiom). Declare only option()
+         * children; chain value() AFTER them (the Choice contract:
+         * the selected 0-based index; programmatic writes are quiet)
+         * and onSelect() for each USER pick's new index.
+         */
+        public MenuItem radioGroup(String label) {
+            MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_RADIO_GROUP, label, false);
+            tx.records.add(KayaWire.txMenubarAppend(id, m.id));
+            return m;
+        }
+    }
+
+    /**
+     * A live menu item: its OWN id space (the c_menu_item counter)
+     * behind its own type, so cross-use with widget or node ids is a
+     * compile error. The id alone is the item's durable name; the
+     * chain methods (props, creators, handlers) ride the transaction
+     * that minted the value and die with it — the Widget.grow
+     * discipline — and tx.menu(item) reopens a retained handle in a
+     * later transaction (append-at-any-time; props mutate freely;
+     * nothing is ever removed in v1).
+     */
+    public static final class MenuItem {
+        final long id;
+        final Tx tx;
+        final KayaApp app;
+        // A context-anchored chain: a shortcut needs a window catalog
+        // as its native dispatch home, so shortcut() throws here at
+        // record time — the root remains the floor beneath.
+        final boolean ctx;
+
+        MenuItem(long id, Tx tx, KayaApp app, boolean ctx) {
+            this.id = id;
+            this.tx = tx;
+            this.app = app;
+            this.ctx = ctx;
+        }
+
+        Tx chain() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                        "kaya: menu chain outside its transaction — reopen the"
+                                + " retained handle with tx.menu inside a live transaction");
+            }
+            return tx;
+        }
+
+        MenuItem child(int kind, String label) {
+            MenuItem c = chain().newMenuItem(kind, label, ctx);
+            tx.records.add(KayaWire.txMenuItemAppend(id, c.id));
+            return c;
+        }
+
+        /** Appends an action — a leaf command firing exactly one
+         * menu_activated occurrence (menu click OR its shortcut: ONE
+         * occurrence, one dispatch path). Chain onActivate beside it. */
+        public MenuItem item(String label) {
+            return child(KayaWire.MENU_KIND_ACTION, label);
+        }
+
+        /** Appends a stateful leaf reusing the Checkbox contract: user
+         * flips emit menu_toggled (chain onToggle); programmatic
+         * checked writes are quiet. */
+        public MenuItem toggle(String label) {
+            return child(KayaWire.MENU_KIND_TOGGLE, label);
+        }
+
+        /** Appends a NESTED menu — grouping, never navigation. One
+         * nested grouping level is the cap (root-checked). */
+        public MenuItem menu(String label) {
+            return child(KayaWire.MENU_KIND_MENU, label);
+        }
+
+        /** Appends a NESTED radio group — the Choice contract inline,
+         * with the platform's checkmark idiom. Only option children. */
+        public MenuItem radioGroup(String label) {
+            return child(KayaWire.MENU_KIND_RADIO_GROUP, label);
+        }
+
+        /** Appends one labeled option (radio groups only — root
+         * checked), in declaration order: the order IS the index
+         * vocabulary the group's value selects over. */
+        public MenuItem option(String label) {
+            return child(KayaWire.MENU_KIND_RADIO_OPTION, label);
+        }
+
+        /** Appends native grouping chrome: no label, no props, no
+         * handle kept. */
+        public void separator() {
+            child(KayaWire.MENU_KIND_SEPARATOR, null);
+        }
+
+        /** Renames the item to constant text. Label writes never emit
+         * anything. */
+        public MenuItem label(String text) {
+            chain().records.add(KayaWire.txSetMenuLabel(id, text));
+            return this;
+        }
+
+        /** Binds the item's label to a Str signal. */
+        public MenuItem label(Signal<String> s) {
+            chain().records.add(KayaWire.txBindMenuLabel(id, s.id));
+            return this;
+        }
+
+        /** Whether the item is enabled (default true). Enablement
+         * writes never emit anything; disabling a grouping node
+         * disables its subtree (the inherited-disabled contract). */
+        public MenuItem enabled(boolean on) {
+            chain().records.add(KayaWire.txSetMenuEnabled(id, on));
+            return this;
+        }
+
+        /** Binds the item's enablement to a Bool signal. */
+        public MenuItem enabled(Signal<Boolean> s) {
+            chain().records.add(KayaWire.txBindMenuEnabled(id, s.id));
+            return this;
+        }
+
+        /** A toggle's state (toggle items only — root-checked): the
+         * Checkbox contract. The programmatic write is configuration —
+         * QUIET, no menu_toggled echo (the echo doctrine). */
+        public MenuItem checked(boolean on) {
+            chain().records.add(KayaWire.txSetMenuChecked(id, on));
+            return this;
+        }
+
+        /** Binds a toggle's state to a Bool signal, both ways. */
+        public MenuItem checked(Signal<Boolean> s) {
+            chain().records.add(KayaWire.txBindMenuChecked(id, s.id));
+            return this;
+        }
+
+        /** A radio group's selected option index (radio groups only —
+         * root-checked): the Choice contract. QUIET, like checked. */
+        public MenuItem value(int index) {
+            chain().records.add(KayaWire.txSetMenuValue(id, index));
+            return this;
+        }
+
+        /** Binds a radio group's selected index to a float signal,
+         * both ways. */
+        public MenuItem value(Signal<Double> s) {
+            chain().records.add(KayaWire.txBindMenuValue(id, s.id));
+            return this;
+        }
+
+        /** The item's icon (the blob channel): used by phone
+         * promotion, ignored where native menu dress has no icons.
+         * Const-only. */
+        public MenuItem icon(byte[] data) {
+            chain().records.add(KayaWire.txSetMenuIcon(id, KayaRing.blobRegister(data)));
+            return this;
+        }
+
+        /** The phone-bar promotion hint (actions only — root-checked).
+         * Flipping it recomputes the promoted set deterministically;
+         * INERT on desktops — not a toolbar grammar. Const-only. */
+        public MenuItem primary(boolean on) {
+            chain().records.add(KayaWire.txSetMenuPrimary(id, on));
+            return this;
+        }
+
+        /** The action's shortcut (window-anchored actions only).
+         * Canonicalized by the binding's one parser
+         * (KayaWire.canonicalizeShortcut); the shortcut is another
+         * affordance of the same item — it fires the SAME
+         * menu_activated occurrence as a click. Const-only. */
+        public MenuItem shortcut(String spelling) {
+            if (ctx) {
+                throw new IllegalStateException(
+                        "kaya: a context item takes no shortcut — a shortcut needs"
+                                + " a window catalog as its native dispatch home");
+            }
+            chain().records.add(KayaWire.txSetMenuShortcut(id, spelling));
+            return this;
+        }
+
+        /** Binds this action's handler — it rides the declaration (no
+         * app-global menu dispatcher exists), and the action's click
+         * and its shortcut are ONE occurrence on one dispatch path, so
+         * it covers both. */
+        public MenuItem onActivate(Consumer<Tx> fn) {
+            chain();
+            app.menuActivated.put(id, fn);
+            return this;
+        }
+
+        /** The template-node flavor: an item attached to a stamped
+         * copy reports the copy's key path, outermost first — the keys
+         * ARE the noun the command acts on. */
+        public MenuItem onActivateNode(BiConsumer<Tx, List<Object>> fn) {
+            chain();
+            app.menuActivatedNode.put(id, fn);
+            return this;
+        }
+
+        /** Binds a toggle's handler: each USER flip's new state.
+         * Programmatic checked writes are quiet, so a handler's own
+         * writes cannot loop back at it. */
+        public MenuItem onToggle(BiConsumer<Tx, Boolean> fn) {
+            chain();
+            app.menuToggled.put(id, fn);
+            return this;
+        }
+
+        /** The template-node flavor: the copy's keys, then the state. */
+        public MenuItem onToggleNode(ToggleHandler fn) {
+            chain();
+            app.menuToggledNode.put(id, fn);
+            return this;
+        }
+
+        /** Binds a radio group's handler (registered on the GROUP):
+         * each USER pick's new 0-based option index. Programmatic
+         * value writes are quiet. */
+        public MenuItem onSelect(BiConsumer<Tx, Integer> fn) {
+            chain();
+            app.menuSelected.put(id, fn);
+            return this;
+        }
+
+        /** The template-node flavor: the copy's keys, then the index. */
+        public MenuItem onSelectNode(MenuSelectHandler fn) {
+            chain();
+            app.menuSelectedNode.put(id, fn);
+            return this;
+        }
+    }
+
+    /**
+     * A live widget's context anchor (tx.contextMenu): the same item
+     * vocabulary as the bar, scoped to a NOUN — each creator attaches
+     * another root. No shortcuts here (record-time checked; the
+     * editable text controls reject attachment at the root).
+     */
+    public static final class ContextRef {
+        private final Tx tx;
+        private final long widget;
+
+        ContextRef(Tx tx, long widget) {
+            this.tx = tx;
+            this.widget = widget;
+        }
+
+        MenuItem root(int kind, String label) {
+            MenuItem m = tx.newMenuItem(kind, label, true);
+            tx.records.add(KayaWire.txContextAttach(widget, m.id));
+            return m;
+        }
+
+        /** Attaches an action root; chain onActivate beside it. */
+        public MenuItem item(String label) {
+            return root(KayaWire.MENU_KIND_ACTION, label);
+        }
+
+        /** Attaches a toggle root; chain onToggle beside it. */
+        public MenuItem toggle(String label) {
+            return root(KayaWire.MENU_KIND_TOGGLE, label);
+        }
+
+        /** Attaches a grouping root (one nested grouping level — the
+         * context depth cap is root-checked). */
+        public MenuItem menu(String label) {
+            return root(KayaWire.MENU_KIND_MENU, label);
+        }
+
+        /** Attaches a radio-group root; declare only option children. */
+        public MenuItem radioGroup(String label) {
+            return root(KayaWire.MENU_KIND_RADIO_GROUP, label);
+        }
+
+        /** Attaches native grouping chrome. */
+        public void separator() {
+            root(KayaWire.MENU_KIND_SEPARATOR, null);
+        }
+    }
+
+    /**
+     * A context catalog built UNANCHORED (tx.contextCatalog) for a
+     * template node: menu items are live and shared across stamped
+     * copies, so the catalog is built in the live zone and
+     * Tpl.contextMenu attaches it inside the template, where each
+     * activation carries the copy's key path. An item takes exactly
+     * one anchor — a second attach throws.
+     */
+    public static final class ContextCatalog {
+        private final Tx tx;
+        final List<Long> roots = new ArrayList<>();
+        boolean attached;
+
+        ContextCatalog(Tx tx) {
+            this.tx = tx;
+        }
+
+        MenuItem root(int kind, String label) {
+            MenuItem m = tx.newMenuItem(kind, label, true);
+            roots.add(m.id);
+            return m;
+        }
+
+        /** Collects an action root; chain onActivateNode beside it. */
+        public MenuItem item(String label) {
+            return root(KayaWire.MENU_KIND_ACTION, label);
+        }
+
+        /** Collects a toggle root; chain onToggleNode beside it. */
+        public MenuItem toggle(String label) {
+            return root(KayaWire.MENU_KIND_TOGGLE, label);
+        }
+
+        /** Collects a grouping root. */
+        public MenuItem menu(String label) {
+            return root(KayaWire.MENU_KIND_MENU, label);
+        }
+
+        /** Collects a radio-group root; chain onSelectNode. */
+        public MenuItem radioGroup(String label) {
+            return root(KayaWire.MENU_KIND_RADIO_GROUP, label);
+        }
+
+        /** Collects native grouping chrome. */
+        public void separator() {
+            root(KayaWire.MENU_KIND_SEPARATOR, null);
+        }
     }
 
     /** Chains navigation-entry props, the construction-sugar tier:
@@ -511,6 +871,96 @@ public final class KayaApp {
                         "kaya: forEach binds the collection itself, not an instance"
                                 + " — drop the at(...)");
             }
+        }
+
+        /**
+         * The for-each form over a scalar collection: {@code for (var
+         * row : items.rows())} traces the For template — the body runs
+         * once over the scalar row surface, a break is caught at
+         * submit, and the trace rides the zone it opens in, so
+         * statement traces nest (the record twin is the generated
+         * {@code <Type>Kaya.rows}; the Go {@code Collection.Rows}
+         * twin).
+         */
+        public Iterable<Row> rows() {
+            Collection c = this;
+            return () -> new java.util.Iterator<Row>() {
+                int state;
+                RowTrace trace;
+
+                @Override
+                public boolean hasNext() {
+                    if (state == 0) {
+                        return true;
+                    }
+                    if (state == 1) {
+                        state = 2;
+                        trace.close();
+                    }
+                    return false;
+                }
+
+                @Override
+                public Row next() {
+                    if (state != 0) {
+                        throw new java.util.NoSuchElementException();
+                    }
+                    state = 1;
+                    KayaApp app = KayaApp.ambient;
+                    if (app == null || app.currentTx == null) {
+                        throw new IllegalStateException(
+                                "kaya: rows() iterates at record time, inside a transaction");
+                    }
+                    trace = app.currentTx.beginRowTrace(c);
+                    return new Row(trace.tpl);
+                }
+            };
+        }
+    }
+
+    /**
+     * The scalar-collection row surface a rows() trace yields: the
+     * template vocabulary plus the element's own token — a scalar
+     * collection has exactly one field, the element itself, and
+     * value() is that token (the record twin mints one token per
+     * record component).
+     */
+    public static final class Row {
+        private final Tpl t;
+
+        Row(Tpl t) {
+            this.t = t;
+        }
+
+        /** The element's token: what a stamped copy's bindings read. */
+        public KayaRecords.Field<String> value() {
+            return KayaRecords.fieldAt(0);
+        }
+
+        /** A label bound to the element's token. */
+        public Node label(KayaRecords.Field<String> f) {
+            return t.label(f);
+        }
+
+        public Node row(Runnable body) {
+            return t.row(body);
+        }
+
+        public Node column(Runnable body) {
+            return t.column(body);
+        }
+
+        /** A collection declared inside this row's template — the
+         * nested-instance shape. */
+        public Collection collection() {
+            return t.collection();
+        }
+
+        /** Attach a live-built context catalog to one of this row's
+         * template nodes; each activation carries the stamped copy's
+         * key path. */
+        public void contextMenu(Node n, ContextCatalog catalog) {
+            t.contextMenu(n, catalog);
         }
     }
 
@@ -1126,12 +1576,15 @@ public final class KayaApp {
         /** Open a For template for a generated row trace; the trace
          * hands the loop body the Tpl once, then close() ends the
          * template and parents the For into the enclosing scope. A
-         * break leaves the trace open — caught at submit. */
+         * break leaves the trace open — caught at submit.
+         * The For rides the zone it opens in: the widget id space in
+         * the live zone, the node space inside an enclosing template
+         * (a nested trace) — the Go BeginRowTrace twin. */
         RowTrace beginRowTrace(Collection c) {
             c.assertRoot();
-            Widget w = new Widget(++widgets, this);
+            long id = tplDepth > 0 ? ++nodes : ++widgets;
             long parent = currentParent();
-            records.add(KayaWire.txCreateFor(w.id, c.id));
+            records.add(KayaWire.txCreateFor(id, c.id));
             openFors.add(c.id);
             parents.add(0L);
             openTraces++;
@@ -1145,7 +1598,7 @@ public final class KayaApp {
                 records.add(KayaWire.txTemplateEnd());
                 openTraces--;
                 if (parent != 0) {
-                    records.add(KayaWire.txAddChild(parent, w.id));
+                    records.add(KayaWire.txAddChild(parent, id));
                 }
             });
         }
@@ -1454,6 +1907,60 @@ public final class KayaApp {
             records.add(KayaWire.txSelectSection(window, id));
         }
 
+        // --- Menus: the command vocabulary (DESIGN.md, Menus) --------
+
+        /** Create one item in the menu-item id space. Menu records are
+         * live-zone only: a template body records a blueprint, and
+         * items are live and shared across stamped copies — build the
+         * catalog outside (tx.contextCatalog) and attach it inside the
+         * template with Tpl.contextMenu. */
+        MenuItem newMenuItem(int kind, String label, boolean ctx) {
+            if (tplDepth > 0) {
+                throw new IllegalStateException(
+                        "kaya: menu items are live — build the context catalog in the"
+                                + " live zone (tx.contextCatalog) and attach it inside the"
+                                + " template with Tpl.contextMenu");
+            }
+            MenuItem m = new MenuItem(++menuItems, this, KayaApp.this, ctx);
+            records.add(KayaWire.txMenuItemCreate(m.id, kind));
+            if (label != null) {
+                records.add(KayaWire.txSetMenuLabel(m.id, label));
+            }
+            return m;
+        }
+
+        /**
+         * Reopen a RETAINED menu item — the append-at-any-time
+         * discipline: tx.menu(file).label("Document").item("Publish").
+         * Props mutate freely on every kind the prop applies to; the
+         * root judges a misapplied prop (kind and anchor rules)
+         * exactly as at construction.
+         */
+        public MenuItem menu(MenuItem item) {
+            return new MenuItem(item.id, this, KayaApp.this, false);
+        }
+
+        /**
+         * A context menu on a LIVE widget: the same item vocabulary
+         * scoped to a NOUN, with the platform's own gesture
+         * (right-click, long-press). Calling it again appends more
+         * roots. The editable text controls (entry, textarea) reject
+         * attachment at the root; context items take no shortcuts.
+         */
+        public ContextRef contextMenu(Widget target) {
+            return new ContextRef(this, target.id);
+        }
+
+        /**
+         * Build a context catalog UNANCHORED — free root items for a
+         * template-node anchor (menu items are live and shared across
+         * stamped copies): Tpl.contextMenu attaches it inside the
+         * template, and each activation carries the copy's key path.
+         */
+        public ContextCatalog contextCatalog() {
+            return new ContextCatalog(this);
+        }
+
         /**
          * Set the primary surface's title (the title bar on the
          * desktops, the switcher label on iOS, the task label on
@@ -1572,6 +2079,25 @@ public final class KayaApp {
             Node n = widget(KayaWire.KIND_IMAGE);
             bindSourceField(n, 0, f);
             return n;
+        }
+
+        /**
+         * Attach a live-built context catalog (tx.contextCatalog) to a
+         * template node: every stamped copy shows the same catalog,
+         * and each activation carries that copy's key path — the keys
+         * ARE the noun (received by the *Node handler flavors). An
+         * item takes exactly one anchor, so a second attach of the
+         * same catalog throws here.
+         */
+        public void contextMenu(Node n, ContextCatalog catalog) {
+            if (catalog.attached) {
+                throw new IllegalStateException(
+                        "kaya: a context catalog takes exactly one anchor");
+            }
+            catalog.attached = true;
+            for (long root : catalog.roots) {
+                tx.records.add(KayaWire.txContextAttachNode(n.id, root));
+            }
         }
 
         /** Register a toggle handler on a template node — the bridge
@@ -1937,6 +2463,52 @@ public final class KayaApp {
                 BiConsumer<Tx, Integer> handler = alerts.remove(occ.id);
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED && occ.keys.isEmpty()) {
+                // Menu occurrences key the menu-item tables — their
+                // own id space, so neither widget nor node ids can
+                // collide with them. Node-anchored context items carry
+                // the stamped copy's keys (the keys ARE the noun);
+                // toggles carry the new state, radio groups the new
+                // 0-based index.
+                Consumer<Tx> handler = menuActivated.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED) {
+                BiConsumer<Tx, List<Object>> handler = menuActivatedNode.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_TOGGLED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Boolean> handler = menuToggled.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, (Boolean) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_TOGGLED) {
+                ToggleHandler handler = menuToggledNode.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, (Boolean) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_VALUE_CHANGED && occ.keys.isEmpty()) {
+                BiConsumer<Tx, Integer> handler = menuSelected.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, (int) (double) (Double) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_MENU_VALUE_CHANGED) {
+                MenuSelectHandler handler = menuSelectedNode.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, (int) (double) (Double) occ.payload);
+                    });
                 }
             }
         }

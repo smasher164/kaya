@@ -59,8 +59,10 @@ pub mod capi;
 extern crate self as kaya;
 
 pub use app::{
-    Align, AppCtx, Collection, Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, Messages,
-    PropToken, Tpl, TplSource, Tx, ValueKind, props,
+    ActionRef, Align, AnyAnchor, AppCtx, BarAnchor, Collection, ContextAnchor, ContextCatalog,
+    Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
+    MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
+    ShortcutHome, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
 };
 
 /// The type's own shape is the schema: an enum derives the element
@@ -68,9 +70,9 @@ pub use app::{
 /// patch builder).
 pub use kaya_derive::KayaGen;
 pub use protocol::{
-    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, Occurrence, Path, Prop,
-    SectionProp, SectionsPresentation, SignalId, TemplateNodeId, Value, ValueType, WidgetId,
-    WidgetKind, WindowId,
+    AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind,
+    MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId, TemplateNodeId,
+    Value, ValueType, WidgetId, WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "windows")]

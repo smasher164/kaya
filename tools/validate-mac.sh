@@ -48,10 +48,13 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES.
+# arrive, when they move into SCENES. (Empty since the menus sweep
+# landed its guests on mac+linux; deploy-win/run-sim/run-emulator
+# still carry menus rust-only until the next phase registers their
+# language legs.)
 DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -768,6 +771,26 @@ run sections-ocaml-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/deb
 run sections-haskell-swiftui env KAYA_SELFTEST=sections "$(hs_bin sections)"
 run sections-swift-swiftui env KAYA_SELFTEST=sections target/swift-guests/sections
 run sections-java-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The menus scene: the command vocabulary — one catalog, two anchors;
+# enablement/checked/value live-bound, the shortcut through the
+# platform's own dispatch table, context menus on a live label and on
+# a stamped row (the keys are the noun), and the late catalog rebuild
+# (rename/append/promotion recompute). All eight languages,
+# byte-identical.
+KAYA_SELFTEST_SCRIPT="$(scene_script menus)"
+export KAYA_SELFTEST_SCRIPT
+run menus-rust-swiftui env KAYA_SELFTEST=menus target/debug/examples/menus
+run menus-python-swiftui env KAYA_SELFTEST=menus python3 guests/python/menus.py
+run menus-go-swiftui env KAYA_SELFTEST=menus target/go-guests/menus
+run menus-csharp-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run menus-ocaml-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/menus.exe
+run menus-haskell-swiftui env KAYA_SELFTEST=menus "$(hs_bin menus)"
+run menus-swift-swiftui env KAYA_SELFTEST=menus target/swift-guests/menus
+run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

@@ -157,6 +157,90 @@ readonly struct Collection
     }
 }
 
+/// A live menu item: its OWN id space (the c_menu_item counter)
+/// behind its own type, so cross-use with Widget or Node ids is a
+/// compile error. One command identity: exactly one parent or anchor,
+/// forever (append-only; nothing is removed in v1). The id alone is
+/// the durable name — reopen a retained item with tx.Menu(item, ...).
+readonly struct MenuItem
+{
+    internal readonly ulong Id;
+
+    internal MenuItem(ulong id) => Id = id;
+}
+
+/// A context catalog built UNANCHORED (tx.ContextCatalog) for a
+/// template node: menu items are live and shared across stamped
+/// copies, so the catalog is built in the live zone and
+/// Tpl.ContextMenu attaches it inside the template, where each
+/// activation carries the copy's key path. An item takes exactly one
+/// anchor — a second attach throws.
+sealed class ContextCatalog
+{
+    internal readonly MenuItem[] Roots;
+    internal bool Attached;
+
+    internal ContextCatalog(MenuItem[] roots) => Roots = roots;
+}
+
+/// One of the TWO addressable sources a menu text property binds to —
+/// a constant or a signal (menu items are not collection elements, so
+/// there is no element arm). The implicit conversions keep one
+/// parameter name per property, compile-checked: a bool never
+/// converts here.
+readonly struct TextSource
+{
+    internal readonly string Text;
+    internal readonly Signal? Bind;
+
+    TextSource(string text, Signal? bind)
+    {
+        Text = text;
+        Bind = bind;
+    }
+
+    public static implicit operator TextSource(string text) => new(text, null);
+
+    public static implicit operator TextSource(Signal s) => new(null, s);
+}
+
+/// The Bool twin of TextSource, for enabled/isChecked.
+readonly struct BoolSource
+{
+    internal readonly bool Value;
+    internal readonly Signal? Bind;
+
+    BoolSource(bool value, Signal? bind)
+    {
+        Value = value;
+        Bind = bind;
+    }
+
+    public static implicit operator BoolSource(bool value) => new(value, null);
+
+    public static implicit operator BoolSource(Signal s) => new(false, s);
+}
+
+/// The index twin, for a radio group's value (a 0-based option
+/// index under the Choice contract).
+readonly struct IndexSource
+{
+    internal readonly double Value;
+    internal readonly Signal? Bind;
+
+    IndexSource(double value, Signal? bind)
+    {
+        Value = value;
+        Bind = bind;
+    }
+
+    public static implicit operator IndexSource(int index) => new(index, null);
+
+    public static implicit operator IndexSource(double index) => new(index, null);
+
+    public static implicit operator IndexSource(Signal s) => new(0, s);
+}
+
 /// One instance of a collection: the table inside the stamped copy
 /// selected by Path (the empty path for a live-zone collection).
 /// Entries keep insertion order, matching the core's rendering.
@@ -189,8 +273,18 @@ sealed class KayaApp
     // mutations, written into the same transaction.
     internal readonly Dictionary<ulong, List<Action<Tx>>> Derived = new();
 
-    ulong signals, widgets, collections, nodes;
+    ulong signals, widgets, collections, nodes, menuItems;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
+    // Menu dispatch tables, keyed by MENU ITEM id — their own id
+    // space, separate from every widget/node table ("two tables,
+    // always" — now N tables, still always). The node flavors receive
+    // the stamped copy's key path (the keys ARE the noun).
+    internal readonly Dictionary<ulong, Action<Tx>> menuActivated = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>>> menuActivatedNode = new();
+    internal readonly Dictionary<ulong, Action<Tx, bool>> menuToggled = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>, bool>> menuToggledNode = new();
+    internal readonly Dictionary<ulong, Action<Tx, int>> menuSelected = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>, int>> menuSelectedNode = new();
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeHandlers = new();
     readonly Dictionary<ulong, Action<Tx, string>> widgetChanges = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, string>> nodeChanges = new();
@@ -245,6 +339,8 @@ sealed class KayaApp
     internal Signal NextSignal() => new(++signals);
 
     internal Widget NextWidget() => new(++widgets);
+
+    internal MenuItem NextMenuItem() => new(++menuItems);
 
     internal Node NextNode() => new(++nodes);
 
@@ -439,6 +535,42 @@ sealed class KayaApp
                 // payload is the parsed u32 choice.
                 if (alerts.Remove(id, out var fn))
                     Dispatch(tx => fn(tx, payload is uint c ? c : 0));
+            }
+            // Menu occurrences key the menu-item tables — their own
+            // id space, so neither widget nor node ids can collide
+            // with them. Node-anchored context items carry the
+            // stamped copy's keys (the keys ARE the noun); toggles
+            // carry the new state, radio groups the new 0-based
+            // index.
+            else if (kind == KayaWire.OccKindMenuActivated && keys.Count == 0)
+            {
+                if (menuActivated.TryGetValue(id, out var fn))
+                    Dispatch(fn);
+            }
+            else if (kind == KayaWire.OccKindMenuActivated)
+            {
+                if (menuActivatedNode.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys));
+            }
+            else if (kind == KayaWire.OccKindMenuToggled && keys.Count == 0)
+            {
+                if (menuToggled.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, isChecked));
+            }
+            else if (kind == KayaWire.OccKindMenuToggled)
+            {
+                if (menuToggledNode.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, isChecked));
+            }
+            else if (kind == KayaWire.OccKindMenuValueChanged && keys.Count == 0)
+            {
+                if (menuSelected.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, payload is double d ? (int)d : 0));
+            }
+            else if (kind == KayaWire.OccKindMenuValueChanged)
+            {
+                if (menuSelectedNode.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, payload is double d ? (int)d : 0));
             }
         }
     }
@@ -1203,7 +1335,7 @@ sealed class Tx
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
-        ulong id = 0)
+        MenuItem[]? menus = null, ulong id = 0)
     {
         if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
         if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
@@ -1213,6 +1345,13 @@ sealed class Tx
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
+        // The menubar rides the window construct (the window-attribute
+        // unification rule): menus: appends top-level grouping nodes
+        // (Menu or RadioGroup) to this window's command catalog, in
+        // order — append-only, at any time.
+        if (menus != null)
+            foreach (var m in menus)
+                Records.Add(KayaWire.TxMenubarAppend(id, m.Id));
     }
 
     /// Create an auxiliary window (capability-gated: phone hosts
@@ -1228,11 +1367,12 @@ sealed class Tx
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, long? sectionsPresentation = null,
-        Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null)
+        Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
+        MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         Window(title, width, height, vetoClose, sectionsPresentation,
-            onCloseRequested, onClosed, id);
+            onCloseRequested, onClosed, menus, id);
     }
 
     /// Request a modal alert (the request/result grammar), named
@@ -1327,6 +1467,227 @@ sealed class Tx
     /// onSelected (the echo doctrine).
     public void SelectSection(ulong id, ulong window = 0) =>
         Records.Add(KayaWire.TxSelectSection(window, id));
+
+    // --- Menus: the command vocabulary (DESIGN.md, Menus) ------------
+    //
+    // Named-args constructors nested by argument lists: children are
+    // arguments (evaluated first, unanchored), the grouping construct
+    // appends them, and the window construct's menus: parameter is the
+    // bar anchor. Items are live-zone only; a retained item reopens
+    // through tx.Menu(item, ...) — the append-at-any-time discipline.
+
+    MenuItem NewMenuItem(uint kind, TextSource? label)
+    {
+        if (App.TplDepth > 0)
+            throw new InvalidOperationException(
+                "kaya: menu items are live — build the context catalog in the "
+                + "live zone (tx.ContextCatalog) and attach it inside the "
+                + "template with Tpl.ContextMenu");
+        var m = App.NextMenuItem();
+        Records.Add(KayaWire.TxMenuItemCreate(m.Id, kind));
+        if (label is { } l)
+            MenuLabel(m, l);
+        return m;
+    }
+
+    void MenuLabel(MenuItem m, TextSource label)
+    {
+        if (label.Bind is Signal s)
+            Records.Add(KayaWire.TxBindMenuLabel(m.Id, s.Id));
+        else
+            Records.Add(KayaWire.TxSetMenuLabel(m.Id, label.Text));
+    }
+
+    void MenuEnabled(MenuItem m, BoolSource enabled)
+    {
+        if (enabled.Bind is Signal s)
+            Records.Add(KayaWire.TxBindMenuEnabled(m.Id, s.Id));
+        else
+            Records.Add(KayaWire.TxSetMenuEnabled(m.Id, enabled.Value));
+    }
+
+    void MenuChecked(MenuItem m, BoolSource isChecked)
+    {
+        if (isChecked.Bind is Signal s)
+            Records.Add(KayaWire.TxBindMenuChecked(m.Id, s.Id));
+        else
+            Records.Add(KayaWire.TxSetMenuChecked(m.Id, isChecked.Value));
+    }
+
+    void MenuValue(MenuItem m, IndexSource value)
+    {
+        if (value.Bind is Signal s)
+            Records.Add(KayaWire.TxBindMenuValue(m.Id, s.Id));
+        else
+            Records.Add(KayaWire.TxSetMenuValue(m.Id, value.Value));
+    }
+
+    void MenuTail(MenuItem m, BoolSource? enabled, byte[] icon)
+    {
+        if (enabled is { } e) MenuEnabled(m, e);
+        if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(m.Id, Kaya.RegisterBlob(icon)));
+    }
+
+    void MenuAppendAll(MenuItem parent, MenuItem[] children)
+    {
+        if (children == null)
+            return;
+        foreach (var child in children)
+            Records.Add(KayaWire.TxMenuItemAppend(parent.Id, child.Id));
+    }
+
+    /// An action — a leaf command firing exactly one menu_activated
+    /// occurrence (menu click OR its shortcut: ONE occurrence, one
+    /// dispatch path; the handler rides the declaration and covers
+    /// both). The shortcut is canonicalized by the binding's one
+    /// parser; the root judges its anchor (window catalogs only).
+    public MenuItem Item(TextSource label, string shortcut = null,
+        BoolSource? enabled = null, byte[] icon = null, bool primary = false,
+        Action<Tx> onActivate = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindAction, label);
+        if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
+        MenuTail(m, enabled, icon);
+        if (primary) Records.Add(KayaWire.TxSetMenuPrimary(m.Id, true));
+        if (onActivate != null) App.menuActivated[m.Id] = onActivate;
+        return m;
+    }
+
+    /// The template-node flavor: an item attached to a stamped copy
+    /// (tx.ContextCatalog + Tpl.ContextMenu) reports the copy's key
+    /// path, outermost first — the keys ARE the noun the command acts
+    /// on. Context items take no shortcuts (root-checked).
+    public MenuItem Item(TextSource label, Action<Tx, List<object>> onActivate,
+        BoolSource? enabled = null, byte[] icon = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindAction, label);
+        MenuTail(m, enabled, icon);
+        App.menuActivatedNode[m.Id] = onActivate;
+        return m;
+    }
+
+    /// A toggle — a stateful leaf reusing the Checkbox contract: user
+    /// flips emit menu_toggled (the handler receives the new state);
+    /// programmatic isChecked writes are QUIET (the echo doctrine).
+    public MenuItem Toggle(TextSource label, BoolSource? isChecked = null,
+        BoolSource? enabled = null, byte[] icon = null,
+        Action<Tx, bool> onToggle = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindToggle, label);
+        if (isChecked is { } c) MenuChecked(m, c);
+        MenuTail(m, enabled, icon);
+        if (onToggle != null) App.menuToggled[m.Id] = onToggle;
+        return m;
+    }
+
+    /// The template-node flavor of Toggle: the copy's keys, then the
+    /// new state.
+    public MenuItem Toggle(TextSource label, Action<Tx, List<object>, bool> onToggle,
+        BoolSource? isChecked = null, BoolSource? enabled = null, byte[] icon = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindToggle, label);
+        if (isChecked is { } c) MenuChecked(m, c);
+        MenuTail(m, enabled, icon);
+        App.menuToggledNode[m.Id] = onToggle;
+        return m;
+    }
+
+    /// One labeled radio option, appended in declaration order — the
+    /// order IS the index vocabulary the group's value selects over.
+    public MenuItem Option(TextSource label, BoolSource? enabled = null,
+        byte[] icon = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindRadioOption, label);
+        MenuTail(m, enabled, icon);
+        return m;
+    }
+
+    /// Native grouping chrome: no label, no props, no handler.
+    public MenuItem Separator() => NewMenuItem(KayaWire.MenuKindSeparator, null);
+
+    /// A menu grouping node — at bar level (seat it through the window
+    /// construct's menus: parameter) or nested (pass it in a parent's
+    /// items:). Children arrive as arguments, already created; the
+    /// menu appends them in order. Disabling a menu disables its
+    /// subtree (the inherited-disabled contract).
+    public MenuItem Menu(TextSource label, BoolSource? enabled = null,
+        byte[] icon = null, MenuItem[] items = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindMenu, label);
+        MenuAppendAll(m, items);
+        MenuTail(m, enabled, icon);
+        return m;
+    }
+
+    /// Reopen a RETAINED menu item — the append-at-any-time
+    /// discipline: tx.Menu(file, label: "Document", items: new[] {
+    /// publish }). Props mutate freely on every kind the prop applies
+    /// to (the root judges kind and anchor rules); programmatic
+    /// isChecked/value writes are configuration and stay QUIET.
+    public void Menu(MenuItem item, TextSource? label = null,
+        BoolSource? enabled = null, BoolSource? isChecked = null,
+        IndexSource? value = null, byte[] icon = null, bool? primary = null,
+        string shortcut = null, MenuItem[] items = null)
+    {
+        MenuAppendAll(item, items);
+        if (label is { } l) MenuLabel(item, l);
+        if (enabled is { } e) MenuEnabled(item, e);
+        if (isChecked is { } c) MenuChecked(item, c);
+        if (value is { } v) MenuValue(item, v);
+        if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(item.Id, Kaya.RegisterBlob(icon)));
+        if (primary is { } p) Records.Add(KayaWire.TxSetMenuPrimary(item.Id, p));
+        if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(item.Id, shortcut));
+    }
+
+    /// A radio group — the Choice contract with the platform's
+    /// checkmark idiom, admissible wherever a menu grouping node is
+    /// (bar level via the window construct, nested via a parent's
+    /// items:). options: only Option children (the closed grammar,
+    /// root-checked); value is the selected 0-based index
+    /// (programmatic writes are quiet); onSelect receives each USER
+    /// pick's new index.
+    public MenuItem RadioGroup(TextSource label, MenuItem[] options,
+        IndexSource? value = null, BoolSource? enabled = null, byte[] icon = null,
+        Action<Tx, int> onSelect = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
+        MenuAppendAll(m, options);
+        if (value is { } v) MenuValue(m, v);
+        MenuTail(m, enabled, icon);
+        if (onSelect != null) App.menuSelected[m.Id] = onSelect;
+        return m;
+    }
+
+    /// The template-node flavor of RadioGroup: the copy's keys, then
+    /// the new index.
+    public MenuItem RadioGroup(TextSource label, MenuItem[] options,
+        Action<Tx, List<object>, int> onSelect, IndexSource? value = null,
+        BoolSource? enabled = null, byte[] icon = null)
+    {
+        var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
+        MenuAppendAll(m, options);
+        if (value is { } v) MenuValue(m, v);
+        MenuTail(m, enabled, icon);
+        App.menuSelectedNode[m.Id] = onSelect;
+        return m;
+    }
+
+    /// A context menu on a LIVE widget: the same item vocabulary
+    /// scoped to a NOUN, with the platform's own gesture (right-click,
+    /// long-press). Calling it again appends more roots. The editable
+    /// text controls (entry, textarea) reject attachment at the root;
+    /// context items take no shortcuts.
+    public void ContextMenu(Widget target, params MenuItem[] items)
+    {
+        foreach (var item in items)
+            Records.Add(KayaWire.TxContextAttach(target.Id, item.Id));
+    }
+
+    /// Build a context catalog UNANCHORED — free root items for a
+    /// template-node anchor (menu items are live and shared across
+    /// stamped copies): Tpl.ContextMenu attaches it inside the
+    /// template, and each activation carries the copy's key path.
+    public ContextCatalog ContextCatalog(params MenuItem[] items) => new(items);
 
     /// Mount a root into a specific window; mounting presents an
     /// auxiliary.
@@ -1446,6 +1807,22 @@ sealed class Tpl
 
     public void AddChild(Node parent, Node child) =>
         tx.Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
+
+    /// Attach a live-built context catalog (tx.ContextCatalog) to a
+    /// template node: every stamped copy shows the same catalog, and
+    /// each activation carries that copy's key path — the keys ARE
+    /// the noun (received by the node-flavor handlers). An item takes
+    /// exactly one anchor, so a second attach of the same catalog
+    /// throws here.
+    public void ContextMenu(Node n, ContextCatalog catalog)
+    {
+        if (catalog.Attached)
+            throw new InvalidOperationException(
+                "kaya: a context catalog takes exactly one anchor");
+        catalog.Attached = true;
+        foreach (var root in catalog.Roots)
+            tx.Records.Add(KayaWire.TxContextAttachNode(n.Id, root.Id));
+    }
 
     public Collection Collection() => tx.Collection();
 

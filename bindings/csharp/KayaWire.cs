@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x39a6143b6f4c3e0e;
+    public const ulong SpecHash = 0x0e4b7f4f716cc749;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -53,6 +53,19 @@ static class KayaWire
     public const uint EpropInterceptBack = 2;
     public const uint SpropTitle = 1;
     public const uint SpropIcon = 2;
+    public const uint MenuKindMenu = 1;
+    public const uint MenuKindAction = 2;
+    public const uint MenuKindToggle = 3;
+    public const uint MenuKindRadioGroup = 4;
+    public const uint MenuKindRadioOption = 5;
+    public const uint MenuKindSeparator = 6;
+    public const uint MpropLabel = 1;
+    public const uint MpropEnabled = 2;
+    public const uint MpropChecked = 3;
+    public const uint MpropValue = 4;
+    public const uint MpropIcon = 5;
+    public const uint MpropPrimary = 6;
+    public const uint MpropShortcut = 7;
     public const uint SectionsPresentationAuto = 0;
     public const uint SectionsPresentationBar = 1;
     public const uint SectionsPresentationSidebar = 2;
@@ -101,6 +114,12 @@ static class KayaWire
     public const ushort TxKindAddSection = 25;
     public const ushort TxKindSelectSection = 26;
     public const ushort TxKindSetSectionProp = 27;
+    public const ushort TxKindMenuItemCreate = 28;
+    public const ushort TxKindMenuItemAppend = 29;
+    public const ushort TxKindMenubarAppend = 30;
+    public const ushort TxKindContextAttach = 31;
+    public const ushort TxKindContextAttachNode = 32;
+    public const ushort TxKindSetMenuProp = 33;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -118,6 +137,12 @@ static class KayaWire
     public const ushort ApplyKindAddSection = 15;
     public const ushort ApplyKindSelectSection = 16;
     public const ushort ApplyKindSetSectionProp = 17;
+    public const ushort ApplyKindMenuItemCreate = 18;
+    public const ushort ApplyKindMenuItemAppend = 19;
+    public const ushort ApplyKindMenubarAppend = 20;
+    public const ushort ApplyKindContextAttach = 21;
+    public const ushort ApplyKindContextAttachNode = 22;
+    public const ushort ApplyKindSetMenuProp = 23;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -128,6 +153,9 @@ static class KayaWire
     public const ushort OccKindEntryPopped = 8;
     public const ushort OccKindBackRequested = 9;
     public const ushort OccKindSectionSelected = 10;
+    public const ushort OccKindMenuActivated = 11;
+    public const ushort OccKindMenuToggled = 12;
+    public const ushort OccKindMenuValueChanged = 13;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -459,6 +487,62 @@ static class KayaWire
         w.Write(prop);
         w.Write(source);
         return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus).
+    public static byte[] TxMenuItemCreate(ulong item, uint kind)
+    {
+        var w = Begin(out var stream);
+        w.Write(item);
+        w.Write(kind);
+        w.Write(0u);
+        return Finish(stream, w, TxKindMenuItemCreate);
+    }
+
+    /// Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root.
+    public static byte[] TxMenuItemAppend(ulong parent, ulong child)
+    {
+        var w = Begin(out var stream);
+        w.Write(parent);
+        w.Write(child);
+        return Finish(stream, w, TxKindMenuItemAppend);
+    }
+
+    /// Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error.
+    public static byte[] TxMenubarAppend(ulong window, ulong item)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(item);
+        return Finish(stream, w, TxKindMenubarAppend);
+    }
+
+    /// Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home).
+    public static byte[] TxContextAttach(ulong widget, ulong item)
+    {
+        var w = Begin(out var stream);
+        w.Write(widget);
+        w.Write(item);
+        return Finish(stream, w, TxKindContextAttach);
+    }
+
+    /// Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach.
+    public static byte[] TxContextAttachNode(ulong node, ulong item)
+    {
+        var w = Begin(out var stream);
+        w.Write(node);
+        w.Write(item);
+        return Finish(stream, w, TxKindContextAttachNode);
+    }
+
+    /// Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
+    public static byte[] TxSetMenuProp(ulong item, uint prop, uint source)
+    {
+        var w = Begin(out var stream);
+        w.Write(item);
+        w.Write(prop);
+        w.Write(source);
+        return Finish(stream, w, TxKindSetMenuProp);
     }
 
     /// set_property with a constant text value.
@@ -889,6 +973,143 @@ static class KayaWire
         return Finish(stream, w, TxKindSetSectionProp);
     }
 
+    static readonly HashSet<string> ShortcutNamedKeys = new HashSet<string> { "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12" };
+
+    /// Canonicalize a shortcut spelling to the wire form: lowercase
+    /// '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+    /// key (a-z, 0-9, or the closed named set). Accepts ASCII case
+    /// variants and any modifier order; throws on whitespace, empty
+    /// tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown
+    /// or multiple or missing keys. POLICY stays at the core: escape,
+    /// shift-only and bare alphanumerics, and the reserved floor are
+    /// validated there, on the canonical spelling, never rewritten.
+    public static string CanonicalizeShortcut(string spelling)
+    {
+        if (spelling.Length == 0)
+            throw new ArgumentException("kaya: shortcut is empty");
+        foreach (char ch in spelling)
+            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\v' || ch == '\f' || ch == '\r')
+                throw new ArgumentException("kaya: shortcut \"" + spelling + "\" contains whitespace");
+        string[] parts = spelling.ToLowerInvariant().Split('+');
+        foreach (string p in parts)
+            if (p.Length == 0)
+                throw new ArgumentException("kaya: shortcut \"" + spelling + "\" has an empty token");
+        string key = parts[parts.Length - 1];
+        bool primary = false, shift = false, alt = false;
+        for (int i = 0; i + 1 < parts.Length; i++)
+        {
+            string m = parts[i];
+            bool repeated;
+            if (m == "primary") { repeated = primary; primary = true; }
+            else if (m == "shift") { repeated = shift; shift = true; }
+            else if (m == "alt") { repeated = alt; alt = true; }
+            else
+                throw new ArgumentException("kaya: shortcut \"" + spelling + "\" has an unknown modifier \"" + m + "\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)");
+            if (repeated)
+                throw new ArgumentException("kaya: shortcut \"" + spelling + "\" repeats modifier \"" + m + "\"");
+        }
+        bool alnum = key.Length == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9'));
+        if (!alnum && !ShortcutNamedKeys.Contains(key))
+            throw new ArgumentException("kaya: shortcut \"" + spelling + "\" key \"" + key + "\" is outside the floor (one of a-z, 0-9, or the closed named set)");
+        return (primary ? "primary+" : "") + (shift ? "shift+" : "") + (alt ? "alt+" : "") + key;
+    }
+
+    /// set_menu_prop with a constant label value.
+    public static byte[] TxSetMenuLabel(ulong item, string label)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropLabel); w.Write(SourceConst);
+        EncodeValue(w, label);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a signal-bound label value.
+    public static byte[] TxBindMenuLabel(ulong item, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropLabel); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant enabled value.
+    public static byte[] TxSetMenuEnabled(ulong item, bool enabled)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropEnabled); w.Write(SourceConst);
+        EncodeValue(w, enabled);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a signal-bound enabled value.
+    public static byte[] TxBindMenuEnabled(ulong item, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropEnabled); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant checked value.
+    public static byte[] TxSetMenuChecked(ulong item, bool @checked)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropChecked); w.Write(SourceConst);
+        EncodeValue(w, @checked);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a signal-bound checked value.
+    public static byte[] TxBindMenuChecked(ulong item, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropChecked); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant value value.
+    public static byte[] TxSetMenuValue(ulong item, double value)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropValue); w.Write(SourceConst);
+        EncodeValue(w, value);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a signal-bound value value.
+    public static byte[] TxBindMenuValue(ulong item, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropValue); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant icon value.
+    public static byte[] TxSetMenuIcon(ulong item, ulong handle)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropIcon); w.Write(SourceConst);
+        EncodeValue(w, new BlobHandle(handle));
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant primary value.
+    public static byte[] TxSetMenuPrimary(ulong item, bool primary)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropPrimary); w.Write(SourceConst);
+        EncodeValue(w, primary);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant shortcut value, canonicalized here
+    /// (the one binding-tier shortcut parser — no call site bypasses it).
+    public static byte[] TxSetMenuShortcut(ulong item, string shortcut)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropShortcut); w.Write(SourceConst);
+        EncodeValue(w, CanonicalizeShortcut(shortcut));
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
@@ -900,7 +1121,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -936,7 +1157,7 @@ static class KayaWire
             }
             at += 8 + ((vlen + 7) & ~7);
         }
-        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged)
+        if (kind == OccKindTextChanged || kind == OccKindToggled || kind == OccKindValueChanged || kind == OccKindMenuToggled || kind == OccKindMenuValueChanged)
         {
             uint ptype = BitConverter.ToUInt32(rec, at);
             int plen = BitConverter.ToInt32(rec, at + 4);

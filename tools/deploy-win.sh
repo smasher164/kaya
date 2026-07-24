@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# The menus scene runs every language here (the WinUI backend
+# materializes the command vocabulary). Its legs are the one
+# exception to the four-wide pool: SERIAL, between drains — see the
+# barrier at the bottom of the `all` case (docs/traps.md, OS-global
+# shortcut injection).
 
 # Everything runs inside the dev shell: the flake pins every toolchain
 # (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
@@ -84,6 +89,7 @@ for arg in "$@"; do
         textarea_rust|textarea_python|textarea_go|textarea_csharp|textarea_java) SUITE="$arg" ;;
         sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
+        menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -158,7 +164,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -801,6 +807,23 @@ case "$SUITE" in
         run_suite layout_go
         run_suite layout_csharp
         run_suite layout_java
+        # The menus scene — every language, each leg ALONE between
+        # drains, never in the pool above. WinUI shortcut injection is
+        # OS-global (docs/traps.md): the harness foregrounds the guest
+        # and puts the real chord on the system input queue, so a
+        # concurrent leg's SetForegroundWindow would steal it.
+        # check-steps pins the drain/run/drain barrier on each one.
+        drain_suites
+        run_suite menus_rust
+        drain_suites
+        run_suite menus_python
+        drain_suites
+        run_suite menus_go
+        drain_suites
+        run_suite menus_csharp
+        drain_suites
+        run_suite menus_java
+        drain_suites
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;

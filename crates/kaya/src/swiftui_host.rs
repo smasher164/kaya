@@ -58,6 +58,16 @@ pub struct KayaHostApi {
     /// call). A programmatic select_section never arrives here — the
     /// echo doctrine.
     pub emit_section_selected: extern "C" fn(u64, u64),
+    /// Menu occurrence emits — ONE dispatch path for chrome clicks,
+    /// shortcuts, and harness activation (DESIGN.md, Menus). The
+    /// pointer/length pair is the noun: the wire path
+    /// CONTEXT_ATTACH_NODE handed the backend for a node-anchored
+    /// context item, or NULL/0 for a bar or live-widget item.
+    /// Programmatic checked/value writes never arrive here — the echo
+    /// doctrine.
+    pub emit_menu_activated: unsafe extern "C" fn(u64, *const u8, usize),
+    pub emit_menu_toggled: unsafe extern "C" fn(u64, *const u8, usize, u8),
+    pub emit_menu_value_changed: unsafe extern "C" fn(u64, *const u8, usize, f64),
 }
 
 unsafe extern "C" {
@@ -98,6 +108,9 @@ pub(crate) fn run() -> i32 {
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,
         emit_back_requested: crate::capi::kaya_emit_back_requested,
         emit_section_selected: crate::capi::kaya_emit_section_selected,
+        emit_menu_activated: crate::capi::kaya_emit_menu_activated,
+        emit_menu_toggled: crate::capi::kaya_emit_menu_toggled,
+        emit_menu_value_changed: crate::capi::kaya_emit_menu_value_changed,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };

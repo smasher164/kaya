@@ -107,6 +107,89 @@ check swift   bindings/swift/KayaApp.swift        align "func setAlign\\("
 check haskell bindings/haskell/KayaApp.hs         align "Align :: Align -> Attr"
 check ocaml   bindings/ocaml/kaya_app.ml          align "let row \\?grow \\?spacing \\?align "
 
+# The menu construction surface (DESIGN.md, Menus): menu items are not
+# widget kinds, so the constructor loop above cannot see them — every
+# binding must spell the whole item vocabulary (menu, item/action,
+# toggle, radio_group, option, separator) plus BOTH context anchors
+# (the live-widget attach and the free catalog for template nodes).
+# A binding shipping wire-only menus would pass every other gate until
+# a guest failed to compile (failures-become-guards).
+check_menus() {
+    local lang="$1" file="$2"
+    shift 2
+    local point
+    for point in "$@"; do
+        check "$lang" "$file" "menus:${point%%=*}" "${point#*=}"
+    done
+}
+# The menus clause's own negative test (guard-the-guard, the fake-kind
+# pattern above): an item constructor that exists nowhere must fail in
+# all 8 bindings THROUGH check_menus itself, or the clause's
+# point-splitting has rotted. The subshell keeps the fake's failures
+# out of $status; reset anyway, matching the kind self-test.
+fake_menu_failures=$(
+    {
+        check_menus rust    crates/kaya/src/app.rs              "kayafakemenu=pub fn kayafakemenuitem\\("
+        check_menus python  bindings/python/kaya/__init__.py    "kayafakemenu=^def kayafakemenuitem\\("
+        check_menus go      bindings/go/app.go                  "kayafakemenu=func \\(m MenuItem\\) Kayafakemenuitem\\("
+        check_menus csharp  bindings/csharp/KayaApp.cs          "kayafakemenu=public MenuItem Kayafakemenuitem\\("
+        check_menus java    bindings/java/dev/kaya/KayaApp.java "kayafakemenu=public MenuItem kayafakemenuitem\\("
+        check_menus swift   bindings/swift/KayaApp.swift        "kayafakemenu=func kayafakemenuitem\\("
+        check_menus haskell bindings/haskell/KayaApp.hs         "kayafakemenu=^kayafakemenuitem ::"
+        check_menus ocaml   bindings/ocaml/kaya_app.ml          "kayafakemenu=^let kayafakemenuitem "
+    } 2>&1 | grep -c "no live-zone constructor"
+)
+status=0 # the fake's failures are the point; reset before the real run
+if [ "$fake_menu_failures" -ne 8 ]; then
+    echo "check-sugar-surface: menus self-test failed ($fake_menu_failures/8 patterns fired for a fake item constructor)"
+    exit 1
+fi
+
+check_menus rust crates/kaya/src/app.rs \
+    "menu=pub fn menu" "item=pub fn item\\(" "toggle=pub fn toggle\\(" \
+    "radio_group=pub fn radio_group" "option=pub fn option\\(" \
+    "separator=pub fn separator\\(" "context_menu=pub fn context_menu" \
+    "context_catalog=pub fn context_catalog"
+check_menus python bindings/python/kaya/__init__.py \
+    "menu=^def menu\\(" "item=^def item\\(" "toggle=^def toggle\\(" \
+    "radio_group=^def radio_group\\(" "option=^def option\\(" \
+    "separator=^def separator\\(" "context_menu=def context_menu\\(self" \
+    "context_catalog=^def context_catalog\\("
+check_menus go bindings/go/app.go \
+    "menu=func \\(w WindowRef\\) Menu\\(" "item=func \\(m MenuItem\\) Item\\(" \
+    "toggle=func \\(m MenuItem\\) Toggle\\(" \
+    "radio_group=func \\(w WindowRef\\) RadioGroup\\(" \
+    "option=func \\(m MenuItem\\) Option\\(" \
+    "separator=func \\(m MenuItem\\) Separator\\(" \
+    "context_menu=func \\(tx \\*Tx\\) ContextMenu\\(" \
+    "context_catalog=func \\(tx \\*Tx\\) ContextCatalog\\("
+check_menus csharp bindings/csharp/KayaApp.cs \
+    "menu=public MenuItem Menu\\(" "item=public MenuItem Item\\(" \
+    "toggle=public MenuItem Toggle\\(" "radio_group=public MenuItem RadioGroup\\(" \
+    "option=public MenuItem Option\\(" "separator=public MenuItem Separator\\(" \
+    "context_menu=public void ContextMenu\\(" \
+    "context_catalog=public ContextCatalog ContextCatalog\\("
+check_menus java bindings/java/dev/kaya/KayaApp.java \
+    "menu=public MenuItem menu\\(" "item=public MenuItem item\\(" \
+    "toggle=public MenuItem toggle\\(" "radio_group=public MenuItem radioGroup\\(" \
+    "option=public MenuItem option\\(" "separator=public void separator\\(" \
+    "context_menu=public ContextRef contextMenu\\(" \
+    "context_catalog=public ContextCatalog contextCatalog\\("
+check_menus swift bindings/swift/KayaApp.swift \
+    "menu=func menu\\(" "item=func item\\(" "toggle=func toggle\\(" \
+    "radio_group=func radioGroup\\(" "option=func option\\(" \
+    "separator=func separator\\(" "context_menu=func contextMenu\\(" \
+    "context_catalog=func contextCatalog\\("
+check_menus haskell bindings/haskell/KayaApp.hs \
+    "menu=^menu ::" "item=^item ::" "toggle=^toggle ::" \
+    "radio_group=^radioGroup ::" "option=^option ::" "separator=^separator ::" \
+    "context_menu=^contextMenu ::" "context_catalog=^contextCatalog ::"
+check_menus ocaml bindings/ocaml/kaya_app.ml \
+    "menu=^let menu " "item=^let item " "toggle=^let toggle " \
+    "radio_group=^let radio_group " "option=^let option " \
+    "separator=^let separator " "context_menu=^let context_menu " \
+    "context_catalog=^let context_catalog "
+
 if [ "$status" -ne 0 ]; then
     echo "check-sugar-surface: FAIL"
     exit 1

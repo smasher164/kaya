@@ -43,6 +43,32 @@ static class AbortCheck
         return true;
     }
 
+    // Record-frame helpers for the menu emission section: each frame
+    // is u32 length then u16 kind at offset 4, little-endian.
+    static ushort RecKind(byte[] rec) => (ushort)(rec[4] | (rec[5] << 8));
+
+    static int CountKind(List<byte[]> records, int from, ushort kind)
+    {
+        int n = 0;
+        for (int i = from; i < records.Count; i++)
+            if (RecKind(records[i]) == kind)
+                n++;
+        return n;
+    }
+
+    static bool ContainsAscii(byte[] rec, string needle)
+    {
+        for (int at = 0; at + needle.Length <= rec.Length; at++)
+        {
+            int i = 0;
+            while (i < needle.Length && rec[at + i] == (byte)needle[i])
+                i++;
+            if (i == needle.Length)
+                return true;
+        }
+        return false;
+    }
+
     public static void Run()
     {
         var app = new KayaApp();
@@ -131,6 +157,86 @@ static class AbortCheck
         // only, never build-wide.
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "build-tx read after the guard broken"));
+
+        // The menu construction surface must REACH the record stream —
+        // the wire-dropped-write class: a constructor that emits
+        // nothing passes every surface gate until a scene fails live
+        // (the dropped-spacing lesson; Python's kaya_app_checks.py is
+        // the pattern). The bindings compile into this assembly, so
+        // the open transaction's Records list is in reach.
+        MenuItem file = default;
+        app.Build(tx =>
+        {
+            int before = tx.Records.Count;
+            var save = tx.Item("Save", shortcut: "PRIMARY+S");
+            file = tx.Menu("File", items: new[] { save });
+            var sort = tx.RadioGroup(
+                "Sort", new[] { tx.Option("Name"), tx.Option("Date") }, value: 1);
+            tx.Window(menus: new[] { file, sort });
+            var noun = tx.Label("noun");
+            tx.ContextMenu(noun, tx.Item("Rename"));
+            // Save, File, Name, Date, Sort, Rename.
+            Check(CountKind(tx.Records, before, KayaWire.TxKindMenuItemCreate) == 6,
+                "menu constructors queued the wrong create count");
+            Check(CountKind(tx.Records, before, KayaWire.TxKindMenubarAppend) == 2,
+                "bar anchors queued the wrong menubar-append count");
+            Check(CountKind(tx.Records, before, KayaWire.TxKindMenuItemAppend) == 3,
+                "children queued the wrong item-append count");
+            Check(CountKind(tx.Records, before, KayaWire.TxKindContextAttach) == 1,
+                "context anchor queued the wrong attach count");
+            bool canonical = false;
+            for (int i = before; i < tx.Records.Count; i++)
+                if (RecKind(tx.Records[i]) == KayaWire.TxKindSetMenuProp
+                    && ContainsAscii(tx.Records[i], "primary+s"))
+                    canonical = true;
+            Check(canonical, "shortcut did not reach the records canonicalized");
+
+            // The binding's one shortcut parser rejects aliases at
+            // record time — no call site can bypass it.
+            bool threw = false;
+            try { tx.Item("Bad", shortcut: "ctrl+s"); }
+            catch (ArgumentException) { threw = true; }
+            Check(threw, "an alias shortcut must die in the binding's one parser");
+        });
+
+        // Append-at-any-time: the retained handle reopens in a later
+        // transaction — one create plus one append under the RETAINED
+        // parent, and never a new bar anchor.
+        app.Build(tx =>
+        {
+            int before = tx.Records.Count;
+            tx.Menu(file, items: new[] { tx.Item("Publish") });
+            Check(CountKind(tx.Records, before, KayaWire.TxKindMenuItemCreate) == 1,
+                "reopen queued the wrong create count");
+            byte[] append = null;
+            for (int i = before; i < tx.Records.Count; i++)
+                if (RecKind(tx.Records[i]) == KayaWire.TxKindMenuItemAppend)
+                    append = tx.Records[i];
+            Check(append != null, "reopen queued no append");
+            Check(BitConverter.ToUInt64(append, 8) == file.Id,
+                "reopen did not seat under the retained parent");
+            Check(CountKind(tx.Records, before, KayaWire.TxKindMenubarAppend) == 0,
+                "reopen re-anchored the bar");
+        });
+
+        // An aborted append drops its menu records with everything
+        // else (records die with the tx; nothing ships) and the app
+        // continues.
+        propagated = false;
+        try
+        {
+            app.Build(tx =>
+            {
+                tx.Menu(file, items: new[] { tx.Item("Doomed") });
+                throw new CheckException();
+            });
+        }
+        catch (CheckException)
+        {
+            propagated = true;
+        }
+        Check(propagated, "menu abort: Build must propagate");
+        app.Build(tx => tx.Menu(file, items: new[] { tx.Item("Recovered") }));
 
         Console.WriteLine("csharp abort check: OK");
     }

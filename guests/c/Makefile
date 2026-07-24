@@ -9,7 +9,7 @@ OUT ?= $(ROOT)/target/c-guests
 CFLAGS += -I$(ROOT)/crates/kaya/include -I$(ROOT)/bindings/c
 LDFLAGS += -L$(TARGET_DIR) -lkaya -Wl,-rpath,$(TARGET_DIR)
 
-SCENES := milestone2 entry gallery todos reorder feed
+SCENES := milestone2 entry gallery todos reorder feed menus
 
 all: $(SCENES:%=$(OUT)/%)
 

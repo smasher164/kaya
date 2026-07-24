@@ -190,6 +190,44 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ButtonBaseAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer".to_string(),
+        // Menus (DESIGN.md, Menus and the command vocabulary): the
+        // ratified WinUI lowering — MenuBar in its own Auto row of the
+        // window shell Grid, MenuBarItem per top-level grouping node,
+        // the flyout item kinds 1:1, KeyboardAccelerator per shortcut
+        // (primary → Control), MenuFlyout as ContextFlyout for the
+        // widget/node anchor. Each class is named explicitly: the
+        // filter never pulls referenced types transitively
+        // (docs/traps.md), and the item base class must be present or
+        // MenuBarItem.Items/MenuFlyout.Items reference a type that
+        // does not exist.
+        "Microsoft.UI.Xaml.Controls.MenuBar".to_string(),
+        "Microsoft.UI.Xaml.Controls.MenuBarItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.MenuFlyoutItemBase".to_string(),
+        "Microsoft.UI.Xaml.Controls.MenuFlyoutItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.ToggleMenuFlyoutItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.RadioMenuFlyoutItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.MenuFlyoutSeparator".to_string(),
+        // Shortcuts ride the REAL accelerator machinery: the chord
+        // enums live in Windows.System and must be named or
+        // KeyboardAccelerator's Key/Modifiers setters vanish silently
+        // (the transitivity trap; UIElement.KeyboardAccelerators was a
+        // usize pad while the class was unfiltered).
+        "Microsoft.UI.Xaml.Input.KeyboardAccelerator".to_string(),
+        "Windows.System.VirtualKey".to_string(),
+        "Windows.System.VirtualKeyModifiers".to_string(),
+        // The harness verbs invoke flyout items through their
+        // automation peers (the ContentDialog precedent): the peers
+        // for the item kinds plus the provider interfaces the invoke
+        // patterns live on — casting the peer to the provider is the
+        // route that works whatever concrete peer a subclass mints
+        // (this SDK has no RadioMenuFlyoutItem peer of its own).
+        "Microsoft.UI.Xaml.Automation.Peers.MenuFlyoutItemAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.ToggleMenuFlyoutItemAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Peers.MenuBarItemAutomationPeer".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.IExpandCollapseProvider".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

@@ -36,22 +36,6 @@ moved to git history; their traps live in docs/traps.md.)
     go/analysis; ErrorProne — never load-bearing, the runtime guards
     are the floor);
   - whatever the guide ratifies for multi-window ergonomics.
-- **Menus and the command vocabulary implementation.** The design is
-  ratified in DESIGN.md's "Menus and the command vocabulary"; the
-  phase-by-phase implementation contract is docs/menus-plan.md.
-  Context menus ship in the same milestone as the window catalog,
-  using the same item vocabulary with a second anchor. Open,
-  trigger-gated follow-ons are: shared command identity across
-  anchors (an artifact needs shared enablement); For-stamped
-  items (a dynamic catalog such as Recent Files); `bind_field`
-  context labels; merging authored items into native text-control
-  menus; a GTK hamburger presentation hint; item removal;
-  context-item shortcuts; role-based standard items, including native
-  Settings/Preferences placement; punctuation shortcut keys when an
-  artifact needs layout-sensitive chords (zoom's
-  `primary+plus` / `primary+minus` is the expected first trigger); and
-  a toolbar grammar only if an artifact demonstrates that adaptive
-  menu promotion cannot express its semantics.
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
   beyond the primary set (utility panels, always-on-top).
@@ -159,6 +143,28 @@ moved to git history; their traps live in docs/traps.md.)
   on a container the uniqueness convention cannot name — the layout
   scene already qualifies whenever its rows deserve assertions.
 
+- **Menus follow-ons.** The command vocabulary LANDED 2026-07-24 —
+  both anchors, all four backends, all 8 bindings plus the C floor,
+  and the menus scene green on every lane. DESIGN.md's "Menus and the
+  command vocabulary" is the whole record — the design, the lowering
+  per host, and the three platform limits under "Where a platform
+  cannot say it". What stayed out is trigger-gated, each trigger
+  stated in that section's "Deliberate cuts and admission triggers":
+  shared command identity across anchors (the responder-chain/target
+  problem), For-stamped items, `bind_field` labels on context items,
+  merging authored items into native text-control menus, a GTK
+  hamburger presentation hint, item removal, context-item shortcuts,
+  role-based standard items (including native Settings placement),
+  punctuation shortcut keys, and — only under artifact pressure — a
+  toolbar grammar. One follow-on the section does not carry: iOS has
+  no hardware-keyboard route to the catalog. The interpreter holds
+  the shortcut table (the harness verb drives it, and the scene
+  proves the dispatch), but nothing binds it to a real iPad keyboard
+  or to the hold-Command HUD — that wants `UIKeyCommand` /
+  `UIMenuBuilder`, since the macOS lowering is NSMenu rather than
+  SwiftUI `.commands`. TRIGGER: an artifact running on iPad with a
+  keyboard. Android's equivalent route IS live (each host Activity
+  forwards `dispatchKeyShortcutEvent` into the same table).
 - scrollTo + ref markers (per-instance handles): brings the first
   instance-addressed command (TemplateNodeId + key path target) and the
   silent vanished-target no-op (live-zone commands fail loudly; stamped
@@ -213,14 +219,40 @@ moved to git history; their traps live in docs/traps.md.)
   that actually ran and produced verdicts (a runner can still skip
   legs at runtime); an executed-suite manifest compared against the
   expected tuple set is the missing gate.
-  Packaging notes for whoever adds the next scene: iOS needs a bundle
-  per example in run-sim.sh; Android has one apk PER GUEST TIER, each
-  a scene selector keyed on KAYA_SELFTEST — milestone2 (the Rust
-  guest: a new scene needs a `mod` + match arm in
-  guests/rust/milestone2_android.rs) and milestone2kt (the JVM guest:
-  its MainActivity needs the matching arm);
-  Windows needs a tools/guest/run_<scene>_<lang>.cmd plus
-  build/scp/verify/kill entries in deploy-win.sh.
+  Packaging notes for whoever adds the next scene (walked end to end
+  by menus, 2026-07-24): on iOS the swift guest rides
+  IOS_SWIFT_SCENES — one name, bundle and leg derived — while a rust
+  example needs its own build+bundle+queue_leg block; Android has one
+  apk PER GUEST TIER, each a scene selector keyed on KAYA_SELFTEST —
+  milestone2 (the Rust guest: a new scene needs a `mod` + match arm
+  in guests/rust/milestone2_android.rs) and milestone2kt (the JVM
+  guest: its MainActivity needs the matching arm) — plus a run_apk
+  leg per tier; on Windows the name in deploy-win's SCENES derives
+  the cross-build, the scp of exe/python/go sources, and the taskkill
+  entries, leaving only a tools/guest/run_<scene>_<lang>.cmd per
+  language and the run_suite block. A scene whose guests do not all
+  exist yet must NOT join SCENES: the per-language surfaces glob for
+  sources and must keep failing loudly for the scenes that do exist.
+- Recording stills DRIFT across a long scene: the film and the
+  harness transcript are anchored at ONE instant, and their clocks
+  then run at different rates, so a step's still is progressively
+  earlier than the step. Menus (38 steps, ~2.4s of transcript) is the
+  first scene long enough to show it — measured 2026-07-24 on iOS:
+  the leg's steps span 2.4s of harness time while the same run
+  occupies ~1.3s of film, so `step-38` renders a state from before
+  `click button#2`. The film itself is complete (t=31.0s of suite-1
+  shows the true final frame: `shared`, Publish promoted, the removed
+  row gone) — only the mapping is wrong. Same root cause as the
+  "anchor implausible" failures on the busiest simulator, where the
+  accumulated drift pushes a leg's span past the film's end and the
+  extractor (correctly) refuses. Android has the weaker form: it
+  anchors at stop time minus duration, and screenrecord drops its
+  buffered tail. Fix direction: calibrate rate, not just offset — two
+  fiducials per film, or a per-leg in-band fiducial — rather than
+  trusting one anchor across a whole suite. Windows has a third
+  variant: `KAYA_RECORD=1 deploy-win … menus_rust` passed the leg and
+  then reported "the capturer produced no frames" — the WGC capturer
+  never attached to a window that lives about two seconds.
 - Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
   records a construction emits) in every language, not just Python.
   The motivating miss: the Swift binding's containerOf ACCEPTED

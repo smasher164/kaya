@@ -29,6 +29,15 @@ pub const REC_ALERT_RESULT: u16 = 7;
 pub const REC_ENTRY_POPPED: u16 = 8;
 pub const REC_BACK_REQUESTED: u16 = 9;
 pub const REC_SECTION_SELECTED: u16 = 10;
+// Menu occurrences. Each carries the button_clicked body shape — u64
+// item id, u32 path_len, u32 reserved, then path_len key values (the
+// on_click_node encoding: empty for a bar/live-widget activation, the
+// anchor copy's key path for a node-anchored context item) — then the
+// payload for the stateful pair (a Bool for toggled, an F64 index for
+// value_changed).
+pub const REC_MENU_ACTIVATED: u16 = 11;
+pub const REC_MENU_TOGGLED: u16 = 12;
+pub const REC_MENU_VALUE_CHANGED: u16 = 13;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

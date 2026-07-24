@@ -151,6 +151,21 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_section_selected as *mut _,
             },
             NativeMethod {
+                name: "emitMenuActivated".into(),
+                sig: "(J[B)V".into(),
+                fn_ptr: present_emit_menu_activated as *mut _,
+            },
+            NativeMethod {
+                name: "emitMenuToggled".into(),
+                sig: "(J[BZ)V".into(),
+                fn_ptr: present_emit_menu_toggled as *mut _,
+            },
+            NativeMethod {
+                name: "emitMenuValueChanged".into(),
+                sig: "(J[BD)V".into(),
+                fn_ptr: present_emit_menu_value_changed as *mut _,
+            },
+            NativeMethod {
                 name: "nextCommands".into(),
                 sig: "([B)I".into(),
                 fn_ptr: present_next_commands as *mut _,
@@ -250,6 +265,60 @@ extern "system" fn present_emit_section_selected(
 /// entry — nothing popped; the app answers with pop_entry.
 extern "system" fn present_emit_back_requested(_env: JNIEnv, _class: JClass, entry: jlong) {
     crate::capi::kaya_emit_back_requested(entry as u64);
+}
+
+/// KayaPresent.emitMenuActivated: a menu action fired — a bar/overflow
+/// row, a context-menu row, OR its shortcut; ONE occurrence, one
+/// dispatch path. `noun` is the raw wire key path CONTEXT_ATTACH_NODE
+/// handed the backend, empty for a bar or live-widget activation —
+/// kaya_emit_menu_activated's JNI spelling.
+extern "system" fn present_emit_menu_activated(
+    env: JNIEnv,
+    _class: JClass,
+    item: jlong,
+    noun: JByteArray,
+) {
+    let bytes = env
+        .convert_byte_array(&noun)
+        .expect("kaya: reading the menu noun failed");
+    unsafe { crate::capi::kaya_emit_menu_activated(item as u64, bytes.as_ptr(), bytes.len()) };
+}
+
+/// KayaPresent.emitMenuToggled: a toggle item flipped by the user
+/// (programmatic checked writes never come here — the echo doctrine).
+/// kaya_emit_menu_toggled's JNI spelling.
+extern "system" fn present_emit_menu_toggled(
+    env: JNIEnv,
+    _class: JClass,
+    item: jlong,
+    noun: JByteArray,
+    checked: jni::sys::jboolean,
+) {
+    let bytes = env
+        .convert_byte_array(&noun)
+        .expect("kaya: reading the menu noun failed");
+    unsafe {
+        crate::capi::kaya_emit_menu_toggled(item as u64, bytes.as_ptr(), bytes.len(), checked)
+    };
+}
+
+/// KayaPresent.emitMenuValueChanged: a radio group's selection changed
+/// by the user, keyed by the GROUP's id (programmatic value writes
+/// never come here — the echo doctrine). kaya_emit_menu_value_changed's
+/// JNI spelling.
+extern "system" fn present_emit_menu_value_changed(
+    env: JNIEnv,
+    _class: JClass,
+    item: jlong,
+    noun: JByteArray,
+    index: jni::sys::jdouble,
+) {
+    let bytes = env
+        .convert_byte_array(&noun)
+        .expect("kaya: reading the menu noun failed");
+    unsafe {
+        crate::capi::kaya_emit_menu_value_changed(item as u64, bytes.as_ptr(), bytes.len(), index)
+    };
 }
 
 extern "system" fn present_emit_toggled(

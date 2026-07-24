@@ -86,6 +86,9 @@ public final class Main {
             case "sections":
                 app = Sections::app;
                 break;
+            case "menus":
+                app = Menus::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

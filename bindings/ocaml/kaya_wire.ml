@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x39a6143b6f4c3e0eL
+let spec_hash = 0x0e4b7f4f716cc749L
 
 let value_bool = 1
 let value_i64 = 2
@@ -56,6 +56,19 @@ let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
 let sprop_icon = 2
+let menu_kind_menu = 1
+let menu_kind_action = 2
+let menu_kind_toggle = 3
+let menu_kind_radio_group = 4
+let menu_kind_radio_option = 5
+let menu_kind_separator = 6
+let mprop_label = 1
+let mprop_enabled = 2
+let mprop_checked = 3
+let mprop_value = 4
+let mprop_icon = 5
+let mprop_primary = 6
+let mprop_shortcut = 7
 let sections_presentation_auto = 0
 let sections_presentation_bar = 1
 let sections_presentation_sidebar = 2
@@ -104,6 +117,12 @@ let tx_kind_set_entry_prop = 24
 let tx_kind_add_section = 25
 let tx_kind_select_section = 26
 let tx_kind_set_section_prop = 27
+let tx_kind_menu_item_create = 28
+let tx_kind_menu_item_append = 29
+let tx_kind_menubar_append = 30
+let tx_kind_context_attach = 31
+let tx_kind_context_attach_node = 32
+let tx_kind_set_menu_prop = 33
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -121,6 +140,12 @@ let apply_kind_set_entry_prop = 14
 let apply_kind_add_section = 15
 let apply_kind_select_section = 16
 let apply_kind_set_section_prop = 17
+let apply_kind_menu_item_create = 18
+let apply_kind_menu_item_append = 19
+let apply_kind_menubar_append = 20
+let apply_kind_context_attach = 21
+let apply_kind_context_attach_node = 22
+let apply_kind_set_menu_prop = 23
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -131,6 +156,9 @@ let occ_kind_alert_result = 7
 let occ_kind_entry_popped = 8
 let occ_kind_back_requested = 9
 let occ_kind_section_selected = 10
+let occ_kind_menu_activated = 11
+let occ_kind_menu_toggled = 12
+let occ_kind_menu_value_changed = 13
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -361,6 +389,44 @@ let tx_select_section window section =
 let tx_set_section_prop section prop source =
   finish tx_kind_set_section_prop (fun b ->
       Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b (Int32.of_int source))
+
+(* Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). *)
+let tx_menu_item_create item kind =
+  finish tx_kind_menu_item_create (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int kind);
+      Buffer.add_int32_le b 0l)
+
+(* Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. *)
+let tx_menu_item_append parent child =
+  finish tx_kind_menu_item_append (fun b ->
+      Buffer.add_int64_le b parent;
+      Buffer.add_int64_le b child)
+
+(* Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. *)
+let tx_menubar_append window item =
+  finish tx_kind_menubar_append (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b item)
+
+(* Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). *)
+let tx_context_attach widget item =
+  finish tx_kind_context_attach (fun b ->
+      Buffer.add_int64_le b widget;
+      Buffer.add_int64_le b item)
+
+(* Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. *)
+let tx_context_attach_node node item =
+  finish tx_kind_context_attach_node (fun b ->
+      Buffer.add_int64_le b node;
+      Buffer.add_int64_le b item)
+
+(* Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. *)
+let tx_set_menu_prop item prop source =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
       Buffer.add_int32_le b (Int32.of_int prop);
       Buffer.add_int32_le b (Int32.of_int source))
 
@@ -794,6 +860,154 @@ let tx_bind_section_icon section signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+let shortcut_named_keys = [ "enter"; "escape"; "delete"; "left"; "right"; "up"; "down"; "f1"; "f2"; "f3"; "f4"; "f5"; "f6"; "f7"; "f8"; "f9"; "f10"; "f11"; "f12" ]
+
+(* Canonicalize a shortcut spelling to the wire form: lowercase
+   '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+   key (a-z, 0-9, or the closed named set). Accepts ASCII case
+   variants and any modifier order; raises Invalid_argument on
+   whitespace, empty tokens, repeated modifiers, aliases
+   (ctrl/cmd/option), and unknown or multiple or missing keys.
+   POLICY stays at the core: escape, shift-only and bare
+   alphanumerics, and the reserved floor are validated there, on the
+   canonical spelling, never rewritten. *)
+let canonicalize_shortcut spelling =
+  if String.length spelling = 0 then invalid_arg "kaya: shortcut is empty";
+  String.iter
+    (fun ch ->
+      match ch with
+      | ' ' | '\t' | '\n' | '\011' | '\012' | '\r' ->
+          invalid_arg ("kaya: shortcut \"" ^ spelling ^ "\" contains whitespace")
+      | _ -> ())
+    spelling;
+  let parts = String.split_on_char '+' (String.lowercase_ascii spelling) in
+  if List.exists (fun p -> String.length p = 0) parts then
+    invalid_arg ("kaya: shortcut \"" ^ spelling ^ "\" has an empty token");
+  let rec split_last acc = function
+    | [] -> invalid_arg "kaya: shortcut is empty"
+    | [ k ] -> (List.rev acc, k)
+    | m :: rest -> split_last (m :: acc) rest
+  in
+  let mods, key = split_last [] parts in
+  let has_primary = ref false and has_shift = ref false and has_alt = ref false in
+  List.iter
+    (fun m ->
+      let slot =
+        match m with
+        | "primary" -> has_primary
+        | "shift" -> has_shift
+        | "alt" -> has_alt
+        | _ ->
+            invalid_arg
+              ("kaya: shortcut \"" ^ spelling ^ "\" has an unknown modifier \"" ^ m
+             ^ "\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)")
+      in
+      if !slot then
+        invalid_arg ("kaya: shortcut \"" ^ spelling ^ "\" repeats modifier \"" ^ m ^ "\"");
+      slot := true)
+    mods;
+  let alnum =
+    String.length key = 1
+    && (match key.[0] with 'a' .. 'z' | '0' .. '9' -> true | _ -> false)
+  in
+  if (not alnum) && not (List.mem key shortcut_named_keys) then
+    invalid_arg
+      ("kaya: shortcut \"" ^ spelling ^ "\" key \"" ^ key
+     ^ "\" is outside the floor (one of a-z, 0-9, or the closed named set)");
+  (if !has_primary then "primary+" else "")
+  ^ (if !has_shift then "shift+" else "")
+  ^ (if !has_alt then "alt+" else "")
+  ^ key
+
+(* set_menu_prop with a constant label value. *)
+let tx_set_menu_label item label =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_label);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str label))
+
+(* set_menu_prop with a signal-bound label value. *)
+let tx_bind_menu_label item signal_id =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_label);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_menu_prop with a constant enabled value. *)
+let tx_set_menu_enabled item enabled =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_enabled);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool enabled))
+
+(* set_menu_prop with a signal-bound enabled value. *)
+let tx_bind_menu_enabled item signal_id =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_enabled);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_menu_prop with a constant checked value. *)
+let tx_set_menu_checked item checked =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_checked);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool checked))
+
+(* set_menu_prop with a signal-bound checked value. *)
+let tx_bind_menu_checked item signal_id =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_checked);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_menu_prop with a constant value value. *)
+let tx_set_menu_value item value =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_value);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 value))
+
+(* set_menu_prop with a signal-bound value value. *)
+let tx_bind_menu_value item signal_id =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_value);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_menu_prop with a constant icon value. *)
+let tx_set_menu_icon item handle =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_icon);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Blob handle))
+
+(* set_menu_prop with a constant primary value. *)
+let tx_set_menu_primary item primary =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_primary);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool primary))
+
+(* set_menu_prop with a constant shortcut value, canonicalized here (the
+   one binding-tier shortcut parser — no call site bypasses it). *)
+let tx_set_menu_shortcut item shortcut =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_shortcut);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str (canonicalize_shortcut shortcut)))
+
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)
 let u16_at byte i = byte i lor (byte (i + 1) lsl 8)
@@ -829,7 +1043,7 @@ let parse_value byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -860,7 +1074,7 @@ let parse_occurrence byte =
       at := next
     done;
     let payload =
-      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed then
+      if kind = occ_kind_text_changed || kind = occ_kind_toggled || kind = occ_kind_value_changed || kind = occ_kind_menu_toggled || kind = occ_kind_menu_value_changed then
         Some (fst (parse_value byte !at))
       else None
     in

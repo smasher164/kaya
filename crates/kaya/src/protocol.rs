@@ -63,6 +63,15 @@ pub struct CollectionId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TemplateNodeId(pub u64);
 
+/// A menu item's id: its OWN guest-allocated id space (one `c_menu_item`
+/// counter per app), distinct from widget, node, surface, and every
+/// other space so cross-use with a widget or a window is a compile
+/// error where the language can express it (DESIGN.md, Menus). Dispatch
+/// tables key by item id — "N tables, always". Never carries the
+/// internal bit; 0 is not an item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MenuItemId(pub u64);
+
 /// The implicit window every scene can mount into until the window
 /// vocabulary arrives (see DESIGN.md: windows are a scene layer).
 pub const DEFAULT_WINDOW: WindowId = WindowId(0);
@@ -125,6 +134,27 @@ pub enum Occurrence {
     ValueChanged { id: WidgetId, value: f64 },
     /// The user moved a stamped copy of a template slider.
     InstanceValueChanged { node: TemplateNodeId, path: Path, value: f64 },
+    /// A menu action fired — clicked in the bar/overflow/context menu OR
+    /// invoked through its shortcut: ONE occurrence, one dispatch path
+    /// (the shortcut is another affordance of the same item; DESIGN.md,
+    /// Menus). The action the guest created directly.
+    MenuActivated { item: MenuItemId },
+    /// A menu action fired on a node-anchored context menu: the item id
+    /// plus the anchor copy's key path (the on_click_node encoding — the
+    /// keys ARE the noun).
+    InstanceMenuActivated { item: MenuItemId, path: Path },
+    /// The user flipped a toggle item; carries the new state. Reuses the
+    /// checkbox contract — user activation emits, a programmatic
+    /// `checked` write is configuration and stays quiet.
+    MenuToggled { item: MenuItemId, checked: bool },
+    /// A toggle flipped on a node-anchored context menu.
+    InstanceMenuToggled { item: MenuItemId, path: Path, checked: bool },
+    /// The user picked a radio option; carries the group's new selected
+    /// option index (the Choice contract, 0-based, integral). A
+    /// programmatic `value` write is quiet.
+    MenuValueChanged { group: MenuItemId, index: f64 },
+    /// A radio option picked on a node-anchored context menu.
+    InstanceMenuValueChanged { group: MenuItemId, path: Path, index: f64 },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -338,6 +368,99 @@ pub enum WidgetKind {
     /// do not apply. Virtualization is explicitly out (ledgered; a
     /// For inside a scroll renders unvirtualized).
     Scroll,
+}
+
+/// The menu item vocabulary (spec enum "menu_kind"; DESIGN.md, Menus).
+/// `menu` and `radio_group` are the grouping nodes; the rest are
+/// leaves. One vocabulary, two anchors (the window bar and a
+/// widget/node context) — the anchor decides the spelling, never the
+/// item kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItemKind {
+    /// A neutral grouping node, at bar level or nested as a submenu.
+    Menu,
+    /// A leaf command emitting `menu_activated`.
+    Action,
+    /// A stateful leaf reusing the Checkbox contract; emits
+    /// `menu_toggled`.
+    Toggle,
+    /// A grouping node and Choice-contract state owner; its selected
+    /// option is an integral index (`value`), and a user pick emits
+    /// `menu_value_changed`. Accepts only `radio_option` children.
+    RadioGroup,
+    /// A labeled option belonging to a radio group.
+    RadioOption,
+    /// Native grouping chrome with no label or handler.
+    Separator,
+}
+
+/// Menu property keys — separate from widget, window, entry, and
+/// section props (spec::MENU_PROPS; DESIGN.md, Menus). `label` and
+/// `enabled` apply to every kind but `separator`; `checked` is
+/// toggle-only, `value` radio-group-only; `primary` and `shortcut` are
+/// action-only. `label`, `enabled`, `checked`, and `value` are
+/// signal-bindable; `icon`, `primary`, and `shortcut` are const-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MenuProp {
+    /// The item's label (Str). Required except on separators;
+    /// signal-bindable.
+    Label,
+    /// Whether the item is enabled (Bool, default true);
+    /// signal-bindable.
+    Enabled,
+    /// A toggle's state (Bool); signal-bound in both directions under
+    /// the Checkbox contract.
+    Checked,
+    /// A radio group's selected option index (F64, integral, 0-based)
+    /// under the Choice contract.
+    Value,
+    /// An optional icon (Blob) used by phone promotion; ignored where
+    /// native menu dress has no icon.
+    Icon,
+    /// The phone-bar promotion hint (Bool, default false); action-only,
+    /// inert on desktops.
+    Primary,
+    /// A normalized shortcut spelling (Str); window-anchored action
+    /// only. The core validates the canonical wire form and rejects
+    /// non-canonical spellings — it never rewrites guest data.
+    Shortcut,
+}
+
+/// Which materialized attachment a backend's menu native belongs to:
+/// one window's bar, or one context anchor's flyout. A template
+/// context catalog attaches the SAME item ids to every stamped copy,
+/// so an item id alone never identifies a native — stamped node
+/// activations carry the copy's key path because those keys identify
+/// the noun (DESIGN.md, Menus), and only the attachment says whose
+/// copy (and therefore whose noun) an activation route fires for.
+/// A backend that keeps a flat native map keys it by
+/// `(MenuAttachment, item id)` (WinUI); GTK reaches the same
+/// invariant with per-attachment action instances. Compiled with the
+/// Rust-native backends and the unit tests (the harness cfg
+/// precedent).
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MenuAttachment {
+    /// The window catalog attachment (the bar), by window id.
+    Window(u64),
+    /// A context catalog attachment, by anchor widget id.
+    Context(u64),
+}
+
+/// Destroying a context anchor takes its materialized natives with it
+/// (menu ITEMS are never destroyed; the attachment's instances are):
+/// a detached native still raises Click through its automation peer —
+/// the WinUI menu probe proves it — so a surviving entry would stay
+/// invoke-capable with the dead copy's noun. Every other attachment's
+/// natives — the shared item ids under OTHER anchors, and the window
+/// bars — survive untouched (GTK's Destroy arm is the precedent: it
+/// retains item actions against the removed attachment's instances).
+#[cfg(any(target_os = "windows", test))]
+pub fn purge_context_natives<V>(
+    natives: &mut std::collections::HashMap<(MenuAttachment, u64), V>,
+    anchor: u64,
+) {
+    natives.retain(|&(a, _), _| a != MenuAttachment::Context(anchor));
 }
 
 /// Property keys; grows with widgets.
@@ -558,6 +681,30 @@ pub enum TxOp {
     /// Bind a section property. Element sources are rejected at
     /// decode — sections are not collection elements.
     SetSectionProp { section: WindowId, prop: SectionProp, value: PropValue },
+    /// Create a menu item of `kind` in the menu-item id space. Items
+    /// are live, append-only, and never removed in v1 (DESIGN.md,
+    /// Menus).
+    MenuItemCreate { item: MenuItemId, kind: MenuItemKind },
+    /// Append `child` under grouping node `parent` (single-parent: an
+    /// item acquires exactly one parent or anchor). The closed
+    /// parent/child grammar is validated at the root.
+    MenuItemAppend { parent: MenuItemId, child: MenuItemId },
+    /// Append a top-level grouping node (`menu` or `radio_group`) to
+    /// `window`'s command catalog — the window anchor, riding the
+    /// window construct under the window-attribute unification rule.
+    MenubarAppend { window: WindowId, item: MenuItemId },
+    /// Attach a context catalog rooted at `item` to a live widget. The
+    /// editable text controls (Entry, TextArea) reject attachment — their
+    /// native edit menus are dress.
+    ContextAttach { widget: WidgetId, item: MenuItemId },
+    /// Attach a context catalog to a template node (the Tpl zone): every
+    /// stamped copy shows the same catalog, and an activation carries the
+    /// copy's key path (the on_click_node encoding).
+    ContextAttachNode { node: TemplateNodeId, item: MenuItemId },
+    /// Bind a menu property (MENU_PROPS). Element sources are rejected at
+    /// decode — menu items are not collection elements; `icon`,
+    /// `primary`, and `shortcut` reject signal sources at the root.
+    SetMenuProp { item: MenuItemId, prop: MenuProp, value: PropValue },
     /// Declare a collection with its schema: one ordered field-type
     /// list per variant of the element sum. Mandatory — a record
     /// collection is the one-variant case and a scalar collection the
@@ -658,6 +805,23 @@ pub enum ApplyOp {
     /// section_selected.
     SelectSection { window: WindowId, section: WindowId },
     SetSectionProp { section: WindowId, prop: SectionProp, value: Value },
+    /// Create a presentation-side menu item; the backend keys its
+    /// dispatch by item id and emits menu occurrences carrying that id.
+    MenuItemCreate { item: MenuItemId, kind: MenuItemKind },
+    /// Append `child` under grouping node `parent`.
+    MenuItemAppend { parent: MenuItemId, child: MenuItemId },
+    /// Append a top-level grouping node to the window's catalog. The bar
+    /// materializes per platform (native menu chrome on desktop, top-bar
+    /// overflow on the phones).
+    MenubarAppend { window: WindowId, item: MenuItemId },
+    /// Attach a context catalog to a live widget.
+    ContextAttach { widget: WidgetId, item: MenuItemId },
+    /// Attach a context catalog to a stamped widget, carrying the anchor
+    /// copy's key path — the noun every activation from this attachment
+    /// stamps into its occurrence (the on_click_node encoding).
+    ContextAttachNode { widget: WidgetId, item: MenuItemId, path: Path },
+    /// Set a menu property to an already-resolved value.
+    SetMenuProp { item: MenuItemId, prop: MenuProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
     Mount { window: WindowId, root: WidgetId },
     /// Reposition `child` among `parent`'s children: before the
@@ -766,6 +930,34 @@ impl OccSink {
                     body[8..].copy_from_slice(&section.0.to_le_bytes());
                     ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
                 }
+                Occurrence::MenuActivated { item } => {
+                    let tag = crate::wire::click_tag(item.0, &[]);
+                    ring.push_record(crate::ring::REC_MENU_ACTIVATED, &tag);
+                }
+                Occurrence::InstanceMenuActivated { item, path } => {
+                    let tag = crate::wire::click_tag(item.0, &path);
+                    ring.push_record(crate::ring::REC_MENU_ACTIVATED, &tag);
+                }
+                Occurrence::MenuToggled { item, checked } => {
+                    let tag = crate::wire::click_tag(item.0, &[]);
+                    let body = crate::wire::toggled_body(&tag, checked);
+                    ring.push_record(crate::ring::REC_MENU_TOGGLED, &body);
+                }
+                Occurrence::InstanceMenuToggled { item, path, checked } => {
+                    let tag = crate::wire::click_tag(item.0, &path);
+                    let body = crate::wire::toggled_body(&tag, checked);
+                    ring.push_record(crate::ring::REC_MENU_TOGGLED, &body);
+                }
+                Occurrence::MenuValueChanged { group, index } => {
+                    let tag = crate::wire::click_tag(group.0, &[]);
+                    let body = crate::wire::value_changed_body(&tag, index);
+                    ring.push_record(crate::ring::REC_MENU_VALUE_CHANGED, &body);
+                }
+                Occurrence::InstanceMenuValueChanged { group, path, index } => {
+                    let tag = crate::wire::click_tag(group.0, &path);
+                    let body = crate::wire::value_changed_body(&tag, index);
+                    ring.push_record(crate::ring::REC_MENU_VALUE_CHANGED, &body);
+                }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },
         }
@@ -831,6 +1023,65 @@ impl OccSink {
             }
         }
     }
+
+    /// A menu action fired: the item's menu tag (item id + noun path)
+    /// goes out verbatim (ring) or is parsed back into an Occurrence
+    /// (mpsc). One route for the bar action and the node-anchored
+    /// context item; the noun path in the tag tells them apart.
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "ios", target_os = "android"),
+        allow(dead_code)
+    )]
+    pub(crate) fn send_menu_activated_tag(&self, tag: &[u8]) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_menu_activated_tag(tag));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(crate::ring::REC_MENU_ACTIVATED, tag);
+            }
+        }
+    }
+
+    /// The same fast path for a toggle item: the menu tag plus the new
+    /// state.
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "ios", target_os = "android"),
+        allow(dead_code)
+    )]
+    pub(crate) fn send_menu_toggled_tag(&self, tag: &[u8], checked: bool) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_menu_toggled_tag(tag, checked));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_MENU_TOGGLED,
+                    &crate::wire::toggled_body(tag, checked),
+                );
+            }
+        }
+    }
+
+    /// The same fast path for a radio group: the menu tag plus the new
+    /// selected option index.
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "ios", target_os = "android"),
+        allow(dead_code)
+    )]
+    pub(crate) fn send_menu_value_tag(&self, tag: &[u8], index: f64) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                let _ = tx.send(crate::wire::decode_menu_value_tag(tag, index));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(
+                    crate::ring::REC_MENU_VALUE_CHANGED,
+                    &crate::wire::value_changed_body(tag, index),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -844,5 +1095,44 @@ mod tests {
     #[should_panic(expected = "a blob names content, never identity")]
     fn a_blob_cannot_be_a_key() {
         Key::from_value(&Value::Blob(Blob::from(&b"\x89PNG"[..])));
+    }
+
+    /// The multi-copy negative: a template context catalog attaches
+    /// the SAME item ids to every stamped row, so a native map must
+    /// hold one entry per (attachment, item). A flat per-item map
+    /// keeps only the last-built copy — whichever attachment an
+    /// arbitrary rebuild order visits last — with THAT row's noun
+    /// baked into its activation route (the WinUI wrong-noun bug,
+    /// docs/traps.md).
+    #[test]
+    fn stamped_copies_keep_one_native_per_attachment() {
+        let mut natives = std::collections::HashMap::new();
+        // Item 7 materializes under the bar and under two stamped rows.
+        natives.insert((MenuAttachment::Window(0), 7u64), "bar copy");
+        natives.insert((MenuAttachment::Context(31), 7u64), "row 1 copy");
+        natives.insert((MenuAttachment::Context(32), 7u64), "row 2 copy");
+        assert_eq!(natives.len(), 3, "every stamped copy keeps its own native");
+        assert_eq!(natives[&(MenuAttachment::Context(31), 7)], "row 1 copy");
+        assert_eq!(natives[&(MenuAttachment::Context(32), 7)], "row 2 copy");
+        assert_eq!(natives[&(MenuAttachment::Window(0), 7)], "bar copy");
+    }
+
+    /// The destroy negative: removing one stamped row purges exactly
+    /// that attachment's instances — the other rows' copies and the
+    /// bar's stay — so Remove on row 1 followed by context_open +
+    /// menu_activate on row 2 can never invoke (and re-emit the keys
+    /// of) the dead copy.
+    #[test]
+    fn destroying_an_anchor_purges_only_its_natives() {
+        let mut natives = std::collections::HashMap::new();
+        natives.insert((MenuAttachment::Window(0), 7u64), "bar copy");
+        natives.insert((MenuAttachment::Context(31), 7u64), "row 1 copy");
+        natives.insert((MenuAttachment::Context(31), 8u64), "row 1 rename");
+        natives.insert((MenuAttachment::Context(32), 7u64), "row 2 copy");
+        purge_context_natives(&mut natives, 31);
+        assert!(!natives.contains_key(&(MenuAttachment::Context(31), 7)));
+        assert!(!natives.contains_key(&(MenuAttachment::Context(31), 8)));
+        assert_eq!(natives[&(MenuAttachment::Context(32), 7)], "row 2 copy");
+        assert_eq!(natives[&(MenuAttachment::Window(0), 7)], "bar copy");
     }
 }

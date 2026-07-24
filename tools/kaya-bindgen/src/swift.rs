@@ -298,12 +298,120 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        self.end(start)");
         c.line("    }");
     }
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root). The shortcut setter
+    // routes through kayaCanonicalizeShortcut (defined after the
+    // struct), so no call site can bypass canonicalization.
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => (
+                camel(prop),
+                "String",
+                format!(".str(kayaCanonicalizeShortcut({}))", camel(prop)),
+            ),
+            crate::PropKind::Str => (camel(prop), "String", format!(".str({})", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "Bool", format!(".bool({})", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "Double", format!(".f64({})", camel(prop))),
+            crate::PropKind::Blob => ("handle".to_string(), "UInt64", ".blob(handle)".to_string()),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("    /// set_menu_prop with a constant shortcut value, canonicalized here");
+            c.line("    /// (the one binding-tier shortcut parser — no call site bypasses it).");
+        } else {
+            c.line(&format!("    /// set_menu_prop with a constant {prop} value."));
+        }
+        c.line(&format!("    mutating func setMenu{pc}(_ item: UInt64, _ {p}: {ty}) {{"));
+        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
+        c.line("        self.u64(item)");
+        c.line(&format!("        self.u32(UInt32(KAYA_MPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value({expr})"));
+        c.line("        self.end(start)");
+        c.line("    }");
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("    /// set_menu_prop with a signal-bound {prop} value."));
+            c.line(&format!("    mutating func bindMenu{pc}(_ item: UInt64, _ signalId: UInt64) {{"));
+            c.line("        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
+            c.line("        self.u64(item)");
+            c.line(&format!("        self.u32(UInt32(KAYA_MPROP_{up}))"));
+            c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+            c.line("        self.u64(signalId)");
+            c.line("        self.end(start)");
+            c.line("    }");
+        }
+    }
     c.line("");
     c.line("    func submit() {");
     c.line("        bytes.withUnsafeBytes { raw in");
     c.line("            kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))");
     c.line("        }");
     c.line("    }");
+    c.line("}");
+    c.line("");
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line(&format!("let kayaShortcutNamedKeys: Set<String> = [{named_keys}]"));
+    c.line("");
+    c.line("/// The one binding-tier shortcut parser (DESIGN.md, Menus).");
+    c.line("/// Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("/// '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("/// key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("/// variants and any modifier order; traps on whitespace, empty tokens,");
+    c.line("/// repeated modifiers, aliases (ctrl/cmd/option), and unknown or");
+    c.line("/// multiple or missing keys. POLICY stays at the core: escape,");
+    c.line("/// shift-only and bare alphanumerics, and the reserved floor are");
+    c.line("/// validated there, on the canonical spelling, never rewritten.");
+    c.line("func kayaCanonicalizeShortcut(_ spelling: String) -> String {");
+    c.line("    if spelling.isEmpty {");
+    c.line("        preconditionFailure(\"kaya: shortcut is empty\")");
+    c.line("    }");
+    c.line("    for ch in spelling {");
+    c.line("        if ch == \" \" || ch == \"\\t\" || ch == \"\\n\" || ch == \"\\u{0B}\" || ch == \"\\u{0C}\" || ch == \"\\r\" {");
+    c.line("            preconditionFailure(\"kaya: shortcut \\\"\\(spelling)\\\" contains whitespace\")");
+    c.line("        }");
+    c.line("    }");
+    c.line("    let parts = spelling.lowercased()");
+    c.line("        .split(separator: \"+\", omittingEmptySubsequences: false)");
+    c.line("        .map(String.init)");
+    c.line("    for p in parts where p.isEmpty {");
+    c.line("        preconditionFailure(\"kaya: shortcut \\\"\\(spelling)\\\" has an empty token\")");
+    c.line("    }");
+    c.line("    let key = parts[parts.count - 1]");
+    c.line("    var primary = false, shift = false, alt = false");
+    c.line("    for m in parts.dropLast() {");
+    c.line("        let repeated: Bool");
+    c.line("        switch m {");
+    c.line("        case \"primary\":");
+    c.line("            repeated = primary");
+    c.line("            primary = true");
+    c.line("        case \"shift\":");
+    c.line("            repeated = shift");
+    c.line("            shift = true");
+    c.line("        case \"alt\":");
+    c.line("            repeated = alt");
+    c.line("            alt = true");
+    c.line("        default:");
+    c.line("            preconditionFailure(\"kaya: shortcut \\\"\\(spelling)\\\" has an unknown modifier \\\"\\(m)\\\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\")");
+    c.line("        }");
+    c.line("        if repeated {");
+    c.line("            preconditionFailure(\"kaya: shortcut \\\"\\(spelling)\\\" repeats modifier \\\"\\(m)\\\"\")");
+    c.line("        }");
+    c.line("    }");
+    c.line("    let alnum = key.count == 1 && (key.first!.isASCII && (key.first!.isLowercase || key.first!.isNumber))");
+    c.line("    if !alnum && !kayaShortcutNamedKeys.contains(key) {");
+    c.line("        preconditionFailure(\"kaya: shortcut \\\"\\(spelling)\\\" key \\\"\\(key)\\\" is outside the floor (one of a-z, 0-9, or the closed named set)\")");
+    c.line("    }");
+    c.line("    return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key");
     c.line("}");
     c.line("");
     c.line("/// Decode one occurrence record (header included); nil for pad or");

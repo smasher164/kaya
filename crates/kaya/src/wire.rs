@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::protocol::{
-    EntryProp, SectionProp, WindowProp,
+    EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
@@ -52,6 +52,12 @@ pub const TX_SET_ENTRY_PROP: u16 = 24;
 pub const TX_ADD_SECTION: u16 = 25;
 pub const TX_SELECT_SECTION: u16 = 26;
 pub const TX_SET_SECTION_PROP: u16 = 27;
+pub const TX_MENU_ITEM_CREATE: u16 = 28;
+pub const TX_MENU_ITEM_APPEND: u16 = 29;
+pub const TX_MENUBAR_APPEND: u16 = 30;
+pub const TX_CONTEXT_ATTACH: u16 = 31;
+pub const TX_CONTEXT_ATTACH_NODE: u16 = 32;
+pub const TX_SET_MENU_PROP: u16 = 33;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -71,6 +77,12 @@ pub const APPLY_SET_ENTRY_PROP: u16 = 14;
 pub const APPLY_ADD_SECTION: u16 = 15;
 pub const APPLY_SELECT_SECTION: u16 = 16;
 pub const APPLY_SET_SECTION_PROP: u16 = 17;
+pub const APPLY_MENU_ITEM_CREATE: u16 = 18;
+pub const APPLY_MENU_ITEM_APPEND: u16 = 19;
+pub const APPLY_MENUBAR_APPEND: u16 = 20;
+pub const APPLY_CONTEXT_ATTACH: u16 = 21;
+pub const APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
+pub const APPLY_SET_MENU_PROP: u16 = 23;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -120,6 +132,25 @@ pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
 /// surface table (see DESIGN.md, Sections).
 pub const SPROP_TITLE: u32 = 1;
 pub const SPROP_ICON: u32 = 2;
+
+/// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
+/// and `radio_group` are the grouping nodes.
+pub const MENU_KIND_MENU: u32 = 1;
+pub const MENU_KIND_ACTION: u32 = 2;
+pub const MENU_KIND_TOGGLE: u32 = 3;
+pub const MENU_KIND_RADIO_GROUP: u32 = 4;
+pub const MENU_KIND_RADIO_OPTION: u32 = 5;
+pub const MENU_KIND_SEPARATOR: u32 = 6;
+
+/// Menu property ids (spec::MENU_PROPS) — their own typed surface
+/// table, separate from widget/window/entry/section props.
+pub const MPROP_LABEL: u32 = 1;
+pub const MPROP_ENABLED: u32 = 2;
+pub const MPROP_CHECKED: u32 = 3;
+pub const MPROP_VALUE: u32 = 4;
+pub const MPROP_ICON: u32 = 5;
+pub const MPROP_PRIMARY: u32 = 6;
+pub const MPROP_SHORTCUT: u32 = 7;
 
 /// The sections_presentation enum's wire values (spec enum
 /// "sections_presentation"): ADVISORY, the width/height precedent.
@@ -359,6 +390,54 @@ fn section_prop_raw(p: SectionProp) -> u32 {
     match p {
         SectionProp::Title => SPROP_TITLE,
         SectionProp::Icon => SPROP_ICON,
+    }
+}
+
+fn menu_kind(raw: u32) -> MenuItemKind {
+    match raw {
+        MENU_KIND_MENU => MenuItemKind::Menu,
+        MENU_KIND_ACTION => MenuItemKind::Action,
+        MENU_KIND_TOGGLE => MenuItemKind::Toggle,
+        MENU_KIND_RADIO_GROUP => MenuItemKind::RadioGroup,
+        MENU_KIND_RADIO_OPTION => MenuItemKind::RadioOption,
+        MENU_KIND_SEPARATOR => MenuItemKind::Separator,
+        other => panic!("kaya: unknown menu kind {other}"),
+    }
+}
+
+fn menu_kind_raw(kind: MenuItemKind) -> u32 {
+    match kind {
+        MenuItemKind::Menu => MENU_KIND_MENU,
+        MenuItemKind::Action => MENU_KIND_ACTION,
+        MenuItemKind::Toggle => MENU_KIND_TOGGLE,
+        MenuItemKind::RadioGroup => MENU_KIND_RADIO_GROUP,
+        MenuItemKind::RadioOption => MENU_KIND_RADIO_OPTION,
+        MenuItemKind::Separator => MENU_KIND_SEPARATOR,
+    }
+}
+
+fn menu_prop(raw: u32) -> MenuProp {
+    match raw {
+        MPROP_LABEL => MenuProp::Label,
+        MPROP_ENABLED => MenuProp::Enabled,
+        MPROP_CHECKED => MenuProp::Checked,
+        MPROP_VALUE => MenuProp::Value,
+        MPROP_ICON => MenuProp::Icon,
+        MPROP_PRIMARY => MenuProp::Primary,
+        MPROP_SHORTCUT => MenuProp::Shortcut,
+        other => panic!("kaya: unknown menu property {other}"),
+    }
+}
+
+fn menu_prop_raw(p: MenuProp) -> u32 {
+    match p {
+        MenuProp::Label => MPROP_LABEL,
+        MenuProp::Enabled => MPROP_ENABLED,
+        MenuProp::Checked => MPROP_CHECKED,
+        MenuProp::Value => MPROP_VALUE,
+        MenuProp::Icon => MPROP_ICON,
+        MenuProp::Primary => MPROP_PRIMARY,
+        MenuProp::Shortcut => MPROP_SHORTCUT,
     }
 }
 
@@ -629,6 +708,48 @@ pub fn decode_transaction_with_blobs(
                     value,
                 }
             }
+            TX_MENU_ITEM_CREATE => TxOp::MenuItemCreate {
+                item: MenuItemId(r.u64()),
+                kind: {
+                    let kind = menu_kind(r.u32());
+                    let _reserved = r.u32();
+                    kind
+                },
+            },
+            TX_MENU_ITEM_APPEND => TxOp::MenuItemAppend {
+                parent: MenuItemId(r.u64()),
+                child: MenuItemId(r.u64()),
+            },
+            TX_MENUBAR_APPEND => TxOp::MenubarAppend {
+                window: WindowId(r.u64()),
+                item: MenuItemId(r.u64()),
+            },
+            TX_CONTEXT_ATTACH => TxOp::ContextAttach {
+                widget: WidgetId(r.u64()),
+                item: MenuItemId(r.u64()),
+            },
+            TX_CONTEXT_ATTACH_NODE => TxOp::ContextAttachNode {
+                node: TemplateNodeId(r.u64()),
+                item: MenuItemId(r.u64()),
+            },
+            TX_SET_MENU_PROP => {
+                let item = MenuItemId(r.u64());
+                let p = menu_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: menu properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetMenuProp {
+                    item,
+                    prop: p,
+                    value,
+                }
+            }
             other => panic!("kaya: unknown transaction record kind {other}"),
         });
         at += size;
@@ -797,6 +918,62 @@ pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
     }
 }
 
+// --- Menu occurrence tags --------------------------------------------------
+//
+// A menu occurrence's identity is the item id plus a NOUN: the empty
+// path for a bar action or a live-widget context item, or the anchor
+// copy's key path for a node-anchored context item (the on_click_node
+// encoding). One entry serves both routes: `noun` is either empty (the
+// direct route) or a wire path encoding { u32 count; u32 reserved;
+// count values } handed to the backend by CONTEXT_ATTACH_NODE. The
+// resulting tag is byte-identical to a click_tag, so the toggled/value
+// body builders and the click-tag decoders serve menus unchanged.
+
+pub fn menu_tag(item: u64, noun: &[u8]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(16 + noun.len());
+    b.extend_from_slice(&item.to_le_bytes());
+    if noun.is_empty() {
+        b.extend_from_slice(&0u32.to_le_bytes()); // path_len
+        b.extend_from_slice(&0u32.to_le_bytes()); // reserved
+    } else {
+        b.extend_from_slice(noun);
+    }
+    b
+}
+
+pub fn decode_menu_activated_tag(tag: &[u8]) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let item = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::MenuActivated { item: MenuItemId(item) }
+    } else {
+        Occurrence::InstanceMenuActivated { item: MenuItemId(item), path }
+    }
+}
+
+pub fn decode_menu_toggled_tag(tag: &[u8], checked: bool) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let item = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::MenuToggled { item: MenuItemId(item), checked }
+    } else {
+        Occurrence::InstanceMenuToggled { item: MenuItemId(item), path, checked }
+    }
+}
+
+pub fn decode_menu_value_tag(tag: &[u8], index: f64) -> Occurrence {
+    let mut r = Reader { buf: tag, at: 0, blobs: &|_| None };
+    let group = r.u64();
+    let path = r.path();
+    if path.is_empty() {
+        Occurrence::MenuValueChanged { group: MenuItemId(group), index }
+    } else {
+        Occurrence::InstanceMenuValueChanged { group: MenuItemId(group), path, index }
+    }
+}
+
 // --- Writing -------------------------------------------------------------
 
 pub struct Writer {
@@ -926,6 +1103,58 @@ impl Writer {
                 self.record(APPLY_SET_SECTION_PROP, |b, blobs| {
                     b.extend_from_slice(&section.0.to_le_bytes());
                     b.extend_from_slice(&section_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
+            // MENU_ITEM_CREATE: u64 item, u32 kind, u32 pad.
+            ApplyOp::MenuItemCreate { item, kind } => {
+                self.record(APPLY_MENU_ITEM_CREATE, |b, _| {
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                    b.extend_from_slice(&menu_kind_raw(*kind).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                })
+            }
+            // MENU_ITEM_APPEND: u64 parent, u64 child.
+            ApplyOp::MenuItemAppend { parent, child } => {
+                self.record(APPLY_MENU_ITEM_APPEND, |b, _| {
+                    b.extend_from_slice(&parent.0.to_le_bytes());
+                    b.extend_from_slice(&child.0.to_le_bytes());
+                })
+            }
+            // MENUBAR_APPEND: u64 window, u64 item.
+            ApplyOp::MenubarAppend { window, item } => {
+                self.record(APPLY_MENUBAR_APPEND, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                })
+            }
+            // CONTEXT_ATTACH: u64 widget, u64 item.
+            ApplyOp::ContextAttach { widget, item } => {
+                self.record(APPLY_CONTEXT_ATTACH, |b, _| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                })
+            }
+            // CONTEXT_ATTACH_NODE: u64 widget, u64 item, then the anchor
+            // copy's key path as { u32 count; u32 reserved; count values }
+            // — the noun every activation from this attachment stamps.
+            ApplyOp::ContextAttachNode { widget, item, path } => {
+                self.record(APPLY_CONTEXT_ATTACH_NODE, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                    b.extend_from_slice(&(path.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for key in path {
+                        write_value(b, key, blobs);
+                    }
+                })
+            }
+            // SET_MENU_PROP: u64 item, u32 mprop, u32 pad, value.
+            ApplyOp::SetMenuProp { item, prop, value } => {
+                self.record(APPLY_SET_MENU_PROP, |b, blobs| {
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                    b.extend_from_slice(&menu_prop_raw(*prop).to_le_bytes());
                     b.extend_from_slice(&0u32.to_le_bytes());
                     write_value(b, value, blobs);
                 })
@@ -1152,6 +1381,46 @@ impl Writer {
                     }
                 })
             }
+            TxOp::MenuItemCreate { item, kind } => self.record(TX_MENU_ITEM_CREATE, |b, _| {
+                b.extend_from_slice(&item.0.to_le_bytes());
+                b.extend_from_slice(&menu_kind_raw(*kind).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
+            TxOp::MenuItemAppend { parent, child } => self.record(TX_MENU_ITEM_APPEND, |b, _| {
+                b.extend_from_slice(&parent.0.to_le_bytes());
+                b.extend_from_slice(&child.0.to_le_bytes());
+            }),
+            TxOp::MenubarAppend { window, item } => self.record(TX_MENUBAR_APPEND, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&item.0.to_le_bytes());
+            }),
+            TxOp::ContextAttach { widget, item } => self.record(TX_CONTEXT_ATTACH, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&item.0.to_le_bytes());
+            }),
+            TxOp::ContextAttachNode { node, item } => {
+                self.record(TX_CONTEXT_ATTACH_NODE, |b, _| {
+                    b.extend_from_slice(&node.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                })
+            }
+            TxOp::SetMenuProp { item, prop, value } => self.record(TX_SET_MENU_PROP, |b, blobs| {
+                b.extend_from_slice(&item.0.to_le_bytes());
+                b.extend_from_slice(&menu_prop_raw(*prop).to_le_bytes());
+                match value {
+                    PropValue::Const(v) => {
+                        b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                        write_value(b, v, blobs);
+                    }
+                    PropValue::Signal(id) => {
+                        b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                        b.extend_from_slice(&id.0.to_le_bytes());
+                    }
+                    PropValue::Element { .. } => {
+                        panic!("kaya: menu properties cannot bind element sources")
+                    }
+                }
+            }),
             TxOp::TemplateEnd => self.record(TX_TEMPLATE_END, |_, _| {}),
         }
     }

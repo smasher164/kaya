@@ -34,6 +34,11 @@ if let trap = ProcessInfo.processInfo.environment["KAYA_GUARD_TRAP"] {
         case "when":
             let s = tx.signal(.bool(false))
             _ = tx.when(s) { _ in tx.count(c) }
+        case "shortcut":
+            // The binding's one shortcut parser rejects aliases with a
+            // preconditionFailure — uncatchable, so it is pinned the
+            // same way as the mirror-read guard: the child must die.
+            _ = tx.item("Bad", shortcut: "ctrl+s")
         default:
             FileHandle.standardError.write(Data("unknown KAYA_GUARD_TRAP: \(trap)\n".utf8))
         }
@@ -114,10 +119,108 @@ app.build { tx in
         "post-scope read broken: \(tx.count(todos))")
 }
 
+// The menu construction surface must REACH the record stream — the
+// wire-dropped-write class: a constructor that emits nothing passes
+// every surface gate until a scene fails live (the dropped-spacing
+// lesson; Python's kaya_app_checks.py is the pattern). One module
+// with the bindings, so the transaction's byte buffer is in reach;
+// each frame is u32 length then u16 kind at offset 4, little-endian.
+func recordKinds(_ data: Data, from start: Int) -> [UInt16] {
+    var kinds: [UInt16] = []
+    var at = start
+    while at + 8 <= data.count {
+        let len = UInt32(data[at]) | UInt32(data[at + 1]) << 8
+            | UInt32(data[at + 2]) << 16 | UInt32(data[at + 3]) << 24
+        kinds.append(UInt16(data[at + 4]) | UInt16(data[at + 5]) << 8)
+        at += Int(len)
+    }
+    return kinds
+}
+
+func menuAppendParent(_ data: Data, from start: Int) -> UInt64? {
+    var at = start
+    while at + 8 <= data.count {
+        let len = UInt32(data[at]) | UInt32(data[at + 1]) << 8
+            | UInt32(data[at + 2]) << 16 | UInt32(data[at + 3]) << 24
+        let kind = UInt16(data[at + 4]) | UInt16(data[at + 5]) << 8
+        if kind == UInt16(KAYA_TX_MENU_ITEM_APPEND) {
+            var parent: UInt64 = 0
+            for i in 0..<8 { parent |= UInt64(data[at + 8 + i]) << (8 * UInt64(i)) }
+            return parent
+        }
+        at += Int(len)
+    }
+    return nil
+}
+
+var fileItem: KayaMenuItem!
+app.build { tx in
+    let start = tx.tx.bytes.count
+    let save = tx.item("Save", shortcut: "PRIMARY+S")
+    fileItem = tx.menu("File", items: [save])
+    let sort = tx.radioGroup(
+        "Sort", options: [tx.option("Name"), tx.option("Date")], value: 1)
+    tx.window(menus: [fileItem, sort])
+    let noun = tx.label("noun")
+    tx.contextMenu(noun, items: [tx.item("Rename")])
+    let kinds = recordKinds(tx.tx.bytes, from: start)
+    // Save, File, Name, Date, Sort, Rename.
+    precondition(
+        kinds.filter { $0 == UInt16(KAYA_TX_MENU_ITEM_CREATE) }.count == 6,
+        "menu constructors queued the wrong create count")
+    precondition(
+        kinds.filter { $0 == UInt16(KAYA_TX_MENUBAR_APPEND) }.count == 2,
+        "bar anchors queued the wrong menubar-append count")
+    precondition(
+        kinds.filter { $0 == UInt16(KAYA_TX_MENU_ITEM_APPEND) }.count == 3,
+        "children queued the wrong item-append count")
+    precondition(
+        kinds.filter { $0 == UInt16(KAYA_TX_CONTEXT_ATTACH) }.count == 1,
+        "context anchor queued the wrong attach count")
+    precondition(
+        String(decoding: tx.tx.bytes[start...], as: UTF8.self).contains("primary+s"),
+        "shortcut did not reach the records canonicalized")
+}
+
+// Append-at-any-time: the retained handle reopens in a later
+// transaction — one create plus one append under the RETAINED parent,
+// and never a new bar anchor.
+app.build { tx in
+    let start = tx.tx.bytes.count
+    tx.menu(fileItem, items: [tx.item("Publish")])
+    let kinds = recordKinds(tx.tx.bytes, from: start)
+    precondition(
+        kinds.filter { $0 == UInt16(KAYA_TX_MENU_ITEM_CREATE) }.count == 1,
+        "reopen queued the wrong create count")
+    precondition(
+        menuAppendParent(tx.tx.bytes, from: start) == fileItem.id,
+        "reopen did not seat under the retained parent")
+    precondition(
+        !kinds.contains(UInt16(KAYA_TX_MENUBAR_APPEND)),
+        "reopen re-anchored the bar")
+}
+
+// An aborted append drops its menu records with everything else
+// (records die with the tx; nothing ships) and the app continues.
+propagated = false
+do {
+    try app.build { tx in
+        tx.menu(fileItem, items: [tx.item("Doomed")])
+        throw CheckError()
+    }
+} catch {
+    propagated = error is CheckError
+}
+precondition(propagated, "menu abort: build must propagate")
+app.build { tx in
+    tx.menu(fileItem, items: [tx.item("Recovered")])
+}
+
 // The trap side, via re-exec (see the KAYA_GUARD_TRAP branch at the
 // top): a mirror read inside a For or When body being declared must
-// kill the process.
-for mode in ["for", "when"] {
+// kill the process — and so must an alias shortcut hitting the
+// binding's one parser (its rejection is a preconditionFailure).
+for mode in ["for", "when", "shortcut"] {
     let child = Process()
     child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     var env = ProcessInfo.processInfo.environment

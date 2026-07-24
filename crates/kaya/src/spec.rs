@@ -181,6 +181,27 @@ pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("icon", 2, PropKind::Blob),
 ];
 
+/// Menu-item properties: the fifth typed surface table (the
+/// SECTION_PROPS stance — spec facts with typed setters, never
+/// applicability checks; DESIGN.md, Menus). `label` and `enabled` apply
+/// to every kind but `separator`; `checked` is toggle-only, `value`
+/// radio-group-only, `primary`/`shortcut` action-only — the scene core
+/// enforces the kind scoping, keeping this table a flat spec fact. The
+/// signal-bindable slots are `label`, `enabled`, `checked`, and
+/// `value`; `icon`, `primary`, and `shortcut` are const-only (enforced
+/// at the root). `value` rides F64 like every numeric slot (integral,
+/// 0-based option index, domain-checked at the root); `shortcut` is a
+/// normalized spelling the core validates but never rewrites.
+pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("label", 1, PropKind::Str),
+    ("enabled", 2, PropKind::Bool),
+    ("checked", 3, PropKind::Bool),
+    ("value", 4, PropKind::F64),
+    ("icon", 5, PropKind::Blob),
+    ("primary", 6, PropKind::Bool),
+    ("shortcut", 7, PropKind::Str),
+];
+
 /// The variable tail of SET_PROPERTY, after `source`: a value for
 /// SOURCE_CONST, a u64 signal id for SOURCE_SIGNAL, or u32 level + u32
 /// reserved for SOURCE_ELEMENT. The one record whose layout depends on
@@ -242,6 +263,12 @@ pub fn hash() -> u64 {
     }
     eat(b"entry_props");
     for (name, id, kind) in ENTRY_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"menu_props");
+    for (name, id, kind) in MENU_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -585,6 +612,85 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is \
                   rejected — sections are not collection elements.",
         },
+        Record {
+            kind: 28,
+            name: "menu_item_create",
+            fields: &[
+                f("item", FieldTy::U64),
+                f("kind", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Create a menu item of `kind` (menu_kind) in the menu-item \
+                  id space — its own guest allocator (c_menu_item), distinct \
+                  from every widget, node, and surface space. Items are \
+                  live, append-only, and never removed in v1 (DESIGN.md, \
+                  Menus).",
+        },
+        Record {
+            kind: 29,
+            name: "menu_item_append",
+            fields: &[f("parent", FieldTy::U64), f("child", FieldTy::U64)],
+            payload: None,
+            doc: "Append `child` under grouping node `parent`. Single-parent: \
+                  an item acquires exactly one parent or anchor and ids are \
+                  never reused. The closed parent/child grammar (menu accepts \
+                  menu/radio_group/action/toggle/separator; radio_group \
+                  accepts only radio_option; leaves accept nothing) and the \
+                  depth cap are validated at the root.",
+        },
+        Record {
+            kind: 30,
+            name: "menubar_append",
+            fields: &[f("window", FieldTy::U64), f("item", FieldTy::U64)],
+            payload: None,
+            doc: "Append a top-level grouping node (menu or radio_group) to \
+                  `window`'s command catalog — the window anchor, riding the \
+                  window construct under the window-attribute unification \
+                  rule (0 = the primary surface). The bar accepts only \
+                  grouping nodes; duplicate shortcuts within the window's \
+                  catalog are a root error.",
+        },
+        Record {
+            kind: 31,
+            name: "context_attach",
+            fields: &[f("widget", FieldTy::U64), f("item", FieldTy::U64)],
+            payload: None,
+            doc: "Attach a context catalog rooted at `item` to a live \
+                  widget — the same command vocabulary scoped to a noun. The \
+                  editable text controls (entry, textarea) reject attachment \
+                  (their native edit menus are dress), a context root cannot \
+                  be a radio_option, and a shortcut anywhere in the subtree \
+                  is a root error (shortcuts need a window catalog home).",
+        },
+        Record {
+            kind: 32,
+            name: "context_attach_node",
+            fields: &[f("node", FieldTy::U64), f("item", FieldTy::U64)],
+            payload: None,
+            doc: "Attach a context catalog to a template node (the Tpl \
+                  zone): every stamped copy shows the same catalog, and an \
+                  activation carries that copy's key path — the keys ARE the \
+                  noun (the on_click_node encoding). Same rejections as \
+                  context_attach.",
+        },
+        Record {
+            kind: 33,
+            name: "set_menu_prop",
+            fields: &[
+                f("item", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a menu property (MENU_PROPS). Same tail convention as \
+                  SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu \
+                  items are not collection elements — and icon/primary/ \
+                  shortcut reject SOURCE_SIGNAL (const-only). label and \
+                  enabled fan out through the signal-write path; the domain \
+                  of a signal-bound value is validated on the COMPLETE \
+                  coalesced value at the transaction barrier.",
+        },
     ],
     apply: &[
         Record {
@@ -765,6 +871,67 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Set a section property to an already-resolved value.",
         },
+        Record {
+            kind: 18,
+            name: "menu_item_create",
+            fields: &[
+                f("item", FieldTy::U64),
+                f("kind", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Create a presentation-side menu item; the backend keys its \
+                  dispatch by item id and emits menu occurrences carrying it.",
+        },
+        Record {
+            kind: 19,
+            name: "menu_item_append",
+            fields: &[f("parent", FieldTy::U64), f("child", FieldTy::U64)],
+            payload: None,
+            doc: "Append `child` under grouping node `parent`.",
+        },
+        Record {
+            kind: 20,
+            name: "menubar_append",
+            fields: &[f("window", FieldTy::U64), f("item", FieldTy::U64)],
+            payload: None,
+            doc: "Append a top-level grouping node to the window's catalog; \
+                  the bar materializes per platform (native menu chrome on \
+                  desktop, top-bar overflow on the phones).",
+        },
+        Record {
+            kind: 21,
+            name: "context_attach",
+            fields: &[f("widget", FieldTy::U64), f("item", FieldTy::U64)],
+            payload: None,
+            doc: "Attach a context catalog to a live widget.",
+        },
+        Record {
+            kind: 22,
+            name: "context_attach_node",
+            fields: &[
+                f("widget", FieldTy::U64),
+                f("item", FieldTy::U64),
+                f("path", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Attach a context catalog to a stamped widget, carrying the \
+                  anchor copy's key path — the noun every activation from \
+                  this attachment stamps into its occurrence (the \
+                  on_click_node encoding). One of these per stamped copy.",
+        },
+        Record {
+            kind: 23,
+            name: "set_menu_prop",
+            fields: &[
+                f("item", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a menu property to an already-resolved value.",
+        },
     ],
     occurrence: &[
         Record {
@@ -893,6 +1060,51 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   echo doctrine). Informational and post-fact: the \
                   selection has already changed on screen.",
         },
+        Record {
+            kind: 11,
+            name: "menu_activated",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "An action fired — clicked OR invoked through its shortcut: \
+                  ONE occurrence, one dispatch path. path_len 0: id is the \
+                  menu item id (a bar or live-widget context action). \
+                  Otherwise id is the item id and the values are the anchor \
+                  copy's key path, outermost first (the on_click_node \
+                  encoding — the keys are the noun).",
+        },
+        Record {
+            kind: 12,
+            name: "menu_toggled",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::Bool),
+            doc: "path_len key values follow, then the toggle's new state as \
+                  one Bool value. Identity reads as in menu_activated. The \
+                  Checkbox contract: user activation emits; a programmatic \
+                  checked write is configuration and never echoes.",
+        },
+        Record {
+            kind: 13,
+            name: "menu_value_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: Some(PropKind::F64),
+            doc: "path_len key values follow, then the radio group's new \
+                  selected option index as one F64 value (integral, 0-based; \
+                  the Choice contract, the select's precedent). id is the \
+                  group. User picks only emit; a programmatic value write \
+                  never echoes.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -953,6 +1165,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("title", 1), ("icon", 2)],
         },
         EnumSpec {
+            // The menu item vocabulary (DESIGN.md, Menus). `menu` and
+            // `radio_group` are the grouping nodes; the rest are leaves.
+            name: "menu_kind",
+            variants: &[
+                ("menu", 1),
+                ("action", 2),
+                ("toggle", 3),
+                ("radio_group", 4),
+                ("radio_option", 5),
+                ("separator", 6),
+            ],
+        },
+        EnumSpec {
+            // Menu-item properties, in lockstep with MENU_PROPS (pinned
+            // by test): the enum feeds constants, MENU_PROPS feeds the
+            // typed setter generation.
+            name: "mprop",
+            variants: &[
+                ("label", 1),
+                ("enabled", 2),
+                ("checked", 3),
+                ("value", 4),
+                ("icon", 5),
+                ("primary", 6),
+                ("shortcut", 7),
+            ],
+        },
+        EnumSpec {
             // The presentation hint's closed set (DESIGN.md, Sections):
             // auto = the platform's dominant sections idiom, bar = the
             // horizontal spelling, sidebar = the leading-edge list.
@@ -1005,8 +1245,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
 mod tests {
     use super::*;
     use crate::protocol::{
-        AlertId, AlertSpec, CollectionId, CommandKind, Prop, PropValue, SignalId, TxOp, Value,
-        ValueType, WidgetId, WidgetKind, WindowId,
+        AlertId, AlertSpec, CollectionId, CommandKind, MenuItemId, MenuItemKind, MenuProp, Prop,
+        PropValue, SignalId, TemplateNodeId, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
     };
     use crate::wire;
 
@@ -1138,6 +1378,12 @@ mod tests {
             ("add_section", wire::TX_ADD_SECTION),
             ("select_section", wire::TX_SELECT_SECTION),
             ("set_section_prop", wire::TX_SET_SECTION_PROP),
+            ("menu_item_create", wire::TX_MENU_ITEM_CREATE),
+            ("menu_item_append", wire::TX_MENU_ITEM_APPEND),
+            ("menubar_append", wire::TX_MENUBAR_APPEND),
+            ("context_attach", wire::TX_CONTEXT_ATTACH),
+            ("context_attach_node", wire::TX_CONTEXT_ATTACH_NODE),
+            ("set_menu_prop", wire::TX_SET_MENU_PROP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -1168,6 +1414,12 @@ mod tests {
                 ("add_section", wire::APPLY_ADD_SECTION),
                 ("select_section", wire::APPLY_SELECT_SECTION),
                 ("set_section_prop", wire::APPLY_SET_SECTION_PROP),
+                ("menu_item_create", wire::APPLY_MENU_ITEM_CREATE),
+                ("menu_item_append", wire::APPLY_MENU_ITEM_APPEND),
+                ("menubar_append", wire::APPLY_MENUBAR_APPEND),
+                ("context_attach", wire::APPLY_CONTEXT_ATTACH),
+                ("context_attach_node", wire::APPLY_CONTEXT_ATTACH_NODE),
+                ("set_menu_prop", wire::APPLY_SET_MENU_PROP),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -1180,6 +1432,9 @@ mod tests {
         assert_eq!(SPEC.occurrence[7].kind, crate::ring::REC_ENTRY_POPPED);
         assert_eq!(SPEC.occurrence[8].kind, crate::ring::REC_BACK_REQUESTED);
         assert_eq!(SPEC.occurrence[9].kind, crate::ring::REC_SECTION_SELECTED);
+        assert_eq!(SPEC.occurrence[10].kind, crate::ring::REC_MENU_ACTIVATED);
+        assert_eq!(SPEC.occurrence[11].kind, crate::ring::REC_MENU_TOGGLED);
+        assert_eq!(SPEC.occurrence[12].kind, crate::ring::REC_MENU_VALUE_CHANGED);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -1214,6 +1469,26 @@ mod tests {
             .expect("spec has an eprop enum");
         assert_eq!(ENTRY_PROPS.len(), eprop_enum.variants.len());
         for ((name, id, _), (ename, eid)) in ENTRY_PROPS.iter().zip(eprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
+        let sprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "sprop")
+            .expect("spec has an sprop enum");
+        assert_eq!(SECTION_PROPS.len(), sprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in SECTION_PROPS.iter().zip(sprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
+        let mprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "mprop")
+            .expect("spec has an mprop enum");
+        assert_eq!(MENU_PROPS.len(), mprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in MENU_PROPS.iter().zip(mprop_enum.variants) {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
@@ -1263,6 +1538,19 @@ mod tests {
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("sprop", "title") => wire::SPROP_TITLE,
                     ("sprop", "icon") => wire::SPROP_ICON,
+                    ("menu_kind", "menu") => wire::MENU_KIND_MENU,
+                    ("menu_kind", "action") => wire::MENU_KIND_ACTION,
+                    ("menu_kind", "toggle") => wire::MENU_KIND_TOGGLE,
+                    ("menu_kind", "radio_group") => wire::MENU_KIND_RADIO_GROUP,
+                    ("menu_kind", "radio_option") => wire::MENU_KIND_RADIO_OPTION,
+                    ("menu_kind", "separator") => wire::MENU_KIND_SEPARATOR,
+                    ("mprop", "label") => wire::MPROP_LABEL,
+                    ("mprop", "enabled") => wire::MPROP_ENABLED,
+                    ("mprop", "checked") => wire::MPROP_CHECKED,
+                    ("mprop", "value") => wire::MPROP_VALUE,
+                    ("mprop", "icon") => wire::MPROP_ICON,
+                    ("mprop", "primary") => wire::MPROP_PRIMARY,
+                    ("mprop", "shortcut") => wire::MPROP_SHORTCUT,
                     ("sections_presentation", "auto") => wire::SECTIONS_PRESENTATION_AUTO,
                     ("sections_presentation", "bar") => wire::SECTIONS_PRESENTATION_BAR,
                     ("sections_presentation", "sidebar") => {
@@ -1389,6 +1677,34 @@ mod tests {
         }
         w.record(tx_record("pop_entry"), &[Arg::U64(0)]);
 
+        // Menus: a bar catalog (File > Save), a context attach on a live
+        // widget and a template node, and a const-tail set_menu_prop.
+        w.record(
+            tx_record("menu_item_create"),
+            &[Arg::U64(100), Arg::U32(wire::MENU_KIND_ACTION), Arg::U32(0)],
+        );
+        w.record(
+            tx_record("menu_item_create"),
+            &[Arg::U64(101), Arg::U32(wire::MENU_KIND_MENU), Arg::U32(0)],
+        );
+        w.record(tx_record("menu_item_append"), &[Arg::U64(101), Arg::U64(100)]);
+        w.record(tx_record("menubar_append"), &[Arg::U64(0), Arg::U64(101)]);
+        w.record(tx_record("context_attach"), &[Arg::U64(5), Arg::U64(101)]);
+        w.record(tx_record("context_attach_node"), &[Arg::U64(8), Arg::U64(101)]);
+        // set_menu_prop carries the SET_PROPERTY variable tail (spliced
+        // by hand, as a generated helper would).
+        {
+            let start = w.buf.len();
+            w.buf.extend_from_slice(&[0u8; 8]);
+            w.buf.extend_from_slice(&100u64.to_le_bytes());
+            w.buf.extend_from_slice(&wire::MPROP_LABEL.to_le_bytes());
+            w.buf.extend_from_slice(&wire::SOURCE_CONST.to_le_bytes());
+            w.value(&Value::from("Save"));
+            let size = (w.buf.len() - start) as u32;
+            w.buf[start..start + 4].copy_from_slice(&size.to_le_bytes());
+            w.buf[start + 4..start + 6].copy_from_slice(&wire::TX_SET_MENU_PROP.to_le_bytes());
+        }
+
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
             TxOp::CreateSignal {
@@ -1459,6 +1775,35 @@ mod tests {
             },
             TxOp::PopEntry {
                 window: WindowId(0),
+            },
+            TxOp::MenuItemCreate {
+                item: MenuItemId(100),
+                kind: MenuItemKind::Action,
+            },
+            TxOp::MenuItemCreate {
+                item: MenuItemId(101),
+                kind: MenuItemKind::Menu,
+            },
+            TxOp::MenuItemAppend {
+                parent: MenuItemId(101),
+                child: MenuItemId(100),
+            },
+            TxOp::MenubarAppend {
+                window: WindowId(0),
+                item: MenuItemId(101),
+            },
+            TxOp::ContextAttach {
+                widget: WidgetId(5),
+                item: MenuItemId(101),
+            },
+            TxOp::ContextAttachNode {
+                node: TemplateNodeId(8),
+                item: MenuItemId(101),
+            },
+            TxOp::SetMenuProp {
+                item: MenuItemId(100),
+                prop: MenuProp::Label,
+                value: PropValue::Const(Value::from("Save")),
             },
         ];
         assert_eq!(ops.len(), expected.len());

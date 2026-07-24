@@ -11,6 +11,7 @@ use crate::{Ctx, prop_variants, record_params, window_prop_variants};
 
 pub const RESERVED: &[&str] = &[
     "encode_value", "encode_values", "encode_variant_schemas", "finish", "parse_value", "parse_occurrence",
+    "canonicalize_shortcut", "shortcut_named_keys",
     "and", "as", "assert", "begin", "class", "constraint", "do", "done", "downto", "else",
     "end", "exception", "external", "false", "for", "fun", "function", "functor", "if", "in",
     "include", "inherit", "initializer", "lazy", "let", "match", "method", "module", "mutable",
@@ -236,6 +237,116 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("      Buffer.add_int32_le b (Int32.of_int sprop_{prop});"));
         c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
         c.line("      Buffer.add_int64_le b signal_id)");
+    }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // tx_set_menu_shortcut routes through it, so no call site can
+    // bypass canonicalization. Emitted BEFORE the menu duos: OCaml
+    // resolves let-bindings in order.
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join("; ");
+    c.line("");
+    c.line(&format!("let shortcut_named_keys = [ {named_keys} ]"));
+    c.line("");
+    c.line("(* Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("   '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("   key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("   variants and any modifier order; raises Invalid_argument on");
+    c.line("   whitespace, empty tokens, repeated modifiers, aliases");
+    c.line("   (ctrl/cmd/option), and unknown or multiple or missing keys.");
+    c.line("   POLICY stays at the core: escape, shift-only and bare");
+    c.line("   alphanumerics, and the reserved floor are validated there, on the");
+    c.line("   canonical spelling, never rewritten. *)");
+    c.line("let canonicalize_shortcut spelling =");
+    c.line("  if String.length spelling = 0 then invalid_arg \"kaya: shortcut is empty\";");
+    c.line("  String.iter");
+    c.line("    (fun ch ->");
+    c.line("      match ch with");
+    c.line("      | ' ' | '\\t' | '\\n' | '\\011' | '\\012' | '\\r' ->");
+    c.line("          invalid_arg (\"kaya: shortcut \\\"\" ^ spelling ^ \"\\\" contains whitespace\")");
+    c.line("      | _ -> ())");
+    c.line("    spelling;");
+    c.line("  let parts = String.split_on_char '+' (String.lowercase_ascii spelling) in");
+    c.line("  if List.exists (fun p -> String.length p = 0) parts then");
+    c.line("    invalid_arg (\"kaya: shortcut \\\"\" ^ spelling ^ \"\\\" has an empty token\");");
+    c.line("  let rec split_last acc = function");
+    c.line("    | [] -> invalid_arg \"kaya: shortcut is empty\"");
+    c.line("    | [ k ] -> (List.rev acc, k)");
+    c.line("    | m :: rest -> split_last (m :: acc) rest");
+    c.line("  in");
+    c.line("  let mods, key = split_last [] parts in");
+    c.line("  let has_primary = ref false and has_shift = ref false and has_alt = ref false in");
+    c.line("  List.iter");
+    c.line("    (fun m ->");
+    c.line("      let slot =");
+    c.line("        match m with");
+    c.line("        | \"primary\" -> has_primary");
+    c.line("        | \"shift\" -> has_shift");
+    c.line("        | \"alt\" -> has_alt");
+    c.line("        | _ ->");
+    c.line("            invalid_arg");
+    c.line("              (\"kaya: shortcut \\\"\" ^ spelling ^ \"\\\" has an unknown modifier \\\"\" ^ m");
+    c.line("             ^ \"\\\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\")");
+    c.line("      in");
+    c.line("      if !slot then");
+    c.line("        invalid_arg (\"kaya: shortcut \\\"\" ^ spelling ^ \"\\\" repeats modifier \\\"\" ^ m ^ \"\\\"\");");
+    c.line("      slot := true)");
+    c.line("    mods;");
+    c.line("  let alnum =");
+    c.line("    String.length key = 1");
+    c.line("    && (match key.[0] with 'a' .. 'z' | '0' .. '9' -> true | _ -> false)");
+    c.line("  in");
+    c.line("  if (not alnum) && not (List.mem key shortcut_named_keys) then");
+    c.line("    invalid_arg");
+    c.line("      (\"kaya: shortcut \\\"\" ^ spelling ^ \"\\\" key \\\"\" ^ key");
+    c.line("     ^ \"\\\" is outside the floor (one of a-z, 0-9, or the closed named set)\");");
+    c.line("  (if !has_primary then \"primary+\" else \"\")");
+    c.line("  ^ (if !has_shift then \"shift+\" else \"\")");
+    c.line("  ^ (if !has_alt then \"alt+\" else \"\")");
+    c.line("  ^ key");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let (ctor_expr, param) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => {
+                ("Str (canonicalize_shortcut shortcut)".to_string(), "shortcut")
+            }
+            crate::PropKind::Str => (format!("Str {prop}"), *prop),
+            crate::PropKind::Bool => (format!("Bool {prop}"), *prop),
+            crate::PropKind::F64 => (format!("F64 {prop}"), *prop),
+            crate::PropKind::Blob => ("Blob handle".to_string(), "handle"),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("(* set_menu_prop with a constant shortcut value, canonicalized here (the");
+            c.line("   one binding-tier shortcut parser — no call site bypasses it). *)");
+        } else {
+            c.line(&format!("(* set_menu_prop with a constant {prop} value. *)"));
+        }
+        c.line(&format!("let tx_set_menu_{prop} item {param} ="));
+        c.line("  finish tx_kind_set_menu_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b item;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int mprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor_expr}))"));
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("(* set_menu_prop with a signal-bound {prop} value. *)"));
+            c.line(&format!("let tx_bind_menu_{prop} item signal_id ="));
+            c.line("  finish tx_kind_set_menu_prop (fun b ->");
+            c.line("      Buffer.add_int64_le b item;");
+            c.line(&format!("      Buffer.add_int32_le b (Int32.of_int mprop_{prop});"));
+            c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+            c.line("      Buffer.add_int64_le b signal_id)");
+        }
     }
     c.line("");
     c.line("(* Reads assembled from a byte accessor (absolute offset -> byte);");

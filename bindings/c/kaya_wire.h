@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x39a6143b6f4c3e0eULL
+#define KAYA_SPEC_HASH 0x0e4b7f4f716cc749ULL
 
 
 /* Create a signal holding `initial`. */
@@ -369,6 +369,56 @@ static inline void kaya_tx_select_section(KayaTx *tx, uint64_t window, uint64_t 
 static inline void kaya_tx_set_section_prop(KayaTx *tx, uint64_t section, uint32_t prop, uint32_t source) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_SECTION_PROP);
     kaya_wire_u64(tx, section);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, start);
+}
+
+/* Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). */
+static inline void kaya_tx_menu_item_create(KayaTx *tx, uint64_t item, uint32_t kind) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_CREATE);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, kind);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, start);
+}
+
+/* Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. */
+static inline void kaya_tx_menu_item_append(KayaTx *tx, uint64_t parent, uint64_t child) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_APPEND);
+    kaya_wire_u64(tx, parent);
+    kaya_wire_u64(tx, child);
+    kaya_wire_end(tx, start);
+}
+
+/* Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. */
+static inline void kaya_tx_menubar_append(KayaTx *tx, uint64_t window, uint64_t item) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_MENUBAR_APPEND);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, item);
+    kaya_wire_end(tx, start);
+}
+
+/* Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). */
+static inline void kaya_tx_context_attach(KayaTx *tx, uint64_t widget, uint64_t item) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH);
+    kaya_wire_u64(tx, widget);
+    kaya_wire_u64(tx, item);
+    kaya_wire_end(tx, start);
+}
+
+/* Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. */
+static inline void kaya_tx_context_attach_node(KayaTx *tx, uint64_t node, uint64_t item) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH_NODE);
+    kaya_wire_u64(tx, node);
+    kaya_wire_u64(tx, item);
+    kaya_wire_end(tx, start);
+}
+
+/* Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. */
+static inline void kaya_tx_set_menu_prop(KayaTx *tx, uint64_t item, uint32_t prop, uint32_t source) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
     kaya_wire_end(tx, start);
@@ -726,6 +776,124 @@ static inline void kaya_tx_bind_columns_element(KayaTx *tx, uint64_t widget_id, 
     kaya_wire_end(tx, start);
 }
 
+/* set_menu_prop with a constant label value. */
+static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(label));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a signal-bound label value. */
+static inline void kaya_tx_bind_menu_label(KayaTx *tx, uint64_t item, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant enabled value. */
+static inline void kaya_tx_set_menu_enabled(KayaTx *tx, uint64_t item, int enabled) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_ENABLED);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(enabled));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a signal-bound enabled value. */
+static inline void kaya_tx_bind_menu_enabled(KayaTx *tx, uint64_t item, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_ENABLED);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant checked value. */
+static inline void kaya_tx_set_menu_checked(KayaTx *tx, uint64_t item, int checked) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_CHECKED);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(checked));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a signal-bound checked value. */
+static inline void kaya_tx_bind_menu_checked(KayaTx *tx, uint64_t item, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_CHECKED);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant value value. */
+static inline void kaya_tx_set_menu_value(KayaTx *tx, uint64_t item, double value) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_VALUE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(value));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a signal-bound value value. */
+static inline void kaya_tx_bind_menu_value(KayaTx *tx, uint64_t item, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_VALUE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant icon value. */
+static inline void kaya_tx_set_menu_icon(KayaTx *tx, uint64_t item, uint64_t handle) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_ICON);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_blob(handle));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant primary value. */
+static inline void kaya_tx_set_menu_primary(KayaTx *tx, uint64_t item, int primary) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_PRIMARY);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(primary));
+    kaya_wire_end(tx, start);
+}
+
+/* set_menu_prop with a constant shortcut value. NO canonicalizer
+ * exists at the C floor by design: write the canonical wire spelling
+ * yourself — lowercase '+'-joined tokens, modifiers in primary,
+ * shift, alt order, then exactly one key (a-z, 0-9, or the closed
+ * named set: enter, delete, f1..f12, left, right, up, down), e.g.
+ * "primary+shift+s". The core validates spelling and policy at the
+ * root and REJECTS non-canonical forms rather than rewriting them —
+ * the same root errors every generated binding gets after its
+ * canonicalizer (DESIGN.md, Menus). */
+static inline void kaya_tx_set_menu_shortcut(KayaTx *tx, uint64_t item, const char *shortcut) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_SHORTCUT);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(shortcut));
+    kaya_wire_end(tx, start);
+}
+
 /* Decode one value at `at`; returns the next offset. */
 static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {
     memcpy(&out->type, buf + at, 4);
@@ -761,6 +929,25 @@ static inline int kaya_parse_click(const uint8_t *rec, uint64_t *id,
                                    uint32_t *n_keys) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_BUTTON_CLICKED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    return 1;
+}
+
+/* Decode a menu_activated occurrence: the click identity shape — id plus
+ * path_len key-path values (a node-anchored context activation
+ * carries the stamped copy's keys; path_len is 0 for a bar or
+ * live-widget item). Returns 1 and fills the outputs, or 0 for
+ * other kinds. */
+static inline int kaya_parse_menu_activated(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *keys, uint32_t max_keys,
+                                             uint32_t *n_keys) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_MENU_ACTIVATED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;
@@ -814,6 +1001,42 @@ static inline int kaya_parse_value_changed(const uint8_t *rec, uint64_t *id,
                                             uint32_t *n_keys, KayaVal *payload) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_VALUE_CHANGED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a menu_toggled occurrence: same identity head as a click, then
+ * its payload as one Bool value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_menu_toggled(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *keys, uint32_t max_keys,
+                                           uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_MENU_TOGGLED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    kaya_parse_value(rec, at, payload);
+    return 1;
+}
+
+/* Decode a menu_value_changed occurrence: same identity head as a click, then
+ * its payload as one F64 value (strings point into rec). Returns 1
+ * and fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_menu_value_changed(const uint8_t *rec, uint64_t *id,
+                                                 KayaVal *keys, uint32_t max_keys,
+                                                 uint32_t *n_keys, KayaVal *payload) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

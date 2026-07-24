@@ -24,6 +24,9 @@ if not exist C:\kaya\%1.exe (
     exit /b 1
 )
 set KAYA_WINUI_TRACE=1
+rem The menus instrument (winui/mod.rs menu_probe): inert unless the
+rem probed scene builds a menu catalog; prints the echo/peer canaries.
+set KAYA_WINUI_MENU_PROBE=1
 if not "%2"=="" set KAYA_SELFTEST=%2
 start /b C:\kaya\%1.exe > C:\kaya\out_probe_app.txt 2>&1
 ping -n 6 127.0.0.1 >nul

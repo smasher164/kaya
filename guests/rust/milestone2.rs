@@ -115,6 +115,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Occurrence::EntryPopped { .. }
             | Occurrence::BackRequested { .. }
             | Occurrence::SectionSelected { .. } => {}
+            Occurrence::MenuActivated { .. }
+            | Occurrence::InstanceMenuActivated { .. }
+            | Occurrence::MenuToggled { .. }
+            | Occurrence::InstanceMenuToggled { .. }
+            | Occurrence::MenuValueChanged { .. }
+            | Occurrence::InstanceMenuValueChanged { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

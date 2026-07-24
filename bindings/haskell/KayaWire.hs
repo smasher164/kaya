@@ -15,7 +15,7 @@ import Foreign.Marshal.Array (peekArray)
 import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import GHC.Float (castDoubleToWord64, castWord64ToDouble)
-import Data.Char (chr)
+import Data.Char (chr, toLower)
 
 -- VBlob carries the u64 handle from kaya_blob_register, consumed by
 -- the next submit; the bytes never ride the record stream.
@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x39a6143b6f4c3e0e
+specHash = 0x0e4b7f4f716cc749
 
 valueBool :: Word32
 valueBool = 1
@@ -104,6 +104,32 @@ spropTitle :: Word32
 spropTitle = 1
 spropIcon :: Word32
 spropIcon = 2
+menuKindMenu :: Word32
+menuKindMenu = 1
+menuKindAction :: Word32
+menuKindAction = 2
+menuKindToggle :: Word32
+menuKindToggle = 3
+menuKindRadioGroup :: Word32
+menuKindRadioGroup = 4
+menuKindRadioOption :: Word32
+menuKindRadioOption = 5
+menuKindSeparator :: Word32
+menuKindSeparator = 6
+mpropLabel :: Word32
+mpropLabel = 1
+mpropEnabled :: Word32
+mpropEnabled = 2
+mpropChecked :: Word32
+mpropChecked = 3
+mpropValue :: Word32
+mpropValue = 4
+mpropIcon :: Word32
+mpropIcon = 5
+mpropPrimary :: Word32
+mpropPrimary = 6
+mpropShortcut :: Word32
+mpropShortcut = 7
 sectionsPresentationAuto :: Word32
 sectionsPresentationAuto = 0
 sectionsPresentationBar :: Word32
@@ -200,6 +226,18 @@ txKindSelectSection :: Word16
 txKindSelectSection = 26
 txKindSetSectionProp :: Word16
 txKindSetSectionProp = 27
+txKindMenuItemCreate :: Word16
+txKindMenuItemCreate = 28
+txKindMenuItemAppend :: Word16
+txKindMenuItemAppend = 29
+txKindMenubarAppend :: Word16
+txKindMenubarAppend = 30
+txKindContextAttach :: Word16
+txKindContextAttach = 31
+txKindContextAttachNode :: Word16
+txKindContextAttachNode = 32
+txKindSetMenuProp :: Word16
+txKindSetMenuProp = 33
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -234,6 +272,18 @@ applyKindSelectSection :: Word16
 applyKindSelectSection = 16
 applyKindSetSectionProp :: Word16
 applyKindSetSectionProp = 17
+applyKindMenuItemCreate :: Word16
+applyKindMenuItemCreate = 18
+applyKindMenuItemAppend :: Word16
+applyKindMenuItemAppend = 19
+applyKindMenubarAppend :: Word16
+applyKindMenubarAppend = 20
+applyKindContextAttach :: Word16
+applyKindContextAttach = 21
+applyKindContextAttachNode :: Word16
+applyKindContextAttachNode = 22
+applyKindSetMenuProp :: Word16
+applyKindSetMenuProp = 23
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -254,6 +304,12 @@ occKindBackRequested :: Word16
 occKindBackRequested = 9
 occKindSectionSelected :: Word16
 occKindSectionSelected = 10
+occKindMenuActivated :: Word16
+occKindMenuActivated = 11
+occKindMenuToggled :: Word16
+occKindMenuToggled = 12
+occKindMenuValueChanged :: Word16
+occKindMenuValueChanged = 13
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -393,6 +449,30 @@ txSelectSection window section = wireRecord txKindSelectSection (word64LE window
 -- Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
 txSetSectionProp :: Word64 -> Word32 -> Word32 -> Builder
 txSetSectionProp section prop source = wireRecord txKindSetSectionProp (word64LE section <> word32LE prop <> word32LE source)
+
+-- Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus).
+txMenuItemCreate :: Word64 -> Word32 -> Builder
+txMenuItemCreate item kind = wireRecord txKindMenuItemCreate (word64LE item <> word32LE kind <> word32LE 0)
+
+-- Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root.
+txMenuItemAppend :: Word64 -> Word64 -> Builder
+txMenuItemAppend parent child = wireRecord txKindMenuItemAppend (word64LE parent <> word64LE child)
+
+-- Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error.
+txMenubarAppend :: Word64 -> Word64 -> Builder
+txMenubarAppend window item = wireRecord txKindMenubarAppend (word64LE window <> word64LE item)
+
+-- Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home).
+txContextAttach :: Word64 -> Word64 -> Builder
+txContextAttach widget item = wireRecord txKindContextAttach (word64LE widget <> word64LE item)
+
+-- Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach.
+txContextAttachNode :: Word64 -> Word64 -> Builder
+txContextAttachNode node item = wireRecord txKindContextAttachNode (word64LE node <> word64LE item)
+
+-- Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
+txSetMenuProp :: Word64 -> Word32 -> Word32 -> Builder
+txSetMenuProp item prop source = wireRecord txKindSetMenuProp (word64LE item <> word32LE prop <> word32LE source)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -711,6 +791,115 @@ txBindSectionIcon section signalId = wireRecord txKindSetSectionProp
   (word64LE section <> word32LE spropIcon <> word32LE sourceSignal
     <> word64LE signalId)
 
+shortcutNamedKeys :: [String]
+shortcutNamedKeys = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"]
+
+-- | Canonicalize a shortcut spelling to the wire form: lowercase
+-- '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+-- key (a-z, 0-9, or the closed named set). Accepts ASCII case
+-- variants and any modifier order; errors on whitespace, empty
+-- tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown
+-- or multiple or missing keys. POLICY stays at the core: escape,
+-- shift-only and bare alphanumerics, and the reserved floor are
+-- validated there, on the canonical spelling, never rewritten.
+canonicalizeShortcut :: String -> String
+canonicalizeShortcut spelling
+  | null spelling = error "kaya: shortcut is empty"
+  | any (`elem` " \t\n\v\f\r") spelling =
+      error ("kaya: shortcut \"" ++ spelling ++ "\" contains whitespace")
+  | any null parts =
+      error ("kaya: shortcut \"" ++ spelling ++ "\" has an empty token")
+  | otherwise = emitKey (foldl addMod [] (init parts)) (last parts)
+  where
+    parts = cut (map toLower spelling)
+    cut = foldr step [[]]
+      where
+        step '+' acc = [] : acc
+        step ch (t : ts) = (ch : t) : ts
+        step ch [] = [[ch]]
+    addMod seen m
+      | m /= "primary" && m /= "shift" && m /= "alt" =
+          error ("kaya: shortcut \"" ++ spelling ++ "\" has an unknown modifier \"" ++ m
+            ++ "\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)")
+      | m `elem` seen =
+          error ("kaya: shortcut \"" ++ spelling ++ "\" repeats modifier \"" ++ m ++ "\"")
+      | otherwise = seen ++ [m]
+    emitKey seen key
+      | not (alnum key) && key `notElem` shortcutNamedKeys =
+          error ("kaya: shortcut \"" ++ spelling ++ "\" key \"" ++ key
+            ++ "\" is outside the floor (one of a-z, 0-9, or the closed named set)")
+      | otherwise =
+          concat [m ++ "+" | m <- ["primary", "shift", "alt"], m `elem` seen] ++ key
+    alnum [ch] = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+    alnum _ = False
+
+-- set_menu_prop with a constant label value.
+txSetMenuLabel :: Word64 -> String -> Builder
+txSetMenuLabel item label = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropLabel <> word32LE sourceConst
+    <> encodeValue (VStr label))
+
+-- set_menu_prop with a signal-bound label value.
+txBindMenuLabel :: Word64 -> Word64 -> Builder
+txBindMenuLabel item signalId = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropLabel <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_menu_prop with a constant enabled value.
+txSetMenuEnabled :: Word64 -> Bool -> Builder
+txSetMenuEnabled item enabled = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropEnabled <> word32LE sourceConst
+    <> encodeValue (VBool enabled))
+
+-- set_menu_prop with a signal-bound enabled value.
+txBindMenuEnabled :: Word64 -> Word64 -> Builder
+txBindMenuEnabled item signalId = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropEnabled <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_menu_prop with a constant checked value.
+txSetMenuChecked :: Word64 -> Bool -> Builder
+txSetMenuChecked item checked = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropChecked <> word32LE sourceConst
+    <> encodeValue (VBool checked))
+
+-- set_menu_prop with a signal-bound checked value.
+txBindMenuChecked :: Word64 -> Word64 -> Builder
+txBindMenuChecked item signalId = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropChecked <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_menu_prop with a constant value value.
+txSetMenuValue :: Word64 -> Double -> Builder
+txSetMenuValue item value = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropValue <> word32LE sourceConst
+    <> encodeValue (VF64 value))
+
+-- set_menu_prop with a signal-bound value value.
+txBindMenuValue :: Word64 -> Word64 -> Builder
+txBindMenuValue item signalId = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropValue <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_menu_prop with a constant icon value.
+txSetMenuIcon :: Word64 -> Word64 -> Builder
+txSetMenuIcon item handle = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropIcon <> word32LE sourceConst
+    <> encodeValue (VBlob handle))
+
+-- set_menu_prop with a constant primary value.
+txSetMenuPrimary :: Word64 -> Bool -> Builder
+txSetMenuPrimary item primary = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropPrimary <> word32LE sourceConst
+    <> encodeValue (VBool primary))
+
+-- set_menu_prop with a constant shortcut value, canonicalized here
+-- (the one binding-tier shortcut parser — no call site bypasses it).
+txSetMenuShortcut :: Word64 -> String -> Builder
+txSetMenuShortcut item shortcut = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropShortcut <> word32LE sourceConst
+    <> encodeValue (VStr (canonicalizeShortcut shortcut)))
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -745,7 +934,7 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -772,7 +961,7 @@ parseOccurrence rec = do
                 go next (n - 1 :: Word32) (v : acc)
           (keys, at') <- go (24 :: Int) pathLen []
           payload <-
-            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged
+            if kind == occKindTextChanged || kind == occKindToggled || kind == occKindValueChanged || kind == occKindMenuToggled || kind == occKindMenuValueChanged
               then do
                 (v, _) <- parseValue rec at'
                 return (Just v)

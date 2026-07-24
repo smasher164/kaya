@@ -8,11 +8,13 @@ package kaya
 import (
 	"encoding/binary"
 	"math"
+	"strconv"
+	"strings"
 )
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x39a6143b6f4c3e0e
+	SpecHash uint64 = 0x0e4b7f4f716cc749
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -53,6 +55,19 @@ const (
 	EpropInterceptBack = 2
 	SpropTitle = 1
 	SpropIcon = 2
+	MenuKindMenu = 1
+	MenuKindAction = 2
+	MenuKindToggle = 3
+	MenuKindRadioGroup = 4
+	MenuKindRadioOption = 5
+	MenuKindSeparator = 6
+	MpropLabel = 1
+	MpropEnabled = 2
+	MpropChecked = 3
+	MpropValue = 4
+	MpropIcon = 5
+	MpropPrimary = 6
+	MpropShortcut = 7
 	SectionsPresentationAuto = 0
 	SectionsPresentationBar = 1
 	SectionsPresentationSidebar = 2
@@ -101,6 +116,12 @@ const (
 	txAddSection = 25
 	txSelectSection = 26
 	txSetSectionProp = 27
+	txMenuItemCreate = 28
+	txMenuItemAppend = 29
+	txMenubarAppend = 30
+	txContextAttach = 31
+	txContextAttachNode = 32
+	txSetMenuProp = 33
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -118,6 +139,12 @@ const (
 	applyAddSection = 15
 	applySelectSection = 16
 	applySetSectionProp = 17
+	applyMenuItemCreate = 18
+	applyMenuItemAppend = 19
+	applyMenubarAppend = 20
+	applyContextAttach = 21
+	applyContextAttachNode = 22
+	applySetMenuProp = 23
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -128,6 +155,9 @@ const (
 	occEntryPopped = 8
 	occBackRequested = 9
 	occSectionSelected = 10
+	occMenuActivated = 11
+	occMenuToggled = 12
+	occMenuValueChanged = 13
 )
 
 func pad8(b []byte) []byte {
@@ -437,6 +467,56 @@ func TxSelectSection(window uint64, section uint64) []byte {
 func TxSetSectionProp(section uint64, prop uint32, source uint32) []byte {
 	b := beginRecord(txSetSectionProp)
 	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, source)
+	return endRecord(b)
+}
+
+// TxMenuItemCreate: Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus).
+func TxMenuItemCreate(item uint64, kind uint32) []byte {
+	b := beginRecord(txMenuItemCreate)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, kind)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxMenuItemAppend: Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root.
+func TxMenuItemAppend(parent uint64, child uint64) []byte {
+	b := beginRecord(txMenuItemAppend)
+	b = binary.LittleEndian.AppendUint64(b, parent)
+	b = binary.LittleEndian.AppendUint64(b, child)
+	return endRecord(b)
+}
+
+// TxMenubarAppend: Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error.
+func TxMenubarAppend(window uint64, item uint64) []byte {
+	b := beginRecord(txMenubarAppend)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	return endRecord(b)
+}
+
+// TxContextAttach: Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home).
+func TxContextAttach(widget uint64, item uint64) []byte {
+	b := beginRecord(txContextAttach)
+	b = binary.LittleEndian.AppendUint64(b, widget)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	return endRecord(b)
+}
+
+// TxContextAttachNode: Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach.
+func TxContextAttachNode(node uint64, item uint64) []byte {
+	b := beginRecord(txContextAttachNode)
+	b = binary.LittleEndian.AppendUint64(b, node)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	return endRecord(b)
+}
+
+// TxSetMenuProp: Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
+func TxSetMenuProp(item uint64, prop uint32, source uint32) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
 	b = binary.LittleEndian.AppendUint32(b, prop)
 	b = binary.LittleEndian.AppendUint32(b, source)
 	return endRecord(b)
@@ -974,6 +1054,177 @@ func TxBindSectionIcon(section uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+var shortcutNamedKeys = map[string]bool{"enter": true, "escape": true, "delete": true, "left": true, "right": true, "up": true, "down": true, "f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true, "f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true}
+
+// CanonicalizeShortcut canonicalizes a shortcut spelling to the wire
+// form: lowercase '+'-joined tokens, modifiers ordered primary,
+// shift, alt, then one key (a-z, 0-9, or the closed named set).
+// Accepts ASCII case variants and any modifier order; panics on
+// whitespace, empty tokens, repeated modifiers, aliases
+// (ctrl/cmd/option), and unknown or multiple or missing keys. POLICY
+// stays at the core: escape, shift-only and bare alphanumerics, and
+// the reserved floor are validated there, on the canonical spelling,
+// never rewritten.
+func CanonicalizeShortcut(spelling string) string {
+	if spelling == "" {
+		panic("kaya: shortcut is empty")
+	}
+	if strings.ContainsAny(spelling, " \t\n\v\f\r") {
+		panic("kaya: shortcut " + strconv.Quote(spelling) + " contains whitespace")
+	}
+	parts := strings.Split(strings.ToLower(spelling), "+")
+	for _, p := range parts {
+		if p == "" {
+			panic("kaya: shortcut " + strconv.Quote(spelling) + " has an empty token")
+		}
+	}
+	mods, key := parts[:len(parts)-1], parts[len(parts)-1]
+	var hasPrimary, hasShift, hasAlt bool
+	for _, m := range mods {
+		var slot *bool
+		switch m {
+		case "primary":
+			slot = &hasPrimary
+		case "shift":
+			slot = &hasShift
+		case "alt":
+			slot = &hasAlt
+		default:
+			panic("kaya: shortcut " + strconv.Quote(spelling) + " has an unknown modifier " + strconv.Quote(m) + " (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)")
+		}
+		if *slot {
+			panic("kaya: shortcut " + strconv.Quote(spelling) + " repeats modifier " + strconv.Quote(m))
+		}
+		*slot = true
+	}
+	alnum := len(key) == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9'))
+	if !alnum && !shortcutNamedKeys[key] {
+		panic("kaya: shortcut " + strconv.Quote(spelling) + " key " + strconv.Quote(key) + " is outside the floor (one of a-z, 0-9, or the closed named set)")
+	}
+	out := ""
+	if hasPrimary {
+		out += "primary+"
+	}
+	if hasShift {
+		out += "shift+"
+	}
+	if hasAlt {
+		out += "alt+"
+	}
+	return out + key
+}
+
+// TxSetMenuLabel: set_menu_prop with a constant label value.
+func TxSetMenuLabel(item uint64, label string) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, label)
+	return endRecord(b)
+}
+
+// TxBindMenuLabel: set_menu_prop with a signal-bound label value.
+func TxBindMenuLabel(item uint64, signalID uint64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetMenuEnabled: set_menu_prop with a constant enabled value.
+func TxSetMenuEnabled(item uint64, enabled bool) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropEnabled)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, enabled)
+	return endRecord(b)
+}
+
+// TxBindMenuEnabled: set_menu_prop with a signal-bound enabled value.
+func TxBindMenuEnabled(item uint64, signalID uint64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropEnabled)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetMenuChecked: set_menu_prop with a constant checked value.
+func TxSetMenuChecked(item uint64, checked bool) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropChecked)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, checked)
+	return endRecord(b)
+}
+
+// TxBindMenuChecked: set_menu_prop with a signal-bound checked value.
+func TxBindMenuChecked(item uint64, signalID uint64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropChecked)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetMenuValue: set_menu_prop with a constant value value.
+func TxSetMenuValue(item uint64, value float64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropValue)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, value)
+	return endRecord(b)
+}
+
+// TxBindMenuValue: set_menu_prop with a signal-bound value value.
+func TxBindMenuValue(item uint64, signalID uint64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropValue)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetMenuIcon: set_menu_prop with a constant icon value.
+func TxSetMenuIcon(item uint64, handle uint64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropIcon)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, BlobHandle(handle))
+	return endRecord(b)
+}
+
+// TxSetMenuPrimary: set_menu_prop with a constant primary value.
+func TxSetMenuPrimary(item uint64, primary bool) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropPrimary)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, primary)
+	return endRecord(b)
+}
+
+// TxSetMenuShortcut: set_menu_prop with a constant shortcut value, canonicalized
+// here (the one binding-tier shortcut parser — no call site bypasses it).
+func TxSetMenuShortcut(item uint64, shortcut string) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropShortcut)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, CanonicalizeShortcut(shortcut))
+	return endRecord(b)
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
@@ -983,7 +1234,7 @@ func TxBindSectionIcon(section uint64, signalID uint64) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -1019,7 +1270,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		}
 		at += 8 + (vlen+7)&^7
 	}
-	if kind == occTextChanged || kind == occToggled || kind == occValueChanged {
+	if kind == occTextChanged || kind == occToggled || kind == occValueChanged || kind == occMenuToggled || kind == occMenuValueChanged {
 		vtype := binary.LittleEndian.Uint32(rec[at:])
 		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
 		switch vtype {

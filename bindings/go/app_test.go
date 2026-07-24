@@ -6,7 +6,11 @@ package kaya
 // carries). Runs headless: the library loads (KAYA_LIB) but the core
 // loop is never entered; records queue and the process exits.
 
-import "testing"
+import (
+	"encoding/binary"
+	"strings"
+	"testing"
+)
 
 func entryKeys(tx *Tx, c Collection) []any {
 	items := tx.Items(c)
@@ -181,5 +185,108 @@ func TestMirrorReadsPoisonInsideTemplateBodies(t *testing.T) {
 		if n := tx.Len(c); n != 1 {
 			t.Fatalf("post-abort live read broken: %d", n)
 		}
+	})
+}
+
+// The menu construction surface must REACH the record stream — the
+// wire-dropped-write class: a constructor that emits nothing passes
+// every surface gate until a scene fails live (the dropped-spacing
+// lesson; Python's kaya_app_checks.py is the pattern). In-package,
+// so the queued records are countable before submit; each frame is
+// u32 length then u16 kind at offset 4, little-endian.
+func recKind(rec []byte) uint16 {
+	return binary.LittleEndian.Uint16(rec[4:6])
+}
+
+func countKind(records [][]byte, kind uint16) int {
+	n := 0
+	for _, r := range records {
+		if recKind(r) == kind {
+			n++
+		}
+	}
+	return n
+}
+
+func TestMenuConstructionEmitsAndAbortsWithTheTx(t *testing.T) {
+	app := NewApp()
+	var file MenuItem
+	app.Build(func(tx *Tx) {
+		before := len(tx.records)
+		file = tx.Window(0).Menu("File")
+		file.Item("Save").Shortcut("PRIMARY+S")
+		sort := tx.Window(0).RadioGroup("Sort")
+		sort.Option("Name")
+		sort.Option("Date")
+		sort.Value(1)
+		noun := tx.LabelText("noun")
+		tx.ContextMenu(noun).Item("Rename")
+		queued := tx.records[before:]
+		// File, Save, Sort, Name, Date, Rename.
+		if n := countKind(queued, txMenuItemCreate); n != 6 {
+			t.Fatalf("menu constructors queued %d creates, want 6", n)
+		}
+		if n := countKind(queued, txMenubarAppend); n != 2 {
+			t.Fatalf("bar anchors queued %d menubar appends, want 2", n)
+		}
+		if n := countKind(queued, txMenuItemAppend); n != 3 {
+			t.Fatalf("children queued %d item appends, want 3", n)
+		}
+		if n := countKind(queued, txContextAttach); n != 1 {
+			t.Fatalf("context anchor queued %d attaches, want 1", n)
+		}
+		canonical := false
+		for _, r := range queued {
+			if recKind(r) == txSetMenuProp && strings.Contains(string(r), "primary+s") {
+				canonical = true
+			}
+		}
+		if !canonical {
+			t.Fatal("Shortcut did not reach the records canonicalized")
+		}
+	})
+
+	// Append-at-any-time: the retained handle reopens in a later
+	// transaction — one create plus one append under the RETAINED
+	// parent, and never a new bar anchor.
+	app.Build(func(tx *Tx) {
+		before := len(tx.records)
+		tx.Menu(file).Item("Publish")
+		queued := tx.records[before:]
+		if n := countKind(queued, txMenuItemCreate); n != 1 {
+			t.Fatalf("reopen queued %d creates, want 1", n)
+		}
+		var appendRec []byte
+		for _, r := range queued {
+			if recKind(r) == txMenuItemAppend {
+				appendRec = r
+			}
+		}
+		if appendRec == nil {
+			t.Fatal("reopen queued no append")
+		}
+		if parent := binary.LittleEndian.Uint64(appendRec[8:16]); parent != file.id {
+			t.Fatalf("reopen seated under %d, want the retained parent %d", parent, file.id)
+		}
+		if countKind(queued, txMenubarAppend) != 0 {
+			t.Fatal("reopen re-anchored the bar")
+		}
+	})
+
+	// An aborted append drops its menu records with everything else
+	// (records die with the tx; nothing ships) and the app continues.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("Build swallowed the panic — the tx boundary must propagate")
+			}
+		}()
+		app.Build(func(tx *Tx) {
+			tx.Menu(file).Item("Doomed")
+			panic("handler bug")
+		})
+	}()
+	app.Build(func(tx *Tx) {
+		tx.Menu(file).Item("Recovered")
 	})
 }

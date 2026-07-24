@@ -260,6 +260,58 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    kaya_wire_end(tx, start);");
         c.line("}");
     }
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root). The C floor is the ONE
+    // surface with no shortcut canonicalizer, BY DESIGN: the floor
+    // writes the canonical wire spelling itself and the core validates
+    // it, rejecting rather than rewriting — the same root errors every
+    // generated binding gets after its canonicalizer (DESIGN.md, Menus).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (ty, ctor, param) = match kind {
+            crate::PropKind::Str => ("const char *", "kaya_str", *prop),
+            crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
+            crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
+            crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("/* set_menu_prop with a constant shortcut value. NO canonicalizer");
+            c.line(" * exists at the C floor by design: write the canonical wire spelling");
+            c.line(" * yourself — lowercase '+'-joined tokens, modifiers in primary,");
+            c.line(" * shift, alt order, then exactly one key (a-z, 0-9, or the closed");
+            c.line(" * named set: enter, delete, f1..f12, left, right, up, down), e.g.");
+            c.line(" * \"primary+shift+s\". The core validates spelling and policy at the");
+            c.line(" * root and REJECTS non-canonical forms rather than rewriting them —");
+            c.line(" * the same root errors every generated binding gets after its");
+            c.line(" * canonicalizer (DESIGN.md, Menus). */");
+        } else {
+            c.line(&format!("/* set_menu_prop with a constant {prop} value. */"));
+        }
+        c.line(&format!("static inline void kaya_tx_set_menu_{prop}(KayaTx *tx, uint64_t item, {ty}{param}) {{"));
+        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
+        c.line("    kaya_wire_u64(tx, item);");
+        c.line(&format!("    kaya_wire_u32(tx, KAYA_MPROP_{up});"));
+        c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
+        c.line(&format!("    kaya_wire_value(tx, {ctor}({param}));"));
+        c.line("    kaya_wire_end(tx, start);");
+        c.line("}");
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("/* set_menu_prop with a signal-bound {prop} value. */"));
+            c.line(&format!("static inline void kaya_tx_bind_menu_{prop}(KayaTx *tx, uint64_t item, uint64_t signal_id) {{"));
+            c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
+            c.line("    kaya_wire_u64(tx, item);");
+            c.line(&format!("    kaya_wire_u32(tx, KAYA_MPROP_{up});"));
+            c.line("    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);");
+            c.line("    kaya_wire_u64(tx, signal_id);");
+            c.line("    kaya_wire_end(tx, start);");
+            c.line("}");
+        }
+    }
     c.line("");
     c.line("/* Decode one value at `at`; returns the next offset. */");
     c.line("static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {");
@@ -305,6 +357,41 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return 1;");
     c.line("}");
     c.line("");
+    // One parse helper per further click-shaped payload-less occurrence
+    // (menu_activated), DERIVED from the record shapes like the id-only
+    // branch elsewhere — a new click-shaped record reaches the C floor
+    // with zero emitter edits. button_clicked keeps its historic name,
+    // kaya_parse_click, above.
+    for name in crate::click_shaped_occurrence_names(spec)
+        .iter()
+        .filter(|n| **n != "button_clicked")
+    {
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        c.line(&format!(
+            "/* Decode a {name} occurrence: the click identity shape — id plus"
+        ));
+        c.line(" * path_len key-path values (a node-anchored context activation");
+        c.line(" * carries the stamped copy's keys; path_len is 0 for a bar or");
+        c.line(" * live-widget item). Returns 1 and fills the outputs, or 0 for");
+        c.line(" * other kinds. */");
+        c.line(&format!(
+            "static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"
+        ));
+        c.line(&format!("{pad}KayaVal *keys, uint32_t max_keys,"));
+        c.line(&format!("{pad}uint32_t *n_keys) {{"));
+        c.line("    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;");
+        c.line(&format!("    if (r->header.kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    *id = r->id;");
+        c.line("    *n_keys = r->path_len;");
+        c.line("    size_t at = sizeof(KayaRecordButtonClicked);");
+        c.line("    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)");
+        c.line("        at = kaya_parse_value(rec, at, &keys[k]);");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
     // One parse helper per payload-carrying occurrence, from the spec's
     // Record::payload — the kind list derives rather than drifts. The
     // payload lands in a KayaVal, kaya_parse_value's generic decode.

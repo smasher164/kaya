@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x39a6143b6f4c3e0eL;
+    public static final long SPEC_HASH = 0x0e4b7f4f716cc749L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -54,6 +54,19 @@ public final class KayaWire {
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
     public static final int SPROP_ICON = 2;
+    public static final int MENU_KIND_MENU = 1;
+    public static final int MENU_KIND_ACTION = 2;
+    public static final int MENU_KIND_TOGGLE = 3;
+    public static final int MENU_KIND_RADIO_GROUP = 4;
+    public static final int MENU_KIND_RADIO_OPTION = 5;
+    public static final int MENU_KIND_SEPARATOR = 6;
+    public static final int MPROP_LABEL = 1;
+    public static final int MPROP_ENABLED = 2;
+    public static final int MPROP_CHECKED = 3;
+    public static final int MPROP_VALUE = 4;
+    public static final int MPROP_ICON = 5;
+    public static final int MPROP_PRIMARY = 6;
+    public static final int MPROP_SHORTCUT = 7;
     public static final int SECTIONS_PRESENTATION_AUTO = 0;
     public static final int SECTIONS_PRESENTATION_BAR = 1;
     public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
@@ -102,6 +115,12 @@ public final class KayaWire {
     public static final short TX_KIND_ADD_SECTION = 25;
     public static final short TX_KIND_SELECT_SECTION = 26;
     public static final short TX_KIND_SET_SECTION_PROP = 27;
+    public static final short TX_KIND_MENU_ITEM_CREATE = 28;
+    public static final short TX_KIND_MENU_ITEM_APPEND = 29;
+    public static final short TX_KIND_MENUBAR_APPEND = 30;
+    public static final short TX_KIND_CONTEXT_ATTACH = 31;
+    public static final short TX_KIND_CONTEXT_ATTACH_NODE = 32;
+    public static final short TX_KIND_SET_MENU_PROP = 33;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -119,6 +138,12 @@ public final class KayaWire {
     public static final short APPLY_KIND_ADD_SECTION = 15;
     public static final short APPLY_KIND_SELECT_SECTION = 16;
     public static final short APPLY_KIND_SET_SECTION_PROP = 17;
+    public static final short APPLY_KIND_MENU_ITEM_CREATE = 18;
+    public static final short APPLY_KIND_MENU_ITEM_APPEND = 19;
+    public static final short APPLY_KIND_MENUBAR_APPEND = 20;
+    public static final short APPLY_KIND_CONTEXT_ATTACH = 21;
+    public static final short APPLY_KIND_CONTEXT_ATTACH_NODE = 22;
+    public static final short APPLY_KIND_SET_MENU_PROP = 23;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -129,6 +154,9 @@ public final class KayaWire {
     public static final short OCC_KIND_ENTRY_POPPED = 8;
     public static final short OCC_KIND_BACK_REQUESTED = 9;
     public static final short OCC_KIND_SECTION_SELECTED = 10;
+    public static final short OCC_KIND_MENU_ACTIVATED = 11;
+    public static final short OCC_KIND_MENU_TOGGLED = 12;
+    public static final short OCC_KIND_MENU_VALUE_CHANGED = 13;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -412,6 +440,56 @@ public final class KayaWire {
     public static byte[] txSetSectionProp(long section, int prop, int source) {
         ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
         b.putLong(section);
+        b.putInt(prop);
+        b.putInt(source);
+        return finish(b);
+    }
+
+    /** Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). */
+    public static byte[] txMenuItemCreate(long item, int kind) {
+        ByteBuffer b = begin(TX_KIND_MENU_ITEM_CREATE);
+        b.putLong(item);
+        b.putInt(kind);
+        b.putInt(0);
+        return finish(b);
+    }
+
+    /** Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. */
+    public static byte[] txMenuItemAppend(long parent, long child) {
+        ByteBuffer b = begin(TX_KIND_MENU_ITEM_APPEND);
+        b.putLong(parent);
+        b.putLong(child);
+        return finish(b);
+    }
+
+    /** Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. */
+    public static byte[] txMenubarAppend(long window, long item) {
+        ByteBuffer b = begin(TX_KIND_MENUBAR_APPEND);
+        b.putLong(window);
+        b.putLong(item);
+        return finish(b);
+    }
+
+    /** Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). */
+    public static byte[] txContextAttach(long widget, long item) {
+        ByteBuffer b = begin(TX_KIND_CONTEXT_ATTACH);
+        b.putLong(widget);
+        b.putLong(item);
+        return finish(b);
+    }
+
+    /** Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. */
+    public static byte[] txContextAttachNode(long node, long item) {
+        ByteBuffer b = begin(TX_KIND_CONTEXT_ATTACH_NODE);
+        b.putLong(node);
+        b.putLong(item);
+        return finish(b);
+    }
+
+    /** Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. */
+    public static byte[] txSetMenuProp(long item, int prop, int source) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item);
         b.putInt(prop);
         b.putInt(source);
         return finish(b);
@@ -805,6 +883,151 @@ public final class KayaWire {
         return finish(b);
     }
 
+    private static final java.util.Set<String> SHORTCUT_NAMED_KEYS =
+            java.util.Set.of("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12");
+
+    /** Canonicalize a shortcut spelling to the wire form: lowercase
+     * '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+     * key (a-z, 0-9, or the closed named set). Accepts ASCII case
+     * variants and any modifier order; throws on whitespace, empty
+     * tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown
+     * or multiple or missing keys. POLICY stays at the core: escape,
+     * shift-only and bare alphanumerics, and the reserved floor are
+     * validated there, on the canonical spelling, never rewritten. */
+    public static String canonicalizeShortcut(String spelling) {
+        if (spelling.isEmpty()) {
+            throw new IllegalArgumentException("kaya: shortcut is empty");
+        }
+        for (int i = 0; i < spelling.length(); i++) {
+            char ch = spelling.charAt(i);
+            if (ch == ' ' || ch == '\t' || ch == '\n' || ch == 0x0b || ch == '\f' || ch == '\r') {
+                throw new IllegalArgumentException(
+                        "kaya: shortcut \"" + spelling + "\" contains whitespace");
+            }
+        }
+        // split takes a regex, and -1 keeps trailing empty tokens so
+        // "primary+" fails as an empty token, never as a silent drop.
+        String[] parts = spelling.toLowerCase(java.util.Locale.ROOT).split("\\+", -1);
+        for (String p : parts) {
+            if (p.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "kaya: shortcut \"" + spelling + "\" has an empty token");
+            }
+        }
+        String key = parts[parts.length - 1];
+        boolean primary = false, shift = false, alt = false;
+        for (int i = 0; i + 1 < parts.length; i++) {
+            String m = parts[i];
+            boolean repeated;
+            if (m.equals("primary")) { repeated = primary; primary = true; }
+            else if (m.equals("shift")) { repeated = shift; shift = true; }
+            else if (m.equals("alt")) { repeated = alt; alt = true; }
+            else {
+                throw new IllegalArgumentException(
+                        "kaya: shortcut \"" + spelling + "\" has an unknown modifier \"" + m
+                        + "\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)");
+            }
+            if (repeated) {
+                throw new IllegalArgumentException(
+                        "kaya: shortcut \"" + spelling + "\" repeats modifier \"" + m + "\"");
+            }
+        }
+        boolean alnum = key.length() == 1
+                && ((key.charAt(0) >= 'a' && key.charAt(0) <= 'z')
+                        || (key.charAt(0) >= '0' && key.charAt(0) <= '9'));
+        if (!alnum && !SHORTCUT_NAMED_KEYS.contains(key)) {
+            throw new IllegalArgumentException(
+                    "kaya: shortcut \"" + spelling + "\" key \"" + key
+                    + "\" is outside the floor (one of a-z, 0-9, or the closed named set)");
+        }
+        return (primary ? "primary+" : "") + (shift ? "shift+" : "") + (alt ? "alt+" : "") + key;
+    }
+
+    /** set_menu_prop with a constant label value. */
+    public static byte[] txSetMenuLabel(long item, String label) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_LABEL).putInt(SOURCE_CONST);
+        encodeValue(b, label);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a signal-bound label value. */
+    public static byte[] txBindMenuLabel(long item, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant enabled value. */
+    public static byte[] txSetMenuEnabled(long item, boolean enabled) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_ENABLED).putInt(SOURCE_CONST);
+        encodeValue(b, enabled);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a signal-bound enabled value. */
+    public static byte[] txBindMenuEnabled(long item, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_ENABLED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant checked value. */
+    public static byte[] txSetMenuChecked(long item, boolean checked) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_CHECKED).putInt(SOURCE_CONST);
+        encodeValue(b, checked);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a signal-bound checked value. */
+    public static byte[] txBindMenuChecked(long item, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_CHECKED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant value value. */
+    public static byte[] txSetMenuValue(long item, double value) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_VALUE).putInt(SOURCE_CONST);
+        encodeValue(b, value);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a signal-bound value value. */
+    public static byte[] txBindMenuValue(long item, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_VALUE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant icon value. */
+    public static byte[] txSetMenuIcon(long item, long handle) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_ICON).putInt(SOURCE_CONST);
+        encodeValue(b, new BlobHandle(handle));
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant primary value. */
+    public static byte[] txSetMenuPrimary(long item, boolean primary) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_PRIMARY).putInt(SOURCE_CONST);
+        encodeValue(b, primary);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant shortcut value, canonicalized here
+     * (the one binding-tier shortcut parser — no call site bypasses it). */
+    public static byte[] txSetMenuShortcut(long item, String shortcut) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_SHORTCUT).putInt(SOURCE_CONST);
+        encodeValue(b, canonicalizeShortcut(shortcut));
+        return finish(b);
+    }
+
     /** Concatenate packed records into one transaction. */
     public static byte[] tx(byte[]... records) {
         int len = 0;
@@ -843,7 +1066,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -878,7 +1101,7 @@ public final class KayaWire {
             at += 8 + ((vlen + 7) & ~7);
         }
         Object payload = null;
-        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED) {
+        if (kind == OCC_KIND_TEXT_CHANGED || kind == OCC_KIND_TOGGLED || kind == OCC_KIND_VALUE_CHANGED || kind == OCC_KIND_MENU_TOGGLED || kind == OCC_KIND_MENU_VALUE_CHANGED) {
             int ptype = b.getInt(at);
             int plen = b.getInt(at + 4);
             switch (ptype) {

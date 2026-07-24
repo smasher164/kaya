@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x39a6143b6f4c3e0e
+SPEC_HASH = 0x0e4b7f4f716cc749
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -51,6 +51,19 @@ EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
 SPROP_ICON = 2
+MENU_KIND_MENU = 1
+MENU_KIND_ACTION = 2
+MENU_KIND_TOGGLE = 3
+MENU_KIND_RADIO_GROUP = 4
+MENU_KIND_RADIO_OPTION = 5
+MENU_KIND_SEPARATOR = 6
+MPROP_LABEL = 1
+MPROP_ENABLED = 2
+MPROP_CHECKED = 3
+MPROP_VALUE = 4
+MPROP_ICON = 5
+MPROP_PRIMARY = 6
+MPROP_SHORTCUT = 7
 SECTIONS_PRESENTATION_AUTO = 0
 SECTIONS_PRESENTATION_BAR = 1
 SECTIONS_PRESENTATION_SIDEBAR = 2
@@ -100,6 +113,12 @@ TX_SET_ENTRY_PROP = 24
 TX_ADD_SECTION = 25
 TX_SELECT_SECTION = 26
 TX_SET_SECTION_PROP = 27
+TX_MENU_ITEM_CREATE = 28
+TX_MENU_ITEM_APPEND = 29
+TX_MENUBAR_APPEND = 30
+TX_CONTEXT_ATTACH = 31
+TX_CONTEXT_ATTACH_NODE = 32
+TX_SET_MENU_PROP = 33
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -117,6 +136,12 @@ APPLY_SET_ENTRY_PROP = 14
 APPLY_ADD_SECTION = 15
 APPLY_SELECT_SECTION = 16
 APPLY_SET_SECTION_PROP = 17
+APPLY_MENU_ITEM_CREATE = 18
+APPLY_MENU_ITEM_APPEND = 19
+APPLY_MENUBAR_APPEND = 20
+APPLY_CONTEXT_ATTACH = 21
+APPLY_CONTEXT_ATTACH_NODE = 22
+APPLY_SET_MENU_PROP = 23
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -127,6 +152,9 @@ OCC_ALERT_RESULT = 7
 OCC_ENTRY_POPPED = 8
 OCC_BACK_REQUESTED = 9
 OCC_SECTION_SELECTED = 10
+OCC_MENU_ACTIVATED = 11
+OCC_MENU_TOGGLED = 12
+OCC_MENU_VALUE_CHANGED = 13
 
 
 def _pad(b):
@@ -283,6 +311,30 @@ def tx_select_section(window, section):
 def tx_set_section_prop(section, prop, source):
     """Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements."""
     return record(TX_SET_SECTION_PROP, struct.pack("<Q", section) + struct.pack("<I", prop) + struct.pack("<I", source))
+
+def tx_menu_item_create(item, kind):
+    """Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus)."""
+    return record(TX_MENU_ITEM_CREATE, struct.pack("<Q", item) + struct.pack("<I", kind) + struct.pack("<I", 0))
+
+def tx_menu_item_append(parent, child):
+    """Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root."""
+    return record(TX_MENU_ITEM_APPEND, struct.pack("<Q", parent) + struct.pack("<Q", child))
+
+def tx_menubar_append(window, item):
+    """Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error."""
+    return record(TX_MENUBAR_APPEND, struct.pack("<Q", window) + struct.pack("<Q", item))
+
+def tx_context_attach(widget, item):
+    """Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home)."""
+    return record(TX_CONTEXT_ATTACH, struct.pack("<Q", widget) + struct.pack("<Q", item))
+
+def tx_context_attach_node(node, item):
+    """Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach."""
+    return record(TX_CONTEXT_ATTACH_NODE, struct.pack("<Q", node) + struct.pack("<Q", item))
+
+def tx_set_menu_prop(item, prop, source):
+    """Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier."""
+    return record(TX_SET_MENU_PROP, struct.pack("<Q", item) + struct.pack("<I", prop) + struct.pack("<I", source))
 
 
 def tx_set_text(widget_id, text):
@@ -540,6 +592,99 @@ def tx_bind_section_icon(section, signal_id):
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_ICON, SOURCE_SIGNAL, signal_id))
 
 
+_SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"))
+
+
+def canonicalize_shortcut(spelling):
+    """Canonicalize a shortcut spelling to the wire form: lowercase
+    '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+    key (a-z, 0-9, or the closed named set). Accepts ASCII case
+    variants and any modifier order; rejects whitespace, empty tokens,
+    repeated modifiers, aliases (ctrl/cmd/option), and unknown or
+    multiple or missing keys. POLICY stays at the core: escape,
+    shift-only and bare alphanumerics, and the reserved floor are
+    validated there, on the canonical spelling, never rewritten."""
+    if not spelling:
+        raise ValueError("kaya: shortcut is empty")
+    if any(ch in spelling for ch in " \t\n\v\f\r"):
+        raise ValueError(f"kaya: shortcut {spelling!r} contains whitespace")
+    parts = spelling.lower().split("+")
+    if any(not p for p in parts):
+        raise ValueError(f"kaya: shortcut {spelling!r} has an empty token")
+    mods, key = parts[:-1], parts[-1]
+    seen = []
+    for m in mods:
+        if m not in ("primary", "shift", "alt"):
+            raise ValueError(
+                f"kaya: shortcut {spelling!r} has an unknown modifier {m!r} "
+                "(the portable modifiers are primary, shift, alt; aliases "
+                "like ctrl, cmd, and option are not accepted)")
+        if m in seen:
+            raise ValueError(f"kaya: shortcut {spelling!r} repeats modifier {m!r}")
+        seen.append(m)
+    alnum = len(key) == 1 and ("a" <= key <= "z" or "0" <= key <= "9")
+    if not alnum and key not in _SHORTCUT_NAMED_KEYS:
+        raise ValueError(
+            f"kaya: shortcut {spelling!r} key {key!r} is outside the floor "
+            "(one of a-z, 0-9, or the closed named set)")
+    return "+".join([m for m in ("primary", "shift", "alt") if m in seen] + [key])
+
+
+def tx_set_menu_label(item, label):
+    """set_menu_prop with a constant label value (str)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_LABEL, SOURCE_CONST) + _enc.value(label))
+
+
+def tx_bind_menu_label(item, signal_id):
+    """set_menu_prop with a signal-bound label value."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_LABEL, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_menu_enabled(item, enabled):
+    """set_menu_prop with a constant enabled value (bool)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ENABLED, SOURCE_CONST) + _enc.value(enabled))
+
+
+def tx_bind_menu_enabled(item, signal_id):
+    """set_menu_prop with a signal-bound enabled value."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_ENABLED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_menu_checked(item, checked):
+    """set_menu_prop with a constant checked value (bool)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_CHECKED, SOURCE_CONST) + _enc.value(checked))
+
+
+def tx_bind_menu_checked(item, signal_id):
+    """set_menu_prop with a signal-bound checked value."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_CHECKED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_menu_value(item, value):
+    """set_menu_prop with a constant value value (float)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_VALUE, SOURCE_CONST) + _enc.value(value))
+
+
+def tx_bind_menu_value(item, signal_id):
+    """set_menu_prop with a signal-bound value value."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QIIQ", item, MPROP_VALUE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_menu_icon(item, handle):
+    """set_menu_prop with a constant icon value (a kaya_blob_register handle, consumed by the next submit)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ICON, SOURCE_CONST) + _enc.value(BlobHandle(handle)))
+
+
+def tx_set_menu_primary(item, primary):
+    """set_menu_prop with a constant primary value (bool)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_PRIMARY, SOURCE_CONST) + _enc.value(primary))
+
+
+def tx_set_menu_shortcut(item, shortcut):
+    """set_menu_prop with a constant shortcut value (str, canonicalized here — the one binding-tier shortcut parser)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SHORTCUT, SOURCE_CONST) + _enc.value(canonicalize_shortcut(shortcut)))
+
+
 def parse_value(buf, at):
     """Decode one value; returns (python value, next offset)."""
     vtype, vlen = struct.unpack_from("<II", buf, at)
@@ -568,7 +713,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
@@ -592,6 +737,6 @@ def parse_occurrence(buf):
         key, at = parse_value(buf, at)
         keys.append(key)
     payload = None
-    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED,):
+    if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED,):
         payload, at = parse_value(buf, at)
     return kind, ident, keys, payload

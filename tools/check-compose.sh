@@ -22,6 +22,13 @@ fi
 # verticalScroll import produced a zero-verdict emulator run). This
 # is the swift-typecheck/java-typecheck sibling for the Kotlin layer:
 # seconds warm under the gradle daemon.
+#
+# The two APP modules compile here too, for the same reason one level
+# up: they carry per-scene registration (each MainActivity's scene
+# arm) and the hardware-chord override that forwards to the
+# interpreter's dispatch table. That code is Kotlin no other gate
+# sees, and the milestone2kt module drags in every Java guest as
+# well, so this also type-checks them on the mac.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,6 +36,11 @@ cd "$ROOT/android" || exit 1
 
 gradle --console=plain -q :kaya:compileDebugKotlin || {
     echo "check-compose: FAIL (KayaCompose.kt does not compile)" >&2
+    exit 1
+}
+gradle --console=plain -q :milestone2:compileDebugKotlin \
+    :milestone2kt:compileDebugKotlin || {
+    echo "check-compose: FAIL (an Android app module does not compile)" >&2
     exit 1
 }
 echo "check-compose: OK"

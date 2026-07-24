@@ -33,11 +33,15 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
-    ContentDialogButton, ContentDialogResult, Grid, Image, NavigationView, NavigationViewItem,
-    NavigationViewPaneDisplayMode, ProgressBar, RowDefinition,
+    ContentDialogButton, ContentDialogResult, Grid, Image, MenuBar, MenuBarItem, MenuFlyout,
+    MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
+    NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
+    RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
-    Slider, TextBlock, TextBox, TextChangedEventHandler,
+    Slider, TextBlock, TextBox, TextChangedEventHandler, ToggleMenuFlyoutItem,
 };
+use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
+use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
 use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
@@ -48,8 +52,9 @@ use bindings::Microsoft::UI::Xaml::{
 };
 
 use crate::protocol::{
-    ApplyOp, CommandKind, OccSink, Occurrence, Prop, Transaction, Value, WidgetId, WidgetKind,
-    WindowId, WindowProp,
+    ApplyOp, CommandKind, MenuAttachment, MenuItemId, MenuItemKind, MenuProp, OccSink, Occurrence,
+    Path, Prop, Transaction, Value, WidgetId, WidgetKind, WindowId, WindowProp,
+    purge_context_natives,
 };
 use crate::scene::Scene;
 
@@ -227,6 +232,53 @@ struct CoreState {
     ui_selected_sections: HashMap<u64, u64>,
     selected_sections: HashMap<u64, u64>,
     sections_presentation: HashMap<u64, i64>,
+    /// Menus (DESIGN.md, Menus and the command vocabulary): the
+    /// retained item model — kind fixed at create, every applicable
+    /// prop live. This map is the POST-USER MIRROR (docs/traps.md):
+    /// toggle/radio chrome owns the immediate user change, its Click
+    /// handler updates checked/value here BEFORE emitting, and every
+    /// rebuild starts from it. Items are never destroyed.
+    menu_models: HashMap<u64, MenuModel>,
+    /// Per-window top-level catalog items, in menubar-append order.
+    menu_windows: HashMap<u64, Vec<u64>>,
+    /// Context catalogs: attached root items per anchor widget, the
+    /// stamped copy's key path (empty for a live widget — the noun
+    /// every activation from that anchor stamps), and the one real
+    /// MenuFlyout set as the element's ContextFlyout.
+    context_roots: HashMap<u64, Vec<u64>>,
+    context_nouns: HashMap<u64, Path>,
+    context_flyouts: HashMap<u64, MenuFlyout>,
+    /// (attachment, item id) -> its materialized native chrome,
+    /// rebuilt with the catalog. Keyed PER ATTACHMENT: a template
+    /// context catalog attaches the SAME item ids to every stamped
+    /// copy, and the copy's keys ARE the noun (DESIGN.md, Menus) — a
+    /// flat per-item map would keep only the last-built copy, in
+    /// context_roots' arbitrary iteration order, and the harness
+    /// would invoke that anchor's chrome (and emit ITS noun) from
+    /// every other row (docs/traps.md). Separators and NESTED radio
+    /// groups mint none (the group's options materialize inline —
+    /// the checkmark idiom).
+    menu_natives: HashMap<(MenuAttachment, u64), MenuNative>,
+    /// The window shell (the ratified lowering): MenuBar in its own
+    /// Auto row of a shell Grid, the window's real content in the
+    /// Star-row slot beneath it. Built once per window at the first
+    /// menubar_append; every content swap goes through the slot.
+    menubars: HashMap<u64, MenuBar>,
+    menu_slots: HashMap<u64, Grid>,
+    /// Canonical shortcut spelling -> action item id for the PRIMARY
+    /// window's catalog (the harness's target, the sections-precedent
+    /// scoping). Gates the shortcut verb: a chord no catalog action
+    /// owns is a silent no-op — checked before any OS-global
+    /// injection (docs/traps.md).
+    menu_shortcuts: HashMap<String, u64>,
+    /// The harness's OPEN context menu: anchor widget id plus the
+    /// flyout handle, kept until Closed is awaited (the staged
+    /// ShowAt ruling — the anchor row may be destroyed by the very
+    /// occurrence the activation emits).
+    open_context: Option<(u64, MenuFlyout)>,
+    /// Coalesced per drain: any op touching the command surface sets
+    /// it; one rebuild follows the batch.
+    menus_touched: bool,
 }
 
 /// One section's materialized state: the pane Grid (the mount
@@ -256,6 +308,49 @@ struct WinLiveAlert {
     window: u64,
     actions: usize,
     dialog: ContentDialog,
+}
+
+/// One menu item's retained state (the post-user mirror; see
+/// CoreState::menu_models). `primary` is stored but INERT on desktop
+/// (the phone-promotion hint; DESIGN.md, Menus).
+struct MenuModel {
+    kind: MenuItemKind,
+    label: String,
+    enabled: bool,
+    checked: bool,
+    value: f64,
+    primary: bool,
+    shortcut: String,
+    children: Vec<u64>,
+    parent: Option<u64>,
+}
+
+/// An item's materialized WinUI chrome, per the ratified 1:1 lowering:
+/// MenuBarItem for a top-level grouping node (a bar-level radio_group
+/// included — its options inline under the group's own title),
+/// MenuFlyoutSubItem for a nested menu, and the three leaf item kinds.
+#[derive(Clone)]
+enum MenuNative {
+    Bar(MenuBarItem),
+    Sub(MenuFlyoutSubItem),
+    Action(MenuFlyoutItem),
+    Toggle(ToggleMenuFlyoutItem),
+    Option(RadioMenuFlyoutItem),
+}
+
+impl MenuNative {
+    /// The REAL chrome's enablement — what expect_menu reads. The
+    /// rebuild stamps the inherited AND onto every native, so this is
+    /// the effective value (docs/traps.md, inherited enablement).
+    fn is_enabled(&self) -> windows_core::Result<bool> {
+        match self {
+            MenuNative::Bar(i) => i.IsEnabled(),
+            MenuNative::Sub(i) => i.IsEnabled(),
+            MenuNative::Action(i) => i.IsEnabled(),
+            MenuNative::Toggle(i) => i.IsEnabled(),
+            MenuNative::Option(i) => i.IsEnabled(),
+        }
+    }
 }
 
 impl Drop for CoreState {
@@ -335,6 +430,19 @@ fn drain_transactions() {
             for op in core.scene.apply(tx) {
                 apply(core, op).expect("kaya: applying an op failed");
             }
+        }
+        // ONE coalesced menu-chrome rebuild per drain, from the
+        // post-user mirror. Quiet-armed as a belt: constructing and
+        // stamping native items must never read as user activation
+        // (the echo doctrine).
+        if core.menus_touched {
+            core.menus_touched = false;
+            core.apply_quiet
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let rebuilt = rebuild_menus(core);
+            core.apply_quiet
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            rebuilt.expect("kaya: rebuilding the menu chrome failed");
         }
     });
 }
@@ -954,13 +1062,15 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
             if let Some(wrapper) = &entry.wrapper {
-                target.SetContent(wrapper)?;
+                let wrapper: UIElement = windows_core::Interface::cast(wrapper)?;
+                set_window_content(core, window, &wrapper)?;
             }
             target.SetTitle(&HSTRING::from(&*entry.title))?;
         }
         None => {
             if let Some(root) = core.window_roots.get(&window) {
-                target.SetContent(root)?;
+                let root = root.clone();
+                set_window_content(core, window, &root)?;
             }
             let own = core.window_titles.get(&window).cloned().unwrap_or_default();
             target.SetTitle(&HSTRING::from(&*own))?;
@@ -1101,8 +1211,8 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         );
         nav.SelectionChanged(&handler)?;
         core.section_navs.insert(window, nav.clone());
-        let target = winui_window(core, window)?;
-        target.SetContent(&nav)?;
+        let nav_el: UIElement = windows_core::Interface::cast(&nav)?;
+        set_window_content(core, window, &nav_el)?;
     }
     let nav = core.section_navs[&window].clone();
     // Grow incrementally: an item per section not yet appended (add
@@ -1258,6 +1368,549 @@ fn nav_probe_wrap(element: &UIElement) -> windows_core::Result<UIElement> {
     }
     nav.SetContent(element)?;
     nav.cast()
+}
+
+// --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+//
+// One item vocabulary, two anchors. The WINDOW anchor is a real
+// in-window MenuBar in its own Auto row of the window shell Grid; the
+// WIDGET/NODE anchor is a MenuFlyout set as the element's
+// ContextFlyout. Echo doctrine: ONE dispatch path — chrome clicks,
+// the KeyboardAccelerator route, and harness verbs all land in
+// menu_user_activate and emit; programmatic set_menu_prop writes
+// mutate the model silently in the apply arm and the rebuild restamps
+// the chrome from that mirror.
+
+/// Enablement is the AND of the item's own flag and every grouping
+/// ancestor's — the inherited rule every read, render, shortcut, and
+/// activation route shares (docs/traps.md).
+fn menu_effective_enabled(core: &CoreState, item: u64) -> bool {
+    let mut enabled = match core.menu_models.get(&item) {
+        Some(m) => m.enabled,
+        None => return false,
+    };
+    let mut current = item;
+    while let Some(parent) = core.menu_models.get(&current).and_then(|m| m.parent) {
+        enabled = enabled && core.menu_models.get(&parent).is_some_and(|m| m.enabled);
+        current = parent;
+    }
+    enabled
+}
+
+/// Catalog preorder: top-level grouping nodes in menubar-append order,
+/// then each node's children in append order, depth-first (the
+/// promotion/shortcut-table order; creation time is irrelevant).
+fn menu_preorder(core: &CoreState, roots: &[u64], out: &mut Vec<u64>) {
+    for &id in roots {
+        out.push(id);
+        if let Some(children) = core.menu_models.get(&id).map(|m| m.children.clone()) {
+            menu_preorder(core, &children, out);
+        }
+    }
+}
+
+/// Resolve a `>`-joined label path against root items, labels compared
+/// byte-for-byte (the shared-scene contract). The path walks the
+/// SEMANTIC tree: a grouping root's label is a path segment whether or
+/// not materialization mints a titled row — an inline nested
+/// radio_group has none, yet "View>Sort>Date" must still land on Date.
+fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64> {
+    let mut current: Vec<u64> = roots.to_vec();
+    let mut found = None;
+    for seg in path.split('>') {
+        let item = *current
+            .iter()
+            .find(|id| core.menu_models.get(id).is_some_and(|m| m.label == seg))?;
+        found = Some(item);
+        current = core.menu_models[&item].children.clone();
+    }
+    found
+}
+
+/// Build the window shell at the first menubar_append (the ratified
+/// lowering): a Grid whose Auto row holds the MenuBar and whose Star
+/// row is the content slot every later mount/nav/sections swap fills.
+/// Built ONCE and grown through rebuilds; any content the window
+/// already presents moves into the slot (detached by the SetContent
+/// swap first — XAML refuses re-parenting; docs/traps.md).
+fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    use windows_core::Interface as _;
+    if core.menubars.contains_key(&window) {
+        return Ok(());
+    }
+    let target = winui_window(core, window)?;
+    let shell = Grid::new()?;
+    let defs = shell.RowDefinitions()?;
+    let bar_row = RowDefinition::new()?;
+    bar_row.SetHeight(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Auto,
+    })?;
+    defs.Append(&bar_row)?;
+    let fill = RowDefinition::new()?;
+    fill.SetHeight(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Star,
+    })?;
+    defs.Append(&fill)?;
+    let bar = MenuBar::new()?;
+    let bar_el: FrameworkElement = bar.cast()?;
+    Grid::SetRow(&bar_el, 0)?;
+    shell.Children()?.Append(&bar_el)?;
+    let slot = Grid::new()?;
+    let slot_el: FrameworkElement = slot.cast()?;
+    Grid::SetRow(&slot_el, 1)?;
+    shell.Children()?.Append(&slot_el)?;
+    let old = target.Content().ok();
+    target.SetContent(&shell.cast::<UIElement>()?)?;
+    if let Some(old) = old {
+        slot.Children()?.Append(&old)?;
+    }
+    core.menubars.insert(window, bar);
+    core.menu_slots.insert(window, slot);
+    Ok(())
+}
+
+/// Every content swap for a window goes through here: into the menu
+/// shell's slot when the window carries a bar, straight onto the
+/// Window otherwise. Keeps the mount/nav/sections paths one mechanism.
+fn set_window_content(
+    core: &CoreState,
+    window: u64,
+    element: &UIElement,
+) -> windows_core::Result<()> {
+    if let Some(slot) = core.menu_slots.get(&window) {
+        let children = slot.Children()?;
+        children.Clear()?;
+        children.Append(element)?;
+        Ok(())
+    } else {
+        winui_window(core, window)?.SetContent(element)
+    }
+}
+
+/// One real MenuFlyout per context anchor, set as the element's
+/// ContextFlyout (the platform's own right-click route); its items
+/// rebuild from the attached roots with the catalog.
+fn ensure_context_flyout(core: &mut CoreState, widget: u64) -> windows_core::Result<()> {
+    if core.context_flyouts.contains_key(&widget) {
+        return Ok(());
+    }
+    let flyout = MenuFlyout::new()?;
+    let element = core
+        .widgets
+        .get(&WidgetId(widget))
+        .expect("scene validated the context anchor")
+        .element()?;
+    element.SetContextFlyout(&flyout)?;
+    core.context_flyouts.insert(widget, flyout);
+    Ok(())
+}
+
+/// The canonical shortcut spelling (root-validated: lowercase,
+/// `primary`/`shift`/`alt` order, one key) onto the accelerator
+/// enums. `primary` = Control on Windows. The same key table feeds
+/// the verb's keybd_event injection, so matching is by construction.
+fn accelerator_chord(spelling: &str) -> Option<(VirtualKey, VirtualKeyModifiers)> {
+    let mut mods = VirtualKeyModifiers::None;
+    let mut key = None;
+    for part in spelling.split('+') {
+        match part {
+            "primary" => mods = VirtualKeyModifiers(mods.0 | VirtualKeyModifiers::Control.0),
+            "shift" => mods = VirtualKeyModifiers(mods.0 | VirtualKeyModifiers::Shift.0),
+            "alt" => mods = VirtualKeyModifiers(mods.0 | VirtualKeyModifiers::Menu.0),
+            k => key = virtual_key(k),
+        }
+    }
+    Some((key?, mods))
+}
+
+/// One closed key floor (DESIGN.md, Menus) onto Windows.System
+/// VirtualKey values. `escape` never arrives — the root rejects every
+/// spelling of it.
+fn virtual_key(name: &str) -> Option<VirtualKey> {
+    match name {
+        "enter" => return Some(VirtualKey(0x0D)),
+        "delete" => return Some(VirtualKey(0x2E)),
+        "left" => return Some(VirtualKey(0x25)),
+        "up" => return Some(VirtualKey(0x26)),
+        "right" => return Some(VirtualKey(0x27)),
+        "down" => return Some(VirtualKey(0x28)),
+        _ => {}
+    }
+    if let Some(n) = name.strip_prefix('f').and_then(|s| s.parse::<u32>().ok()) {
+        if (1..=12).contains(&n) {
+            return Some(VirtualKey(0x70 + n as i32 - 1));
+        }
+    }
+    let bytes = name.as_bytes();
+    if bytes.len() == 1 && bytes[0].is_ascii_lowercase() {
+        return Some(VirtualKey(i32::from(bytes[0]) - 32)); // 'a'..'z' -> A..Z
+    }
+    if bytes.len() == 1 && bytes[0].is_ascii_digit() {
+        return Some(VirtualKey(i32::from(bytes[0]))); // '0'..'9' -> Number0..9
+    }
+    None
+}
+
+/// Rebuild every window bar and context flyout from the model — which
+/// IS the post-user mirror, so a rebuild forced by an unrelated prop
+/// write preserves the user's toggle/radio state (docs/traps.md). Also
+/// re-derives the shortcut table. Coalesced per drain (menus_touched).
+fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
+    if std::env::var_os("KAYA_WINUI_MENU_PROBE").is_some() {
+        menu_probe();
+    }
+    core.menu_natives.clear();
+    core.menu_shortcuts.clear();
+    let windows: Vec<(u64, Vec<u64>)> = core
+        .menu_windows
+        .iter()
+        .map(|(w, tops)| (*w, tops.clone()))
+        .collect();
+    for (window, tops) in windows {
+        let Some(bar) = core.menubars.get(&window).cloned() else {
+            continue;
+        };
+        let items = bar.Items()?;
+        items.Clear()?;
+        for top in tops {
+            let (label, kind) = {
+                let m = &core.menu_models[&top];
+                (m.label.clone(), m.kind)
+            };
+            let bar_item = MenuBarItem::new()?;
+            bar_item.SetTitle(&HSTRING::from(&*label))?;
+            bar_item.SetIsEnabled(menu_effective_enabled(core, top))?;
+            // A bar-level radio_group is a top-level menu whose
+            // options use the checkmark idiom — the same inline
+            // materialization, one level up (the mac segment's shape).
+            let children: Vec<u64> = if kind == MenuItemKind::RadioGroup {
+                vec![top]
+            } else {
+                core.menu_models[&top].children.clone()
+            };
+            build_menu_items(core, &bar_item.Items()?, &children, MenuAttachment::Window(window))?;
+            items.Append(&bar_item)?;
+            core.menu_natives
+                .insert((MenuAttachment::Window(window), top), MenuNative::Bar(bar_item));
+        }
+    }
+    let attaches: Vec<(u64, Vec<u64>)> = core
+        .context_roots
+        .iter()
+        .map(|(w, roots)| (*w, roots.clone()))
+        .collect();
+    for (widget, roots) in attaches {
+        let Some(flyout) = core.context_flyouts.get(&widget).cloned() else {
+            continue;
+        };
+        let items = flyout.Items()?;
+        items.Clear()?;
+        build_menu_items(core, &items, &roots, MenuAttachment::Context(widget))?;
+    }
+    let roots = core.menu_windows.get(&0).cloned().unwrap_or_default();
+    let mut order = Vec::new();
+    menu_preorder(core, &roots, &mut order);
+    for id in order {
+        let m = &core.menu_models[&id];
+        if m.kind == MenuItemKind::Action && !m.shortcut.is_empty() {
+            core.menu_shortcuts.insert(m.shortcut.clone(), id);
+        }
+    }
+    Ok(())
+}
+
+/// Materialize one child list into a flyout item vector, 1:1 per the
+/// ratified lowering. Every leaf's Click routes to the shared
+/// dispatch carrying ITS OWN attachment — the noun resolves from
+/// that anchor at dispatch time (the SwiftUI parity rule), so no
+/// rebuild order can cross the stamped copies' nouns. Every native
+/// is stamped with the inherited AND of enablement and keyed under
+/// its attachment.
+fn build_menu_items(
+    core: &mut CoreState,
+    dest: &windows_collections::IVector<MenuFlyoutItemBase>,
+    ids: &[u64],
+    attachment: MenuAttachment,
+) -> windows_core::Result<()> {
+    use windows_core::Interface as _;
+    for &id in ids {
+        let (kind, label, checked, value, shortcut, children) = {
+            let m = &core.menu_models[&id];
+            (
+                m.kind,
+                m.label.clone(),
+                m.checked,
+                m.value,
+                m.shortcut.clone(),
+                m.children.clone(),
+            )
+        };
+        let enabled = menu_effective_enabled(core, id);
+        match kind {
+            MenuItemKind::Separator => {
+                dest.Append(&MenuFlyoutSeparator::new()?.cast::<MenuFlyoutItemBase>()?)?;
+            }
+            MenuItemKind::Action => {
+                let item = MenuFlyoutItem::new()?;
+                item.SetText(&HSTRING::from(&*label))?;
+                item.SetIsEnabled(enabled)?;
+                if !shortcut.is_empty() {
+                    if let Some((key, mods)) = accelerator_chord(&shortcut) {
+                        // The accelerator is the REAL dispatch (and the
+                        // tooltip display comes free): the chord's
+                        // default invocation raises the same Click the
+                        // pointer path does — one dispatch path.
+                        let accel = KeyboardAccelerator::new()?;
+                        accel.SetKey(key)?;
+                        accel.SetModifiers(mods)?;
+                        item.KeyboardAccelerators()?.Append(&accel)?;
+                    }
+                }
+                let handler = RoutedEventHandler::new(move |_, _| {
+                    menu_user_activate(id, attachment);
+                    Ok(())
+                });
+                item.Click(&handler)?;
+                dest.Append(&item.cast::<MenuFlyoutItemBase>()?)?;
+                core.menu_natives.insert((attachment, id), MenuNative::Action(item));
+            }
+            MenuItemKind::Toggle => {
+                let item = ToggleMenuFlyoutItem::new()?;
+                item.SetText(&HSTRING::from(&*label))?;
+                item.SetIsChecked(checked)?;
+                item.SetIsEnabled(enabled)?;
+                let handler = RoutedEventHandler::new(move |_, _| {
+                    menu_user_activate(id, attachment);
+                    Ok(())
+                });
+                item.Click(&handler)?;
+                dest.Append(&item.cast::<MenuFlyoutItemBase>()?)?;
+                core.menu_natives.insert((attachment, id), MenuNative::Toggle(item));
+            }
+            MenuItemKind::Menu => {
+                let sub = MenuFlyoutSubItem::new()?;
+                sub.SetText(&HSTRING::from(&*label))?;
+                sub.SetIsEnabled(enabled)?;
+                build_menu_items(core, &sub.Items()?, &children, attachment)?;
+                dest.Append(&sub.cast::<MenuFlyoutItemBase>()?)?;
+                core.menu_natives.insert((attachment, id), MenuNative::Sub(sub));
+            }
+            MenuItemKind::RadioGroup => {
+                // Inline with the platform's checkmark idiom: the
+                // options join the enclosing vector directly
+                // (RadioMenuFlyoutItem.GroupName per radio group);
+                // the GROUP mints no chrome of its own here.
+                for (index, &option) in children.iter().enumerate() {
+                    let option_label = core.menu_models[&option].label.clone();
+                    let option_enabled = menu_effective_enabled(core, option);
+                    let radio = RadioMenuFlyoutItem::new()?;
+                    radio.SetText(&HSTRING::from(&*option_label))?;
+                    radio.SetGroupName(&HSTRING::from(format!("kmg{id}")))?;
+                    radio.SetIsChecked(value == index as f64)?;
+                    radio.SetIsEnabled(option_enabled)?;
+                    let handler = RoutedEventHandler::new(move |_, _| {
+                        menu_user_activate(option, attachment);
+                        Ok(())
+                    });
+                    radio.Click(&handler)?;
+                    dest.Append(&radio.cast::<MenuFlyoutItemBase>()?)?;
+                    core.menu_natives
+                        .insert((attachment, option), MenuNative::Option(radio));
+                }
+            }
+            // The closed grammar: options build through their group.
+            MenuItemKind::RadioOption => {}
+        }
+    }
+    Ok(())
+}
+
+/// THE user dispatch path: chrome clicks, the KeyboardAccelerator
+/// route, and harness verbs all land here. Fires from the message
+/// loop, never under an apply borrow. Mirrors FIRST (the
+/// post-user-mirror rule), then emits with the item's identity and
+/// the noun of the attachment whose copy fired — resolved HERE, at
+/// dispatch, from that anchor (the SwiftUI parity rule: the keys ARE
+/// the noun, so the noun can only come from the copy's own anchor).
+/// Disabled items — the inherited AND — stay inert, exactly as
+/// native chrome leaves them.
+fn menu_user_activate(item: u64, attachment: MenuAttachment) {
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        // Echo doctrine belt: no programmatic write path raises Click
+        // on these controls (the MENU PROBE verifies), but if one
+        // ever did, the apply guard keeps it quiet.
+        if core.apply_quiet.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Some(model) = core.menu_models.get(&item) else {
+            return;
+        };
+        let kind = model.kind;
+        let was_checked = model.checked;
+        if !menu_effective_enabled(core, item) {
+            return;
+        }
+        let noun = match attachment {
+            MenuAttachment::Window(_) => Path::new(),
+            MenuAttachment::Context(widget) => {
+                core.context_nouns.get(&widget).cloned().unwrap_or_default()
+            }
+        };
+        match kind {
+            MenuItemKind::Action => {
+                core.occurrences.send(if noun.is_empty() {
+                    Occurrence::MenuActivated { item: MenuItemId(item) }
+                } else {
+                    Occurrence::InstanceMenuActivated {
+                        item: MenuItemId(item),
+                        path: noun.clone(),
+                    }
+                });
+            }
+            MenuItemKind::Toggle => {
+                // The native control owns the immediate user change
+                // (it flipped IsChecked before raising Click): mirror
+                // from the REAL control first — the firing copy's own
+                // native, by its attachment key — then emit; a later
+                // rebuild starts from this mirror (docs/traps.md).
+                let checked = match core.menu_natives.get(&(attachment, item)) {
+                    Some(MenuNative::Toggle(native)) => {
+                        native.IsChecked().unwrap_or(!was_checked)
+                    }
+                    _ => !was_checked,
+                };
+                core.menu_models.get_mut(&item).expect("checked above").checked = checked;
+                core.occurrences.send(if noun.is_empty() {
+                    Occurrence::MenuToggled { item: MenuItemId(item), checked }
+                } else {
+                    Occurrence::InstanceMenuToggled {
+                        item: MenuItemId(item),
+                        path: noun.clone(),
+                        checked,
+                    }
+                });
+            }
+            MenuItemKind::RadioOption => {
+                let Some(group) = core.menu_models.get(&item).and_then(|m| m.parent) else {
+                    return;
+                };
+                let Some(index) = core
+                    .menu_models
+                    .get(&group)
+                    .and_then(|g| g.children.iter().position(|&c| c == item))
+                else {
+                    return;
+                };
+                // Re-selecting the selected option is not a change and
+                // emits nothing, exactly as the platform's own change
+                // route behaves (the choice contract).
+                if core.menu_models[&group].value == index as f64 {
+                    return;
+                }
+                core.menu_models.get_mut(&group).expect("resolved above").value =
+                    index as f64; // the retained mirror, BEFORE the emit
+                core.occurrences.send(if noun.is_empty() {
+                    Occurrence::MenuValueChanged {
+                        group: MenuItemId(group),
+                        index: index as f64,
+                    }
+                } else {
+                    Occurrence::InstanceMenuValueChanged {
+                        group: MenuItemId(group),
+                        path: noun.clone(),
+                        index: index as f64,
+                    }
+                });
+            }
+            // Grouping nodes and separators have no activation; native
+            // chrome opens or ignores them.
+            _ => {}
+        }
+    });
+}
+
+/// The harness's REAL invoke route (the ContentDialog precedent): the
+/// item's automation peer, cast to the provider pattern it exposes —
+/// Invoke for plain/radio items, Toggle for toggle items. The peer
+/// pipeline runs the control's own OnInvoke, which raises the same
+/// Click a pointer press does. Grouping chrome has no activation.
+fn invoke_menu_native(native: &MenuNative) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+    use bindings::Microsoft::UI::Xaml::Automation::Provider::{IInvokeProvider, IToggleProvider};
+    use windows_core::Interface as _;
+    let element: UIElement = match native {
+        MenuNative::Action(i) => i.cast()?,
+        MenuNative::Toggle(i) => i.cast()?,
+        MenuNative::Option(i) => i.cast()?,
+        MenuNative::Bar(_) | MenuNative::Sub(_) => return Ok(()),
+    };
+    let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&element)?;
+    if let Ok(invoke) = peer.cast::<IInvokeProvider>() {
+        return invoke.Invoke();
+    }
+    peer.cast::<IToggleProvider>()?.Toggle()
+}
+
+/// KAYA_WINUI_MENU_PROBE: the flag-gated instrument (the
+/// KAYA_WINUI_NAV_PROBE pattern) answering this backend's two menu
+/// behavior questions in-band, on detached canary items:
+/// (1) echo doctrine — programmatic IsChecked writes must not raise
+/// Click; (2) the peer-invoke route must raise Click on an item whose
+/// flyout has never opened (the bar-activation mechanism). Runs once,
+/// at the first rebuild.
+fn menu_probe() {
+    static RAN: OnceLock<()> = OnceLock::new();
+    if RAN.set(()).is_err() {
+        return;
+    }
+    let probe: windows_core::Result<()> = (|| {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        // (1) Echo canary: programmatic set on toggle and radio items.
+        let toggled = Arc::new(AtomicBool::new(false));
+        let toggle = ToggleMenuFlyoutItem::new()?;
+        let seen = toggled.clone();
+        toggle.Click(&RoutedEventHandler::new(move |_, _| {
+            seen.store(true, Ordering::Relaxed);
+            Ok(())
+        }))?;
+        toggle.SetIsChecked(true)?;
+        toggle.SetIsChecked(false)?;
+        let radio_fired = Arc::new(AtomicBool::new(false));
+        let radio = RadioMenuFlyoutItem::new()?;
+        let seen = radio_fired.clone();
+        radio.Click(&RoutedEventHandler::new(move |_, _| {
+            seen.store(true, Ordering::Relaxed);
+            Ok(())
+        }))?;
+        radio.SetGroupName(&HSTRING::from("kmg-probe"))?;
+        radio.SetIsChecked(true)?;
+        eprintln!(
+            "kaya: MENU PROBE programmatic-set clicks: toggle={} radio={} (must both be false)",
+            toggled.load(Ordering::Relaxed),
+            radio_fired.load(Ordering::Relaxed),
+        );
+        // (2) Peer-invoke canary on a never-opened item.
+        let clicked = Arc::new(AtomicBool::new(false));
+        let item = MenuFlyoutItem::new()?;
+        let seen = clicked.clone();
+        item.Click(&RoutedEventHandler::new(move |_, _| {
+            seen.store(true, Ordering::Relaxed);
+            Ok(())
+        }))?;
+        invoke_menu_native(&MenuNative::Action(item))?;
+        eprintln!(
+            "kaya: MENU PROBE peer invoke on closed item: click fired={} (must be true)",
+            clicked.load(Ordering::Relaxed),
+        );
+        Ok(())
+    })();
+    if let Err(e) = probe {
+        eprintln!("kaya: MENU PROBE failed: {:?} {}", e.code(), e.message());
+    }
 }
 
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
@@ -1666,6 +2319,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             reindex(core, parent)?;
         }
         ApplyOp::Destroy { id } => {
+            // A destroyed anchor takes its context attachment with it
+            // (menu ITEMS are never destroyed; the anchor map entries
+            // are): a For-row removal must not leave the harness's
+            // open-menu pointer dangling. The Stage's activation keeps
+            // its own flyout handle through Closed (the staged
+            // ruling), so dropping these is safe mid-activation.
+            if core.context_roots.remove(&id.0).is_some() {
+                core.context_nouns.remove(&id.0);
+                core.context_flyouts.remove(&id.0);
+                // The dead copy's native instances leave the map too
+                // (GTK's Destroy arm parity: it retains item actions
+                // against the removed attachment's instances). A
+                // For-row removal forces no rebuild, and a detached
+                // item still raises Click through its automation peer
+                // — the menu probe proves it — so a surviving entry
+                // would stay invoke-capable with the dead row's noun
+                // until some unrelated menu mutation rebuilt the map.
+                purge_context_natives(&mut core.menu_natives, id.0);
+                if core.open_context.as_ref().is_some_and(|(w, _)| *w == id.0) {
+                    core.open_context = None;
+                }
+            }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             core.grow.remove(&id);
             core.child_order.remove(&id);
@@ -1764,6 +2439,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.sections_presentation.remove(&window.0);
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
+            // ... and its menu shell/catalog registration (the item
+            // MODELS stay — items are never destroyed).
+            core.menu_windows.remove(&window.0);
+            core.menubars.remove(&window.0);
+            core.menu_slots.remove(&window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
             // Materializes covered/incoming: on the stack now, the
@@ -1858,6 +2538,84 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (p, v) => unreachable!("scene validated section prop {p:?}/{v:?}"),
             }
         }
+        // Menus: every arm mutates the retained model and defers the
+        // chrome to ONE coalesced rebuild per drain (menus_touched) —
+        // the rebuild starts from the post-user mirror by
+        // construction (docs/traps.md).
+        ApplyOp::MenuItemCreate { item, kind } => {
+            core.menu_models.insert(
+                item.0,
+                MenuModel {
+                    kind,
+                    label: String::new(),
+                    enabled: true,
+                    checked: false,
+                    value: 0.0,
+                    primary: false,
+                    shortcut: String::new(),
+                    children: Vec::new(),
+                    parent: None,
+                },
+            );
+            core.menus_touched = true;
+        }
+        ApplyOp::MenuItemAppend { parent, child } => {
+            core.menu_models
+                .get_mut(&child.0)
+                .expect("scene validated the child item")
+                .parent = Some(parent.0);
+            core.menu_models
+                .get_mut(&parent.0)
+                .expect("scene validated the parent item")
+                .children
+                .push(child.0);
+            core.menus_touched = true;
+        }
+        ApplyOp::MenubarAppend { window, item } => {
+            core.menu_windows.entry(window.0).or_default().push(item.0);
+            ensure_menu_shell(core, window.0)?;
+            core.menus_touched = true;
+        }
+        ApplyOp::ContextAttach { widget, item } => {
+            core.context_roots.entry(widget.0).or_default().push(item.0);
+            ensure_context_flyout(core, widget.0)?;
+            core.menus_touched = true;
+        }
+        ApplyOp::ContextAttachNode { widget, item, path } => {
+            core.context_roots.entry(widget.0).or_default().push(item.0);
+            // The stamped copy's key path — the noun every activation
+            // from this anchor carries (the on_click_node encoding).
+            core.context_nouns.insert(widget.0, path);
+            ensure_context_flyout(core, widget.0)?;
+            core.menus_touched = true;
+        }
+        ApplyOp::SetMenuProp { item, prop, value } => {
+            let model = core
+                .menu_models
+                .get_mut(&item.0)
+                .expect("scene validated the item id");
+            match (prop, &value) {
+                (MenuProp::Label, Value::Str(s)) => model.label = s.clone(),
+                (MenuProp::Enabled, Value::Bool(b)) => model.enabled = *b,
+                // Programmatic checked/value writes are configuration
+                // and stay QUIET (the echo doctrine): the rebuild
+                // restamps the native state and no Click fires on a
+                // programmatic set (the MENU PROBE's first canary).
+                (MenuProp::Checked, Value::Bool(b)) => model.checked = *b,
+                (MenuProp::Value, Value::F64(v)) => model.value = *v,
+                // The phone-promotion hint, INERT on desktop by the
+                // ratified design — stored, never materialized here.
+                (MenuProp::Primary, Value::Bool(b)) => model.primary = *b,
+                (MenuProp::Shortcut, Value::Str(s)) => model.shortcut = s.clone(),
+                // Icons dress phone promotion; native Windows menu
+                // rows carry no icon in this lowering (the section
+                // Icon precedent: accepted, day-one slot).
+                (MenuProp::Icon, Value::Blob(_)) => {}
+                (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
+            }
+            core.menus_touched = true;
+        }
+
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
             // slots ARE the vocabulary (two actions + close). The
@@ -2291,13 +3049,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
                 let element = nav_probe_wrap(&element)?;
-                core.window.SetContent(&element)?;
+                set_window_content(core, 0, &element)?;
                 core.window_roots.insert(0, element);
             } else {
-                let target = winui_window(core, window.0)?;
-                target.SetContent(&element)?;
+                set_window_content(core, window.0, &element)?;
                 // Mounting presents.
-                target.Activate()?;
+                winui_window(core, window.0)?.Activate()?;
                 core.window_roots.insert(window.0, element);
             }
         }
@@ -2696,6 +3453,14 @@ unsafe extern "system" {
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetDpiForWindow(hwnd: isize) -> u32;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
+    // The shortcut verb's REAL dispatch: foreground the guest and put
+    // the chord on the system input queue, so XAML's own
+    // KeyboardAccelerator machinery routes it (docs/traps.md: the
+    // injection is OS-global; menu legs run serially for exactly this
+    // reason).
+    fn SetForegroundWindow(hwnd: isize) -> i32;
+    fn GetForegroundWindow() -> isize;
+    fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
     fn CallWindowProcW(
         prev: isize,
         hwnd: isize,
@@ -2870,6 +3635,17 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             window_veto: HashMap::new(),
             tearing_down: std::collections::HashSet::new(),
             live_alert: None,
+            menu_models: HashMap::new(),
+            menu_windows: HashMap::new(),
+            context_roots: HashMap::new(),
+            context_nouns: HashMap::new(),
+            context_flyouts: HashMap::new(),
+            menu_natives: HashMap::new(),
+            menubars: HashMap::new(),
+            menu_slots: HashMap::new(),
+            menu_shortcuts: HashMap::new(),
+            open_context: None,
+            menus_touched: false,
         });
     });
 
@@ -2959,6 +3735,291 @@ impl WinUiStage {
 }
 
 impl crate::harness::Stage for WinUiStage {
+    fn menu_activate(&self, path: &str) {
+        let spec = path.to_owned();
+        // Resolve SEMANTICALLY against the model tree — the OPEN
+        // context menu exclusively while one is presented, the
+        // primary window's catalog otherwise — then drive the REAL
+        // invoke pipeline on the materialized item. For a context
+        // activation the staged ruling applies: register Closed
+        // BEFORE invoking, keep the flyout handle through Closed, and
+        // await it before another open may start. No sleeps.
+        let wait = Self::on_ui_mut(move |core| {
+            let (roots, flyout, attachment) = match &core.open_context {
+                Some((widget, flyout)) => (
+                    core.context_roots.get(widget).cloned().unwrap_or_default(),
+                    Some(flyout.clone()),
+                    MenuAttachment::Context(*widget),
+                ),
+                None => (
+                    core.menu_windows.get(&0).cloned().unwrap_or_default(),
+                    None,
+                    MenuAttachment::Window(0),
+                ),
+            };
+            let Some(item) = resolve_menu_path(core, &spec, &roots) else {
+                panic!("kaya: no such menu item {spec:?}");
+            };
+            // The OPEN attachment's own instance: the anchor-qualified
+            // key is what makes a stamped row invoke ITS copy — never
+            // whichever copy an arbitrary rebuild order built last
+            // (the keys ARE the noun; docs/traps.md).
+            let Some(native) = core.menu_natives.get(&(attachment, item)).cloned() else {
+                // A grouping node whose materialization mints no
+                // chrome of its own: nothing to activate (parity with
+                // the interpreters' silent grouping arm).
+                return Ok(None);
+            };
+            let closed = match &flyout {
+                Some(flyout) => {
+                    let (tx, rx) = std::sync::mpsc::channel::<()>();
+                    let armed = std::sync::Mutex::new(Some(tx));
+                    let handler = bindings::Windows::Foundation::EventHandler::<
+                        windows_core::IInspectable,
+                    >::new(move |_, _| {
+                        if let Some(tx) = armed.lock().unwrap().take() {
+                            let _ = tx.send(());
+                        }
+                        Ok(())
+                    });
+                    flyout.Closed(&handler)?;
+                    Some(rx)
+                }
+                None => None,
+            };
+            // Deferred one dispatcher tick: the item's Click handler
+            // re-borrows CORE, which this closure holds (the back()
+            // precedent). The flyout handle rides the closure so it
+            // outlives even the anchor row's destruction — the item's
+            // occurrence may remove its stamped anchor before event
+            // cleanup runs (docs/traps.md).
+            let queue = DispatcherQueue::GetForCurrentThread()?;
+            let keep = flyout.clone();
+            let handler = DispatcherQueueHandler::new(move || {
+                let _keep = &keep;
+                invoke_menu_native(&native)
+            });
+            queue.TryEnqueue(&handler)?;
+            Ok(closed)
+        });
+        if let Some(rx) = wait {
+            rx.recv_timeout(std::time::Duration::from_secs(10)).expect(
+                "kaya: the context flyout never closed after the activation (Closed did not arrive)",
+            );
+            Self::on_ui_mut(|core| {
+                core.open_context = None;
+                Ok(())
+            });
+        }
+    }
+
+    fn context_open(&self, t: crate::harness::Target) {
+        // The REAL presentation path: ShowAt on the anchor's own
+        // ContextFlyout. ShowAt is a request, not a readiness
+        // boundary (docs/traps.md): Opened is registered BEFORE the
+        // request and this step does not complete until it arrives —
+        // the following menu_activate then acts on a live presenter.
+        let opened = Self::on_ui_mut(move |core| {
+            // A lingering open menu would let this open overtake its
+            // close animation; the scene grammar always activates
+            // first, so this is the loud belt, not the path.
+            if let Some((_, previous)) = core.open_context.take() {
+                let _ = previous.Hide();
+            }
+            let widget = widget_id_for_target(core, t);
+            let flyout = core.context_flyouts.get(&widget).cloned().unwrap_or_else(|| {
+                panic!("kaya: no context menu attached to {t:?}")
+            });
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let armed = std::sync::Mutex::new(Some(tx));
+            let handler = bindings::Windows::Foundation::EventHandler::<
+                windows_core::IInspectable,
+            >::new(move |_, _| {
+                if let Some(tx) = armed.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                Ok(())
+            });
+            flyout.Opened(&handler)?;
+            let anchor: FrameworkElement = core
+                .widgets
+                .get(&WidgetId(widget))
+                .expect("the anchor widget lives")
+                .element()?
+                .cast()?;
+            flyout.ShowAt(&anchor)?;
+            core.open_context = Some((widget, flyout));
+            Ok(rx)
+        });
+        opened
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("kaya: the context flyout never opened (Opened did not arrive)");
+    }
+
+    fn menu_count(&self) -> usize {
+        // The REAL bar chrome's top-level count, never the model map
+        // (the section_count precedent).
+        Self::on_ui_read(|core| {
+            Ok(core
+                .menubars
+                .get(&0)
+                .map(|bar| bar.Items()?.Size().map(|n| n as usize))
+                .transpose()?
+                .unwrap_or(0))
+        })
+        .unwrap_or(0)
+    }
+
+    fn menu_state(&self, path: &str, aspect: crate::harness::MenuAspect) -> String {
+        use crate::harness::MenuAspect;
+        let path = path.to_owned();
+        Self::on_ui_read(move |core| {
+            // Open-context EXCLUSIVITY: while presented, the context
+            // menu owns resolution — a miss reads as the retryable
+            // "no such item", never a bar fallback.
+            let (roots, attachment) = match &core.open_context {
+                Some((widget, _)) => (
+                    core.context_roots.get(widget).cloned().unwrap_or_default(),
+                    MenuAttachment::Context(*widget),
+                ),
+                None => (
+                    core.menu_windows.get(&0).cloned().unwrap_or_default(),
+                    MenuAttachment::Window(0),
+                ),
+            };
+            let Some(item) = resolve_menu_path(core, &path, &roots) else {
+                return Ok("no such item".to_owned());
+            };
+            Ok(match aspect {
+                MenuAspect::Enablement => match core.menu_natives.get(&(attachment, item)) {
+                    // The REAL item's flag — the rebuild stamps the
+                    // inherited AND onto every native, so a backend
+                    // that ignored the write must fail here.
+                    Some(native) => if native.is_enabled()? {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                    .to_owned(),
+                    // An inline nested grouping node mints no titled
+                    // chrome (mac segment parity).
+                    None => "no such item".to_owned(),
+                },
+                MenuAspect::Checkedness => match core.menu_natives.get(&(attachment, item)) {
+                    Some(MenuNative::Toggle(native)) => if native.IsChecked()? {
+                        "checked"
+                    } else {
+                        "unchecked"
+                    }
+                    .to_owned(),
+                    Some(MenuNative::Option(native)) => if native.IsChecked()? {
+                        "checked"
+                    } else {
+                        "unchecked"
+                    }
+                    .to_owned(),
+                    Some(_) => "unchecked".to_owned(),
+                    None => "no such item".to_owned(),
+                },
+                MenuAspect::Value => {
+                    // The group's value IS its checked option, read
+                    // from the REAL radio rows (the checkmark idiom).
+                    let children = core
+                        .menu_models
+                        .get(&item)
+                        .map(|m| m.children.clone())
+                        .unwrap_or_default();
+                    let mut found = None;
+                    for (index, child) in children.iter().enumerate() {
+                        if let Some(MenuNative::Option(radio)) =
+                            core.menu_natives.get(&(attachment, *child))
+                        {
+                            if radio.IsChecked()? {
+                                found = Some(index);
+                                break;
+                            }
+                        }
+                    }
+                    match found {
+                        Some(index) => format!("value {index}"),
+                        None => "no checked option".to_owned(),
+                    }
+                }
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn shortcut(&self, spelling: &str) {
+        let spec = spelling.to_owned();
+        // A chord no catalog action owns is a silent no-op on every
+        // platform — gated BEFORE any injection, because keybd_event
+        // is OS-GLOBAL and a stray chord could land anywhere
+        // (docs/traps.md: menu legs run serially for this verb).
+        let owned = Self::on_ui_read({
+            let spec = spec.clone();
+            move |core| Ok(core.menu_shortcuts.contains_key(&spec))
+        })
+        .unwrap_or(false);
+        if !owned {
+            return;
+        }
+        let hwnd = Self::on_ui(|core| {
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            native.window_handle()
+        });
+        // Foreground the guest and CONFIRM it before pressing
+        // anything; failing to take foreground fails the leg loudly
+        // rather than spraying the chord at whatever else is focused.
+        // (A bounded confirmation poll, not a lifecycle sleep.)
+        let mut confirmed = false;
+        for attempt in 0..150 {
+            if unsafe { GetForegroundWindow() } == hwnd {
+                confirmed = true;
+                break;
+            }
+            unsafe { SetForegroundWindow(hwnd) };
+            if attempt == 50 {
+                // The classic foreground-lock release: a bare ALT tap
+                // grants the next SetForegroundWindow call.
+                unsafe {
+                    keybd_event(0x12, 0, 0, 0);
+                    keybd_event(0x12, 0, 2, 0);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            confirmed,
+            "kaya: could not foreground the guest window for shortcut injection"
+        );
+        // The REAL KeyboardAccelerator path: the chord goes onto the
+        // system input queue; XAML routes it to the accelerator whose
+        // default invocation raises the item's own Click — the SAME
+        // menu_activated the direct activation emits.
+        let mut mods: Vec<u8> = Vec::new();
+        let mut key: Option<u8> = None;
+        for part in spec.split('+') {
+            match part {
+                "primary" => mods.push(0x11), // VK_CONTROL
+                "shift" => mods.push(0x10),
+                "alt" => mods.push(0x12),
+                name => key = virtual_key(name).map(|vk| vk.0 as u8),
+            }
+        }
+        let key = key.expect("a root-validated spelling carries one key");
+        const KEYEVENTF_KEYUP: u32 = 0x2;
+        unsafe {
+            for &m in &mods {
+                keybd_event(m, 0, 0, 0);
+            }
+            keybd_event(key, 0, 0, 0);
+            keybd_event(key, 0, KEYEVENTF_KEYUP, 0);
+            for &m in mods.iter().rev() {
+                keybd_event(m, 0, KEYEVENTF_KEYUP, 0);
+            }
+        }
+    }
     fn click(&self, t: crate::harness::Target) {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.buttons.len());
@@ -3734,6 +4795,28 @@ impl crate::harness::Stage for WinUiStage {
     }
 }
 
+
+/// The widget id behind a harness target, recovered by COM identity
+/// from the creation-ordered registry (the cross_mode precedent).
+/// Context anchors in the scenes are labels; other kinds join as
+/// scenes demand them — an unwired kind fails loudly, never silently
+/// (the is_focused stance).
+fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
+    match t.kind {
+        crate::harness::TargetKind::Label => {
+            let i = crate::harness::resolve(t.index, core.labels.len());
+            let block = core.labels[i].clone();
+            core.widgets
+                .iter()
+                .find_map(|(id, w)| match w {
+                    NativeWidget::Label(l) if *l == block => Some(id.0),
+                    _ => None,
+                })
+                .expect("registry labels live in the widget table")
+        }
+        other => panic!("kaya: context_open not wired for {other:?} on winui"),
+    }
+}
 
 /// Depth-first search for the ContentDialog template button with the
 /// given part name (PrimaryButton/SecondaryButton) under an element —

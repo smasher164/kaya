@@ -142,6 +142,33 @@ module KayaApp
     sumDerive,
     sumArm,
     eachSum,
+    MScope (..),
+    MItem,
+    MOption,
+    Catalog,
+    IAttr (..),
+    item,
+    toggle,
+    option,
+    separator,
+    menu,
+    radioGroup,
+    contextMenu,
+    contextCatalog,
+    nodeContextMenu,
+    setMenuLabel,
+    bindMenuLabel,
+    setMenuEnabled,
+    bindMenuEnabled,
+    setMenuChecked,
+    bindMenuChecked,
+    setMenuValue,
+    bindMenuValue,
+    setMenuIcon,
+    setMenuPrimary,
+    setMenuShortcut,
+    menuAppend,
+    menuOptions,
   )
 where
 
@@ -196,7 +223,8 @@ data Counters = Counters
     cWidget :: !Word64,
     cCollection :: !Word64,
     cNode :: !Word64,
-    cAlert :: !Word64
+    cAlert :: !Word64,
+    cMenuItem :: !Word64
   }
 
 -- One instance of a collection: the table inside the stamped copy
@@ -259,6 +287,12 @@ data Pending
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([W.Value] -> Bool -> IO ())
+  | PMenuActivated !Word64 (IO ())
+  | PMenuActivatedNode !Word64 ([W.Value] -> IO ())
+  | PMenuToggled !Word64 (Bool -> IO ())
+  | PMenuToggledNode !Word64 ([W.Value] -> Bool -> IO ())
+  | PMenuSelected !Word64 (Int -> IO ())
+  | PMenuSelectedNode !Word64 ([W.Value] -> Int -> IO ())
 
 modelSet :: Word64 -> [W.Value] -> W.Value -> Word32 -> [W.Value] -> Model -> Model
 modelSet cid path key variant fields model =
@@ -380,6 +414,16 @@ allocN = Tpl $ \s ->
   let c = bCounters s
       n = cNode c + 1
    in (n, s {bCounters = c {cNode = n}})
+
+-- Menu items get their OWN id space (the c_menu_item counter) —
+-- never a widget, node, or surface id. Build-only: menu items are
+-- live, so the type system itself is the "no items in a template
+-- body" guard every closure-language binding carries at runtime.
+allocM :: Build Word64
+allocM = Build $ \s ->
+  let c = bCounters s
+      n = cMenuItem c + 1
+   in (n, s {bCounters = c {cMenuItem = n}})
 
 -- Runs a template body inside whichever zone hosts it, bracketing its
 -- records with the opener and template_end. A For's collection id is
@@ -590,6 +634,12 @@ data WindowAttr
   | WSectionsPresentation Int64
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
+  | -- | The menubar rides the window construct (the window-attribute
+    -- unification rule): 'WMenus' realizes its inline Build actions in
+    -- order and appends each top-level grouping node ('menu' or
+    -- 'radioGroup') to this window's command catalog — append-only, at
+    -- any time. A retained handle re-enters through 'pure'.
+    WMenus [Build (MItem 'BarM)]
 
 -- | Set a window's attributes in one construct — the attribute set
 -- is EXACTLY 'createWindow''s (a window's attributes ride its window
@@ -607,6 +657,8 @@ window n = mapM_ apply
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
+    apply (WMenus menus) =
+      mapM_ (\m -> m >>= \(MItem i) -> emitB (W.txMenubarAppend n i)) menus
 
 -- | Create an auxiliary window (capability-gated: phone hosts reject
 -- at the root); materializes hidden, 'mountIn' presents:
@@ -687,6 +739,234 @@ addSection n attrs = do
 -- 'SOnSelected' (the echo doctrine).
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
+
+-- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+
+-- | The anchor scope a catalog belongs to, as a phantom index: 'BarM
+-- is a window catalog (a shortcut home), 'CtxM a context anchor.
+-- 'IShortcut' is typed @IAttr 'BarM@ and the node-flavor handlers
+-- @IAttr 'CtxM@, so a shortcut on a context item — or a keyed handler
+-- on a bar item — is a TYPE error where the anchor is known; the
+-- runtime guard at the root remains the floor beneath.
+data MScope = BarM | CtxM
+
+-- | A live menu item: its OWN id space behind its own type (indexed
+-- by anchor scope), so cross-use with 'Widget'/'Node' handles is a
+-- type error. One command identity: exactly one parent or anchor,
+-- forever (append-only; nothing is removed in v1). The handle is
+-- durable — the dynamic tier ('setMenuLabel', 'menuAppend', ...)
+-- reopens it in any later transaction.
+newtype MItem (s :: MScope) = MItem Word64
+
+-- | A radio option: its own type, so an option outside a 'radioGroup'
+-- children list — or a non-option inside one — is a type error (the
+-- closed parent/child grammar, compile-checked).
+newtype MOption (s :: MScope) = MOption Word64
+
+-- | A context catalog built UNANCHORED ('contextCatalog') for a
+-- template node: menu items are live and shared across stamped
+-- copies, so the catalog is built in the live zone and
+-- 'nodeContextMenu' attaches it inside the template, where each
+-- activation carries the copy's key path. An item takes exactly one
+-- anchor — the root rejects a second attach.
+newtype Catalog = Catalog [Word64]
+
+-- | Menu item construction attributes — the config-list spelling over
+-- a closed GADT indexed by anchor scope. Label and enablement are
+-- signal-bindable ('ILabel'/'IEnabledBy'); 'IChecked'/'IValue' bind
+-- both ways under the Checkbox/Choice contracts (programmatic writes
+-- are QUIET — the echo doctrine); icon, primary, and shortcut are
+-- const-only. Handlers ride the declaration — no app-global menu
+-- dispatcher exists; the @Node@ flavors receive the stamped copy's
+-- key path (the keys ARE the noun).
+data IAttr (s :: MScope) where
+  -- | Bind the label to a Str signal (constant labels are the
+  -- creator's positional argument).
+  ILabel :: Signal -> IAttr s
+  IEnabled :: Bool -> IAttr s
+  IEnabledBy :: Signal -> IAttr s
+  IChecked :: Bool -> IAttr s
+  ICheckedBy :: Signal -> IAttr s
+  IValue :: Int -> IAttr s
+  IValueBy :: Signal -> IAttr s
+  IIcon :: BS.ByteString -> IAttr s
+  IPrimary :: Bool -> IAttr s
+  -- | Window-anchored actions only: a shortcut needs a window catalog
+  -- as its native dispatch home — the type carries the rule.
+  IShortcut :: String -> IAttr 'BarM
+  IOnActivate :: IO () -> IAttr s
+  IOnActivateNode :: ([W.Value] -> IO ()) -> IAttr 'CtxM
+  IOnToggle :: (Bool -> IO ()) -> IAttr s
+  IOnToggleNode :: ([W.Value] -> Bool -> IO ()) -> IAttr 'CtxM
+  IOnSelect :: (Int -> IO ()) -> IAttr s
+  IOnSelectNode :: ([W.Value] -> Int -> IO ()) -> IAttr 'CtxM
+
+-- The total interpreter: an attr without an arm is a compile failure
+-- (the capi-completeness tripwire's type-level twin).
+applyIAttr :: Word64 -> IAttr s -> Build ()
+applyIAttr n attr = case attr of
+  ILabel (Signal s) -> emitB (W.txBindMenuLabel n s)
+  IEnabled v -> emitB (W.txSetMenuEnabled n v)
+  IEnabledBy (Signal s) -> emitB (W.txBindMenuEnabled n s)
+  IChecked v -> emitB (W.txSetMenuChecked n v)
+  ICheckedBy (Signal s) -> emitB (W.txBindMenuChecked n s)
+  IValue v -> emitB (W.txSetMenuValue n (fromIntegral v))
+  IValueBy (Signal s) -> emitB (W.txBindMenuValue n s)
+  IIcon bytes -> emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
+  IPrimary v -> emitB (W.txSetMenuPrimary n v)
+  IShortcut spelling -> emitB (W.txSetMenuShortcut n spelling)
+  IOnActivate handler -> pendB (PMenuActivated n handler)
+  IOnActivateNode handler -> pendB (PMenuActivatedNode n handler)
+  IOnToggle handler -> pendB (PMenuToggled n handler)
+  IOnToggleNode handler -> pendB (PMenuToggledNode n handler)
+  IOnSelect handler -> pendB (PMenuSelected n handler)
+  IOnSelectNode handler -> pendB (PMenuSelectedNode n handler)
+
+newMenuItem :: Word32 -> Maybe String -> [IAttr s] -> Build Word64
+newMenuItem kind label attrs = do
+  n <- allocM
+  emitB (W.txMenuItemCreate n kind)
+  mapM_ (emitB . W.txSetMenuLabel n) label
+  mapM_ (applyIAttr n) attrs
+  return n
+
+-- | An action — a leaf command firing exactly one menu_activated
+-- occurrence (menu click OR its shortcut: ONE occurrence, one
+-- dispatch path; 'IOnActivate' rides the declaration and covers
+-- both): @item "Save" [IShortcut "primary+s", IOnActivate h]@.
+item :: String -> [IAttr s] -> Build (MItem s)
+item label attrs = MItem <$> newMenuItem W.menuKindAction (Just label) attrs
+
+-- | A toggle — a stateful leaf reusing the Checkbox contract: user
+-- flips emit menu_toggled ('IOnToggle' receives the new state);
+-- programmatic 'IChecked' writes are QUIET.
+toggle :: String -> [IAttr s] -> Build (MItem s)
+toggle label attrs = MItem <$> newMenuItem W.menuKindToggle (Just label) attrs
+
+-- | One labeled radio option, appended in declaration order — the
+-- order IS the index vocabulary the group's value selects over.
+option :: String -> [IAttr s] -> Build (MOption s)
+option label attrs = MOption <$> newMenuItem W.menuKindRadioOption (Just label) attrs
+
+-- | Native grouping chrome: no label, no props, no handler.
+separator :: Build (MItem s)
+separator = MItem <$> newMenuItem W.menuKindSeparator Nothing []
+
+-- | A menu grouping node — a bar root through the window construct's
+-- 'WMenus', or nested as an inline Build action in a parent's child
+-- list (one nested grouping level is the cap, root-checked):
+-- @menu "File" [IEnabledBy canExport] [item "Save" [...], ...]@.
+-- Children are inline Build actions (the todos.hs container shape);
+-- a realized handle re-enters through 'pure'. Disabling a menu
+-- disables its subtree (the inherited-disabled contract).
+menu :: String -> [IAttr s] -> [Build (MItem s)] -> Build (MItem s)
+menu label attrs children = do
+  n <- newMenuItem W.menuKindMenu (Just label) []
+  mapM_ (\child -> child >>= \(MItem c) -> emitB (W.txMenuItemAppend n c)) children
+  mapM_ (applyIAttr n) attrs
+  return (MItem n)
+
+-- | A radio group — the Choice contract with the platform's checkmark
+-- idiom, admissible wherever a menu grouping node is. The children
+-- are 'option's ONLY (their type holds the closed grammar); 'IValue'
+-- /'IValueBy' is the selected 0-based index, applied AFTER the
+-- options so the index has options to address; 'IOnSelect' receives
+-- each USER pick's new index.
+radioGroup :: String -> [IAttr s] -> [Build (MOption s)] -> Build (MItem s)
+radioGroup label attrs options = do
+  n <- newMenuItem W.menuKindRadioGroup (Just label) []
+  mapM_ (\child -> child >>= \(MOption c) -> emitB (W.txMenuItemAppend n c)) options
+  mapM_ (applyIAttr n) attrs
+  return (MItem n)
+
+-- | A context menu on a LIVE widget: the same item vocabulary scoped
+-- to a NOUN, with the platform's own gesture (right-click,
+-- long-press). Calling it again appends more roots. The editable text
+-- controls (entry, textarea) reject attachment at the root; the
+-- 'CtxM index rejects shortcuts at compile time.
+contextMenu :: Widget -> [Build (MItem 'CtxM)] -> Build ()
+contextMenu (Widget w) roots =
+  mapM_ (\root -> root >>= \(MItem n) -> emitB (W.txContextAttach w n)) roots
+
+-- | Build a context catalog UNANCHORED — free root items for a
+-- template-node anchor (menu items are live and shared across stamped
+-- copies): 'nodeContextMenu' attaches it inside the template, and
+-- each activation carries the copy's key path.
+contextCatalog :: [Build (MItem 'CtxM)] -> Build Catalog
+contextCatalog roots =
+  Catalog <$> mapM (\root -> (\(MItem n) -> n) <$> root) roots
+
+-- | Attach a live-built context catalog to a template node: every
+-- stamped copy shows the same catalog, and each activation carries
+-- that copy's key path — the keys ARE the noun (received by the
+-- @...Node@ attr handlers). An item takes exactly one anchor; the
+-- root rejects a second attach.
+nodeContextMenu :: Node -> Catalog -> Tpl ()
+nodeContextMenu (Node n) (Catalog roots) =
+  mapM_ (emitT . W.txContextAttachNode n) roots
+
+-- The dynamic tier for a RETAINED item — every mutable prop, each
+-- judged by the root against the item's kind and anchor, plus
+-- 'menuAppend'/'menuOptions', the reopening of a grouping node
+-- (append-at-any-time). Label and enablement writes never emit
+-- anything; programmatic checked/value writes are configuration and
+-- stay QUIET (the echo doctrine).
+
+setMenuLabel :: MItem s -> String -> Build ()
+setMenuLabel (MItem n) text = emitB (W.txSetMenuLabel n text)
+
+bindMenuLabel :: MItem s -> Signal -> Build ()
+bindMenuLabel (MItem n) (Signal s) = emitB (W.txBindMenuLabel n s)
+
+setMenuEnabled :: MItem s -> Bool -> Build ()
+setMenuEnabled (MItem n) v = emitB (W.txSetMenuEnabled n v)
+
+bindMenuEnabled :: MItem s -> Signal -> Build ()
+bindMenuEnabled (MItem n) (Signal s) = emitB (W.txBindMenuEnabled n s)
+
+setMenuChecked :: MItem s -> Bool -> Build ()
+setMenuChecked (MItem n) v = emitB (W.txSetMenuChecked n v)
+
+bindMenuChecked :: MItem s -> Signal -> Build ()
+bindMenuChecked (MItem n) (Signal s) = emitB (W.txBindMenuChecked n s)
+
+setMenuValue :: MItem s -> Int -> Build ()
+setMenuValue (MItem n) v = emitB (W.txSetMenuValue n (fromIntegral v))
+
+bindMenuValue :: MItem s -> Signal -> Build ()
+bindMenuValue (MItem n) (Signal s) = emitB (W.txBindMenuValue n s)
+
+setMenuIcon :: MItem s -> BS.ByteString -> Build ()
+setMenuIcon (MItem n) bytes = emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
+
+-- | The phone-bar promotion hint (actions only — root-checked).
+-- Flipping it recomputes the promoted set deterministically; INERT on
+-- desktops — not a toolbar grammar.
+setMenuPrimary :: MItem s -> Bool -> Build ()
+setMenuPrimary (MItem n) v = emitB (W.txSetMenuPrimary n v)
+
+-- | The action's shortcut (window-anchored actions only).
+-- Canonicalized by the binding's one parser
+-- ('W.canonicalizeShortcut'); the shortcut is another affordance of
+-- the same item — it fires the SAME menu_activated occurrence as a
+-- click.
+setMenuShortcut :: MItem s -> String -> Build ()
+setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n spelling)
+
+-- | Reopen a RETAINED grouping node and append more children — the
+-- append-at-any-time discipline: @menuAppend file [item "Publish"
+-- [IPrimary True, IOnActivate h]]@. The scope index rides the
+-- retained handle, so appends inherit the anchor's compile-time
+-- rules; the root re-validates the appended subtree (depth,
+-- shortcuts, duplicates).
+menuAppend :: MItem s -> [Build (MItem s)] -> Build ()
+menuAppend (MItem n) children =
+  mapM_ (\child -> child >>= \(MItem c) -> emitB (W.txMenuItemAppend n c)) children
+
+-- | The option-flavored reopening, for a retained radio group.
+menuOptions :: MItem s -> [Build (MOption s)] -> Build ()
+menuOptions (MItem n) options =
+  mapM_ (\child -> child >>= \(MOption c) -> emitB (W.txMenuItemAppend n c)) options
 
 
 
@@ -1555,7 +1835,17 @@ data App = App
     appSectionSelected :: IORef (Map.Map Word64 (IO ())),
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
-    appNextAlert :: IORef Word64
+    appNextAlert :: IORef Word64,
+    -- Menu dispatch tables, keyed by MENU ITEM id — their own id
+    -- space, separate from every widget/node table ("two tables,
+    -- always" — now N tables, still always). The node flavors receive
+    -- the stamped copy's key path (the keys ARE the noun).
+    appMenuActivated :: IORef (Map.Map Word64 (IO ())),
+    appMenuActivatedNode :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
+    appMenuToggled :: IORef (Map.Map Word64 (Bool -> IO ())),
+    appMenuToggledNode :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
+    appMenuSelected :: IORef (Map.Map Word64 (Int -> IO ())),
+    appMenuSelectedNode :: IORef (Map.Map Word64 ([W.Value] -> Int -> IO ()))
   }
 
 -- | Run a Build to records, submit them as one transaction, and return
@@ -1606,6 +1896,12 @@ register app pending = case pending of
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (appNodeToggles app) (Map.insert n handler)
+  PMenuActivated n handler -> modifyIORef' (appMenuActivated app) (Map.insert n handler)
+  PMenuActivatedNode n handler -> modifyIORef' (appMenuActivatedNode app) (Map.insert n handler)
+  PMenuToggled n handler -> modifyIORef' (appMenuToggled app) (Map.insert n handler)
+  PMenuToggledNode n handler -> modifyIORef' (appMenuToggledNode app) (Map.insert n handler)
+  PMenuSelected n handler -> modifyIORef' (appMenuSelected app) (Map.insert n handler)
+  PMenuSelectedNode n handler -> modifyIORef' (appMenuSelectedNode app) (Map.insert n handler)
 
 -- | buildTx for handlers that keep no handles.
 submitTx :: App -> Build () -> IO ()
@@ -1658,7 +1954,7 @@ onToggleNode app (Node n) handler =
 newApp :: IO App
 newApp =
   App
-    <$> newIORef (Counters 0 0 0 0 0)
+    <$> newIORef (Counters 0 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -1675,6 +1971,12 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef 0
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -1775,6 +2077,40 @@ dispatchLoop app = do
           handlers <- readIORef (appAlertHandlers app)
           writeIORef (appAlertHandlers app) (Map.delete ident handlers)
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
+          dispatchLoop app
+      -- Menu occurrences key the menu-item tables — their own id
+      -- space, so neither widget nor node ids can collide with them.
+      -- Node-anchored context items carry the stamped copy's keys
+      -- (the keys ARE the noun); toggles carry the new state, radio
+      -- groups the new 0-based index.
+      | kind == W.occKindMenuActivated -> do
+          case keys of
+            [] -> do
+              handlers <- readIORef (appMenuActivated app)
+              dispatch (mapM_ id (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appMenuActivatedNode app)
+              dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindMenuToggled -> do
+          let checked = case payload of Just (W.VBool b) -> b; _ -> False
+          case keys of
+            [] -> do
+              handlers <- readIORef (appMenuToggled app)
+              dispatch (mapM_ ($ checked) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appMenuToggledNode app)
+              dispatch (mapM_ (\h -> h keys checked) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindMenuValueChanged -> do
+          let index = case payload of Just (W.VF64 x) -> truncate x; _ -> 0
+          case keys of
+            [] -> do
+              handlers <- readIORef (appMenuSelected app)
+              dispatch (mapM_ ($ index) (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (appMenuSelectedNode app)
+              dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
           dispatchLoop app
     Just (_, ident, [], _) -> do
       handlers <- readIORef (appWidgetHandlers app)

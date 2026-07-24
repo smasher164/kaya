@@ -46,6 +46,25 @@ object KayaPresent {
      * doctrine. */
     @JvmStatic external fun emitSectionSelected(window: Long, section: Long)
 
+    /** A menu action fired — a bar/overflow row, a context-menu row,
+     * OR its shortcut: ONE occurrence, one dispatch path. [noun] is
+     * the raw wire key path CONTEXT_ATTACH_NODE delivered with the
+     * anchor (handed back verbatim), empty for a bar or live-widget
+     * activation. kaya_emit_menu_activated's JNI spelling. */
+    @JvmStatic external fun emitMenuActivated(item: Long, noun: ByteArray)
+
+    /** A toggle item flipped by the USER ([checked] is the new state);
+     * programmatic checked writes stay quiet — the echo doctrine.
+     * Same item/noun identity as [emitMenuActivated];
+     * kaya_emit_menu_toggled's JNI spelling. */
+    @JvmStatic external fun emitMenuToggled(item: Long, noun: ByteArray, checked: Boolean)
+
+    /** A radio group's selection changed by the USER; [item] is the
+     * GROUP's id and [index] the 0-based option index (integral).
+     * Programmatic value writes stay quiet — the echo doctrine.
+     * kaya_emit_menu_value_changed's JNI spelling. */
+    @JvmStatic external fun emitMenuValueChanged(item: Long, noun: ByteArray, index: Double)
+
     /**
      * Block until the next transaction resolves, fill [buffer] with
      * apply-op records (KAYA_APPLY_*), and return the byte length —

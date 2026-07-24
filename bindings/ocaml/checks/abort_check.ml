@@ -144,4 +144,107 @@ let () =
   in
   if n <> 3 then fail "post-scope read broken: %d" n;
 
+  (* The menu construction surface must REACH the record stream — the
+     wire-dropped-write class: a constructor that emits nothing passes
+     every surface gate until a scene fails live (the dropped-spacing
+     lesson; Python's kaya_app_checks.py is the pattern). The ambient
+     transaction's queue is in reach inside build (records accumulate
+     REVERSED — newest first); each frame is u32 length then u16 kind
+     at offset 4, little-endian. *)
+  let rec_kind r = Char.code r.[4] lor (Char.code r.[5] lsl 8) in
+  let rec_u64 r at =
+    let v = ref 0L in
+    for i = 7 downto 0 do
+      v := Int64.logor (Int64.shift_left !v 8) (Int64.of_int (Char.code r.[at + i]))
+    done;
+    !v
+  in
+  let contains_sub s sub =
+    let n = String.length s and m = String.length sub in
+    let rec go i = i + m <= n && (String.sub s i m = sub || go (i + 1)) in
+    m = 0 || go 0
+  in
+  let queued_since tx before =
+    let after = List.length tx.records in
+    List.filteri (fun i _ -> i < after - before) tx.records
+  in
+  let count_kind rs k = List.length (List.filter (fun r -> rec_kind r = k) rs) in
+  let file =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        let file =
+          menu ~label:"File" [ item ~label:"Save" ~shortcut:"PRIMARY+S" ] ()
+        in
+        let sort =
+          radio_group ~value:1 ~label:"Sort"
+            [ option ~label:"Name"; option ~label:"Date" ]
+            ()
+        in
+        window ~menus:[ (fun () -> file); (fun () -> sort) ] ();
+        let noun = label ~text:"noun" () in
+        context_menu noun [ item ~label:"Rename" ];
+        let queued = queued_since tx before in
+        (* File, Save, Sort, Name, Date, Rename. *)
+        if count_kind queued Kaya_wire.tx_kind_menu_item_create <> 6 then
+          fail "menu constructors queued the wrong create count";
+        if count_kind queued Kaya_wire.tx_kind_menubar_append <> 2 then
+          fail "bar anchors queued the wrong menubar-append count";
+        if count_kind queued Kaya_wire.tx_kind_menu_item_append <> 3 then
+          fail "children queued the wrong item-append count";
+        if count_kind queued Kaya_wire.tx_kind_context_attach <> 1 then
+          fail "context anchor queued the wrong attach count";
+        if
+          not
+            (List.exists
+               (fun r ->
+                 rec_kind r = Kaya_wire.tx_kind_set_menu_prop
+                 && contains_sub r "primary+s")
+               queued)
+        then fail "shortcut did not reach the records canonicalized";
+        file)
+  in
+
+  (* The binding's one shortcut parser rejects aliases at record time
+     — no call site can bypass it. *)
+  (match
+     build app (fun () -> menu_append file [ item ~label:"Bad" ~shortcut:"ctrl+s" ])
+   with
+  | () -> fail "an alias shortcut must die in the binding's one parser"
+  | exception Invalid_argument _ -> ());
+
+  (* Append-at-any-time: the retained handle reopens in a later
+     transaction — one create plus one append under the RETAINED
+     parent, and never a new bar anchor. *)
+  build app (fun () ->
+      let tx = the_tx () in
+      let before = List.length tx.records in
+      menu_append file [ item ~label:"Publish" ];
+      let queued = queued_since tx before in
+      if count_kind queued Kaya_wire.tx_kind_menu_item_create <> 1 then
+        fail "reopen queued the wrong create count";
+      (match
+         List.find_opt
+           (fun r -> rec_kind r = Kaya_wire.tx_kind_menu_item_append)
+           queued
+       with
+      | None -> fail "reopen queued no append"
+      | Some r ->
+          let (MenuItem file_id) = file in
+          if rec_u64 r 8 <> file_id then
+            fail "reopen did not seat under the retained parent");
+      if count_kind queued Kaya_wire.tx_kind_menubar_append <> 0 then
+        fail "reopen re-anchored the bar");
+
+  (* An aborted append drops its menu records with everything else
+     (records die with the tx; nothing ships) and the app continues. *)
+  (match
+     build app (fun () ->
+         menu_append file [ item ~label:"Doomed" ];
+         raise Handler_bug)
+   with
+  | () -> fail "menu abort: build must propagate"
+  | exception Handler_bug -> ());
+  build app (fun () -> menu_append file [ item ~label:"Recovered" ]);
+
   print_endline "ocaml abort check: OK"

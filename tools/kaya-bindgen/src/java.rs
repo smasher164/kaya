@@ -293,6 +293,124 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return finish(b);");
         c.line("    }");
     }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // txSetMenuShortcut routes through it, so no call site can bypass
+    // canonicalization. Locale.ROOT, deliberately: a default-locale
+    // toLowerCase turns "I" into a dotless ı under tr-TR.
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line("");
+    c.line("    private static final java.util.Set<String> SHORTCUT_NAMED_KEYS =");
+    c.line(&format!("            java.util.Set.of({named_keys});"));
+    c.line("");
+    c.line("    /** Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("     * '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("     * key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("     * variants and any modifier order; throws on whitespace, empty");
+    c.line("     * tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
+    c.line("     * or multiple or missing keys. POLICY stays at the core: escape,");
+    c.line("     * shift-only and bare alphanumerics, and the reserved floor are");
+    c.line("     * validated there, on the canonical spelling, never rewritten. */");
+    c.line("    public static String canonicalizeShortcut(String spelling) {");
+    c.line("        if (spelling.isEmpty()) {");
+    c.line("            throw new IllegalArgumentException(\"kaya: shortcut is empty\");");
+    c.line("        }");
+    c.line("        for (int i = 0; i < spelling.length(); i++) {");
+    c.line("            char ch = spelling.charAt(i);");
+    c.line("            if (ch == ' ' || ch == '\\t' || ch == '\\n' || ch == 0x0b || ch == '\\f' || ch == '\\r') {");
+    c.line("                throw new IllegalArgumentException(");
+    c.line("                        \"kaya: shortcut \\\"\" + spelling + \"\\\" contains whitespace\");");
+    c.line("            }");
+    c.line("        }");
+    c.line("        // split takes a regex, and -1 keeps trailing empty tokens so");
+    c.line("        // \"primary+\" fails as an empty token, never as a silent drop.");
+    c.line("        String[] parts = spelling.toLowerCase(java.util.Locale.ROOT).split(\"\\\\+\", -1);");
+    c.line("        for (String p : parts) {");
+    c.line("            if (p.isEmpty()) {");
+    c.line("                throw new IllegalArgumentException(");
+    c.line("                        \"kaya: shortcut \\\"\" + spelling + \"\\\" has an empty token\");");
+    c.line("            }");
+    c.line("        }");
+    c.line("        String key = parts[parts.length - 1];");
+    c.line("        boolean primary = false, shift = false, alt = false;");
+    c.line("        for (int i = 0; i + 1 < parts.length; i++) {");
+    c.line("            String m = parts[i];");
+    c.line("            boolean repeated;");
+    c.line("            if (m.equals(\"primary\")) { repeated = primary; primary = true; }");
+    c.line("            else if (m.equals(\"shift\")) { repeated = shift; shift = true; }");
+    c.line("            else if (m.equals(\"alt\")) { repeated = alt; alt = true; }");
+    c.line("            else {");
+    c.line("                throw new IllegalArgumentException(");
+    c.line("                        \"kaya: shortcut \\\"\" + spelling + \"\\\" has an unknown modifier \\\"\" + m");
+    c.line("                        + \"\\\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\");");
+    c.line("            }");
+    c.line("            if (repeated) {");
+    c.line("                throw new IllegalArgumentException(");
+    c.line("                        \"kaya: shortcut \\\"\" + spelling + \"\\\" repeats modifier \\\"\" + m + \"\\\"\");");
+    c.line("            }");
+    c.line("        }");
+    c.line("        boolean alnum = key.length() == 1");
+    c.line("                && ((key.charAt(0) >= 'a' && key.charAt(0) <= 'z')");
+    c.line("                        || (key.charAt(0) >= '0' && key.charAt(0) <= '9'));");
+    c.line("        if (!alnum && !SHORTCUT_NAMED_KEYS.contains(key)) {");
+    c.line("            throw new IllegalArgumentException(");
+    c.line("                    \"kaya: shortcut \\\"\" + spelling + \"\\\" key \\\"\" + key");
+    c.line("                    + \"\\\" is outside the floor (one of a-z, 0-9, or the closed named set)\");");
+    c.line("        }");
+    c.line("        return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key;");
+    c.line("    }");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => (
+                camel(prop),
+                "String",
+                format!("encodeValue(b, canonicalizeShortcut({}));", camel(prop)),
+            ),
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "double", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "long",
+                "encodeValue(b, new BlobHandle(handle));".to_string(),
+            ),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("    /** set_menu_prop with a constant shortcut value, canonicalized here");
+            c.line("     * (the one binding-tier shortcut parser — no call site bypasses it). */");
+        } else {
+            c.line(&format!("    /** set_menu_prop with a constant {prop} value. */"));
+        }
+        c.line(&format!("    public static byte[] txSetMenu{pc}(long item, {ty} {p}) {{"));
+        c.line("        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);");
+        c.line(&format!("        b.putLong(item).putInt(MPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("    /** set_menu_prop with a signal-bound {prop} value. */"));
+            c.line(&format!("    public static byte[] txBindMenu{pc}(long item, long signalId) {{"));
+            c.line("        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);");
+            c.line(&format!("        b.putLong(item).putInt(MPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+            c.line("        return finish(b);");
+            c.line("    }");
+        }
+    }
     c.line("");
     c.line("    /** Concatenate packed records into one transaction. */");
     c.line("    public static byte[] tx(byte[]... records) {");

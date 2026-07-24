@@ -336,6 +336,108 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        return Finish(stream, w, TxKindSetSectionProp);");
         c.line("    }");
     }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // TxSetMenuShortcut routes through it, so no call site can bypass
+    // canonicalization. ToLowerInvariant, deliberately: a culture-
+    // sensitive ToLower turns "I" into a dotless ı under tr-TR.
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line("");
+    c.line(&format!(
+        "    static readonly HashSet<string> ShortcutNamedKeys = new HashSet<string> {{ {named_keys} }};"
+    ));
+    c.line("");
+    c.line("    /// Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("    /// '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("    /// key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("    /// variants and any modifier order; throws on whitespace, empty");
+    c.line("    /// tokens, repeated modifiers, aliases (ctrl/cmd/option), and unknown");
+    c.line("    /// or multiple or missing keys. POLICY stays at the core: escape,");
+    c.line("    /// shift-only and bare alphanumerics, and the reserved floor are");
+    c.line("    /// validated there, on the canonical spelling, never rewritten.");
+    c.line("    public static string CanonicalizeShortcut(string spelling)");
+    c.line("    {");
+    c.line("        if (spelling.Length == 0)");
+    c.line("            throw new ArgumentException(\"kaya: shortcut is empty\");");
+    c.line("        foreach (char ch in spelling)");
+    c.line("            if (ch == ' ' || ch == '\\t' || ch == '\\n' || ch == '\\v' || ch == '\\f' || ch == '\\r')");
+    c.line("                throw new ArgumentException(\"kaya: shortcut \\\"\" + spelling + \"\\\" contains whitespace\");");
+    c.line("        string[] parts = spelling.ToLowerInvariant().Split('+');");
+    c.line("        foreach (string p in parts)");
+    c.line("            if (p.Length == 0)");
+    c.line("                throw new ArgumentException(\"kaya: shortcut \\\"\" + spelling + \"\\\" has an empty token\");");
+    c.line("        string key = parts[parts.Length - 1];");
+    c.line("        bool primary = false, shift = false, alt = false;");
+    c.line("        for (int i = 0; i + 1 < parts.Length; i++)");
+    c.line("        {");
+    c.line("            string m = parts[i];");
+    c.line("            bool repeated;");
+    c.line("            if (m == \"primary\") { repeated = primary; primary = true; }");
+    c.line("            else if (m == \"shift\") { repeated = shift; shift = true; }");
+    c.line("            else if (m == \"alt\") { repeated = alt; alt = true; }");
+    c.line("            else");
+    c.line("                throw new ArgumentException(\"kaya: shortcut \\\"\" + spelling + \"\\\" has an unknown modifier \\\"\" + m + \"\\\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)\");");
+    c.line("            if (repeated)");
+    c.line("                throw new ArgumentException(\"kaya: shortcut \\\"\" + spelling + \"\\\" repeats modifier \\\"\" + m + \"\\\"\");");
+    c.line("        }");
+    c.line("        bool alnum = key.Length == 1 && ((key[0] >= 'a' && key[0] <= 'z') || (key[0] >= '0' && key[0] <= '9'));");
+    c.line("        if (!alnum && !ShortcutNamedKeys.Contains(key))");
+    c.line("            throw new ArgumentException(\"kaya: shortcut \\\"\" + spelling + \"\\\" key \\\"\" + key + \"\\\" is outside the floor (one of a-z, 0-9, or the closed named set)\");");
+    c.line("        return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key;");
+    c.line("    }");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str if *prop == "shortcut" => (
+                camel(prop),
+                "string",
+                format!("EncodeValue(w, CanonicalizeShortcut({}));", camel(prop)),
+            ),
+            crate::PropKind::Str => (camel(prop), "string", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "bool", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::F64 => (camel(prop), "double", format!("EncodeValue(w, {});", camel(prop))),
+            crate::PropKind::Blob => (
+                "handle".to_string(),
+                "ulong",
+                "EncodeValue(w, new BlobHandle(handle));".to_string(),
+            ),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        if *prop == "shortcut" {
+            c.line("    /// set_menu_prop with a constant shortcut value, canonicalized here");
+            c.line("    /// (the one binding-tier shortcut parser — no call site bypasses it).");
+        } else {
+            c.line(&format!("    /// set_menu_prop with a constant {prop} value."));
+        }
+        c.line(&format!("    public static byte[] TxSetMenu{pc}(ulong item, {ty} {p})"));
+        c.line("    {");
+        c.line("        var w = Begin(out var stream);");
+        c.line(&format!("        w.Write(item); w.Write(Mprop{pc}); w.Write(SourceConst);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return Finish(stream, w, TxKindSetMenuProp);");
+        c.line("    }");
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line(&format!("    /// set_menu_prop with a signal-bound {prop} value."));
+            c.line(&format!("    public static byte[] TxBindMenu{pc}(ulong item, ulong signalId)"));
+            c.line("    {");
+            c.line("        var w = Begin(out var stream);");
+            c.line(&format!("        w.Write(item); w.Write(Mprop{pc}); w.Write(SourceSignal); w.Write(signalId);"));
+            c.line("        return Finish(stream, w, TxKindSetMenuProp);");
+            c.line("    }");
+        }
+    }
     c.line("");
     c.line("    /// Decode one occurrence record (header included). Returns false");
     c.line("    /// for non-click records. keys is empty for a click on a");

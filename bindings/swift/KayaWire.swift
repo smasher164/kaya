@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x39a6143b6f4c3e0e
+let kayaSpecHash: UInt64 = 0x0e4b7f4f716cc749
 
 struct KayaTx {
     var bytes = Data()
@@ -319,6 +319,56 @@ struct KayaTx {
     mutating func setSectionProp(_ section: UInt64, _ prop: UInt32, _ source: UInt32) {
         let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
+        self.u32(prop)
+        self.u32(source)
+        self.end(start)
+    }
+
+    /// Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus).
+    mutating func menuItemCreate(_ item: UInt64, _ kind: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_MENU_ITEM_CREATE))
+        self.u64(item)
+        self.u32(kind)
+        self.u32(0)
+        self.end(start)
+    }
+
+    /// Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root.
+    mutating func menuItemAppend(_ parent: UInt64, _ child: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_MENU_ITEM_APPEND))
+        self.u64(parent)
+        self.u64(child)
+        self.end(start)
+    }
+
+    /// Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error.
+    mutating func menubarAppend(_ window: UInt64, _ item: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_MENUBAR_APPEND))
+        self.u64(window)
+        self.u64(item)
+        self.end(start)
+    }
+
+    /// Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home).
+    mutating func contextAttach(_ widget: UInt64, _ item: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH))
+        self.u64(widget)
+        self.u64(item)
+        self.end(start)
+    }
+
+    /// Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach.
+    mutating func contextAttachNode(_ node: UInt64, _ item: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH_NODE))
+        self.u64(node)
+        self.u64(item)
+        self.end(start)
+    }
+
+    /// Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
+    mutating func setMenuProp(_ item: UInt64, _ prop: UInt32, _ source: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
         self.u32(prop)
         self.u32(source)
         self.end(start)
@@ -856,11 +906,176 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_menu_prop with a constant label value.
+    mutating func setMenuLabel(_ item: UInt64, _ label: String) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(label))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a signal-bound label value.
+    mutating func bindMenuLabel(_ item: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_LABEL))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant enabled value.
+    mutating func setMenuEnabled(_ item: UInt64, _ enabled: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_ENABLED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(enabled))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a signal-bound enabled value.
+    mutating func bindMenuEnabled(_ item: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_ENABLED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant checked value.
+    mutating func setMenuChecked(_ item: UInt64, _ checked: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_CHECKED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(checked))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a signal-bound checked value.
+    mutating func bindMenuChecked(_ item: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_CHECKED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant value value.
+    mutating func setMenuValue(_ item: UInt64, _ value: Double) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_VALUE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(value))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a signal-bound value value.
+    mutating func bindMenuValue(_ item: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_VALUE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant icon value.
+    mutating func setMenuIcon(_ item: UInt64, _ handle: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_ICON))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.blob(handle))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant primary value.
+    mutating func setMenuPrimary(_ item: UInt64, _ primary: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_PRIMARY))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(primary))
+        self.end(start)
+    }
+
+    /// set_menu_prop with a constant shortcut value, canonicalized here
+    /// (the one binding-tier shortcut parser — no call site bypasses it).
+    mutating func setMenuShortcut(_ item: UInt64, _ shortcut: String) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_SHORTCUT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(kayaCanonicalizeShortcut(shortcut)))
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
         }
     }
+}
+
+let kayaShortcutNamedKeys: Set<String> = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"]
+
+/// The one binding-tier shortcut parser (DESIGN.md, Menus).
+/// Canonicalize a shortcut spelling to the wire form: lowercase
+/// '+'-joined tokens, modifiers ordered primary, shift, alt, then one
+/// key (a-z, 0-9, or the closed named set). Accepts ASCII case
+/// variants and any modifier order; traps on whitespace, empty tokens,
+/// repeated modifiers, aliases (ctrl/cmd/option), and unknown or
+/// multiple or missing keys. POLICY stays at the core: escape,
+/// shift-only and bare alphanumerics, and the reserved floor are
+/// validated there, on the canonical spelling, never rewritten.
+func kayaCanonicalizeShortcut(_ spelling: String) -> String {
+    if spelling.isEmpty {
+        preconditionFailure("kaya: shortcut is empty")
+    }
+    for ch in spelling {
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\u{0B}" || ch == "\u{0C}" || ch == "\r" {
+            preconditionFailure("kaya: shortcut \"\(spelling)\" contains whitespace")
+        }
+    }
+    let parts = spelling.lowercased()
+        .split(separator: "+", omittingEmptySubsequences: false)
+        .map(String.init)
+    for p in parts where p.isEmpty {
+        preconditionFailure("kaya: shortcut \"\(spelling)\" has an empty token")
+    }
+    let key = parts[parts.count - 1]
+    var primary = false, shift = false, alt = false
+    for m in parts.dropLast() {
+        let repeated: Bool
+        switch m {
+        case "primary":
+            repeated = primary
+            primary = true
+        case "shift":
+            repeated = shift
+            shift = true
+        case "alt":
+            repeated = alt
+            alt = true
+        default:
+            preconditionFailure("kaya: shortcut \"\(spelling)\" has an unknown modifier \"\(m)\" (the portable modifiers are primary, shift, alt; aliases like ctrl, cmd, and option are not accepted)")
+        }
+        if repeated {
+            preconditionFailure("kaya: shortcut \"\(spelling)\" repeats modifier \"\(m)\"")
+        }
+    }
+    let alnum = key.count == 1 && (key.first!.isASCII && (key.first!.isLowercase || key.first!.isNumber))
+    if !alnum && !kayaShortcutNamedKeys.contains(key) {
+        preconditionFailure("kaya: shortcut \"\(spelling)\" key \"\(key)\" is outside the floor (one of a-z, 0-9, or the closed named set)")
+    }
+    return (primary ? "primary+" : "") + (shift ? "shift+" : "") + (alt ? "alt+" : "") + key
 }
 
 /// Decode one occurrence record (header included); nil for pad or
@@ -884,6 +1099,9 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
+            || kind == UInt16(KAYA_OCCURRENCE_MENU_ACTIVATED)
+            || kind == UInt16(KAYA_OCCURRENCE_MENU_TOGGLED)
+            || kind == UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -932,6 +1150,8 @@ func kayaParseOccurrence(_ rec: [UInt8])
         if kind == UInt16(KAYA_OCCURRENCE_TEXT_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_TOGGLED)
             || kind == UInt16(KAYA_OCCURRENCE_VALUE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_MENU_TOGGLED)
+            || kind == UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
         {
             let ptype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
             let plen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))

@@ -1160,7 +1160,7 @@ The window lowering is deliberately platform-shaped:
 
 | Host | Native lowering |
 |------|-----------------|
-| macOS | The key Kaya window's catalog occupies the process-global menu bar; changing key Kaya windows changes the presented catalog and shortcut target. |
+| macOS | The key Kaya window's catalog occupies the process-global menu bar; changing key Kaya windows changes the presented catalog and shortcut target. The SwiftUI interpreter materializes a Kaya-owned native `NSMenu` segment through its AppKit bridge: the pinned SDK's `CommandsBuilder` has fixed-arity `buildBlock` plus conditional builders but no `buildArray`, so it cannot express append-at-any-time top-level catalogs. The bridge owns only the segment after Edit and before Window/Help; application, Edit, Window, and Help dress remain untouched. |
 | Windows | The catalog is a real in-window `MenuBar` in window chrome. |
 | Linux | The catalog is a real window menu bar backed by the platform menu/action model. |
 | iOS | The entire catalog is available from an adaptive trailing More/ellipsis menu in the existing top/navigation bar; promoted actions become trailing bar actions. |
@@ -1323,6 +1323,31 @@ every command remain reachable regardless of capacity.
 `primary` is inert on desktop. It does not create a desktop toolbar,
 and no toolbar materialization is planned. This one bit is an adaptive
 menu hint, not the seed of a toolbar grammar.
+
+### Where a platform cannot say it
+
+Three limits are recorded rather than papered over. None of them
+changes what a program means or what it emits; each is stated once,
+here, instead of being re-decided per binding.
+
+- **GTK renders a disabled grouping node as enabled.** GMenu has no
+  per-header enablement — a submenu or bar-level group is model
+  structure, not a GAction — so a disabled `menu` or `radio_group`
+  renders like an enabled one on Linux, while every descendant carries
+  the AND of its own flag and its ancestors' and refuses activation.
+  The semantics are uniform; the dress is the platform's.
+- **GTK renders a disabled radio option as enabled.** A radio group
+  lowers to one stateful GAction with per-option targets, and GMenu
+  cannot disable a single target of a shared action, so the gate lives
+  in the activate handler: selecting a disabled option changes nothing
+  and emits nothing, but it looks like its siblings.
+- **On macOS the harness drives context menus through the model.**
+  SwiftUI's `.contextMenu` exposes no NSMenu handle and cannot be
+  opened programmatically, so `context_open` + `menu_activate` resolve
+  the anchored catalog in the interpreter's model and land in the same
+  activation path the real gesture takes — one emit, one occurrence.
+  The window catalog and its shortcuts stay real chrome (the
+  Kaya-owned NSMenu walk and `performKeyEquivalent`).
 
 ### Deliberate cuts and admission triggers
 

@@ -393,5 +393,278 @@ with app.build():
             _prop_write(kaya.wire.PROP_ALIGN, kaya.wire.VALUE_I64),
         )
 
+# The generated shortcut canonicalizer (the one binding-tier parser;
+# DESIGN.md, Menus): spelling is canonicalized here, POLICY (escape,
+# shift-only/bare alphanumerics, the reserved floor) dies at the core
+# on the canonical form. The vectors mirror kaya-bindgen's reference
+# table (tools/kaya-bindgen/src/main.rs) — the shared statement of the
+# algorithm every emitter transcribes.
+for spelling, want in (
+    ("primary+s", "primary+s"),
+    ("PRIMARY+S", "primary+s"),
+    ("Shift+Primary+S", "primary+shift+s"),
+    ("alt+shift+f5", "shift+alt+f5"),
+    ("ALT+ENTER", "alt+enter"),
+    ("enter", "enter"),
+    # Recognized at the binding tier, rejected by the core (policy):
+    ("Escape", "escape"),
+    ("shift+s", "shift+s"),
+    ("primary+q", "primary+q"),
+):
+    check(
+        f"canonicalize_shortcut accepts {spelling!r}",
+        kaya.wire.canonicalize_shortcut(spelling) == want,
+    )
+for bad in (
+    "",
+    "primary + s",
+    "ctrl+s",
+    "cmd+s",
+    "option+p",
+    "primary+primary+s",
+    "primary+",
+    "+s",
+    "primary+s+k",
+    "primary",
+    "primary+esc",
+    "primary+f13",
+):
+    try:
+        kaya.wire.canonicalize_shortcut(bad)
+        check(f"canonicalize_shortcut rejects {bad!r}", False)
+    except ValueError:
+        check(f"canonicalize_shortcut rejects {bad!r}", True)
+
+# tx_set_menu_shortcut routes through the canonicalizer — no call site
+# can bypass it: a case-variant spelling packs the canonical bytes,
+# and a bad one raises before any record is framed.
+check(
+    "tx_set_menu_shortcut canonicalizes",
+    kaya.wire.tx_set_menu_shortcut(7, "SHIFT+PRIMARY+S")
+    == kaya.wire.tx_set_menu_shortcut(7, "primary+shift+s"),
+)
+try:
+    kaya.wire.tx_set_menu_shortcut(7, "ctrl+s")
+    check("tx_set_menu_shortcut rejects aliases", False)
+except ValueError:
+    check("tx_set_menu_shortcut rejects aliases", True)
+
+# Menu construction must REACH the record stream (the dropped-spacing
+# lesson: a surface check cannot see a constructor that emits
+# nothing): one bar menu, its action with shortcut + bound enablement,
+# and a live-widget context anchor, each asserted by record kind and
+# prop tail.
+with app.build():
+    enable = kaya.signal(False)
+    before = len(kaya._tx)
+    with app.menu("File", enabled=enable):
+        kaya.item("Save", shortcut="Primary+S")
+    queued = kaya._tx[before:]
+
+    def _menu_prop(prop, source):
+        return any(
+            _rec_kind(r) == kaya.wire.TX_SET_MENU_PROP
+            and int.from_bytes(r[16:20], "little") == prop
+            and int.from_bytes(r[20:24], "little") == source
+            for r in queued
+        )
+
+    check(
+        "menu construction creates both items",
+        sum(_rec_kind(r) == kaya.wire.TX_MENU_ITEM_CREATE for r in queued) == 2,
+    )
+    check(
+        "app.menu reaches the window catalog",
+        any(_rec_kind(r) == kaya.wire.TX_MENUBAR_APPEND for r in queued),
+    )
+    check(
+        "kaya.item seats under the open menu",
+        any(_rec_kind(r) == kaya.wire.TX_MENU_ITEM_APPEND for r in queued),
+    )
+    check(
+        "menu label= reaches the records",
+        _menu_prop(kaya.wire.MPROP_LABEL, kaya.wire.SOURCE_CONST),
+    )
+    check(
+        "menu enabled= binds the signal",
+        _menu_prop(kaya.wire.MPROP_ENABLED, kaya.wire.SOURCE_SIGNAL),
+    )
+    check(
+        "item shortcut= reaches the records canonicalized",
+        any(
+            _rec_kind(r) == kaya.wire.TX_SET_MENU_PROP
+            and int.from_bytes(r[16:20], "little") == kaya.wire.MPROP_SHORTCUT
+            and b"primary+s" in bytes(r)
+            for r in queued
+        ),
+    )
+
+    # The radio value's seat: value= must land AFTER the option
+    # children it addresses — the root judges the index against the
+    # option count at the record, so an eager emission dies with
+    # "0 options" (caught live by the first menus-python leg; the
+    # block-exit emission is the fix this check pins).
+    before = len(kaya._tx)
+    with app.radio_group("Sort", value=1):
+        kaya.option("Name")
+        kaya.option("Date")
+    order = [
+        _rec_kind(r)
+        for r in kaya._tx[before:]
+        if _rec_kind(r) in (kaya.wire.TX_MENU_ITEM_CREATE, kaya.wire.TX_SET_MENU_PROP)
+        and not (
+            _rec_kind(r) == kaya.wire.TX_SET_MENU_PROP
+            and int.from_bytes(r[16:20], "little") != kaya.wire.MPROP_VALUE
+        )
+    ]
+    check(
+        "radio_group value= lands after its options",
+        order[-1] == kaya.wire.TX_SET_MENU_PROP
+        and order.count(kaya.wire.TX_MENU_ITEM_CREATE) == 3,
+    )
+
+    before = len(kaya._tx)
+    with kaya.column():
+        anchor = kaya.label("noun")
+        with anchor.context_menu():
+            kaya.item("Rename")
+            try:
+                kaya.item("Bad", shortcut="primary+r")
+                check("context items reject shortcuts at record time", False)
+            except ValueError:
+                check("context items reject shortcuts at record time", True)
+    check(
+        "widget.context_menu attaches to the anchor",
+        any(_rec_kind(r) == kaya.wire.TX_CONTEXT_ATTACH for r in kaya._tx[before:]),
+    )
+
+    with kaya.context_catalog() as catalog:
+        kaya.item("Remove")
+    with kaya.column():
+        coll = kaya.collection()
+        with kaya.for_each(coll):
+            try:
+                kaya.item("Late")
+                check("menu items are live-zone only", False)
+            except RuntimeError:
+                check("menu items are live-zone only", True)
+            before = len(kaya._tx)
+            row = kaya.label("row")
+            row.context_menu(catalog)
+            check(
+                "node.context_menu attaches the catalog",
+                any(
+                    _rec_kind(r) == kaya.wire.TX_CONTEXT_ATTACH_NODE
+                    for r in kaya._tx[before:]
+                ),
+            )
+    try:
+        row.context_menu(catalog)
+        check("a context catalog takes exactly one anchor", False)
+    except RuntimeError:
+        check("a context catalog takes exactly one anchor", True)
+
+# The rest of the menu guard layer (menus-plan §6): the
+# append-at-any-time reopen, handler scoping direct vs stamped, and
+# the abort dropping an appended subtree with its records. A fresh App
+# keeps the module-global _app (the handler tables, the menu-item
+# counter) pointed at what these blocks assert.
+app_menu = kaya.App()
+
+# Append-at-any-time: a retained grouping handle reopens in a LATER
+# transaction; the reopen queues exactly the child's create + its
+# append under the RETAINED parent — and never re-anchors the bar.
+with app_menu.build():
+    with app_menu.menu("File") as file_menu:
+        kaya.item("Save", shortcut="primary+s")
+with app_menu.build():
+    before = len(kaya._tx)
+    with file_menu.append():
+        publish = kaya.item("Publish")
+    queued = kaya._tx[before:]
+    check(
+        "reopen creates exactly the appended child",
+        sum(_rec_kind(r) == kaya.wire.TX_MENU_ITEM_CREATE for r in queued) == 1,
+    )
+    appends = [r for r in queued if _rec_kind(r) == kaya.wire.TX_MENU_ITEM_APPEND]
+    check(
+        "reopen seats under the retained parent",
+        len(appends) == 1
+        and int.from_bytes(appends[0][8:16], "little") == file_menu.id
+        and int.from_bytes(appends[0][16:24], "little") == publish.id,
+    )
+    check(
+        "reopen does not re-anchor the bar",
+        all(_rec_kind(r) != kaya.wire.TX_MENUBAR_APPEND for r in queued),
+    )
+
+# Handler scoping, direct vs stamped: on_activate rides the item into
+# the MENU table (its own id space — never the widget or node tables),
+# and dispatch passes a bar item's activation bare while a stamped
+# context copy's activation carries the copy's keys FIRST (the keys
+# ARE the noun); a toggle's payload lands after the keys.
+hits = []
+with app_menu.build():
+    with app_menu.menu("Edit"):
+        direct = kaya.item(
+            "Rename", on_activate=lambda: hits.append(("direct",)))
+        tog = kaya.toggle(
+            "Details", on_toggle=lambda on: hits.append(("toggle", on)))
+    with kaya.context_catalog():
+        stamped = kaya.item(
+            "Remove",
+            on_activate=lambda group, key: hits.append(("stamped", group, key)))
+check(
+    "on_activate registers in the menu-item table only",
+    (kaya.wire.OCC_MENU_ACTIVATED, direct.id) in app_menu._menu_handlers
+    and (kaya.wire.OCC_MENU_ACTIVATED, direct.id) not in app_menu._widget_handlers
+    and (kaya.wire.OCC_MENU_ACTIVATED, direct.id) not in app_menu._node_handlers,
+)
+_occs = [
+    (kaya.wire.OCC_MENU_ACTIVATED, direct.id, [], None),
+    (kaya.wire.OCC_MENU_ACTIVATED, stamped.id, ["g2", "a"], None),
+    (kaya.wire.OCC_MENU_TOGGLED, tog.id, [], True),
+]
+_real_next = kaya.runtime.next_occurrence
+kaya.runtime.next_occurrence = lambda: _occs.pop(0) if _occs else None
+try:
+    app_menu._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next
+check("direct activation dispatches bare", ("direct",) in hits)
+check("stamped activation carries the keys first", ("stamped", "g2", "a") in hits)
+check("toggle payload lands after the keys", ("toggle", True) in hits)
+
+# Abort rollback of an aborted append: the reopened subtree's records
+# die with the transaction (nothing ships), and the abort disarms any
+# open menu scope — the next transaction must not inherit a seat.
+_shipped = []
+_real_submit2 = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: _shipped.append(len(records))
+try:
+    with app_menu.build():
+        with file_menu.append():
+            kaya.item("Doomed")
+        raise RuntimeError("handler bug")
+except RuntimeError:
+    pass
+finally:
+    kaya.runtime.submit = _real_submit2
+check("an aborted append ships nothing", not _shipped)
+try:
+    with app_menu.build():
+        with app_menu.menu("Poisoned"):
+            kaya.item("X")
+            raise RuntimeError("handler bug")
+except RuntimeError:
+    pass
+check("an abort inside a menu scope leaves none armed", not kaya._menu_scopes)
+with app_menu.build():
+    try:
+        kaya.item("Orphan")
+        check("post-abort item outside any scope raises", False)
+    except RuntimeError:
+        check("post-abort item outside any scope raises", True)
+
 sys.exit(1 if failures else 0)
 

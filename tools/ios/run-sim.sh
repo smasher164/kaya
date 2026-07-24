@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# The menus scene runs both of this runner's flavors: the swift guest
+# (IOS_SWIFT_SCENES) and the rust example (rust-swiftui). The phone
+# half of the command vocabulary is the interesting part — promoted
+# primaries in the bar, everything else behind More.
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -124,6 +128,24 @@ rec_suite_start() {
     "$ROOT/tools/harness-extract.sh" --selftest || exit 1
     REC_ROOT="$ROOT/target/recordings/ios"
     mkdir -p "$REC_ROOT"
+    # Extraction sweeps this root, so a leg directory left by an
+    # EARLIER run — a suite this invocation does not run, or a leg
+    # name the runner no longer produces — would be extracted against
+    # TODAY's film and fail "anchor implausible" forever, reddening
+    # every recorded run regardless of the code (observed 2026-07-24:
+    # eight `*-rust` directories from the pre-roster naming, four days
+    # stale, with each recorded run since). A stamp rather than a
+    # wipe, because `run-sim.sh swift` must not delete the
+    # rust-swiftui suite's films: this run's legs carry its id and
+    # extraction ignores everything else. Directories with no stamp
+    # predate the mechanism and can never be matched to a film, so
+    # they go now.
+    REC_RUN="$$-$(date +%s)"
+    local stale
+    for stale in "$REC_ROOT"/*/; do
+        [ -d "$stale" ] || continue
+        [ -f "$stale/run" ] || rm -rf "$stale"
+    done
     # One suite-long recording PER SIMULATOR (concurrent sessions on
     # different udids coexist; same-device sessions are what wedge).
     REC_PIDS=()
@@ -341,6 +363,7 @@ rec_suite_stop() {
     local pids=()
     for dir in "$REC_ROOT"/*/; do
         [ -f "$dir/leg.log" ] || continue
+        [ "$(cat "$dir/run" 2>/dev/null)" = "$REC_RUN" ] || continue
         slot=$(cat "$dir/sim" 2>/dev/null || echo 0)
         (
             "$ROOT/tools/harness-extract.sh" "$REC_ROOT/suite-$slot.mov" \
@@ -353,6 +376,7 @@ rec_suite_stop() {
     [ ${#pids[@]} -eq 0 ] || wait "${pids[@]}" 2>/dev/null || true
     for dir in "$REC_ROOT"/*/; do
         [ -f "$dir/extract.log" ] || continue
+        [ "$(cat "$dir/run" 2>/dev/null)" = "$REC_RUN" ] || continue
         cat "$dir/extract.log"
         [ ! -e "$dir/extract-failed" ] || failed=1
     done
@@ -363,8 +387,10 @@ rec_start() {
     [ -n "${KAYA_RECORD:-}" ] || return 0
     REC_DIR="$ROOT/target/recordings/ios/$1"
     mkdir -p "$REC_DIR"
-    # Which simulator's film covers this leg.
+    # Which simulator's film covers this leg, and which run recorded
+    # it (extraction takes only this run's legs — see rec_suite_start).
     echo "${2:-0}" >"$REC_DIR/sim"
+    printf '%s\n' "$REC_RUN" >"$REC_DIR/run"
 }
 
 rec_finish() {
@@ -524,7 +550,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # measured 2026-07-22); legs queue only after every binary
     # exists. The list is explicit: window/panels are desktop-only
     # by design and must not ride $SCENES here.
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections"
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus"
     swift_pids=()
     swift_names=()
     for guest in $IOS_SWIFT_SCENES; do
@@ -656,6 +682,17 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle progressrs-swiftui dev.kaya.progressswiftui "$TARGET_DIR/examples/progress")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on progress-swiftui "$APP" dev.kaya.progressswiftui progress-swiftui progress progress
+
+    # The menus scene (the depth annotation above): the phone half of
+    # the command vocabulary — promoted primaries as trailing bar
+    # actions, the rest in the More menu, the shortcut through the
+    # interpreter's one dispatch table, long-press context menus with
+    # stamped keys as the noun, and the late rebuild's promotion
+    # recompute (Publish resolves with no More-open step).
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example menus
+    APP=$(make_bundle menusrs-swiftui dev.kaya.menusswiftui "$TARGET_DIR/examples/menus")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on menus-swiftui "$APP" dev.kaya.menusswiftui menus-swiftui menus menus
     drain
     timing swiftui-build+legs
 fi

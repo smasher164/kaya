@@ -2,6 +2,7 @@ package dev.kaya.milestone2
 
 import android.os.Bundle
 import android.system.Os
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import dev.kaya.Kaya
 import dev.kaya.KayaCompose
@@ -29,4 +30,12 @@ class MainActivity : ComponentActivity() {
         Kaya.attach(this)
         KayaCompose.mount(this)
     }
+
+    // The hardware-keyboard route for menu shortcuts (ChromeOS/DeX):
+    // the shell Activity is where Android delivers a modified chord,
+    // and the interpreter owns the spelling, the catalog table, and
+    // the emit — so this forwards and never decides. A chord no
+    // catalog action claims falls through to the platform unchanged.
+    override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
+        KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 }

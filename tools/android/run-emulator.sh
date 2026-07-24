@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# The menus scene runs both legs here: compose (the rust guest on the
+# Compose interpreter) and jvm (the Kotlin guest over milestone2kt's
+# "menus" arm). Hardware chords reach the catalog through each host
+# Activity's dispatchKeyShortcutEvent override; the harness verb
+# drives the same interpreter table, so the emulator needs no
+# keyboard.
 
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
@@ -370,6 +376,13 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity sections \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+    # The menus scene: the command catalog in the top bar's overflow,
+    # promoted primaries as bar actions, long-press context menus, and
+    # the shortcut verb through the interpreter's dispatch table.
+    run_apk menus-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity menus \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
     drain
     timing legs-compose
 fi
@@ -463,6 +476,13 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity sections \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+    # The menus scene through the JVM binding (see the compose leg);
+    # this host carries the same dispatchKeyShortcutEvent override, so
+    # the chord reaches the catalog identically in both languages.
+    run_apk menus-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity menus \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
     drain
     timing legs-jvm
 fi

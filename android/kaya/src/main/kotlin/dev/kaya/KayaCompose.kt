@@ -2,9 +2,11 @@ package dev.kaya
 
 import android.graphics.BitmapFactory
 import android.util.Log
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -17,6 +19,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
@@ -25,6 +31,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -187,6 +194,25 @@ object KayaSceneModel {
     val sectionIndex = HashMap<Long, KayaSection>()
     var selectedSection by mutableStateOf<Long?>(null)
     var sectionsPresentation: Long = 0
+    // The window's command catalog (window 0 — this host's one
+    // surface) in menubar-append order, plus every menu item by id.
+    // Menu items are their OWN id space (c_menu_item), never widget,
+    // node, or surface ids (DESIGN.md, Menus).
+    val menuItems = HashMap<Long, KayaMenuItem>() // UI thread only
+    val menubar = androidx.compose.runtime.mutableStateListOf<KayaMenuItem>()
+    // Context catalogs by anchored WIDGET id. Each attach APPENDS one
+    // root — a widget's roots ACCUMULATE in attach order (the bindings
+    // emit one attach per root), never replace. A template attachment
+    // arrives once per stamped copy, carrying that copy's key path —
+    // the noun every activation from the anchor stamps. Observable so
+    // an attach landing after first composition still wraps its node.
+    val contextMenus =
+        androidx.compose.runtime.mutableStateMapOf<Long, KayaContextAttachment>()
+    // The OPEN context menu's anchor widget. The long-press gesture
+    // and the harness's context_open drive this SAME state (one
+    // presentation route); menu_activate resolves against it, and
+    // closing — dismissal or a leaf firing — clears it.
+    var openContextWidget by mutableStateOf<Long?>(null)
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -229,6 +255,50 @@ class KayaNavEntry(val id: Long) {
     var interceptBack by mutableStateOf(false)
 }
 
+/** One menu item — a VERB, never a place (DESIGN.md, Menus). All
+ * mutable props are snapshot state: label/enabled writes recompose
+ * live, and a catalog rebuild recomputes promotion automatically
+ * because the promoted walk reads observable children/primary. This
+ * model is also the backend's user-state mirror: a user toggle/radio
+ * pick lands in checked/value here (and emits), the guest deliberately
+ * may not echo it back, and an unrelated prop write must not clobber
+ * it. */
+class KayaMenuItem(val id: Long, val kind: Int) {
+    var label by mutableStateOf("")
+    // Own enablement only; what a row shows is the EFFECTIVE state —
+    // an item under a disabled grouping node reads disabled and lifts
+    // when the ancestor does (kayaMenuEffectivelyEnabled).
+    var enabled by mutableStateOf(true)
+    // Toggle only: the Checkbox contract (programmatic writes QUIET).
+    var checked by mutableStateOf(false)
+    // Radio group only: the Choice contract's integral option index.
+    var value by mutableStateOf(0.0)
+    // Action only: the phone-promotion hint (inert on desktops).
+    var primary by mutableStateOf(false)
+    // Window-anchored action only: the canonical wire spelling; the
+    // catalog walk IS the dispatch table.
+    var shortcut by mutableStateOf("")
+    // Optional icon blob, decoded like Image; promoted bar actions
+    // show it, overflow rows stay textual (native menu dress).
+    var iconBitmap by mutableStateOf<ImageBitmap?>(null)
+    // Single-parent (the root validates); set at append. Bar-level
+    // items keep null.
+    var parent: KayaMenuItem? = null
+    val children = mutableStateListOf<KayaMenuItem>()
+}
+
+/** A context catalog attachment: the anchored ROOTS in attach order —
+ * every CONTEXT_ATTACH(_NODE) appends one root; roots accumulate,
+ * never replace (an observable list, so a late root joins a rendered
+ * menu) — plus the anchor copy's raw wire key path `{ u32 count; u32
+ * reserved; count values }` as CONTEXT_ATTACH_NODE delivered it,
+ * handed back VERBATIM as the noun of every emission from this anchor
+ * (empty for a live widget). */
+class KayaContextAttachment {
+    val roots = androidx.compose.runtime.mutableStateListOf<KayaMenuItem>()
+    var noun: ByteArray = ByteArray(0)
+}
+
 object KayaCompose {
     // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
     // in kaya.h.
@@ -238,7 +308,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x39a6143b6f4c3e0euL
+    private const val SPEC_HASH: ULong = 0x0e4b7f4f716cc749uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -257,6 +327,12 @@ object KayaCompose {
     private const val APPLY_ADD_SECTION = 15
     private const val APPLY_SELECT_SECTION = 16
     private const val APPLY_SET_SECTION_PROP = 17
+    private const val APPLY_MENU_ITEM_CREATE = 18
+    private const val APPLY_MENU_ITEM_APPEND = 19
+    private const val APPLY_MENUBAR_APPEND = 20
+    private const val APPLY_CONTEXT_ATTACH = 21
+    private const val APPLY_CONTEXT_ATTACH_NODE = 22
+    private const val APPLY_SET_MENU_PROP = 23
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -278,6 +354,31 @@ object KayaCompose {
     private const val EPROP_INTERCEPT_BACK = 2
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
+    // Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus): menu
+    // and radio_group are the grouping nodes, the rest are leaves.
+    const val MENU_KIND_MENU = 1
+    const val MENU_KIND_ACTION = 2
+    const val MENU_KIND_TOGGLE = 3
+    const val MENU_KIND_RADIO_GROUP = 4
+    const val MENU_KIND_RADIO_OPTION = 5
+    const val MENU_KIND_SEPARATOR = 6
+    // Menu properties (spec::MENU_PROPS) — their own typed surface,
+    // separate from widget/window/entry/section props.
+    private const val MPROP_LABEL = 1
+    private const val MPROP_ENABLED = 2
+    private const val MPROP_CHECKED = 3
+    private const val MPROP_VALUE = 4
+    private const val MPROP_ICON = 5
+    private const val MPROP_PRIMARY = 6
+    private const val MPROP_SHORTCUT = 7
+    /**
+     * How many promoted primary actions the top bar carries: k is this
+     * PLATFORM's idiom, never computed by kaya (DESIGN.md, Menus). M3
+     * tolerates up to three top-bar actions; one slot stays the
+     * overflow anchor, so two remain for promoted primaries. The rest
+     * of the catalog is always reachable through overflow.
+     */
+    const val MENU_PROMOTED_CAPACITY = 2
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -342,6 +443,58 @@ object KayaCompose {
         mountedActivity?.title = top?.title ?: KayaSceneModel.windowTitle
     }
 
+    /**
+     * The hardware-keyboard shortcut route (ChromeOS/DeX): map the key
+     * event to its canonical spelling and drive the SAME catalog table
+     * and activation helper a rendered row uses — one dispatch path,
+     * one menu_activated occurrence (the shortcut is another
+     * affordance of the same item). The shell Activity overrides
+     * [android.app.Activity.dispatchKeyShortcutEvent] and forwards
+     * here on the UI thread — both app modules (the rust host and the
+     * JVM guest host) carry that one-line override beside their scene
+     * plumbing. Returns true when a catalog action owned the chord.
+     */
+    @JvmStatic
+    fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean {
+        val spelling = kayaShortcutSpelling(event) ?: return false
+        return kayaDispatchShortcut(spelling)
+    }
+
+    /**
+     * A key event's canonical wire spelling — lowercase, modifiers in
+     * `primary`, `shift`, `alt` order, one key from the closed floor
+     * (ASCII alphanumerics and the named set). `primary` is ctrl off
+     * Apple hosts. escape never maps: it is the platforms' universal
+     * dismiss key and the root rejects the spelling outright; bare
+     * alphanumerics are typing, never chords (the root enforces the
+     * same floor, so an unmapped event simply falls through to the
+     * platform).
+     */
+    private fun kayaShortcutSpelling(event: KeyEvent): String? {
+        if (event.action != KeyEvent.ACTION_DOWN) return null
+        val key = when (event.keyCode) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z ->
+                ('a' + (event.keyCode - KeyEvent.KEYCODE_A)).toString()
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 ->
+                ('0' + (event.keyCode - KeyEvent.KEYCODE_0)).toString()
+            KeyEvent.KEYCODE_ENTER -> "enter"
+            KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL -> "delete"
+            in KeyEvent.KEYCODE_F1..KeyEvent.KEYCODE_F12 ->
+                "f${event.keyCode - KeyEvent.KEYCODE_F1 + 1}"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+            KeyEvent.KEYCODE_DPAD_UP -> "up"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+            else -> return null
+        }
+        val mods = StringBuilder()
+        if (event.isCtrlPressed) mods.append("primary+")
+        if (event.isShiftPressed) mods.append("shift+")
+        if (event.isAltPressed) mods.append("alt+")
+        if (mods.isEmpty() && key.length == 1) return null
+        return mods.toString() + key
+    }
+
     private fun startPump(activity: ComponentActivity) {
         thread(name = "kaya-compose-pump") {
             val buffer = ByteArray(64 * 1024)
@@ -374,8 +527,11 @@ object KayaCompose {
             val size = b.int
             val kind = b.short.toInt()
             b.short // flags
-            if (kind == APPLY_SET_PROP) {
-                b.long // widget id
+            // SET_PROP and SET_MENU_PROP share the body shape (u64 id,
+            // u32 prop, u32 pad, value); a menu item's icon rides the
+            // same batch-local blob table as an image source.
+            if (kind == APPLY_SET_PROP || kind == APPLY_SET_MENU_PROP) {
+                b.long // widget or menu item id
                 b.int // prop
                 b.int // pad
                 val type = b.int
@@ -595,6 +751,94 @@ object KayaCompose {
                         else -> error("kaya: unknown section prop $prop")
                     }
                 }
+                APPLY_MENU_ITEM_CREATE -> {
+                    // u64 item, u32 menu_kind, u32 pad — its OWN id
+                    // space (c_menu_item); append-only, never removed.
+                    val item = b.long
+                    val menuKind = b.int
+                    b.int // pad
+                    KayaSceneModel.menuItems[item] = KayaMenuItem(item, menuKind)
+                }
+                APPLY_MENU_ITEM_APPEND -> {
+                    // u64 parent, u64 child — the closed grammar and
+                    // single-parent rule were validated at the root.
+                    val parent = b.long
+                    val child = b.long
+                    val parentItem = KayaSceneModel.menuItems[parent]!!
+                    val childItem = KayaSceneModel.menuItems[child]!!
+                    childItem.parent = parentItem
+                    parentItem.children.add(childItem)
+                }
+                APPLY_MENUBAR_APPEND -> {
+                    // u64 window (0 — this host's one surface), u64
+                    // item: a top-level grouping node joins the window
+                    // catalog; the top bar folds it into overflow.
+                    b.long // window
+                    val item = b.long
+                    KayaSceneModel.menubar.add(KayaSceneModel.menuItems[item]!!)
+                }
+                APPLY_CONTEXT_ATTACH -> {
+                    // u64 widget, u64 item — the same vocabulary
+                    // scoped to a live-widget noun; empty noun path.
+                    // One attach per ROOT: append, never replace.
+                    val widget = b.long
+                    val item = b.long
+                    KayaSceneModel.contextMenus
+                        .getOrPut(widget) { KayaContextAttachment() }
+                        .roots.add(KayaSceneModel.menuItems[item]!!)
+                }
+                APPLY_CONTEXT_ATTACH_NODE -> {
+                    // u64 widget (the STAMPED copy), u64 item, then the
+                    // copy's key path { u32 count; u32 reserved; count
+                    // values }. The raw path bytes ARE the noun: they
+                    // ride back verbatim in every emission from this
+                    // anchor (menu_tag consumes them unchanged), so the
+                    // slice is captured, never re-encoded.
+                    val widget = b.long
+                    val item = b.long
+                    val pathStart = b.position()
+                    val count = b.int
+                    b.int // reserved
+                    repeat(count) { skipValue(b) }
+                    val noun = batch.copyOfRange(pathStart, b.position())
+                    // One attach per ROOT: append, never replace (the
+                    // copy's noun is per-anchor, identical across its
+                    // roots).
+                    val attachment = KayaSceneModel.contextMenus
+                        .getOrPut(widget) { KayaContextAttachment() }
+                    attachment.roots.add(KayaSceneModel.menuItems[item]!!)
+                    attachment.noun = noun
+                }
+                APPLY_SET_MENU_PROP -> {
+                    // u64 item, u32 mprop, u32 pad, value (resolved).
+                    // The echo doctrine: checked/value writes here are
+                    // CONFIGURATION — they land in the model and emit
+                    // nothing (user rows/verbs are the emitting route).
+                    val id = b.long
+                    val prop = b.int
+                    b.int // pad
+                    val item = KayaSceneModel.menuItems[id]!!
+                    when (prop) {
+                        MPROP_LABEL -> item.label = readString(b)
+                        MPROP_ENABLED -> item.enabled = readBool(b)
+                        MPROP_CHECKED -> item.checked = readBool(b)
+                        MPROP_VALUE -> item.value = readF64(b)
+                        MPROP_PRIMARY -> item.primary = readBool(b)
+                        MPROP_SHORTCUT -> item.shortcut = readString(b)
+                        MPROP_ICON -> {
+                            // The image-source path's twin: a
+                            // batch-local blob handle the pump
+                            // prefetched; a null decode is the
+                            // placeholder class, never a crash.
+                            val handle = readBlobHandle(b)
+                            val bytes = blobs[handle]
+                            item.iconBitmap = bytes?.let {
+                                BitmapFactory.decodeByteArray(it, 0, it.size)
+                            }?.asImageBitmap()
+                        }
+                        else -> error("kaya: unknown menu prop $prop")
+                    }
+                }
                 APPLY_ADD_CHILD -> {
                     val parent = b.long
                     val child = b.long
@@ -644,6 +888,16 @@ object KayaCompose {
                         KayaSceneModel.nodes[parent]?.children?.removeAll { it.id == id }
                     }
                     KayaSceneModel.nodes.remove(id)
+                    // A destroyed anchor takes its context attachment
+                    // with it (menu ITEMS are never destroyed; the
+                    // anchor map entry is): a For-row removal must not
+                    // leave the harness's open-menu pointer dangling
+                    // (the SwiftUI sibling's order).
+                    if (KayaSceneModel.contextMenus.remove(id) != null &&
+                        KayaSceneModel.openContextWidget == id
+                    ) {
+                        KayaSceneModel.openContextWidget = null
+                    }
                 }
                 APPLY_COMMAND -> {
                     val id = b.long
@@ -664,6 +918,11 @@ object KayaCompose {
                         else -> error("kaya: unknown command $command")
                     }
                 }
+                // A record kind this interpreter does not know is a
+                // core/interpreter disagreement — fail LOUDLY (the
+                // SwiftUI sibling's fatalError); a silent skip is the
+                // false-verdict class.
+                else -> error("kaya: unknown apply record kind $kind")
             }
             b.position(start + size)
         }
@@ -765,6 +1024,50 @@ object KayaCompose {
         if (bits[1] == "last") return registry.lastOrNull()
         val i = bits[1].toIntOrNull() ?: return null
         return registry.getOrNull(i)
+    }
+
+    /**
+     * The quoted-head split (harness.rs's split_quoted_head): the
+     * verbs whose quoted argument comes FIRST — expect_menu's path,
+     * menu_activate's path, shortcut's spelling — may carry spaces
+     * inside the quotes, so scan to the closing quote and return
+     * (inner, trimmed tail). Null when the head is not quoted.
+     */
+    private fun quotedHead(rest: String): Pair<String, String>? {
+        val s = rest.trim()
+        if (!s.startsWith("\"")) return null
+        val end = s.indexOf('"', 1)
+        if (end < 0) return null
+        return Pair(s.substring(1, end), s.substring(end + 1).trim())
+    }
+
+    /**
+     * Resolve any `kind#index` widget target across the per-kind
+     * registries — context_open accepts every targetable kind, so the
+     * kind names the registry exactly as harness.rs's parse_target
+     * does (a kind that names a different registry is the
+     * false-verdict class the [target] helper guards).
+     */
+    private fun kayaWidgetTarget(spec: String): KayaNode? {
+        val kind = spec.substringBefore('#')
+        val registry = when (kind) {
+            "button" -> KayaSceneModel.buttons
+            "checkbox" -> KayaSceneModel.checkboxes
+            "slider" -> KayaSceneModel.sliders
+            "entry" -> KayaSceneModel.entries
+            "label" -> KayaSceneModel.labels
+            "column" -> KayaSceneModel.columns
+            "row" -> KayaSceneModel.rows
+            "image" -> KayaSceneModel.images
+            "scroll" -> KayaSceneModel.scrolls
+            "progress" -> KayaSceneModel.progresses
+            "select" -> KayaSceneModel.selects
+            "radio" -> KayaSceneModel.radios
+            "grid" -> KayaSceneModel.grids
+            "textarea" -> KayaSceneModel.textareas
+            else -> return null
+        }
+        return target(spec, kind, registry)
     }
 
     private fun quoted(parts: List<String>): String {
@@ -1349,6 +1652,126 @@ object KayaCompose {
                                 failures.add("${parts[1]} leaves leftover ($slack)")
                         }
                     }
+                    "expect_menus" -> {
+                        // The top-level catalog count — the observation
+                        // menubar_append's topology is verified by.
+                        val want = parts[1].toInt()
+                        val got = onUi(activity) { KayaSceneModel.menubar.size }
+                        if (got == want) observed.add("$want menus")
+                        else failures.add("$got menus, wanted $want")
+                    }
+                    "expect_menu" -> {
+                        // Quoted path first, then the state token(s);
+                        // the token names WHICH axis is read (an item
+                        // has several at once) — harness.rs's
+                        // MenuState/MenuAspect split.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val want = head?.second ?: ""
+                        val wantValid = want == "enabled" || want == "disabled" ||
+                            want == "checked" || want == "unchecked" ||
+                            Regex("value \\d+").matches(want)
+                        if (head == null || !wantValid) {
+                            failures.add(
+                                "expect_menu wants a quoted path and " +
+                                    "enabled|disabled|checked|unchecked|value N: $line")
+                        } else {
+                            val path = head.first
+                            val got = onUi(activity) {
+                                kayaResolveMenuPath(path)?.first?.let { item ->
+                                    when {
+                                        want == "enabled" || want == "disabled" ->
+                                            // The EFFECTIVE read: inherited
+                                            // disabled counts, and lifts with
+                                            // the ancestor.
+                                            if (kayaMenuEffectivelyEnabled(item)) "enabled"
+                                            else "disabled"
+                                        want == "checked" || want == "unchecked" ->
+                                            if (item.checked) "checked" else "unchecked"
+                                        else -> "value ${item.value.toInt()}"
+                                    }
+                                }
+                            }
+                            when {
+                                // Retried by the expect wrapper: the miss
+                                // doubles as the wait for a catalog
+                                // rebuild (or a late append) to land.
+                                got == null -> failures.add("no menu item at \"$path\"")
+                                got == want -> observed.add("menu \"$path\" $want")
+                                else -> failures.add(
+                                    "menu \"$path\" reads \"$got\", wanted \"$want\"")
+                            }
+                        }
+                    }
+                    "menu_activate" -> {
+                        // Drive the REAL activation route — the same
+                        // helper every rendered row calls — wherever
+                        // the item surfaced (catalog, or the OPEN
+                        // context menu). Silent, like click; the leaf
+                        // firing closes the open menu.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("menu_activate wants a quoted path: $line")
+                        } else {
+                            val ok = onUi(activity) {
+                                val hit = kayaResolveMenuPath(head.first)
+                                if (hit != null) {
+                                    // The leaf firing closes the open
+                                    // menu: close BEFORE the fire (the
+                                    // SwiftUI sibling's order).
+                                    KayaSceneModel.openContextWidget = null
+                                    kayaActivateMenuItem(hit.first, hit.second)
+                                }
+                                hit != null
+                            }
+                            if (!ok) failures.add("no menu item at \"${head.first}\"")
+                        }
+                    }
+                    "context_open" -> {
+                        // Open the attached context menu through the
+                        // model state the long-press gesture drives —
+                        // the SAME presentation route. No emission.
+                        val spec = parts.getOrNull(1) ?: ""
+                        if (spec.startsWith("entry#") || spec.startsWith("textarea#")) {
+                            // v1: editable text keeps its native edit
+                            // menu as dress — probing a menu that
+                            // cannot exist is the false-verdict class.
+                            failures.add(
+                                "$spec is editable text — its context menu is dress, " +
+                                    "not a context_open target")
+                        } else {
+                            val miss = onUi(activity) {
+                                val node = kayaWidgetTarget(spec)
+                                    ?: return@onUi "no such target $spec"
+                                if (!KayaSceneModel.contextMenus.containsKey(node.id)) {
+                                    "no context menu attached to $spec"
+                                } else {
+                                    KayaSceneModel.openContextWidget = node.id
+                                    ""
+                                }
+                            }
+                            if (miss.isNotEmpty()) failures.add(miss)
+                        }
+                    }
+                    "shortcut" -> {
+                        // The platform dispatch table — the catalog
+                        // walk the hardware-key route traverses — and
+                        // the SAME menu_activated the row emits: one
+                        // dispatch path, proven by the scene's fold.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val spelling = head?.first ?: ""
+                        if (head == null || head.second.isNotEmpty() ||
+                            spelling.isEmpty() || spelling.any { it.isWhitespace() }
+                        ) {
+                            failures.add("shortcut wants a quoted spelling: $line")
+                        } else {
+                            // A SILENT action on every platform: a
+                            // chord no catalog action owns is a no-op
+                            // — exactly what the hardware-key route
+                            // does with an unowned chord — and the
+                            // following expect is the observable.
+                            onUi(activity) { kayaDispatchShortcut(spelling) }
+                        }
+                    }
                     else -> failures.add("unknown step $line")
                 }
                 if (failures.size > failuresBefore && parts[0].startsWith("expect") &&
@@ -1396,9 +1819,93 @@ object KayaCompose {
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+/**
+ * The context-menu anchor (DESIGN.md, Menus): a node carrying a
+ * context catalog renders inside a long-press wrapper — the platform's
+ * own gesture — anchoring an M3 DropdownMenu with the attached rows.
+ * The open state is the MODEL's ([KayaSceneModel.openContextWidget]):
+ * the gesture and the harness's context_open drive the same route, and
+ * a leaf firing or a dismissal closes it. Stamped rows carry their
+ * copy's key path as the noun of every emission (the keys ARE the
+ * noun).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
+    val attachment = KayaSceneModel.contextMenus[node.id]
+    if (attachment == null) {
+        KayaRenderCore(node, isRoot)
+        return
+    }
+    Box(
+        Modifier.combinedClickable(
+            // The wrapper's plain click is inert: the anchored widget
+            // owns its own activation route.
+            onClick = {},
+            onLongClick = { KayaSceneModel.openContextWidget = node.id },
+        )
+    ) {
+        KayaRenderCore(node, isRoot)
+        val open = KayaSceneModel.openContextWidget == node.id
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { KayaSceneModel.openContextWidget = null },
+        ) {
+            val close = { KayaSceneModel.openContextWidget = null }
+            // The drill-in state resets on every (re)open: the menu
+            // always surfaces at its roots.
+            var drilled by remember(open) { mutableStateOf<KayaMenuItem?>(null) }
+            val sub = drilled
+            if (sub == null) {
+                // The attached roots in attach order — the semantic
+                // tree's first level. A grouping root (menu or
+                // radio_group) is a labeled drill-in: its label IS a
+                // path segment ("Stuff>Rename"); a leaf root is its
+                // own row ("Rename" resolves bare only then).
+                // Separators between roots come from the catalog
+                // itself — nothing is added here.
+                attachment.roots.forEach { root ->
+                    when (root.kind) {
+                        KayaCompose.MENU_KIND_MENU,
+                        KayaCompose.MENU_KIND_RADIO_GROUP ->
+                            DropdownMenuItem(
+                                text = { Text(root.label) },
+                                trailingIcon = { Text("▸") },
+                                enabled = kayaMenuEffectivelyEnabled(root),
+                                onClick = { drilled = root },
+                            )
+                        else ->
+                            KayaMenuRows(
+                                listOf(root), attachment.noun,
+                                onDrill = { drilled = it }, onClose = close)
+                    }
+                }
+            } else {
+                // The drill-in: a back row over the grouping root's
+                // rows (the overflow's idiom). Deeper grouping cannot
+                // occur: the root's closed grammar caps context depth
+                // at root items + one grouping-node level.
+                DropdownMenuItem(
+                    text = { Text("‹ ${sub.label}") },
+                    onClick = { drilled = null },
+                )
+                HorizontalDivider()
+                if (sub.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
+                    // The options with the platform's checkmark idiom.
+                    KayaRadioRows(sub, attachment.noun, close)
+                } else {
+                    KayaMenuRows(
+                        sub.children.toList(), attachment.noun,
+                        onDrill = { drilled = it }, onClose = close)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
     // The mounted root fills its window — the same normalization GTK
     // and UIKit needed. A Compose Column wraps its width even when
     // weighted children have forced its height, so the grow scene's
@@ -1707,6 +2214,61 @@ fun KayaRoot() {
     // where composition provides one (expect_fills sums it between
     // tracks).
     kayaDensity = LocalDensity.current.density.toDouble()
+    if (KayaSceneModel.menubar.isEmpty()) {
+        // No catalog: the surface keeps its exact pre-menus shape (no
+        // phantom bar over scenes that declared no commands).
+        KayaSurface()
+    } else {
+        // The window catalog's phone lowering (DESIGN.md, Menus): the
+        // catalog folds into the top app bar — promoted primaries as
+        // real bar actions, everything in the overflow ⋮.
+        Column(modifier = Modifier.fillMaxSize()) {
+            KayaMenuTopBar()
+            Box(modifier = Modifier.weight(1f)) { KayaSurface() }
+        }
+    }
+
+    // The system back gesture, the user-sovereign POP: enabled only
+    // while the stack has entries (declared-ahead, the platform's own
+    // OnBackPressedCallback model — the root's back still leaves the
+    // app).
+    androidx.activity.compose.BackHandler(
+        enabled = KayaSceneModel.navEntries.isNotEmpty()
+    ) { kayaUserBack() }
+
+    KayaSceneModel.alertId?.let { alert ->
+        // The platform's REAL modal dialog: M3 AlertDialog. Every
+        // native dismissal (back, outside tap) IS the cancel slot;
+        // the action row and the cancel button run the same answer
+        // path the runner's alert_choose drives.
+        AlertDialog(
+            onDismissRequest = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) },
+            title = { Text(KayaSceneModel.alertTitle) },
+            text = { Text(KayaSceneModel.alertMessage) },
+            confirmButton = {
+                Row {
+                    KayaSceneModel.alertActions.forEachIndexed { index, label ->
+                        TextButton(onClick = { kayaAnswerAlert(alert, index) }) {
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) }) {
+                    Text(KayaSceneModel.alertCancel)
+                }
+            },
+        )
+    }
+}
+
+/** The one scene surface (sections scaffold | nav top | mounted root),
+ * exactly the pre-menus KayaRoot body: the menus top bar stacks ABOVE
+ * this so a catalog never disturbs the measured offer the layout
+ * observations read. */
+@Composable
+private fun KayaSurface() {
     // Normalized default: the root is pinned to the top-leading corner,
     // not centered, so the scene packs into the top-left like AppKit/SwiftUI.
     Box(
@@ -1745,40 +2307,340 @@ fun KayaRoot() {
         }
         }
     }
+}
 
-    // The system back gesture, the user-sovereign POP: enabled only
-    // while the stack has entries (declared-ahead, the platform's own
-    // OnBackPressedCallback model — the root's back still leaves the
-    // app).
-    androidx.activity.compose.BackHandler(
-        enabled = KayaSceneModel.navEntries.isNotEmpty()
-    ) { kayaUserBack() }
-
-    KayaSceneModel.alertId?.let { alert ->
-        // The platform's REAL modal dialog: M3 AlertDialog. Every
-        // native dismissal (back, outside tap) IS the cancel slot;
-        // the action row and the cancel button run the same answer
-        // path the runner's alert_choose drives.
-        AlertDialog(
-            onDismissRequest = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) },
-            title = { Text(KayaSceneModel.alertTitle) },
-            text = { Text(KayaSceneModel.alertMessage) },
-            confirmButton = {
-                Row {
-                    KayaSceneModel.alertActions.forEachIndexed { index, label ->
-                        TextButton(onClick = { kayaAnswerAlert(alert, index) }) {
-                            Text(label)
-                        }
+/**
+ * The window catalog's phone materialization (DESIGN.md, Menus): an M3
+ * TopAppBar whose actions slot carries the promoted primaries — icon
+ * blob when present, text otherwise — and the overflow ⋮ holding the
+ * ENTIRE catalog. Every affordance here routes through
+ * [kayaActivateMenuItem]: chrome emits, one dispatch path.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaMenuTopBar() {
+    TopAppBar(
+        title = {
+            Text(KayaSceneModel.navEntries.lastOrNull()?.title ?: KayaSceneModel.windowTitle)
+        },
+        actions = {
+            // Promotion is CATALOG PREORDER, recomputed on every
+            // catalog mutation: the walk below reads observable
+            // children/primary snapshot state, so a structural append
+            // or primary flip invalidates this composition — the
+            // recompute IS the recomposition.
+            kayaPromotedActions().forEach { item ->
+                val enabled = kayaMenuEffectivelyEnabled(item)
+                val icon = item.iconBitmap
+                if (icon != null) {
+                    IconButton(
+                        onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
+                        enabled = enabled,
+                    ) {
+                        Image(bitmap = icon, contentDescription = item.label)
+                    }
+                } else {
+                    TextButton(
+                        onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
+                        enabled = enabled,
+                    ) {
+                        Text(item.label)
                     }
                 }
+            }
+            KayaOverflowMenu()
+        },
+    )
+}
+
+/**
+ * The overflow ⋮: one M3 DropdownMenu carrying the catalog. Top-level
+ * grouping nodes render as labeled groups with dividers (the M3
+ * dropdown's group idiom); a nested `menu` survives as a drill-in —
+ * deterministic content swap with a back row, no cascade gymnastics —
+ * and a nested `radio_group` stays inline with radio rows.
+ */
+@Composable
+private fun KayaOverflowMenu() {
+    var expanded by remember { mutableStateOf(false) }
+    var drilled by remember { mutableStateOf<KayaMenuItem?>(null) }
+    Box {
+        IconButton(onClick = {
+            drilled = null
+            expanded = true
+        }) { Text("⋮") }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = {
+                expanded = false
+                drilled = null
             },
-            dismissButton = {
-                TextButton(onClick = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) }) {
-                    Text(KayaSceneModel.alertCancel)
+        ) {
+            val close = {
+                expanded = false
+                drilled = null
+            }
+            // Promotion moves an action OUT of overflow: the promoted
+            // set renders as real bar actions and is excluded from
+            // every overflow row run (drill-ins included).
+            val promotedIds = kayaPromotedActions().map { it.id }.toSet()
+            val sub = drilled
+            if (sub == null) {
+                KayaSceneModel.menubar.forEachIndexed { i, group ->
+                    if (i > 0) HorizontalDivider()
+                    Text(
+                        group.label,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    if (group.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
+                        // A bar-level radio group: a labeled group
+                        // whose options use the checkmark idiom.
+                        KayaRadioRows(group, ByteArray(0), close)
+                    } else {
+                        KayaMenuRows(
+                            group.children.toList(),
+                            ByteArray(0),
+                            onDrill = { drilled = it },
+                            onClose = close,
+                            promoted = promotedIds,
+                        )
+                    }
                 }
+            } else {
+                // The drill-in: a back row over the submenu's rows.
+                DropdownMenuItem(
+                    text = { Text("‹ ${sub.label}") },
+                    onClick = { drilled = null },
+                )
+                HorizontalDivider()
+                KayaMenuRows(
+                    sub.children.toList(),
+                    ByteArray(0),
+                    onDrill = { drilled = it },
+                    onClose = close,
+                    promoted = promotedIds,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One run of menu rows — the shared materialization for the overflow
+ * catalog, a drilled submenu, and a context menu. `noun` is the
+ * anchor's key path (empty off the window catalog); every leaf routes
+ * through [kayaActivateMenuItem] and closes the menu (a leaf command
+ * fires exactly one occurrence and the menu closes). `promoted` is the
+ * promoted-primary id set: promotion moves an action OUT of overflow,
+ * so those ids render no row here (empty off the window catalog —
+ * context items are never promoted).
+ */
+@Composable
+fun KayaMenuRows(
+    items: List<KayaMenuItem>,
+    noun: ByteArray,
+    onDrill: (KayaMenuItem) -> Unit,
+    onClose: () -> Unit,
+    promoted: Set<Long> = emptySet(),
+) {
+    items.forEach { item ->
+        when (item.kind) {
+            KayaCompose.MENU_KIND_SEPARATOR -> HorizontalDivider()
+            KayaCompose.MENU_KIND_MENU ->
+                DropdownMenuItem(
+                    text = { Text(item.label) },
+                    trailingIcon = { Text("▸") },
+                    enabled = kayaMenuEffectivelyEnabled(item),
+                    onClick = { onDrill(item) },
+                )
+            KayaCompose.MENU_KIND_RADIO_GROUP -> KayaRadioRows(item, noun, onClose)
+            KayaCompose.MENU_KIND_TOGGLE ->
+                DropdownMenuItem(
+                    text = { Text(item.label) },
+                    // The platform's checkmark idiom: a trailing mark
+                    // while checked, nothing while not.
+                    trailingIcon = { if (item.checked) Text("✓") },
+                    enabled = kayaMenuEffectivelyEnabled(item),
+                    onClick = {
+                        onClose()
+                        kayaActivateMenuItem(item, noun)
+                    },
+                )
+            KayaCompose.MENU_KIND_ACTION ->
+                // A promoted primary renders in the bar, not here.
+                if (!promoted.contains(item.id)) {
+                    DropdownMenuItem(
+                        text = { Text(item.label) },
+                        enabled = kayaMenuEffectivelyEnabled(item),
+                        onClick = {
+                            onClose()
+                            kayaActivateMenuItem(item, noun)
+                        },
+                    )
+                }
+            else ->
+                DropdownMenuItem(
+                    text = { Text(item.label) },
+                    enabled = kayaMenuEffectivelyEnabled(item),
+                    onClick = {
+                        onClose()
+                        kayaActivateMenuItem(item, noun)
+                    },
+                )
+        }
+    }
+}
+
+/** A radio group's options as RadioButton rows (inline wherever the
+ * group appears — bar level or nested; the platform's checkmark
+ * idiom). A pick routes through [kayaActivateMenuItem], which emits on
+ * the GROUP with the option's index — the Choice contract. */
+@Composable
+fun KayaRadioRows(group: KayaMenuItem, noun: ByteArray, onClose: () -> Unit) {
+    group.children.forEachIndexed { i, option ->
+        DropdownMenuItem(
+            text = { Text(option.label) },
+            leadingIcon = {
+                androidx.compose.material3.RadioButton(
+                    selected = group.value.toInt() == i,
+                    onClick = null,
+                )
+            },
+            enabled = kayaMenuEffectivelyEnabled(option),
+            onClick = {
+                onClose()
+                kayaActivateMenuItem(option, noun)
             },
         )
     }
+}
+
+/**
+ * The promoted primaries: the first k primary actions in CATALOG
+ * PREORDER — top-level grouping nodes in menubar-append order, then
+ * each node's children in append order, depth-first; creation time is
+ * irrelevant. k = [KayaCompose.MENU_PROMOTED_CAPACITY], this
+ * platform's own idiom. Call from composition: the observable reads
+ * make every catalog mutation recompute the set.
+ */
+fun kayaPromotedActions(): List<KayaMenuItem> {
+    val promoted = ArrayList<KayaMenuItem>()
+    fun walk(item: KayaMenuItem) {
+        if (item.kind == KayaCompose.MENU_KIND_ACTION && item.primary) promoted.add(item)
+        item.children.forEach { walk(it) }
+    }
+    KayaSceneModel.menubar.forEach { walk(it) }
+    return promoted.take(KayaCompose.MENU_PROMOTED_CAPACITY)
+}
+
+/** Effective enablement: an item is reachable only while it AND every
+ * ancestor grouping node is enabled — the inherited-disabled read
+ * expect_menu asserts, and what lifts when the ancestor re-enables. */
+fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
+    var cur: KayaMenuItem? = item
+    while (cur != null) {
+        if (!cur.enabled) return false
+        cur = cur.parent
+    }
+    return true
+}
+
+/**
+ * THE activation route — every affordance lands here: a rendered row
+ * (bar action, overflow, drill-in, context), the harness's
+ * menu_activate, and a shortcut. Chrome emits (the user route);
+ * programmatic prop writes never come here. The model mirrors the
+ * user state exactly as the checkbox/slider nodes do, and the noun
+ * rides every emission verbatim.
+ */
+fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
+    // A disabled item's row is inert and its chord fires nothing —
+    // the native menu behavior, uniform across the routes.
+    if (!kayaMenuEffectivelyEnabled(item)) return
+    when (item.kind) {
+        KayaCompose.MENU_KIND_ACTION -> KayaPresent.emitMenuActivated(item.id, noun)
+        KayaCompose.MENU_KIND_TOGGLE -> {
+            item.checked = !item.checked
+            KayaPresent.emitMenuToggled(item.id, noun, item.checked)
+        }
+        KayaCompose.MENU_KIND_RADIO_OPTION -> {
+            // The Choice contract: keyed by the GROUP, integral index
+            // — and re-selecting the selected option is NOT a change:
+            // no write, no emission (the platform's own change route
+            // behaves exactly so).
+            val group = item.parent ?: return
+            val index = group.children.indexOfFirst { it.id == item.id }
+            if (index < 0 || group.value.toInt() == index) return
+            group.value = index.toDouble()
+            KayaPresent.emitMenuValueChanged(group.id, noun, index.toDouble())
+        }
+    }
+}
+
+/**
+ * The shortcut dispatch table IS the window catalog: window-anchored
+ * actions matched on their canonical spelling (the root already
+ * rejected shortcuts anywhere else, and context items never carry
+ * one). Both the hardware-key route and the harness's shortcut verb
+ * land here, and the hit activates through [kayaActivateMenuItem] —
+ * the SAME menu_activated the row emits. Returns false when no
+ * catalog action owns the chord.
+ */
+fun kayaDispatchShortcut(spelling: String): Boolean {
+    fun find(items: List<KayaMenuItem>): KayaMenuItem? {
+        for (item in items) {
+            if (item.kind == KayaCompose.MENU_KIND_ACTION && item.shortcut == spelling) {
+                return item
+            }
+            find(item.children)?.let { return it }
+        }
+        return null
+    }
+    val item = find(KayaSceneModel.menubar) ?: return false
+    // A disabled item owns its chord but fires nothing (the helper's
+    // enablement gate — native menu behavior).
+    kayaActivateMenuItem(item, ByteArray(0))
+    return true
+}
+
+/**
+ * Resolve a `>`-joined label path wherever the item SURFACED: while a
+ * context menu is OPEN it owns resolution EXCLUSIVELY — paths walk the
+ * attached roots (a grouping root's label IS a path segment, exactly
+ * as the drill-in surfaces it), and a miss is a miss, never a bar
+ * fallback; otherwise the window catalog — bar and overflow are one
+ * semantic tree on this host. Returns the item plus the noun its
+ * anchor stamps.
+ */
+fun kayaResolveMenuPath(path: String): Pair<KayaMenuItem, ByteArray>? {
+    val segments = path.split('>')
+    if (segments.isEmpty() || segments.any { it.isEmpty() }) return null
+    val openWidget = KayaSceneModel.openContextWidget
+    if (openWidget != null) {
+        val attachment = KayaSceneModel.contextMenus[openWidget] ?: return null
+        return kayaMenuDescend(attachment.roots.toList(), segments)
+            ?.let { Pair(it, attachment.noun) }
+    }
+    return kayaMenuDescend(KayaSceneModel.menubar.toList(), segments)
+        ?.let { Pair(it, ByteArray(0)) }
+}
+
+/** Walk one label path through the semantic tree (separators have no
+ * label and never match). Paths address the tree directly:
+ * "Sort>Date" is option Date in group Sort, "Sort" the group. */
+private fun kayaMenuDescend(
+    roots: List<KayaMenuItem>,
+    segments: List<String>,
+): KayaMenuItem? {
+    var candidates = roots
+    var current: KayaMenuItem? = null
+    for (segment in segments) {
+        current = candidates.firstOrNull {
+            it.kind != KayaCompose.MENU_KIND_SEPARATOR && it.label == segment
+        } ?: return null
+        candidates = current.children
+    }
+    return current
 }
 
 /// A user-driven back on the top entry: an intercept_back-armed top

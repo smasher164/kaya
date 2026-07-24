@@ -9,6 +9,7 @@ use crate::{Ctx, PropKind, prop_variants, record_params, window_prop_variants};
 /// Python's keywords and builtins a parameter would shadow.
 pub const RESERVED: &[&str] = &[
     "_enc", "record", "parse_value", "parse_occurrence", "struct", "BlobHandle",
+    "canonicalize_shortcut",
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in",
     "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
@@ -239,6 +240,90 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("def tx_bind_section_{prop}(section, signal_id):"));
         c.line(&format!("    \"\"\"set_section_prop with a signal-bound {prop} value.\"\"\""));
         c.line(&format!("    return record(TX_SET_SECTION_PROP, struct.pack(\"<QIIQ\", section, SPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+    }
+
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
+    // only — policy (escape, shift-only/bare alphanumerics, the
+    // reserved floor) is the core's, validated on the canonical form.
+    // tx_set_menu_shortcut routes through it, so no call site can
+    // bypass canonicalization.
+    let named_keys = crate::SHORTCUT_NAMED_KEYS
+        .iter()
+        .map(|k| format!("\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    c.line("");
+    c.line("");
+    c.line(&format!("_SHORTCUT_NAMED_KEYS = frozenset(({named_keys}))"));
+    c.line("");
+    c.line("");
+    c.line("def canonicalize_shortcut(spelling):");
+    c.line("    \"\"\"Canonicalize a shortcut spelling to the wire form: lowercase");
+    c.line("    '+'-joined tokens, modifiers ordered primary, shift, alt, then one");
+    c.line("    key (a-z, 0-9, or the closed named set). Accepts ASCII case");
+    c.line("    variants and any modifier order; rejects whitespace, empty tokens,");
+    c.line("    repeated modifiers, aliases (ctrl/cmd/option), and unknown or");
+    c.line("    multiple or missing keys. POLICY stays at the core: escape,");
+    c.line("    shift-only and bare alphanumerics, and the reserved floor are");
+    c.line("    validated there, on the canonical spelling, never rewritten.\"\"\"");
+    c.line("    if not spelling:");
+    c.line("        raise ValueError(\"kaya: shortcut is empty\")");
+    c.line("    if any(ch in spelling for ch in \" \\t\\n\\v\\f\\r\"):");
+    c.line("        raise ValueError(f\"kaya: shortcut {spelling!r} contains whitespace\")");
+    c.line("    parts = spelling.lower().split(\"+\")");
+    c.line("    if any(not p for p in parts):");
+    c.line("        raise ValueError(f\"kaya: shortcut {spelling!r} has an empty token\")");
+    c.line("    mods, key = parts[:-1], parts[-1]");
+    c.line("    seen = []");
+    c.line("    for m in mods:");
+    c.line("        if m not in (\"primary\", \"shift\", \"alt\"):");
+    c.line("            raise ValueError(");
+    c.line("                f\"kaya: shortcut {spelling!r} has an unknown modifier {m!r} \"");
+    c.line("                \"(the portable modifiers are primary, shift, alt; aliases \"");
+    c.line("                \"like ctrl, cmd, and option are not accepted)\")");
+    c.line("        if m in seen:");
+    c.line("            raise ValueError(f\"kaya: shortcut {spelling!r} repeats modifier {m!r}\")");
+    c.line("        seen.append(m)");
+    c.line("    alnum = len(key) == 1 and (\"a\" <= key <= \"z\" or \"0\" <= key <= \"9\")");
+    c.line("    if not alnum and key not in _SHORTCUT_NAMED_KEYS:");
+    c.line("        raise ValueError(");
+    c.line("            f\"kaya: shortcut {spelling!r} key {key!r} is outside the floor \"");
+    c.line("            \"(one of a-z, 0-9, or the closed named set)\")");
+    c.line("    return \"+\".join([m for m in (\"primary\", \"shift\", \"alt\") if m in seen] + [key])");
+
+    // The menu-prop setters (const for every prop; signal binders only
+    // for the bindable ones — icon/primary/shortcut are const-only and
+    // SOURCE_SIGNAL on them dies at the root).
+    for (prop, _, kind) in crate::menu_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (param, ty, expr) = match kind {
+            PropKind::Str if *prop == "shortcut" => (
+                *prop,
+                "str, canonicalized here — the one binding-tier shortcut parser",
+                format!("_enc.value(canonicalize_shortcut({prop}))"),
+            ),
+            PropKind::Str => (*prop, "str", format!("_enc.value({prop})")),
+            PropKind::Bool => (*prop, "bool", format!("_enc.value({prop})")),
+            PropKind::F64 => (*prop, "float", format!("_enc.value({prop})")),
+            PropKind::Blob => (
+                "handle",
+                "a kaya_blob_register handle, consumed by the next submit",
+                "_enc.value(BlobHandle(handle))".to_string(),
+            ),
+            other => unreachable!("no menu prop carries {other:?}"),
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_menu_{prop}(item, {param}):"));
+        c.line(&format!("    \"\"\"set_menu_prop with a constant {prop} value ({ty}).\"\"\""));
+        c.line(&format!("    return record(TX_SET_MENU_PROP, struct.pack(\"<QII\", item, MPROP_{up}, SOURCE_CONST) + {expr})"));
+        if crate::menu_prop_bindable(prop) {
+            c.line("");
+            c.line("");
+            c.line(&format!("def tx_bind_menu_{prop}(item, signal_id):"));
+            c.line(&format!("    \"\"\"set_menu_prop with a signal-bound {prop} value.\"\"\""));
+            c.line(&format!("    return record(TX_SET_MENU_PROP, struct.pack(\"<QIIQ\", item, MPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+        }
     }
     c.line("");
     c.line("");

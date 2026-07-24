@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x39a6143b6f4c3e0e
+let kayaSpecHash: UInt64 = 0x0e4b7f4f716cc749
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -42,6 +42,12 @@ private let applySetEntryProp: UInt16 = 14
 private let applyAddSection: UInt16 = 15
 private let applySelectSection: UInt16 = 16
 private let applySetSectionProp: UInt16 = 17
+private let applyMenuItemCreate: UInt16 = 18
+private let applyMenuItemAppend: UInt16 = 19
+private let applyMenubarAppend: UInt16 = 20
+private let applyContextAttach: UInt16 = 21
+private let applyContextAttachNode: UInt16 = 22
+private let applySetMenuProp: UInt16 = 23
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -61,6 +67,23 @@ private let sectionsPresentationSidebar: Int64 = 2
 /// is the close-veto class transplanted to POP).
 private let epropTitle: UInt32 = 1
 private let epropInterceptBack: UInt32 = 2
+/// The menu item vocabulary (spec enum "menu_kind"; DESIGN.md, Menus):
+/// menu and radio_group are the grouping nodes, the rest are leaves.
+private let menuKindMenu: UInt32 = 1
+private let menuKindAction: UInt32 = 2
+private let menuKindToggle: UInt32 = 3
+private let menuKindRadioGroup: UInt32 = 4
+private let menuKindRadioOption: UInt32 = 5
+private let menuKindSeparator: UInt32 = 6
+/// Menu properties (spec::MENU_PROPS) — their own typed table,
+/// separate from widget, window, entry, and section props.
+private let mpropLabel: UInt32 = 1
+private let mpropEnabled: UInt32 = 2
+private let mpropChecked: UInt32 = 3
+private let mpropValue: UInt32 = 4
+private let mpropIcon: UInt32 = 5
+private let mpropPrimary: UInt32 = 6
+private let mpropShortcut: UInt32 = 7
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -178,10 +201,46 @@ final class KayaWindowModel: Identifiable {
     var selectedSection: UInt64?
     /// The ADVISORY presentation hint (wprop 5): auto | bar | sidebar.
     var sectionsPresentation: Int64 = 0
+    /// The window's command catalog (DESIGN.md, Menus): top-level
+    /// grouping nodes in menubar-append order. macOS materializes the
+    /// key kaya window's catalog as a native NSMenu segment; iOS folds
+    /// it into the top bar's trailing More menu with promoted
+    /// primaries as real bar actions.
+    var menubar: [KayaMenuItemModel] = []
 
     init(id: UInt64, title: String = "") {
         self.id = id
         self.title = title
+    }
+}
+
+/// One menu item: kind fixed at create, every applicable prop live.
+/// This model is the backend's retained MIRROR: user chrome writes
+/// checked/value here BEFORE emitting (a native rebuild must start
+/// from the post-user mirror — docs/traps.md), and programmatic
+/// set_menu_prop writes land here QUIETLY (the echo doctrine).
+@Observable
+final class KayaMenuItemModel: Identifiable {
+    let id: UInt64
+    let kind: UInt32
+    var label = ""
+    var enabled = true
+    /// Toggle only (the checkbox contract).
+    var checked = false
+    /// Radio group only: the selected option index (choice contract).
+    var value = 0.0
+    /// Phone-promotion hint on actions; INERT on desktops.
+    var primary = false
+    /// The canonical shortcut spelling (root-validated), "" = none.
+    var shortcut = ""
+    /// Optional icon, used by phone promotion; ignored where native
+    /// menu dress has no icon.
+    var icon: KayaPlatformImage?
+    var children: [KayaMenuItemModel] = []
+
+    init(id: UInt64, kind: UInt32) {
+        self.id = id
+        self.kind = kind
     }
 }
 
@@ -240,6 +299,20 @@ final class KayaSceneModel {
     /// entries, sections), and section id -> hosting window.
     var sectionsById: [UInt64: KayaSectionModel] = [:]
     var sectionWindow: [UInt64: UInt64] = [:]
+    /// Menu items by id — their OWN id space (never widget, node, or
+    /// surface ids), the dispatch table keyed by item id.
+    var menuItems: [UInt64: KayaMenuItemModel] = [:]
+    /// child item id -> parent item id (grouping nodes only): the
+    /// enablement AND-chain walks this.
+    var menuParents: [UInt64: UInt64] = [:]
+    /// Context catalogs by ANCHOR widget id: the root items attached
+    /// through context_attach / context_attach_node (append order).
+    var contextRoots: [UInt64: [KayaMenuItemModel]] = [:]
+    /// The anchor copy's key-path bytes (the wire path encoding
+    /// CONTEXT_ATTACH_NODE delivered) by widget id — the NOUN every
+    /// activation from that anchor stamps; absent for live-widget
+    /// anchors (the empty noun).
+    var contextNouns: [UInt64: [UInt8]] = [:]
     // The focus command's landing spot: the entry view's FocusState
     // mirrors it into SwiftUI, and expect_focused reads it back.
     var focusedId: UInt64?
@@ -543,6 +616,34 @@ enum KayaHost {
         }
     }
 
+    /// A menu action fired — chrome click, shortcut, or harness verb:
+    /// ONE occurrence, one dispatch path. `noun` is the wire path
+    /// bytes CONTEXT_ATTACH_NODE delivered for a node-anchored context
+    /// item (empty for bar and live-widget items) — the keys ARE the
+    /// noun.
+    static func emitMenuActivated(_ item: UInt64, _ noun: [UInt8]) {
+        noun.withUnsafeBufferPointer { buffer in
+            api.emit_menu_activated(item, buffer.baseAddress, UInt(buffer.count))
+        }
+    }
+
+    /// A toggle item flipped by the user; `checked` is the NEW state
+    /// (the model mirror was updated before this call — the post-user
+    /// mirror rule). Programmatic checked writes never come here.
+    static func emitMenuToggled(_ item: UInt64, _ noun: [UInt8], _ checked: Bool) {
+        noun.withUnsafeBufferPointer { buffer in
+            api.emit_menu_toggled(item, buffer.baseAddress, UInt(buffer.count), checked ? 1 : 0)
+        }
+    }
+
+    /// A radio group's selection changed by the user; keyed by the
+    /// GROUP's id, index integral (the choice contract).
+    static func emitMenuValueChanged(_ group: UInt64, _ noun: [UInt8], _ index: Double) {
+        noun.withUnsafeBufferPointer { buffer in
+            api.emit_menu_value_changed(group, buffer.baseAddress, UInt(buffer.count), index)
+        }
+    }
+
     static func emitValue(_ tag: [UInt8], _ value: Double) {
         tag.withUnsafeBufferPointer { buffer in
             api.emit_value_changed(buffer.baseAddress, UInt(buffer.count), value)
@@ -605,7 +706,10 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
         while at + 8 <= raw.count {
             let size = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
             let kind = raw.loadUnaligned(fromByteOffset: at + 4, as: UInt16.self)
-            if kind == applySetProp {
+            // SET_PROP and SET_MENU_PROP share the { u64 id; u32 prop;
+            // u32 pad; value } layout, so one scan serves both blob
+            // carriers (widget source, menu icon).
+            if kind == applySetProp || kind == applySetMenuProp {
                 let valueType = raw.loadUnaligned(fromByteOffset: at + 24, as: UInt32.self)
                 if valueType == valueBlob {
                     let handle = raw.loadUnaligned(fromByteOffset: at + 32, as: UInt64.self)
@@ -637,6 +741,10 @@ private func kayaApplyWindowSize(_ windowId: UInt64) {
 }
 
 private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
+    // Coalesced menu re-assert: any record that touches the command
+    // catalog re-syncs the native chrome ONCE at the batch boundary
+    // (the macOS NSMenu segment, the shortcut dispatch table).
+    var menusTouched = false
     batch.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
         var at = 0
         while at + 8 <= raw.count {
@@ -925,6 +1033,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     parentNode.children.removeAll { $0.id == id }
                 }
                 kayaScene.nodes.removeValue(forKey: id)
+                // A destroyed anchor takes its context attachment with
+                // it (menu ITEMS are never destroyed; the anchor map
+                // entry is): a For-row removal must not leave the
+                // harness's open-menu pointer dangling.
+                if kayaScene.contextRoots.removeValue(forKey: id) != nil {
+                    kayaScene.contextNouns.removeValue(forKey: id)
+                    if kayaOpenContextWidget == id {
+                        kayaOpenContextWidget = nil
+                    }
+                }
             case applyCommand:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let command = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
@@ -1023,11 +1141,94 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 default:
                     fatalError("kaya: bad section prop \(prop) value type \(svType)")
                 }
+            case applyMenuItemCreate:
+                // u64 item, u32 kind, u32 pad — the menu-item id
+                // space is its own (never widget/node/surface ids).
+                let mid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let mkind = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                kayaScene.menuItems[mid] = KayaMenuItemModel(id: mid, kind: mkind)
+                menusTouched = true
+            case applyMenuItemAppend:
+                // u64 parent, u64 child — append-only, single-parent
+                // (the root validates the closed grammar and depth).
+                let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.menuItems[parent]!.children.append(kayaScene.menuItems[child]!)
+                kayaScene.menuParents[child] = parent
+                menusTouched = true
+            case applyMenubarAppend:
+                // u64 window, u64 item — a top-level grouping node
+                // joins the window's catalog in append order.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let mid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.windows[wid]!.menubar.append(kayaScene.menuItems[mid]!)
+                menusTouched = true
+            case applyContextAttach:
+                // u64 widget, u64 item — a live-widget anchor: the
+                // same command vocabulary scoped to a noun, empty
+                // noun (the direct route).
+                let widget = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let mid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.contextRoots[widget, default: []].append(kayaScene.menuItems[mid]!)
+                menusTouched = true
+            case applyContextAttachNode:
+                // u64 widget (the STAMPED copy), u64 item, then the
+                // copy's key path { u32 count; u32 reserved; count
+                // values } — kept as raw wire bytes: activations hand
+                // them back verbatim as the emit's noun (values
+                // self-pad to 8, so the path runs to the record end).
+                let widget = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let mid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.contextRoots[widget, default: []].append(kayaScene.menuItems[mid]!)
+                kayaScene.contextNouns[widget] = [UInt8](raw[(body + 16)..<(at + size)])
+                menusTouched = true
+            case applySetMenuProp:
+                // u64 item, u32 mprop, u32 pad, value. Programmatic
+                // checked/value writes are configuration and stay
+                // QUIET (the echo doctrine); nothing here emits.
+                let mid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let mvType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let mvLen = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                let item = kayaScene.menuItems[mid]!
+                switch (prop, mvType) {
+                case (mpropLabel, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + mvLen)]
+                    item.label = String(decoding: bytes, as: UTF8.self)
+                case (mpropEnabled, valueBool):
+                    item.enabled = raw[body + 24] != 0
+                case (mpropChecked, valueBool):
+                    item.checked = raw[body + 24] != 0
+                case (mpropValue, valueF64):
+                    item.value =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (mpropPrimary, valueBool):
+                    // The phone-promotion hint: the promoted set
+                    // recomputes from the observable catalog, so this
+                    // write re-renders the iOS toolbar; inert on
+                    // desktop.
+                    item.primary = raw[body + 24] != 0
+                case (mpropShortcut, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + mvLen)]
+                    item.shortcut = String(decoding: bytes, as: UTF8.self)
+                case (mpropIcon, valueBlob):
+                    // Used by phone promotion; ignored where native
+                    // menu dress has no icon. Failed decode is the
+                    // placeholder class, never a crash.
+                    let handle = raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self)
+                    item.icon = blobs[handle].flatMap { KayaPlatformImage(data: $0) }
+                default:
+                    fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
+                }
+                menusTouched = true
             default:
                 fatalError("kaya: unknown apply record kind \(kind)")
             }
             at += size
         }
+    }
+    if menusTouched {
+        kayaMenuChanged()
     }
 }
 
@@ -1158,6 +1359,103 @@ private func kayaQuoted(_ rest: [Substring]) -> String {
         }
     }
     return out
+}
+
+/// A LEADING quoted string plus the remainder after its closing quote
+/// (harness.rs's parse_quoted_prefix, mirrored): expect_menu's path
+/// precedes its state token and a menu label may contain spaces, so
+/// whitespace-splitting before the quote would shear it. Honors the
+/// same escapes as kayaQuoted; the remainder comes back with leading
+/// whitespace stripped.
+private func kayaQuotedPrefix(_ rest: String) -> (String, String)? {
+    var s = Substring(rest)
+    while s.first == " " { s = s.dropFirst() }
+    guard s.first == "\"" else { return nil }
+    s = s.dropFirst()
+    var out = ""
+    var escaped = false
+    var index = s.startIndex
+    while index < s.endIndex {
+        let c = s[index]
+        if escaped {
+            switch c {
+            case "n": out.append("\n")
+            case "r": out.append("\r")
+            case "\\": out.append("\\")
+            default:
+                out.append("\\")
+                out.append(c)
+            }
+            escaped = false
+        } else if c == "\\" {
+            escaped = true
+        } else if c == "\"" {
+            let tail = String(s[s.index(after: index)...])
+                .trimmingCharacters(in: .whitespaces)
+            return (out, tail)
+        } else {
+            out.append(c)
+        }
+        index = s.index(after: index)
+    }
+    return nil
+}
+
+/// The expect_menu state token(s) onto (aspect, normalized spelling) —
+/// the grammar's own words, byte-compared like every observation.
+private func kayaParseMenuState(_ spec: String) -> (KayaMenuAspect, String)? {
+    let s = spec.trimmingCharacters(in: .whitespaces)
+    switch s {
+    case "enabled", "disabled": return (.enablement, s)
+    case "checked", "unchecked": return (.checkedness, s)
+    default:
+        let bits = s.split(separator: " ", omittingEmptySubsequences: true)
+        // value takes a 0-BASED index (harness.rs parses usize; a
+        // negative index is line noise, rejected, not resolved).
+        if bits.count == 2, bits[0] == "value", let index = Int(bits[1]), index >= 0 {
+            return (.value, "value \(index)")
+        }
+        return nil
+    }
+}
+
+/// A menu path is labels joined with `>`: at least one label, every
+/// segment non-empty and byte-exact — harness.rs's check_menu_path,
+/// mirrored. No trimming: labels compare byte-for-byte, so a padded
+/// segment is a typo that would only surface as a bewildering "no
+/// such item" at runtime; reject it at parse instead. Returns the
+/// failure text, nil when the path is well-formed.
+private func kayaCheckMenuPath(_ path: String) -> String? {
+    if path.isEmpty { return "menu path is empty" }
+    for seg in path.split(separator: ">", omittingEmptySubsequences: false) {
+        if seg.isEmpty {
+            return "menu path \"\(path)\" has an empty label segment"
+        }
+        if seg != seg.trimmingCharacters(in: .whitespaces) {
+            return "menu path \"\(path)\" pads a label with whitespace"
+        }
+    }
+    return nil
+}
+
+/// context_open's target may be any non-editable widget kind — the
+/// kind picks the registry, exactly as parse_target routes.
+private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
+    switch spec.split(separator: "#").first.map(String.init) ?? "" {
+    case "button": return kayaTarget(spec, "button", kayaScene.buttons)
+    case "checkbox": return kayaTarget(spec, "checkbox", kayaScene.checkboxes)
+    case "label": return kayaTarget(spec, "label", kayaScene.labels)
+    case "slider": return kayaTarget(spec, "slider", kayaScene.sliders)
+    case "image": return kayaTarget(spec, "image", kayaScene.images)
+    case "column": return kayaTarget(spec, "column", kayaScene.columns)
+    case "row": return kayaTarget(spec, "row", kayaScene.rows)
+    case "scroll": return kayaTarget(spec, "scroll", kayaScene.scrolls)
+    case "progress": return kayaTarget(spec, "progress", kayaScene.progresses)
+    case "select": return kayaTarget(spec, "select", kayaScene.selects)
+    case "radio": return kayaTarget(spec, "radio", kayaScene.radios)
+    case "grid": return kayaTarget(spec, "grid", kayaScene.grids)
+    default: return nil
+    }
 }
 
 private func kayaRunScript(_ script: String) {
@@ -1808,6 +2106,144 @@ private func kayaRunScript(_ script: String) {
                 case nil:
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_menus":
+                // The top-level catalog count from the REAL
+                // materialized bar on macOS (the owned NSMenu segment
+                // actually sitting in NSApp.mainMenu), the overflow's
+                // group list on iOS (the model the More menu
+                // enumerates — the expect_sections precedent).
+                let want = Int(parts[1]) ?? -1
+                let got = DispatchQueue.main.sync { () -> Int in
+                    #if os(macOS)
+                        kayaEnsureMenuSegment()
+                        guard let mainMenu = NSApp.mainMenu else { return 0 }
+                        return kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
+                    #else
+                        return kayaScene.windows[0]?.menubar.count ?? 0
+                    #endif
+                }
+                if got == want {
+                    observed.append("\(want) menus")
+                } else {
+                    failures.append("\(got) menus, wanted \(want)")
+                }
+            case "expect_menu":
+                // Real item state wherever the item surfaced (bar,
+                // More, open context menu); the bounded retry doubles
+                // as the wait for a catalog rebuild to land.
+                let restLine = String(line.dropFirst(parts[0].count))
+                guard let (path, stateSpec) = kayaQuotedPrefix(restLine),
+                    let (aspect, wantS) = kayaParseMenuState(stateSpec)
+                else {
+                    failures.append("expect_menu wants a quoted path and a state: \(line)")
+                    break
+                }
+                if let bad = kayaCheckMenuPath(path) {
+                    failures.append("\(bad): \(line)")
+                    break
+                }
+                let got = DispatchQueue.main.sync { kayaMenuStateRead(path, aspect) }
+                if got == wantS {
+                    observed.append("menu \"\(path)\" \(wantS)")
+                } else {
+                    failures.append("menu \"\(path)\" reads \"\(got)\", wanted \"\(wantS)\"")
+                }
+            case "menu_activate":
+                // An action, silent like click. The OPEN context menu
+                // owns resolution while presented (a leaf fires once
+                // and the menu closes); otherwise macOS walks the
+                // owned NSApp.mainMenu segment by title and performs
+                // the item's REAL target/action (the ruled verdict —
+                // no model-route fallback), and iOS resolves through
+                // the same catalog helper the toolbar consumes, so a
+                // promoted primary resolves WITHOUT opening More.
+                let restLine = String(line.dropFirst(parts[0].count))
+                // Trailing junk after the quoted path is line-noise,
+                // not a no-op (harness.rs's parse_string floor; the
+                // Compose sibling's rejection).
+                guard let (path, tail) = kayaQuotedPrefix(restLine), tail.isEmpty else {
+                    failures.append("menu_activate wants a quoted path: \(line)")
+                    break
+                }
+                if let bad = kayaCheckMenuPath(path) {
+                    failures.append("\(bad): \(line)")
+                    break
+                }
+                let failure = DispatchQueue.main.sync { () -> String? in
+                    if let wid = kayaOpenContextWidget {
+                        guard let roots = kayaScene.contextRoots[wid],
+                            let item = kayaResolveMenuPath(path, roots: roots)
+                        else {
+                            return "no such context item \(path)"
+                        }
+                        let noun = kayaScene.contextNouns[wid] ?? []
+                        kayaOpenContextWidget = nil
+                        kayaMenuUserActivate(item, noun: noun)
+                        return nil
+                    }
+                    #if os(macOS)
+                        return kayaMacMenuActivate(path)
+                    #else
+                        guard
+                            let item = kayaResolveMenuPath(
+                                path, roots: kayaPresentedCatalog())
+                        else {
+                            return "no such menu item \(path)"
+                        }
+                        kayaMenuUserActivate(item)
+                        return nil
+                    #endif
+                }
+                if let failure { failures.append(failure) }
+            case "context_open":
+                // An action, silent like click: opens the anchor's
+                // context catalog for the following menu_activate.
+                // Editable text is rejected up front — its native
+                // menu is dress (harness.rs's guard, mirrored).
+                let failure = DispatchQueue.main.sync { () -> String? in
+                    if parts[1].hasPrefix("entry") || parts[1].hasPrefix("textarea") {
+                        return
+                            "\(parts[1]) is editable text — its context menu is dress, not a context_open target"
+                    }
+                    guard let node = kayaAnyTarget(parts[1]) else {
+                        return "no such target \(parts[1])"
+                    }
+                    guard kayaScene.contextRoots[node.id]?.isEmpty == false else {
+                        return "no context menu attached to \(parts[1])"
+                    }
+                    kayaOpenContextWidget = node.id
+                    return nil
+                }
+                if let failure { failures.append(failure) }
+            case "shortcut":
+                // An action, silent like click: macOS synthesizes the
+                // key event through NSMenu.performKeyEquivalent (the
+                // real key-equivalent walk); iOS traverses the
+                // interpreter's one dispatch table. Both land in the
+                // SAME menu_activated the item's direct activation
+                // emits.
+                let restLine = String(line.dropFirst(parts[0].count))
+                // The grammar floor, mirrored from harness.rs: an
+                // empty spelling, whitespace inside the spelling, and
+                // trailing junk after the quote are line-noise, not
+                // no-ops (the Compose sibling's one rejection).
+                guard let (spelling, tail) = kayaQuotedPrefix(restLine), tail.isEmpty,
+                    !spelling.isEmpty, !spelling.contains(where: { $0.isWhitespace })
+                else {
+                    failures.append("shortcut wants a quoted spelling: \(line)")
+                    break
+                }
+                DispatchQueue.main.sync {
+                    #if os(macOS)
+                        kayaMacShortcut(spelling)
+                    #else
+                        if let id = kayaShortcutItems[spelling],
+                            let item = kayaScene.menuItems[id]
+                        {
+                            kayaMenuUserActivate(item)
+                        }
+                    #endif
+                }
             default:
                 failures.append("unknown step \(line)")
             }
@@ -2145,6 +2581,19 @@ struct KayaRender: View {
     var isRoot = false
 
     var body: some View {
+        // The widget/node anchor: a context catalog attached to this
+        // node rides .contextMenu on its view — the platform's own
+        // gesture (right-click on macOS, long-press on iOS). Editable
+        // text never reaches here (the root rejects the attach; its
+        // native edit menu is dress).
+        if kayaScene.contextRoots[node.id]?.isEmpty == false {
+            widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }
+        } else {
+            widget
+        }
+    }
+
+    @ViewBuilder private var widget: some View {
         switch node.kind {
         case kindColumn:
             // Normalized: 8-unit spacing, leading (cross-axis start).
@@ -2554,6 +3003,725 @@ func kayaUserPops(_ sid: UInt64, to depth: Int) {
     }
 }
 
+// --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+//
+// One item vocabulary, two anchors. The WINDOW anchor rides the window
+// model (menubar); macOS materializes the key kaya window's catalog as
+// a Kaya-owned native NSMenu segment (SwiftUI's pinned CommandsBuilder
+// has no buildArray, so it cannot express append-at-any-time top-level
+// catalogs — the ruled lowering), while iOS folds the catalog into a
+// trailing More menu with promoted primaries as real bar actions. The
+// WIDGET/NODE anchor is .contextMenu on the anchored node's view.
+// Echo doctrine: ONE dispatch path — user chrome, shortcuts, and
+// harness verbs land in kayaMenuUserActivate and emit; programmatic
+// set_menu_prop writes mutate the model silently in the apply arm.
+
+/// The harness's OPEN context menu: context_open records the anchor
+/// here and the following menu_activate resolves against it (main
+/// actor, like the rest of the presentation state).
+var kayaOpenContextWidget: UInt64?
+
+/// The interpreter's shortcut dispatch table: canonical spelling ->
+/// action item id, rebuilt from the presented catalog on every menu
+/// change. On iOS the `shortcut` verb traverses THIS table (the one a
+/// hardware key event would feed); on macOS dispatch is the real
+/// NSMenu key-equivalent walk and the NSMenuItems carry the chords.
+var kayaShortcutItems: [String: UInt64] = [:]
+
+/// The phone bar's promotion capacity: k is the PLATFORM's idiom
+/// (never computed by kaya) — two trailing actions beside More is the
+/// iOS top-bar shape. Inert on macOS.
+let kayaPromotionCapacity = 2
+
+/// Enablement is the AND of the item's own flag and every grouping
+/// ancestor's — the inherited rule every read, render, shortcut, and
+/// activation route shares (docs/traps.md).
+func kayaMenuEffectiveEnabled(_ item: KayaMenuItemModel) -> Bool {
+    var enabled = item.enabled
+    var current = item.id
+    while let parentId = kayaScene.menuParents[current],
+        let parent = kayaScene.menuItems[parentId]
+    {
+        enabled = enabled && parent.enabled
+        current = parentId
+    }
+    return enabled
+}
+
+/// Catalog preorder: top-level grouping nodes in menubar-append order,
+/// then each node's children in append order, depth-first. Creation
+/// time is irrelevant — this order alone decides phone promotion.
+func kayaCatalogPreorder(_ items: [KayaMenuItemModel]) -> [KayaMenuItemModel] {
+    var out: [KayaMenuItemModel] = []
+    func walk(_ item: KayaMenuItemModel) {
+        out.append(item)
+        for child in item.children { walk(child) }
+    }
+    for top in items { walk(top) }
+    return out
+}
+
+/// The promoted primaries: the first k primary actions in catalog
+/// preorder. Recomputed from the observable catalog on every mutation
+/// (a structural append or `primary` prop write re-renders the bar),
+/// so a later append under an earlier node displaces deterministically.
+func kayaPromotedActions(_ window: KayaWindowModel) -> [KayaMenuItemModel] {
+    Array(
+        kayaCatalogPreorder(window.menubar)
+            .filter { $0.kind == menuKindAction && $0.primary }
+            .prefix(kayaPromotionCapacity))
+}
+
+/// The catalog the chrome presents: the key kaya window's on macOS
+/// (key-window changes swap it), the primary's on iOS.
+func kayaPresentedCatalog() -> [KayaMenuItemModel] {
+    #if os(macOS)
+        return kayaScene.windows[kayaPresentedMenuWindow]?.menubar ?? []
+    #else
+        return kayaScene.windows[0]?.menubar ?? []
+    #endif
+}
+
+/// Resolve a `>`-joined label path against root items, labels compared
+/// byte-for-byte (the shared-scene contract). `"Sort>Date"` lands on
+/// option Date inside group Sort; `"Sort"` lands on the group itself.
+func kayaResolveMenuPath(_ path: String, roots: [KayaMenuItemModel]) -> KayaMenuItemModel? {
+    var current = roots
+    var found: KayaMenuItemModel?
+    for seg in path.split(separator: ">", omittingEmptySubsequences: false).map(String.init) {
+        guard let item = current.first(where: { kayaBytesEqual($0.label, seg) }) else {
+            return nil
+        }
+        found = item
+        current = item.children
+    }
+    return found
+}
+
+/// THE user dispatch path: chrome clicks (NSMenu action, More-menu
+/// button, context-menu button), shortcuts, and harness verbs all land
+/// here. Mirrors FIRST (the post-user-mirror rule), then emits with
+/// the item's identity and the anchor's noun. Disabled items — the
+/// inherited AND — are inert, exactly as native chrome leaves them.
+func kayaMenuUserActivate(_ item: KayaMenuItemModel, noun: [UInt8] = []) {
+    guard kayaMenuEffectiveEnabled(item) else { return }
+    switch item.kind {
+    case menuKindAction:
+        KayaHost.emitMenuActivated(item.id, noun)
+    case menuKindToggle:
+        item.checked.toggle()  // the retained mirror, BEFORE the emit
+        KayaHost.emitMenuToggled(item.id, noun, item.checked)
+        kayaMenuChanged()
+    case menuKindRadioOption:
+        guard let groupId = kayaScene.menuParents[item.id],
+            let group = kayaScene.menuItems[groupId],
+            let index = group.children.firstIndex(where: { $0.id == item.id })
+        else { return }
+        kayaMenuUserSelectRadio(group, index, noun: noun)
+    default:
+        // Grouping nodes and separators have no activation; native
+        // chrome opens or ignores them.
+        break
+    }
+}
+
+/// The radio group's user route (choice contract): selecting the
+/// already-selected option is not a change and emits nothing, exactly
+/// as the platform's own change route behaves.
+func kayaMenuUserSelectRadio(_ group: KayaMenuItemModel, _ index: Int, noun: [UInt8] = []) {
+    guard kayaMenuEffectiveEnabled(group),
+        group.children.indices.contains(index),
+        Int(group.value) != index
+    else { return }
+    group.value = Double(index)  // the retained mirror, BEFORE the emit
+    KayaHost.emitMenuValueChanged(group.id, noun, Double(index))
+    kayaMenuChanged()
+}
+
+/// The coalesced menu re-assert: rebuild the shortcut table and, on
+/// macOS, re-synchronize the owned NSMenu segment (a rebuild always
+/// starts from the post-user mirror — the model IS that mirror). The
+/// macOS rebuild hops ONE main-queue turn: a toggle/radio fire runs
+/// inside AppKit's performActionForItem on the very menu the rebuild
+/// would mutate, and the expect retry contract absorbs the hop.
+func kayaMenuChanged() {
+    var table: [String: UInt64] = [:]
+    for item in kayaCatalogPreorder(kayaPresentedCatalog())
+    where item.kind == menuKindAction && !item.shortcut.isEmpty {
+        table[item.shortcut] = item.id
+    }
+    kayaShortcutItems = table
+    #if os(macOS)
+        kayaScheduleMenuRebuild()
+    #endif
+}
+
+/// One aspect of a menu item's state, spelled in the steps grammar's
+/// own words — what expect_menu byte-compares. TOTAL: a missing item
+/// reads as a short description, a retryable mismatch (expect_menu
+/// doubles as the wait for a catalog rebuild to land).
+enum KayaMenuAspect { case enablement, checkedness, value }
+
+func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> String {
+    switch aspect {
+    case .enablement:
+        return kayaMenuEffectiveEnabled(item) ? "enabled" : "disabled"
+    case .checkedness:
+        return item.checked ? "checked" : "unchecked"
+    case .value:
+        return "value \(Int(item.value))"
+    }
+}
+
+/// The expect_menu read: wherever the item surfaced — the OPEN context
+/// menu first (context items shadow the bar while presented), then the
+/// bar. macOS reads the REAL NSMenuItem state from the owned segment
+/// (a backend that ignored the write must fail); iOS reads the model
+/// the More menu and toolbar enumerate (the expect_sections precedent —
+/// SwiftUI exposes no separate item registry).
+func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
+    if let wid = kayaOpenContextWidget {
+        // Open-context EXCLUSIVITY: while presented, the context menu
+        // owns resolution — a miss reads as the retryable "no such
+        // item", never a bar fallback.
+        guard let roots = kayaScene.contextRoots[wid],
+            let item = kayaResolveMenuPath(path, roots: roots)
+        else { return "no such item" }
+        return kayaModelMenuState(item, aspect)
+    }
+    guard let item = kayaResolveMenuPath(path, roots: kayaPresentedCatalog()) else {
+        return "no such item"
+    }
+    #if os(macOS)
+        kayaEnsureMenuSegment()
+        switch aspect {
+        case .enablement:
+            guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
+            return nsItem.isEnabled ? "enabled" : "disabled"
+        case .checkedness:
+            guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
+            return nsItem.state == .on ? "checked" : "unchecked"
+        case .value:
+            // The group's value IS its checked option, read from the
+            // real items (the checkmark idiom).
+            for (index, option) in item.children.enumerated() {
+                if let nsItem = kayaOwnedNSMenuItem(option.id), nsItem.state == .on {
+                    return "value \(index)"
+                }
+            }
+            return "no checked option"
+        }
+    #else
+        return kayaModelMenuState(item, aspect)
+    #endif
+}
+
+#if os(macOS)
+    /// The kaya window whose catalog the global bar presents: the key
+    /// kaya window, swapped by the key-window observer; the primary
+    /// until any other kaya window takes key (accessory-policy suite
+    /// runs never grant key status, which correctly leaves the
+    /// primary's catalog presented).
+    var kayaPresentedMenuWindow: UInt64 = 0
+    /// The Kaya-owned SEGMENT of NSApp.mainMenu, in catalog order.
+    /// Everything outside it — application menu, Edit, Window, Help —
+    /// is dress and never touched.
+    var kayaOwnedMenuItems: [NSMenuItem] = []
+    var kayaMenuObserversInstalled = false
+    /// Re-entrancy guard: our own inserts/removals fire the same NSMenu
+    /// notifications we observe.
+    var kayaMenuSyncing = false
+    var kayaMenuResyncPending = false
+    var kayaMainMenuKVO: NSKeyValueObservation?
+
+    /// The one target of every owned NSMenuItem: routes the REAL
+    /// AppKit action back into the shared dispatch path.
+    final class KayaMenuDispatcher: NSObject {
+        @objc func fire(_ sender: NSMenuItem) {
+            guard let number = sender.representedObject as? NSNumber,
+                let item = kayaScene.menuItems[number.uint64Value]
+            else { return }
+            kayaMenuUserActivate(item)
+        }
+    }
+    let kayaMenuDispatch = KayaMenuDispatcher()
+
+    /// The canonical shortcut spelling (root-validated: lowercase,
+    /// `primary`/`shift`/`alt` order, one key) onto AppKit's key
+    /// equivalent. `primary` = Command on Apple hosts. The same
+    /// mapping builds NSMenuItem chords and the verb's synthetic key
+    /// event, so matching is by construction.
+    func kayaKeyEquivalent(_ spelling: String) -> (String, NSEvent.ModifierFlags)? {
+        var mask: NSEvent.ModifierFlags = []
+        var key: String?
+        for part in spelling.split(separator: "+").map(String.init) {
+            switch part {
+            case "primary": mask.insert(.command)
+            case "shift": mask.insert(.shift)
+            case "alt": mask.insert(.option)
+            default: key = kayaKeyChar(part)
+            }
+        }
+        guard let key else { return nil }
+        return (key, mask)
+    }
+
+    private func kayaKeyChar(_ name: String) -> String? {
+        switch name {
+        case "enter": return "\r"
+        case "delete": return "\u{08}"
+        case "left": return String(UnicodeScalar(0xF702 as UInt32)!)
+        case "right": return String(UnicodeScalar(0xF703 as UInt32)!)
+        case "up": return String(UnicodeScalar(0xF700 as UInt32)!)
+        case "down": return String(UnicodeScalar(0xF701 as UInt32)!)
+        default:
+            // escape never arrives (the root rejects every spelling);
+            // fN maps into the function-key private-use plane.
+            if name.hasPrefix("f"), let n = Int(name.dropFirst()), (1...12).contains(n) {
+                return String(UnicodeScalar(0xF704 as UInt32 + UInt32(n) - 1)!)
+            }
+            return name.count == 1 ? name : nil
+        }
+    }
+
+    /// Builds one grouping node's submenu content. A nested menu
+    /// cascades; a radio_group materializes INLINE with the checkmark
+    /// idiom (its options join the enclosing menu directly).
+    private func kayaBuildNSMenuItems(into menu: NSMenu, children: [KayaMenuItemModel]) {
+        for child in children {
+            switch child.kind {
+            case menuKindSeparator:
+                menu.addItem(NSMenuItem.separator())
+            case menuKindMenu:
+                let holder = NSMenuItem(title: child.label, action: nil, keyEquivalent: "")
+                holder.representedObject = NSNumber(value: child.id)
+                holder.isEnabled = kayaMenuEffectiveEnabled(child)
+                let submenu = NSMenu(title: child.label)
+                submenu.autoenablesItems = false  // docs/traps.md
+                kayaBuildNSMenuItems(into: submenu, children: child.children)
+                holder.submenu = submenu
+                menu.addItem(holder)
+            case menuKindRadioGroup:
+                for (index, option) in child.children.enumerated() {
+                    let nsItem = NSMenuItem(
+                        title: option.label,
+                        action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
+                    nsItem.target = kayaMenuDispatch
+                    nsItem.representedObject = NSNumber(value: option.id)
+                    nsItem.isEnabled = kayaMenuEffectiveEnabled(option)
+                    nsItem.state = Int(child.value) == index ? .on : .off
+                    menu.addItem(nsItem)
+                }
+            case menuKindAction, menuKindToggle:
+                let nsItem = NSMenuItem(
+                    title: child.label,
+                    action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
+                nsItem.target = kayaMenuDispatch
+                nsItem.representedObject = NSNumber(value: child.id)
+                nsItem.isEnabled = kayaMenuEffectiveEnabled(child)
+                if child.kind == menuKindToggle {
+                    nsItem.state = child.checked ? .on : .off
+                }
+                if child.kind == menuKindAction, !child.shortcut.isEmpty,
+                    let (key, mask) = kayaKeyEquivalent(child.shortcut)
+                {
+                    nsItem.keyEquivalent = key
+                    nsItem.keyEquivalentModifierMask = mask
+                }
+                menu.addItem(nsItem)
+            default:
+                break  // radio_option outside its group: the closed grammar forbids it
+            }
+        }
+    }
+
+    /// The segment's insertion point among DRESS items: after the
+    /// Edit dress, before Window/Help — never touching the rest of
+    /// the bar. Anchors are locale-independent: the Edit dress is
+    /// detected by its native edit actions (copy:/paste: survive
+    /// every localization; the English title probe is only the
+    /// fallback), Window/Help by NSApp's own menu handles.
+    private func kayaMenuInsertionIndex(_ items: [NSMenuItem]) -> Int {
+        let editActions = [#selector(NSText.copy(_:)), #selector(NSText.paste(_:))]
+        let editByAction = items.firstIndex(where: { item in
+            guard let submenu = item.submenu else { return false }
+            return submenu.items.contains { child in
+                guard let action = child.action else { return false }
+                return editActions.contains(action)
+            }
+        })
+        if let edit = editByAction ?? items.firstIndex(where: { $0.title == "Edit" }) {
+            return edit + 1
+        }
+        if let windowsMenu = NSApp.windowsMenu,
+            let window = items.firstIndex(where: { $0.submenu === windowsMenu })
+        {
+            return window
+        }
+        if let helpMenu = NSApp.helpMenu,
+            let help = items.firstIndex(where: { $0.submenu === helpMenu })
+        {
+            return help
+        }
+        return items.count
+    }
+
+    /// Rebuild and re-insert the owned segment from the presented
+    /// window's catalog — always from the model, which is the
+    /// post-user mirror (docs/traps.md: rebuilding from a pre-click
+    /// copy silently reverts the user's toggle/radio state).
+    func kayaSyncMacMenuBar() {
+        kayaMenuSyncing = true
+        defer { kayaMenuSyncing = false }
+        for old in kayaOwnedMenuItems { old.menu?.removeItem(old) }
+        kayaOwnedMenuItems.removeAll()
+        let catalog = kayaPresentedCatalog()
+        guard !catalog.isEmpty else { return }
+        // Accessory-policy processes still carry a SwiftUI-built main
+        // menu; if none exists yet there is no dress to preserve and
+        // the segment IS the bar.
+        let mainMenu = NSApp.mainMenu ?? {
+            let menu = NSMenu()
+            menu.autoenablesItems = false  // docs/traps.md
+            NSApp.mainMenu = menu
+            return menu
+        }()
+        // Owned items are already removed above, so this list is the
+        // dress alone — the insertion index's required view.
+        var index = kayaMenuInsertionIndex(mainMenu.items)
+        for top in catalog {
+            let holder = NSMenuItem(title: top.label, action: nil, keyEquivalent: "")
+            holder.representedObject = NSNumber(value: top.id)
+            holder.isEnabled = kayaMenuEffectiveEnabled(top)
+            let submenu = NSMenu(title: top.label)
+            submenu.autoenablesItems = false  // docs/traps.md
+            // A bar-level radio_group is a top-level menu whose
+            // options use the checkmark idiom — the same inline
+            // materialization, one level up.
+            kayaBuildNSMenuItems(
+                into: submenu,
+                children: top.kind == menuKindRadioGroup ? [top] : top.children)
+            holder.submenu = submenu
+            mainMenu.insertItem(holder, at: min(index, mainMenu.items.count))
+            kayaOwnedMenuItems.append(holder)
+            index += 1
+        }
+    }
+
+    /// Idempotent segment assert — the kayaEnsureOpen shape: belt, not
+    /// the fix (the observers below are the event-driven re-assert the
+    /// traps entry requires); free when the segment already sits in
+    /// the current main menu.
+    func kayaEnsureMenuSegment() {
+        if let mainMenu = NSApp.mainMenu, !kayaOwnedMenuItems.isEmpty {
+            // Membership alone is not placement: a dress mutation can
+            // displace or split the owned run. The segment must sit
+            // CONTIGUOUSLY, in catalog order, at the insertion index
+            // the remaining dress computes — anything else re-syncs.
+            let items = mainMenu.items
+            let dress = items.filter { item in
+                !kayaOwnedMenuItems.contains(where: { $0 === item })
+            }
+            let start = kayaMenuInsertionIndex(dress)
+            if items.count == dress.count + kayaOwnedMenuItems.count,
+                start + kayaOwnedMenuItems.count <= items.count,
+                kayaOwnedMenuItems.enumerated().allSatisfy({ offset, owned in
+                    items[start + offset] === owned
+                })
+            {
+                return
+            }
+            kayaSyncMacMenuBar()
+            return
+        }
+        if kayaPresentedCatalog().isEmpty && kayaOwnedMenuItems.isEmpty { return }
+        kayaSyncMacMenuBar()
+    }
+
+    /// Coalesce re-asserts: reacting inside a menu's own change
+    /// notification mutates the menu being changed, so the sync hops
+    /// one main-queue turn.
+    func kayaScheduleMenuResync() {
+        guard !kayaMenuResyncPending else { return }
+        kayaMenuResyncPending = true
+        DispatchQueue.main.async {
+            kayaMenuResyncPending = false
+            kayaEnsureMenuSegment()
+        }
+    }
+
+    /// The model-changed rebuild, likewise one turn out (and
+    /// coalesced): kayaMenuChanged can fire from a dispatcher action
+    /// running inside performActionForItem on the owned menu itself.
+    var kayaMenuRebuildPending = false
+    func kayaScheduleMenuRebuild() {
+        guard !kayaMenuRebuildPending else { return }
+        kayaMenuRebuildPending = true
+        DispatchQueue.main.async {
+            kayaMenuRebuildPending = false
+            kayaSyncMacMenuBar()
+        }
+    }
+
+    /// The EVENT-DRIVEN re-assert (docs/traps.md: a one-shot insertion
+    /// races the same asynchronous scene machinery as a one-shot
+    /// window registration): SwiftUI rebuilding the bar fires the
+    /// NSMenu item notifications or replaces NSApp.mainMenu (KVO);
+    /// key-window changes swap the presented catalog.
+    func kayaInstallMenuObservers() {
+        guard !kayaMenuObserversInstalled else { return }
+        kayaMenuObserversInstalled = true
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { note in
+            guard let window = note.object as? NSWindow,
+                let wid = kayaNSWindows.first(where: { $0.value === window })?.key
+            else { return }
+            if kayaPresentedMenuWindow != wid {
+                kayaPresentedMenuWindow = wid
+                kayaMenuChanged()
+            } else {
+                kayaScheduleMenuResync()
+            }
+        }
+        for name in [NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { note in
+                guard !kayaMenuSyncing, let menu = note.object as? NSMenu,
+                    menu === NSApp.mainMenu
+                else { return }
+                kayaScheduleMenuResync()
+            }
+        }
+        kayaMainMenuKVO = NSApp.observe(\.mainMenu) { _, _ in
+            if !kayaMenuSyncing { kayaScheduleMenuResync() }
+        }
+    }
+
+    /// The owned segment's NSMenuItem for a menu item id (depth-first
+    /// over the segment only — dress is never read).
+    func kayaOwnedNSMenuItem(_ id: UInt64) -> NSMenuItem? {
+        func search(_ items: [NSMenuItem]) -> NSMenuItem? {
+            for item in items {
+                if (item.representedObject as? NSNumber)?.uint64Value == id { return item }
+                if let submenu = item.submenu, let found = search(submenu.items) {
+                    return found
+                }
+            }
+            return nil
+        }
+        return search(kayaOwnedMenuItems)
+    }
+
+    /// menu_activate's macOS bar route — the ruled REAL-chrome verdict,
+    /// resolved SEMANTICALLY: the path walks the model tree (a grouping
+    /// root's label is a path segment whether or not materialization
+    /// mints a titled item — an inline nested radio_group has none, so
+    /// "View>Sort>Date" must still land on Date), then the materialized
+    /// NSMenuItem is found by IDENTITY (the representedObject id every
+    /// owned item carries), never by title-walking the chrome. The
+    /// activation itself stays real chrome (no model-route fallback).
+    /// Returns a failure description, nil on success.
+    func kayaMacMenuActivate(_ path: String) -> String? {
+        kayaEnsureMenuSegment()
+        guard let target = kayaResolveMenuPath(path, roots: kayaPresentedCatalog()) else {
+            return "no such menu item \(path)"
+        }
+        var found = kayaOwnedNSMenuItem(target.id)
+        if found == nil {
+            // A coalesced rebuild may still be one queue turn out;
+            // re-sync from the model (the post-user mirror — always
+            // safe) and look again before failing.
+            kayaSyncMacMenuBar()
+            found = kayaOwnedNSMenuItem(target.id)
+        }
+        guard let item = found, let menu = item.menu else {
+            return "no such menu item \(path)"
+        }
+        // The REAL action route: highlight + target/action, exactly
+        // what menu tracking sends. Disabled items stay inert in the
+        // dispatcher (the inherited AND), as native tracking leaves
+        // them.
+        menu.performActionForItem(at: menu.index(of: item))
+        return nil
+    }
+
+    /// shortcut's macOS route: a synthetic key event through
+    /// NSMenu.performKeyEquivalent — the same key-equivalent table the
+    /// real key press walks, landing on the same NSMenuItem action.
+    /// The verb is a SILENT action and a chord no catalog action owns
+    /// is a no-op on every platform, so the catalog table gates the
+    /// walk — the dress bar must never swallow an unowned chord (a
+    /// stray primary+w would close the window under the leg).
+    func kayaMacShortcut(_ spelling: String) {
+        kayaEnsureMenuSegment()
+        guard kayaShortcutItems[spelling] != nil,
+            let (key, mask) = kayaKeyEquivalent(spelling),
+            let event = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: mask,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
+                context: nil, characters: key, charactersIgnoringModifiers: key,
+                isARepeat: false, keyCode: 0)
+        else { return }
+        _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
+    }
+#endif
+
+/// One menu item rendered in SwiftUI menu content — the More menu's
+/// children and every context menu share this vocabulary. A nested
+/// menu survives as a real cascade/drill-in; a radio_group renders
+/// inline with the platform's checkmark idiom (an inline Picker); all
+/// leaves fire the shared dispatch path with the anchor's noun.
+struct KayaMenuNodeView: View {
+    let item: KayaMenuItemModel
+    let noun: [UInt8]
+    /// Promoted primaries render in the bar, not in overflow.
+    var promoted: Set<UInt64> = []
+
+    var body: some View {
+        switch item.kind {
+        case menuKindSeparator:
+            Divider()
+        case menuKindMenu:
+            // The drill-in row itself disables (Compose disables the
+            // drill row, mac disables the holder — one semantics).
+            Menu(item.label) {
+                ForEach(item.children) { child in
+                    KayaMenuNodeView(item: child, noun: noun, promoted: promoted)
+                }
+            }
+            .disabled(!kayaMenuEffectiveEnabled(item))
+        case menuKindRadioGroup:
+            KayaMenuRadioInline(group: item, noun: noun)
+        case menuKindToggle:
+            Toggle(
+                item.label,
+                isOn: Binding(
+                    get: { item.checked },
+                    set: { _ in kayaMenuUserActivate(item, noun: noun) })
+            )
+            .disabled(!kayaMenuEffectiveEnabled(item))
+        case menuKindAction:
+            if !promoted.contains(item.id) {
+                Button(item.label) {
+                    kayaMenuUserActivate(item, noun: noun)
+                }
+                .disabled(!kayaMenuEffectiveEnabled(item))
+            }
+        default:
+            EmptyView()
+        }
+    }
+}
+
+/// A radio group inline in menu content: the checkmark idiom via an
+/// inline Picker; the selection binding's setter IS the user route
+/// (programmatic value writes land in the apply arm and stay quiet).
+struct KayaMenuRadioInline: View {
+    let group: KayaMenuItemModel
+    let noun: [UInt8]
+
+    var body: some View {
+        Picker(
+            group.label,
+            selection: Binding(
+                get: { Int(group.value) },
+                set: { index in kayaMenuUserSelectRadio(group, index, noun: noun) })
+        ) {
+            ForEach(Array(group.children.enumerated()), id: \.element.id) { index, option in
+                Text(option.label).tag(index)
+            }
+        }
+        .pickerStyle(.inline)
+        .disabled(!kayaMenuEffectiveEnabled(group))
+    }
+}
+
+/// A context anchor's menu content: the attached roots in append
+/// order, every activation stamping the anchor's noun (empty for a
+/// live widget; the stamped copy's key path for a template node).
+struct KayaContextMenuItems: View {
+    let widgetId: UInt64
+
+    var body: some View {
+        let noun = kayaScene.contextNouns[widgetId] ?? []
+        ForEach(kayaScene.contextRoots[widgetId] ?? []) { root in
+            KayaMenuNodeView(item: root, noun: noun)
+        }
+    }
+}
+
+/// The window catalog's chrome, attached to every surface root: a
+/// no-op on macOS (the global-bar synchronizer owns the lowering
+/// there), the top-bar toolbar on iOS.
+struct KayaMenuChrome: ViewModifier {
+    let windowId: UInt64
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            content
+        #else
+            content.modifier(KayaMenuToolbar(windowId: windowId))
+        #endif
+    }
+}
+
+#if !os(macOS)
+    /// The iOS window-anchor lowering: promoted primaries as real
+    /// trailing bar actions, the rest of the catalog behind a trailing
+    /// More menu — top-level grouping nodes as labeled groups, one
+    /// nested menu level as a drill-in, radio groups inline. All
+    /// recomputed from the observable catalog, so promotion follows
+    /// every mutation.
+    struct KayaMenuToolbar: ViewModifier {
+        let windowId: UInt64
+        @State private var scene = kayaScene
+
+        func body(content: Content) -> some View {
+            if let window = scene.windows[windowId], !window.menubar.isEmpty {
+                content.toolbar {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        let promoted = kayaPromotedActions(window)
+                        ForEach(promoted) { item in
+                            Button {
+                                kayaMenuUserActivate(item)
+                            } label: {
+                                if let icon = item.icon {
+                                    Image(uiImage: icon)
+                                } else {
+                                    Text(item.label)
+                                }
+                            }
+                            .disabled(!kayaMenuEffectiveEnabled(item))
+                        }
+                        Menu {
+                            let promotedIds = Set(promoted.map(\.id))
+                            ForEach(window.menubar) { top in
+                                if top.kind == menuKindRadioGroup {
+                                    KayaMenuRadioInline(group: top, noun: [])
+                                } else {
+                                    Section(top.label) {
+                                        ForEach(top.children) { child in
+                                            KayaMenuNodeView(
+                                                item: child, noun: [],
+                                                promoted: promotedIds)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            // The trigger glyph is dress.
+                            Label("More", systemImage: "ellipsis.circle")
+                        }
+                    }
+                }
+            } else {
+                content
+            }
+        }
+    }
+#endif
+
 /// A navigation entry's content: the mounted root in the normalized
 /// frame (16-unit inset, top-leading, fill), titled from its model —
 /// navigationTitle inside a NavigationStack destination titles the
@@ -2767,6 +3935,9 @@ struct KayaSectionPane: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // The hosting window's catalog rides each pane's top bar
+            // on iOS (sections share the window's command catalog).
+            .modifier(KayaMenuChrome(windowId: scene.sectionWindow[sectionId] ?? 0))
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
@@ -2825,6 +3996,10 @@ struct KayaRoot: View {
         // titling path on macOS; harmless on iOS, where the switcher
         // label is stamped in the apply arm instead.
         .navigationTitle(scene.windowTitle)
+        // The window's command catalog rides the window construct: on
+        // iOS this is the trailing More menu + promoted bar actions
+        // (a no-op on macOS, where the NSMenu segment owns the bar).
+        .modifier(KayaMenuChrome(windowId: 0))
         .navigationDestination(for: UInt64.self) { eid in
             KayaEntryRoot(entryId: eid)
         }
@@ -2848,6 +4023,13 @@ struct KayaRoot: View {
                 kayaEnsureOpen(id) { openWindow(value: $0) }
             }
             kayaPendingOpens.removeAll()
+            #if os(macOS)
+                // The menu segment's event-driven re-assert hooks
+                // (SwiftUI rebuilds, key-window changes) — installed
+                // before the pump so the first catalog batch cannot
+                // race them.
+                kayaInstallMenuObservers()
+            #endif
             kayaPlaceWindow()
             kayaStartCommandPump()
             kayaStartSelftest()

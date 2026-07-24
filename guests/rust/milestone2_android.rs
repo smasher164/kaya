@@ -57,6 +57,8 @@ mod grid;
 mod textarea;
 #[path = "sections.rs"]
 mod sections;
+#[path = "menus.rs"]
+mod menus;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -84,6 +86,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("grid") => grid::app(ctx),
         Ok("textarea") => textarea::app(ctx),
         Ok("sections") => sections::app(ctx),
+        Ok("menus") => menus::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

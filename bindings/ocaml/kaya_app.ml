@@ -37,6 +37,22 @@ type signal = Signal of int64
 type widget = Widget of int64
 type node = Node of int64
 
+(* A live menu item: its OWN id space (the c_menu_item counter) behind
+   its own constructor, so cross-use with widget or node handles is a
+   type error. One command identity: exactly one parent or anchor,
+   forever (append-only; nothing is removed in v1). The handle is
+   durable — the dynamic tier (set_menu_label, menu_append, ...)
+   reopens it in any later transaction. *)
+type menu_item = MenuItem of int64
+
+(* A context catalog built UNANCHORED ([context_catalog]) for a
+   template node: menu items are live and shared across stamped
+   copies, so the catalog is built in the live zone and
+   [Tpl.context_menu] attaches it inside the template, where each
+   activation carries the copy's key path. An item takes exactly one
+   anchor — a second attach raises. *)
+type context_catalog = { cc_roots : int64 list; mutable cc_attached : bool }
+
 (* A collection instance handle: the collection plus the key path
    selecting one stamped copy's table. [collection] returns the root
    (empty-path, live-zone) handle; [at] steps into a copy, one key per
@@ -60,7 +76,18 @@ type app = {
   mutable c_widget : int64;
   mutable c_collection : int64;
   mutable c_node : int64;
+  mutable c_menu_item : int64;
   widget_handlers : (int64, unit -> unit) Hashtbl.t;
+  (* Menu dispatch tables, keyed by MENU ITEM id — their own id space,
+     separate from every widget/node table ("two tables, always" — now
+     N tables, still always). The node flavors receive the stamped
+     copy's key path (the keys ARE the noun). *)
+  menu_activated : (int64, unit -> unit) Hashtbl.t;
+  menu_activated_node : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
+  menu_toggled : (int64, bool -> unit) Hashtbl.t;
+  menu_toggled_node : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
+  menu_selected : (int64, int -> unit) Hashtbl.t;
+  menu_selected_node : (int64, Kaya_wire.value list -> int -> unit) Hashtbl.t;
   node_handlers : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   widget_changes : (int64, string -> unit) Hashtbl.t;
   node_changes : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
@@ -129,7 +156,14 @@ let create () =
     c_widget = 0L;
     c_collection = 0L;
     c_node = 0L;
+    c_menu_item = 0L;
     widget_handlers = Hashtbl.create 8;
+    menu_activated = Hashtbl.create 8;
+    menu_activated_node = Hashtbl.create 8;
+    menu_toggled = Hashtbl.create 8;
+    menu_toggled_node = Hashtbl.create 8;
+    menu_selected = Hashtbl.create 8;
+    menu_selected_node = Hashtbl.create 8;
     node_handlers = Hashtbl.create 8;
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
@@ -864,7 +898,7 @@ let derive rc compute =
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
 let window ?title ?width ?height ?veto_close ?sections_presentation
-    ?on_close_requested ?on_closed ?(id = 0L) () =
+    ?on_close_requested ?on_closed ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
@@ -881,18 +915,28 @@ let window ?title ?width ?height ?veto_close ?sections_presentation
   Option.iter
     (fun f -> Hashtbl.replace tx.app.close_requested id f)
     on_close_requested;
-  Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed
+  Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed;
+  (* The menubar rides the window construct (the window-attribute
+     unification rule): [~menus] realizes its thunks left to right —
+     the curried-children convention, [w file] for a retained handle
+     — and appends each top-level grouping node (menu or radio_group)
+     to this window's command catalog. Append-only, at any time. *)
+  Option.iter
+    (List.iter (fun th ->
+         let (MenuItem m) = th () in
+         emit tx (Kaya_wire.tx_menubar_append id m)))
+    menus
 
 (* Create an auxiliary window (capability-gated: phone hosts reject
    at the root); materializes hidden, [mount_in] presents. Labeled
    optional arguments are the OCaml spelling — the same set [window]
    takes. *)
 let create_window ?title ?width ?height ?veto_close ?sections_presentation
-    ?on_close_requested ?on_closed id =
+    ?on_close_requested ?on_closed ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
   window ?title ?width ?height ?veto_close ?sections_presentation
-    ?on_close_requested ?on_closed ~id ()
+    ?on_close_requested ?on_closed ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's
    confirmation and the reconciliation after a chrome close. *)
@@ -995,6 +1039,225 @@ let alert_cancel = Kaya_wire.alert_choice_cancel
 
 
 let mount (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount 0L root)
+
+(* --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
+
+   The curried-children convention extends to items: creators end in
+   [()], omitted unit is the child form, and a grouping creator's list
+   holds bare partial applications the parent realizes left to right —
+   [menu ~label:"File" [ item ~label:"Save" ~shortcut:"primary+s"
+   ~on_activate:h; ... ] ()]. The window construct's [~menus] is the
+   bar anchor; [context_menu]/[context_catalog] are the noun anchors;
+   the dynamic tier below ([set_menu_label], [menu_append], ...)
+   reopens a retained handle in any later transaction — the
+   append-at-any-time discipline. *)
+
+(* Create one item in the menu-item id space. Menu records are
+   live-zone only: a template body records a blueprint, and items are
+   live and shared across stamped copies — build the catalog outside
+   ([context_catalog]) and attach it inside the template with
+   [Tpl.context_menu]. *)
+let alloc_menu_item kind label =
+  let tx = the_tx () in
+  if tx.app.tpl_depth > 0 then
+    invalid_arg
+      "kaya: menu items are live — build the context catalog in the live \
+       zone (context_catalog) and attach it inside the template with \
+       Tpl.context_menu";
+  tx.app.c_menu_item <- Int64.add tx.app.c_menu_item 1L;
+  let id = tx.app.c_menu_item in
+  emit tx (Kaya_wire.tx_menu_item_create id kind);
+  Option.iter (fun l -> emit tx (Kaya_wire.tx_set_menu_label id l)) label;
+  id
+
+(* The shared optional-prop tail: [?enabled] a constant,
+   [?bind_enabled] a Bool signal (the labeled-optional family — one
+   label per (prop, source) pair), [?icon] the blob channel. *)
+let menu_prop_tail id ?enabled ?bind_enabled ?icon () =
+  let tx = the_tx () in
+  Option.iter (fun e -> emit tx (Kaya_wire.tx_set_menu_enabled id e)) enabled;
+  Option.iter
+    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_enabled id s))
+    bind_enabled;
+  Option.iter
+    (fun data ->
+      emit tx (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data)))
+    icon
+
+(* An action — a leaf command firing exactly one menu_activated
+   occurrence (menu click OR its shortcut: ONE occurrence, one
+   dispatch path; [~on_activate] rides the declaration and covers
+   both). [~on_activate_node] is the template-node flavor: an item
+   attached to a stamped copy reports the copy's key path, outermost
+   first — the keys ARE the noun. The shortcut is canonicalized by the
+   binding's one parser; the root judges its anchor (window catalogs
+   only). *)
+let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?on_activate
+    ?on_activate_node ~label () =
+  let tx = the_tx () in
+  let id = alloc_menu_item Kaya_wire.menu_kind_action (Some label) in
+  Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  Option.iter (fun p -> emit tx (Kaya_wire.tx_set_menu_primary id p)) primary;
+  Option.iter (fun f -> Hashtbl.replace tx.app.menu_activated id f) on_activate;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.menu_activated_node id f)
+    on_activate_node;
+  MenuItem id
+
+(* A toggle — a stateful leaf reusing the Checkbox contract: user
+   flips emit menu_toggled ([~on_toggle] receives the new state; the
+   [_node] flavor gets the stamped keys first); programmatic checked
+   writes are QUIET (the echo doctrine). *)
+let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?on_toggle
+    ?on_toggle_node ~label () =
+  let tx = the_tx () in
+  let id = alloc_menu_item Kaya_wire.menu_kind_toggle (Some label) in
+  Option.iter (fun c -> emit tx (Kaya_wire.tx_set_menu_checked id c)) checked;
+  Option.iter
+    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_checked id s))
+    bind_checked;
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  Option.iter (fun f -> Hashtbl.replace tx.app.menu_toggled id f) on_toggle;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.menu_toggled_node id f)
+    on_toggle_node;
+  MenuItem id
+
+(* One labeled radio option, appended in declaration order — the order
+   IS the index vocabulary the group's value selects over. *)
+let option ?enabled ?bind_enabled ?icon ~label () =
+  let id = alloc_menu_item Kaya_wire.menu_kind_radio_option (Some label) in
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  MenuItem id
+
+(* Native grouping chrome: no label, no props, no handle kept. *)
+let separator () = MenuItem (alloc_menu_item Kaya_wire.menu_kind_separator None)
+
+(* Realize a child list under a grouping node, left to right —
+   [List.iter]'s SPECIFIED order, the same reason widget containers
+   take thunked children (docs/traps.md, right-to-left literals). *)
+let realize_menu_children tx parent children =
+  List.iter
+    (fun th ->
+      let (MenuItem c) = th () in
+      emit tx (Kaya_wire.tx_menu_item_append parent c))
+    children
+
+(* A menu grouping node — a bar root through the window construct's
+   [~menus], or nested as a bare partial application in a parent's
+   child list (one nested grouping level is the cap, root-checked).
+   Disabling a menu disables its subtree (the inherited-disabled
+   contract). *)
+let menu ?enabled ?bind_enabled ?icon ~label children () =
+  let tx = the_tx () in
+  let id = alloc_menu_item Kaya_wire.menu_kind_menu (Some label) in
+  realize_menu_children tx id children;
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  MenuItem id
+
+(* A radio group — the Choice contract with the platform's checkmark
+   idiom, admissible wherever a menu grouping node is. The children
+   are [option]s only (the closed grammar, root-checked); [~value] /
+   [~bind_value] is the selected 0-based index, applied AFTER the
+   options so the index has options to address (programmatic writes
+   are quiet); [~on_select] receives each USER pick's new index, and
+   [~on_select_node] the stamped keys first. *)
+let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?on_select
+    ?on_select_node ~label options () =
+  let tx = the_tx () in
+  let id = alloc_menu_item Kaya_wire.menu_kind_radio_group (Some label) in
+  realize_menu_children tx id options;
+  Option.iter
+    (fun v -> emit tx (Kaya_wire.tx_set_menu_value id (float_of_int v)))
+    value;
+  Option.iter
+    (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_value id s))
+    bind_value;
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  Option.iter (fun f -> Hashtbl.replace tx.app.menu_selected id f) on_select;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.menu_selected_node id f)
+    on_select_node;
+  MenuItem id
+
+(* A context menu on a LIVE widget: the same item vocabulary scoped to
+   a NOUN, with the platform's own gesture (right-click, long-press).
+   Calling it again appends more roots. The editable text controls
+   (entry, textarea) reject attachment at the root; context items take
+   no shortcuts (root-checked — the anchor is decided here, after the
+   items exist). *)
+let context_menu (Widget target) children =
+  let tx = the_tx () in
+  List.iter
+    (fun th ->
+      let (MenuItem m) = th () in
+      emit tx (Kaya_wire.tx_context_attach target m))
+    children
+
+(* Build a context catalog UNANCHORED — free root items for a
+   template-node anchor (menu items are live and shared across stamped
+   copies): [Tpl.context_menu] attaches it inside the template, and
+   each activation carries the copy's key path. *)
+let context_catalog children =
+  {
+    cc_roots = List.map (fun th -> let (MenuItem m) = th () in m) children;
+    cc_attached = false;
+  }
+
+(* The dynamic tier for a RETAINED item — every mutable prop, each
+   judged by the root against the item's kind and anchor, plus
+   [menu_append], the reopening of a grouping node. Label and
+   enablement writes never emit anything; programmatic checked/value
+   writes are configuration and stay QUIET (the echo doctrine). *)
+let set_menu_label (MenuItem id) text =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_label id text)
+
+let bind_menu_label (MenuItem id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_menu_label id s)
+
+let set_menu_enabled (MenuItem id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_enabled id on)
+
+let bind_menu_enabled (MenuItem id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_menu_enabled id s)
+
+let set_menu_checked (MenuItem id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_checked id on)
+
+let bind_menu_checked (MenuItem id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_menu_checked id s)
+
+let set_menu_value (MenuItem id) index =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_value id (float_of_int index))
+
+let bind_menu_value (MenuItem id) (Signal s) =
+  emit (the_tx ()) (Kaya_wire.tx_bind_menu_value id s)
+
+let set_menu_icon (MenuItem id) data =
+  emit (the_tx ())
+    (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data))
+
+(* The phone-bar promotion hint (actions only — root-checked).
+   Flipping it recomputes the promoted set deterministically; INERT on
+   desktops — not a toolbar grammar. *)
+let set_menu_primary (MenuItem id) on =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_primary id on)
+
+(* The action's shortcut (window-anchored actions only). Canonicalized
+   by the binding's one parser (Kaya_wire.canonicalize_shortcut); the
+   shortcut is another affordance of the same item — it fires the SAME
+   menu_activated occurrence as a click. *)
+let set_menu_shortcut (MenuItem id) spelling =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_shortcut id spelling)
+
+(* Reopen a RETAINED grouping node and append more children — the
+   append-at-any-time discipline:
+   [menu_append file [ item ~label:"Publish" ~primary:true
+   ~on_activate:h ]]. The root re-validates each appended subtree in
+   the item's real anchor context (depth, shortcuts, duplicates). *)
+let menu_append (MenuItem id) children =
+  realize_menu_children (the_tx ()) id children
 
 (* A template body: the same declaration vocabulary with template-node
    ids, plus element bindings. *)
@@ -1287,6 +1550,20 @@ module Tpl = struct
   let column children = container Kaya_wire.kind_column children
   let row children = container Kaya_wire.kind_row children
 
+  (* Attach a live-built context catalog ([context_catalog]) to a
+     template node: every stamped copy shows the same catalog, and
+     each activation carries that copy's key path — the keys ARE the
+     noun (received by the [_node] handler flavors). An item takes
+     exactly one anchor, so a second attach of the same catalog
+     raises here. *)
+  let context_menu (Node n) catalog =
+    if catalog.cc_attached then
+      invalid_arg "kaya: a context catalog takes exactly one anchor";
+    catalog.cc_attached <- true;
+    List.iter
+      (fun m -> emit (the_tx ()) (Kaya_wire.tx_context_attach_node n m))
+      catalog.cc_roots
+
   (* An existing node as a child (the floor's escape into a sugar
      list): the outer zone's [w], template flavor. *)
   let w n () = n
@@ -1404,6 +1681,45 @@ let dispatch_loop app =
            | Some handler, Some (Kaya_wire.I64 c) ->
                Hashtbl.remove app.alert_handlers id;
                dispatch app (fun () -> handler (Int64.to_int c))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_menu_activated then
+           (* Menu occurrences key the menu-item tables — their own id
+              space, so neither widget nor node ids can collide with
+              them. Node-anchored context items carry the stamped
+              copy's keys (the keys ARE the noun); toggles carry the
+              new state, radio groups the new 0-based index. *)
+           (match keys with
+           | [] ->
+               (match Hashtbl.find_opt app.menu_activated id with
+               | Some handler -> dispatch app handler
+               | None -> ())
+           | keys ->
+               (match Hashtbl.find_opt app.menu_activated_node id with
+               | Some handler -> dispatch app (fun () -> handler keys)
+               | None -> ()))
+         else if kind = Kaya_wire.occ_kind_menu_toggled then
+           (match (payload, keys) with
+           | Some (Kaya_wire.Bool checked), [] ->
+               (match Hashtbl.find_opt app.menu_toggled id with
+               | Some handler -> dispatch app (fun () -> handler checked)
+               | None -> ())
+           | Some (Kaya_wire.Bool checked), keys ->
+               (match Hashtbl.find_opt app.menu_toggled_node id with
+               | Some handler -> dispatch app (fun () -> handler keys checked)
+               | None -> ())
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_menu_value_changed then
+           (match (payload, keys) with
+           | Some (Kaya_wire.F64 v), [] ->
+               (match Hashtbl.find_opt app.menu_selected id with
+               | Some handler ->
+                   dispatch app (fun () -> handler (int_of_float v))
+               | None -> ())
+           | Some (Kaya_wire.F64 v), keys ->
+               (match Hashtbl.find_opt app.menu_selected_node id with
+               | Some handler ->
+                   dispatch app (fun () -> handler keys (int_of_float v))
+               | None -> ())
            | _ -> ())
          else
            match keys with
