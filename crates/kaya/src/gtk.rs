@@ -1003,10 +1003,12 @@ fn menu_resolve_path(reg: &MenuRegistry, roots: &[u64], path: &str) -> Option<u6
 /// every item under `id` carries the AND of its own flag and its
 /// ancestors', so native rendering (grayed rows), native dispatch (a
 /// disabled GSimpleAction refuses activation), accelerators, and the
-/// harness verbs all gate on one state. Grouping `menu` nodes have no
-/// GAction (GMenu cannot gray a submenu header — GTK's spelling, same
-/// semantics: no descendant stays activatable); their reads come from
-/// the registry.
+/// harness verbs all gate on one state. Grouping nodes have no GAction
+/// of their own — GtkPopoverMenuBarItem binds only `label` from the
+/// model, so a bar-level header has no sensitivity to bind (nested
+/// submenu rows do, but graying only there would make GTK's own two
+/// levels disagree). Their reads come from the registry, and the AND
+/// below still reaches every command underneath.
 fn menu_sync_enabled(reg: &MenuRegistry, id: u64) {
     fn walk(reg: &MenuRegistry, id: u64, inherited: bool) {
         let item = &reg.items[&id];
@@ -1022,6 +1024,21 @@ fn menu_sync_enabled(reg: &MenuRegistry, id: u64) {
         .parent
         .map_or(true, |parent| menu_effective_enabled(reg, parent));
     walk(reg, id, inherited);
+}
+
+/// Mirror a radio group's selected index onto every option's action
+/// state, in every instance (the bar's and each context attachment's).
+/// A radio row is checked exactly when its action's state equals its
+/// target, and every option targets its own index, so one shared value
+/// drives the whole group's checkmarks.
+fn menu_sync_radio_state(reg: &MenuRegistry, group: u64) {
+    use gtk4::glib::prelude::ToVariant;
+    let state = (reg.items[&group].value as i32).to_variant();
+    for &option in &reg.items[&group].children {
+        for action in &reg.items[&option].actions {
+            action.set_state(&state);
+        }
+    }
 }
 
 /// Create the GSimpleAction for one item — the shared dispatch path's
@@ -1068,33 +1085,45 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
             });
             Some(action)
         }
-        MenuItemKind::RadioGroup => {
+        MenuItemKind::RadioOption => {
+            // One stateful action PER OPTION, not one per group. GTK
+            // gives an item the radio role when the item carries a
+            // target and its action carries state (gtkmenutrackeritem),
+            // and it takes the row's sensitivity from that action's
+            // enabled flag — which has no per-target form. So options
+            // that shared one group action could never gray
+            // individually. Per-option actions keep the radio idiom
+            // (checked is state == target, and every option's state is
+            // the GROUP's selected index) while giving each option the
+            // enabled flag the inherited AND already walks onto it.
+            let group = item.parent.expect("scene validated option parentage");
+            let index = reg.items[&group]
+                .children
+                .iter()
+                .position(|option| *option == id)
+                .expect("options list under their group") as i32;
             let action = gio::SimpleAction::new_stateful(
                 &name,
                 Some(gtk4::glib::VariantTy::INT32),
-                &(item.value as i32).to_variant(),
+                &(reg.items[&group].value as i32).to_variant(),
             );
-            action.connect_activate(move |_, param| {
-                let Some(index) = param.and_then(|value| value.get::<i32>()) else {
-                    return;
-                };
-                // The choice contract: re-selecting the selected
-                // option is NOT a change and emits nothing. A disabled
-                // option is inert here — GMenu cannot gray one option
-                // of a shared stateful action, so the gate lives in
-                // the handler (GTK's spelling, same semantics).
+            // The occurrence names the GROUP — the choice contract's
+            // subject — even though the activated action is the
+            // option's.
+            let tag = crate::wire::click_tag(group, noun);
+            action.connect_activate(move |_, _| {
+                // The choice contract: re-selecting the selected option
+                // is NOT a change and emits nothing.
                 let changed = {
                     let mut reg = menus.borrow_mut();
-                    let group = &reg.items[&id];
-                    let selectable = (index as usize) < group.children.len()
-                        && group.value as i32 != index
-                        && menu_effective_enabled(&reg, group.children[index as usize]);
+                    let selectable =
+                        reg.items[&group].value as i32 != index && menu_effective_enabled(&reg, id);
                     if selectable {
-                        let group = reg.items.get_mut(&id).expect("menu items are never removed");
-                        group.value = f64::from(index);
-                        for action in &group.actions {
-                            action.set_state(&index.to_variant());
-                        }
+                        reg.items
+                            .get_mut(&group)
+                            .expect("menu items are never removed")
+                            .value = f64::from(index);
+                        menu_sync_radio_state(&reg, group);
                     }
                     selectable
                 };
@@ -1104,7 +1133,7 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
             });
             Some(action)
         }
-        MenuItemKind::Menu | MenuItemKind::RadioOption | MenuItemKind::Separator => None,
+        MenuItemKind::Menu | MenuItemKind::RadioGroup | MenuItemKind::Separator => None,
     }
 }
 
@@ -1200,15 +1229,16 @@ fn flush_menu_section(into: &gio::Menu, section: &mut gio::Menu) {
     }
 }
 
-/// A radio group's option rows: one shared stateful action, one int
-/// target per option — GMenu renders the radio/checkmark idiom from
-/// exactly this shape.
+/// A radio group's option rows: each option carries its OWN stateful
+/// action plus its index as target — GMenu renders the radio idiom
+/// from exactly that shape (target + state), and the per-option action
+/// is what lets ONE option gray while its siblings stay live.
 fn append_radio_options(reg: &MenuRegistry, group: u64, prefix: &str, into: &gio::Menu) {
     use gtk4::glib::prelude::ToVariant;
     for (index, &option) in reg.items[&group].children.iter().enumerate() {
         let row = gio::MenuItem::new(Some(&reg.items[&option].label), None);
         row.set_action_and_target_value(
-            Some(&format!("{prefix}.kmi-{group}")),
+            Some(&format!("{prefix}.kmi-{option}")),
             Some(&(index as i32).to_variant()),
         );
         into.append_item(&row);
@@ -1539,7 +1569,10 @@ fn menu_activation_route(
                 .iter()
                 .position(|c| *c == item)
                 .expect("options list under their group") as i32;
-            instance(group).map(|a| (a, Some(index)))
+            // The option's own action, the same object its rendered row
+            // activates — a disabled option refuses the verb exactly as
+            // it refuses a click.
+            instance(item).map(|a| (a, Some(index)))
         }
         MenuItemKind::Menu | MenuItemKind::RadioGroup | MenuItemKind::Separator => None,
     }
@@ -2154,16 +2187,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (MenuProp::Value, Value::F64(index)) => {
                     // QUIET, same as checked (the choice contract's
-                    // programmatic side).
+                    // programmatic side). The state lives on the
+                    // OPTIONS' actions, one per option, so the group's
+                    // write fans out to all of them.
                     let mut reg = core.menus.borrow_mut();
-                    let state = reg
-                        .items
+                    reg.items
                         .get_mut(&item.0)
-                        .expect("scene validated the item id");
-                    state.value = *index;
-                    for action in &state.actions {
-                        action.set_state(&(*index as i32).to_variant());
-                    }
+                        .expect("scene validated the item id")
+                        .value = *index;
+                    menu_sync_radio_state(&reg, item.0);
                 }
                 (MenuProp::Primary, Value::Bool(on)) => {
                     // The phone-promotion hint: INERT on desktop by
@@ -2952,8 +2984,9 @@ impl crate::harness::Stage for GtkStage {
             match aspect {
                 MenuAspect::Enablement => {
                     // The REAL action's flag where one exists (it
-                    // carries the inherited AND); grouping `menu`
-                    // nodes and radio options have no GAction, so the
+                    // carries the inherited AND) — including a radio
+                    // option's own action, which is what grays that one
+                    // row. Grouping nodes have no GAction, so the
                     // registry's same AND answers for them.
                     let enabled = match item.actions.first() {
                         Some(action) => action.is_enabled(),
@@ -2976,11 +3009,17 @@ impl crate::harness::Stage for GtkStage {
                     }
                 }
                 MenuAspect::Value => {
-                    // The group action's int state — the target GMenu
-                    // marks as the selected radio option.
+                    // The state lives on the OPTIONS' actions, one per
+                    // option and all carrying the group's selected
+                    // index (that index is what each row compares its
+                    // target against to draw the radio mark). Reading
+                    // the first option's action therefore reads what
+                    // GMenu renders — and a group with no options yet
+                    // has no such state to read.
                     match item
-                        .actions
+                        .children
                         .first()
+                        .and_then(|option| reg.items[option].actions.first())
                         .and_then(|action| action.state())
                         .and_then(|state| state.get::<i32>())
                     {

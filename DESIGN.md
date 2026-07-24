@@ -1179,7 +1179,12 @@ responder behavior such as Command-C in text controls. Kaya declares
 no SwiftUI Settings scene, so no phantom native Settings item appears.
 Settings/Preferences has no placement role in v1. An app may author an
 ordinary `Settings…` action in its own catalog, but native
-Settings-menu placement waits for the role vocabulary below.
+Settings-menu placement waits for the role vocabulary below. Dress can
+also arrive INSIDE an authored menu when their titles coincide: macOS
+inserts its own Enter Full Screen item into a menu titled `View` as
+that menu is displayed. The insertion is display-time and never enters
+the catalog — the model, the paths, and the harness see exactly the
+items the app declared.
 
 ### Items, properties, ids, and occurrences
 
@@ -1326,28 +1331,32 @@ menu hint, not the seed of a toolbar grammar.
 
 ### Where a platform cannot say it
 
-Three limits are recorded rather than papered over. None of them
-changes what a program means or what it emits; each is stated once,
-here, instead of being re-decided per binding.
+Two limits are recorded rather than papered over. Neither changes what
+a program means or what it emits; each is stated once, here, instead
+of being re-decided per binding.
 
-- **GTK renders a disabled grouping node as enabled.** GMenu has no
-  per-header enablement — a submenu or bar-level group is model
-  structure, not a GAction — so a disabled `menu` or `radio_group`
-  renders like an enabled one on Linux, while every descendant carries
-  the AND of its own flag and its ancestors' and refuses activation.
-  The semantics are uniform; the dress is the platform's.
-- **GTK renders a disabled radio option as enabled.** A radio group
-  lowers to one stateful GAction with per-option targets, and GMenu
-  cannot disable a single target of a shared action, so the gate lives
-  in the activate handler: selecting a disabled option changes nothing
-  and emits nothing, but it looks like its siblings.
-- **On macOS the harness drives context menus through the model.**
-  SwiftUI's `.contextMenu` exposes no NSMenu handle and cannot be
-  opened programmatically, so `context_open` + `menu_activate` resolve
-  the anchored catalog in the interpreter's model and land in the same
-  activation path the real gesture takes — one emit, one occurrence.
-  The window catalog and its shortcuts stay real chrome (the
-  Kaya-owned NSMenu walk and `performKeyEquivalent`).
+- **A disabled grouping node's own header is never grayed.** Every
+  command under it is inert on every host — the AND of its own flag
+  and its ancestors' reaches each leaf — but the header that opens it
+  still looks live. GTK's menubar is the binding constraint:
+  `GtkPopoverMenuBarItem` binds only the model item's label, so a
+  bar-level header has no sensitivity to bind at all. macOS is asked
+  for it (the segment's holders carry the effective flag) and AppKit
+  declines: the main menu is dress-owned and keeps its automatic
+  enablement, the same validation that keeps Command-C alive in text
+  controls. Rather than gray the header on the hosts that can and
+  leave the rest behind, the behavior is uniform: the menu opens
+  everywhere, and every command inside it is visibly unavailable.
+- **A context menu cannot be presented programmatically, so the
+  harness resolves context items through the model.**
+  `UIContextMenuInteraction` offers `dismissMenu` and
+  `updateVisibleMenu` and nothing that opens one; SwiftUI's
+  `.contextMenu` hands out no `NSMenu` on macOS either. `context_open`
+  and the `menu_activate` after it therefore resolve the anchored
+  catalog in the interpreter's model and land in the same activation
+  path the real gesture takes — one emit, one occurrence, one dispatch
+  table. The window catalog and its shortcuts stay real chrome: the
+  Kaya-owned `NSMenu` walk and `performKeyEquivalent`.
 
 ### Deliberate cuts and admission triggers
 

@@ -147,8 +147,8 @@ moved to git history; their traps live in docs/traps.md.)
   both anchors, all four backends, all 8 bindings plus the C floor,
   and the menus scene green on every lane. DESIGN.md's "Menus and the
   command vocabulary" is the whole record — the design, the lowering
-  per host, and the three platform limits under "Where a platform
-  cannot say it". What stayed out is trigger-gated, each trigger
+  per host, and the two platform limits under "Where a platform cannot
+  say it". What stayed out is trigger-gated, each trigger
   stated in that section's "Deliberate cuts and admission triggers":
   shared command identity across anchors (the responder-chain/target
   problem), For-stamped items, `bind_field` labels on context items,

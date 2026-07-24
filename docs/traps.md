@@ -298,6 +298,15 @@ the same patterns return through interpreter drop-downs
   bar, and re-synchronizes it after SwiftUI rebuilds and key-window
   changes — a one-shot insertion races the same asynchronous scene
   machinery as a one-shot window registration.
+- **Accessibility reads of a CLOSED NSMenu are pre-validation.**
+  Scripting a mac menu check through System Events reports what the
+  menu was built with, not what it will show: items whose live flag is
+  false still read `enabled = true`, and AppKit's display-time
+  insertions (Enter Full Screen in a menu titled `View`) are absent
+  from the item list entirely. Both appear only once the menu is
+  actually presented — so a screenshot of an open menu is evidence and
+  an AX query of a closed one is not (measured 2026-07-24, while
+  photographing the menus scene).
 - **A native menu rebuild must start from the post-user mirror.**
   Toggle/radio chrome owns the immediate user change, so its callback
   updates the backend's retained `checked`/`value` mirror before it
