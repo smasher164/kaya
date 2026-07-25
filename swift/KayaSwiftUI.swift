@@ -1487,12 +1487,22 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         return "unknown"
     }
 
-    private func kayaAxFind(_ node: NSObject, _ identifier: String, _ depth: Int = 0) -> NSObject? {
+    /// UIKit publishes accessibility IN-PROCESS: the identifier lives on
+    /// `UIAccessibilityIdentification`, and containers expose their
+    /// elements through `UIAccessibilityContainer`. That is unlike
+    /// macOS, where the server side returns nil for everything and the
+    /// read has to go through the AXUIElement CLIENT API — the two
+    /// Apple platforms genuinely differ here, which is why this arm is
+    /// not a copy of the macOS one.
+    private func kayaAxFind(_ node: NSObject, _ identifier: String, _ depth: Int = 0)
+        -> NSObject?
+    {
         if depth > 64 { return nil }
-        if node.accessibilityIdentifier == identifier { return node }
-        // UIAccessibilityContainer first — the synthesized tree — then
-        // the view hierarchy, since UIKit publishes both and SwiftUI
-        // uses each in different places.
+        if let ident = (node as? UIAccessibilityIdentification)?.accessibilityIdentifier,
+            ident == identifier
+        {
+            return node
+        }
         let count = node.accessibilityElementCount()
         if count != NSNotFound && count > 0 {
             for i in 0..<count {
@@ -1513,8 +1523,9 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
 
     private func kayaAxRead(_ identifier: String) -> String? {
         guard !identifier.isEmpty else { return nil }
-        let scenes = UIApplication.shared.connectedScenes
-        for scene in scenes.compactMap({ $0 as? UIWindowScene }) {
+        for scene in UIApplication.shared.connectedScenes.compactMap({
+            $0 as? UIWindowScene
+        }) {
             for window in scene.windows {
                 if let hit = kayaAxFind(window, identifier) {
                     return kayaAxRole(hit) + "/" + (hit.accessibilityLabel ?? "")

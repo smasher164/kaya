@@ -95,6 +95,35 @@ if [ "$MODE" = parallel ]; then
         legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null)
         legs=${legs:-0}
         echo "$name: $verdict (${secs}s, $legs legs)"
+        # DURATION IS A CORRECTNESS SIGNAL, not just a stat. CLAUDE.md
+        # states that a duration anomaly is a bug signal; until now
+        # nothing enforced it, so a lane could quietly get six times
+        # slower and still report ALL PASS.
+        #
+        # Measured 2026-07-25: exporting GTK_A11Y=atspi lane-wide took
+        # linux from 65s to 393s — a change in blast radius, not in any
+        # assertion. The failures it caused were legible, but a
+        # SLOWDOWN with no failures is exactly the shape that ships.
+        #
+        # Ceilings are per lane and deliberately loose (roughly 3x the
+        # warm time): this catches a regression in KIND, not jitter. A
+        # legitimately slower lane raises its number in the same commit
+        # that makes it slower, which is the conversation worth forcing.
+        case "$name" in
+            mac) budget=400 ;;
+            linux) budget=300 ;;
+            windows) budget=400 ;;
+            ios) budget=300 ;;
+            android) budget=250 ;;
+            *) budget=0 ;;
+        esac
+        if [ "$budget" -gt 0 ] && [ "$secs" != '?' ] && [ "$secs" -gt "$budget" ]; then
+            echo "$name: DURATION ANOMALY — ${secs}s exceeds the ${budget}s ceiling." \
+                "A lane that slows down by this much changed in kind, not in degree:" \
+                "look for work added to EVERY leg (an env export, a per-leg wait, a" \
+                "rebuild that stopped caching) before assuming it is load."
+            status=1
+        fi
     done
 fi
 

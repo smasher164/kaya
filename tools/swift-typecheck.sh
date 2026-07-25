@@ -65,8 +65,41 @@ done
 if ! kaya_swiftc -typecheck \
     -import-objc-header crates/kaya/include/kaya.h \
     swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift; then
-    echo "swift-typecheck: FAIL (the SwiftUI interpreter)"
+    echo "swift-typecheck: FAIL (the SwiftUI interpreter, macOS)"
     exit 1
+fi
+
+# AND FOR iOS. One file serves both Apple platforms, so half of it lives
+# behind `#if os(macOS)` / `#else` and a host-target typecheck compiles
+# only ONE of those halves. The iOS half is therefore invisible to the
+# macOS pass — measured 2026-07-25, hours after the interpreter pass was
+# added: swift-typecheck reported OK while the iOS lane failed to
+# compile `NSObject.accessibilityIdentifier` in the `#else` branch.
+#
+# The two halves are genuinely different code (UIKit publishes
+# accessibility in-process; AppKit does not), so this is not
+# belt-and-braces — it is the only compiler the iOS branch sees before
+# the simulator.
+# The dev shell's xcrun is a shim with no iOS SDK, so this goes through
+# the real toolchain the same way kaya_swiftc does (SWIFT_DEVELOPER_DIR,
+# resolved above by kaya_resolve_swiftc).
+ios_xcrun() {
+    if [ -n "${SWIFT_DEVELOPER_DIR:-}" ]; then
+        env -u SDKROOT DEVELOPER_DIR="$SWIFT_DEVELOPER_DIR" /usr/bin/xcrun "$@"
+    else
+        env -u SDKROOT /usr/bin/xcrun "$@"
+    fi
+}
+if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
+    if ! ios_xcrun -sdk iphonesimulator swiftc -typecheck \
+        -target arm64-apple-ios17.0-simulator \
+        -import-objc-header crates/kaya/include/kaya.h \
+        swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift; then
+        echo "swift-typecheck: FAIL (the SwiftUI interpreter, iOS)"
+        exit 1
+    fi
+else
+    echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
 fi
 
 echo "swift-typecheck: OK"

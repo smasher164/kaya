@@ -102,6 +102,19 @@ timing core-build
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
 
+# THE ACCESSIBILITY BUS IS PER-LEG, NOT LANE-WIDE. Exporting
+# GTK_A11Y=atspi here changed the GTK backend for EVERY leg and timed
+# out 11 of them at 180s (python/go/csharp/ocaml; rust and c survived)
+# — measured 2026-07-25. One scene's requirement must not alter the
+# environment of three hundred legs that never asked for it.
+#
+# The image carries at-spi2-core + dbus (see the Dockerfile), and
+# tools/linux/atspi_probe.py walks the tree. When the a11y scene gets
+# its Linux leg, launch the bus INSIDE that leg only:
+#   eval "$(dbus-launch --sh-syntax)"; export GTK_A11Y=atspi
+#   /usr/libexec/at-spi-bus-launcher --launch-immediately &
+# and tear both down with it.
+
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
@@ -201,6 +214,20 @@ drain() {
         echo "== $name =="
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
+            # A leg that produced NOTHING is a different failure from one
+            # that failed an assertion, and the bare verdict cannot tell
+            # them apart. An empty log means the guest died or hung
+            # BEFORE the harness printed its first line — a bad library
+            # load, a missing display, or a blocking connect at startup.
+            # Measured 2026-07-25: eleven legs reported `FAIL (180s)`
+            # with empty logs after GTK_A11Y=atspi was exported
+            # lane-wide, and the silence is what made it look like a
+            # scene problem instead of a startup problem.
+            if [ ! -s "$LEGS_DIR/$name.log" ]; then
+                echo "$name: note — NO OUTPUT AT ALL. The guest never reached the harness:" \
+                    "it hung or died during startup (library load, display, or a blocking" \
+                    "connect), so look before the scene, not inside it."
+            fi
             # The confusing failure class: verdict printed OK but the
             # leg still failed — the process never exited (a broken
             # Stage::finish exit path, once bitten on GTK and WinUI).
