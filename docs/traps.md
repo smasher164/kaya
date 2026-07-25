@@ -422,6 +422,28 @@ the same patterns return through interpreter drop-downs
 - **adb shell re-parses `am` args on-device** — `;`-folded script
   extras need device-side single quotes or the separators execute as
   shell commands.
+- **WinUI's `SystemAccentColor` is not overridable, and failing is
+  silent.** Microsoft's own theming documentation says you can override
+  it in `Application.Resources` or a theme dictionary, or set
+  `ColorPaletteResources.Accent`. None of them take
+  (microsoft-ui-xaml#6394) — the system accent wins and the app's value
+  is ignored with no error, no warning, and no visual change to
+  diagnose from. The route that works is the DERIVED brushes:
+  `AccentFillColorDefaultBrush` and its siblings, injected into
+  `Application.Current.Resources.ThemeDictionaries` at startup. Because
+  the failure mode is a silent no-op rather than a crash, any accent
+  lowering wants a gate that READS the rendered brush back, not a
+  comment saying which key to use.
+- **WinUI 3 XAML cannot host a child HWND.** WPF has `HwndHost`; UWP
+  and WinUI never did, because HWNDs and the composition tree are
+  separate airspaces, and the `DesktopWindowXamlSource` /
+  `DesktopChildSiteBridge` machinery runs the other direction (XAML
+  *into* Win32, the XAML Islands case). So "Win32 common controls
+  remain the fallback" is true only for a whole window, never for one
+  widget inside a XAML tree. On Windows there is no interpreter
+  drop-down tier — see DESIGN's lowering tiers — and a gap that other
+  backends solve by reaching into the older toolkit must be
+  CONSTRUCTED here.
 
 ## Language / binding semantics
 
@@ -781,6 +803,33 @@ the same patterns return through interpreter drop-downs
   (2026-07-22). The general rule for mounted-tree builds: an
   incremental build that shares sources with a concurrent writer
   must assert output freshness itself.
+
+## A deferral trigger written against a platform's current shape expires
+
+2026-07-24, the menus close-out review. The ledger deferred iPad menu
+exposure with an explicit trigger: "an artifact running on iPad with a
+keyboard", framed around `UIKeyCommand` and the hold-Command HUD. That
+framing was correct when it was written — a hardware keyboard was then
+the only route to commands on iPad. iPadOS 26 then gave every iPad app
+a real system menu bar reachable by swiping down from the top edge or
+hovering a trackpad, with no keyboard involved. The recorded trigger
+could no longer fire for the case that had become the important one: a
+plain iPad, no keyboard, and a menu bar the app never fills. Both menus
+implementations (shipped, and the `menus/first-cut` stash) meanwhile
+gate on `#if os(iOS)` and route the whole catalog into a phone-shaped
+More overflow.
+
+Trigger-gating is still the right admission policy; the failure is in
+how the trigger was PHRASED. A trigger naming a user artifact ("an app
+that needs a Recent Files menu") stays valid indefinitely, because it
+describes a demand. A trigger naming a platform's current capability
+("an iPad with a keyboard, because that is the only route") silently
+encodes an assumption about the platform that the platform can revoke.
+Guard: when a deferral's trigger rests on what a platform can do today,
+record the assumption separately and give the entry a re-read date, so
+a platform release re-opens it instead of a deferral quietly becoming
+unreachable. The general form of the bug: the deferral did not go
+stale — its PREMISE did, and nothing was watching the premise.
 
 ## The wedged-VM class: "started" is not "reachable"
 

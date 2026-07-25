@@ -41,12 +41,47 @@ The current roster is one backend per platform (ratified 2026-07-20): the
 SwiftUI interpreter on macOS and iOS (one Swift file serves both), Compose
 on Android, GTK4 on Linux, WinUI 3 on Windows. The native AppKit, UIKit,
 and Android Views backends were built and validated first and then
-deleted; where SwiftUI/Compose cannot express a semantic, the interpreter
-drops down per widget through the platform's sanctioned interop
-(NSViewRepresentable / UIViewRepresentable / AndroidView), intersection-
-first, each drop-down recorded with its conformance scene. The table
-below keeps each platform's bring-up record, including the deleted
-backends, because the lessons in it still pay.
+deleted.
+
+**Lowering tiers.** A widget admission does not require that every
+backend's declarative layer already ships the control; it requires that
+every backend has an honest lowering. Four tiers, cheapest first, and an
+admission names its tier per platform rather than counting how many
+toolkits ship the control:
+
+1. **Wrap.** The declarative layer ships it. The default.
+2. **Drop down.** The platform's older object model ships it and the
+   interpreter reaches it through sanctioned interop
+   (NSViewRepresentable / UIViewRepresentable / AndroidView),
+   intersection-first, each drop-down recorded with its conformance
+   scene. The NSButton bridge is the standing example, and it is
+   load-bearing indefinitely rather than transitional.
+3. **Construct.** Neither layer ships it and the backend builds it from
+   primitives. Already in force, not a concession: `grow` lowered
+   natively on WinUI (`Grid` star sizing) and Compose
+   (`Modifier.weight`) and was CONSTRUCTED on GTK4 (a custom
+   `GtkLayoutManager`) and SwiftUI (a custom `Layout`).
+4. **Cannot say it.** The platform has no such idiom, and the carve-out
+   is stated uniformly — the menus section's precedent.
+
+Tier 2 is not uniform across the roster, and the asymmetry decides
+admissions. SwiftUI and Compose have first-class per-widget interop.
+GTK4 is its own object model, so it never needs the drop. **WinUI 3 has
+no tier 2**: XAML has no `HwndHost` equivalent (WPF has one; UWP and
+WinUI never did, because HWNDs and the composition tree are separate
+airspaces), so a Win32 common control cannot be parked in the visual
+tree per widget. Win32 stays an alternative for a whole window, never a
+per-control fallback — read the common-controls note below with that
+limit in mind. On Windows, tier 2 collapses into tier 3.
+
+Tier 3 carries a recorded scar: the KayaStretchCell custom-`Layout`
+attempt was retreated, because a custom `Layout` does not forward
+alignment guides and the guide-forwarding overloads SIGTRAPed the
+gallery leg. The ledger's discipline stands — a constructed failing
+scene before the next attempt.
+
+The table below keeps each platform's bring-up record, including the
+deleted backends, because the lessons in it still pay.
 
 | Platform | Backend | Notes |
 |----------|---------|-------|
@@ -1350,9 +1385,17 @@ chrome shows it.
 
 ### Compact overflow and `primary`
 
-With no hint, desktops render the full catalog and phones place the
-entire catalog in overflow. `primary: true` asks the phone host to
-promote an action into its top bar as a real native action. The host
+Read this with "Form factor and adaptivity". The policy below is
+correct; its TRIGGER was written as a platform test (desktop vs phone)
+and must be re-keyed to the window's size class. "Compact" below means a
+compact window, not a phone, and a regular-width iPad is not compact.
+That restatement is the open correction — the policy itself does not
+move.
+
+With no hint, regular windows render the full catalog and compact
+windows place the entire catalog in overflow. `primary: true` asks a
+compact host to promote an action into its top bar as a real native
+action. The host
 promotes the first *k* primary actions in catalog preorder: top-level
 grouping nodes in menubar-append order, then each node's children in
 append order, depth-first. Creation time is irrelevant. *k* is the
@@ -1363,9 +1406,9 @@ earlier node may therefore displace an item, deterministically on
 every host. This is advisory like initial window size: the catalog and
 every command remain reachable regardless of capacity.
 
-`primary` is inert on desktop. It does not create a desktop toolbar,
-and no toolbar materialization is planned. This one bit is an adaptive
-menu hint, not the seed of a toolbar grammar.
+`primary` is inert in a regular window. It does not create a desktop
+toolbar, and no toolbar materialization is planned. This one bit is an
+adaptive menu hint, not the seed of a toolbar grammar.
 
 ### Where a platform cannot say it
 
@@ -1426,6 +1469,134 @@ of being re-decided per binding.
 - **A toolbar grammar is not on the roadmap.** It is admitted only if
   an artifact demands semantics that adaptive menu promotion cannot
   express.
+
+## Brand identity and the styling ceiling
+
+The dressed control floor answers one question — what should a *button*
+look like — and answers it well: backends normalize, there is no styling
+API to call, and per-platform chrome differences are the Zen Garden
+point. It does not answer the other question an app has: what should
+*this company's* app look like. "Zero styling API" refused both when it
+only needed to refuse one, and native apps that are not Electron
+demonstrably do carry brand.
+
+Three things get called styling, and they take three different verdicts:
+
+- **Brand identity** — accent, typeface, icon set, logo. App-level, a
+  handful of slots, set once. ADMITTED, below.
+- **Semantic emphasis** — this button is destructive, this label is a
+  heading. Per-widget, closed value set, never a raw value. ADMITTED as
+  the `role` grammar the menus milestone already established.
+- **Arbitrary per-widget appearance** — a background color on one
+  button, a corner radius, a padding override. This is what the dressed
+  floor exists to refuse, and it stays refused. Admitting it makes each
+  platform stop flowing like itself, which is the whole bet.
+
+The load-bearing fact is that the brand slots are not kaya inventing a
+design-token system. Every platform in the roster already has one and
+expects an app to fill it: SwiftUI takes the `AccentColor` asset and
+`.tint()`; Material 3 derives its whole color-role scheme from a brand
+source color through a documented custom-brand flow; libadwaita exposes
+`--accent-bg-color` and says explicitly that apps are free to override
+the system accent; WinUI takes theme dictionaries. Symbol sets are the
+same shape — SF Symbols, Material Symbols, Adwaita icon names, Fluent
+icons.
+
+**The WinUI trap.** `SystemAccentColor` is NOT overridable, despite the
+documentation saying it is (microsoft-ui-xaml#6394). The working route
+is to override the DERIVED accent brushes — `AccentFillColorDefaultBrush`
+and its siblings — in `ThemeDictionaries` at startup. A lowering that
+sets `SystemAccentColor` silently does nothing, which is the worst
+failure shape: it compiles, it runs, and it is ignored.
+
+**Typeface substitutes the family, never the scale.** Apple's system
+fonts get Dynamic Type and Bold Text automatically and a custom font
+must reimplement that through `UIFontMetrics`; Material's scale is in
+`sp` for the same reason. So a brand typeface changes the family while
+the platform keeps the size, weight, and metrics that `role: title`
+means. The semantic-role tier is therefore not an alternative to brand
+fonts — it is the PRECONDITION that makes them safe.
+
+**Icons want names, not bytes.** The current `icon` prop is a Blob, and
+a blob is the wrong primitive for a STANDARD icon, for two reasons that
+are both independent of file format. The platforms draw the same concept
+differently — share is a box-with-up-arrow on Apple and a three-node
+graph on Android, and no single asset is right on both. And platform
+symbol sets metric-match the text beside them (SF Symbols track weight
+and baseline; Material Symbols carry weight/fill/grade axes) while a
+blob has no such relationship. The admission is a small closed set of
+semantic names mapped per backend — the `role` trick again. The Blob
+stays for genuinely app-specific art.
+
+Note what is *not* the reason: tinting. Tinting is a template/mask
+operation on the alpha channel (`NSImage.isTemplate`, `.alwaysTemplate`,
+Android's `ColorFilter`, `BitmapIcon.ShowAsMonochrome`, GTK's symbolic
+icons), and a single-color raster tints perfectly well. Vector art buys
+resolution independence, which is a separate open question — see the
+ledger.
+
+**Per-platform values, uniform vocabulary.** A brand color often needs
+tuning per platform, because one hex does not carry the same contrast
+against Material's tonal surfaces as against an Aqua window. Letting a
+slot take a per-platform value keeps the vocabulary uniform and varies
+only the value: no per-platform guest code, no extra toolchain, no
+divergent semantics. That is admissible, and it is a different mechanism
+from an escape hatch.
+
+A native-view escape hatch for APP AUTHORS stays rejected for the reason
+it always was: per-platform guest code in eight languages plus each
+platform's toolchain on the developer's machine, breaking the
+cross-platform promise per widget. The escape kaya does have is lowering
+tier 2 — interpreter-internal, invisible to apps, kaya's to write. The
+two are routinely confused and are not the same mechanism.
+
+**The ceiling, stated deliberately.** A brand tier this size serves a
+company that wants its app to feel like theirs on each platform. It does
+not serve an app whose identity IS its interface, which will outgrow the
+ceiling on macOS first. That app builds from scratch, and that is the
+intended outcome rather than a defect: the bet is that enough
+cross-platform surface plus just enough branding makes kaya the path of
+least resistance for everyone else. Recording the ceiling here means it
+was chosen rather than discovered.
+
+## Form factor and adaptivity
+
+kaya's adaptivity has been keyed on PLATFORM — compile-time `#if
+os(iOS)` branches, and this document's own compact-overflow rule written
+as "desktops render the full catalog and phones place the entire catalog
+in overflow." That axis is wrong. The correct axis is the window's FORM
+FACTOR, resolved at runtime, per window.
+
+The defect that proved it: iPadOS 26 gives iPad apps a real system menu
+bar — swipe down from the top edge or hover a trackpad, with third-party
+apps free to populate it — alongside real windowing. Both menus
+implementations (the shipped one and the `menus/first-cut` stash) gate on
+`#if os(iOS)` and route the whole catalog into a trailing More overflow
+in the top bar. On a current iPad that hides a full command catalog
+behind a phone affordance while the platform's own menu bar sits empty.
+
+Every platform in the roster already has the concept, and kaya uses none
+of them: SwiftUI's horizontal size class, Compose's `WindowSizeClass`
+(compact / medium / expanded), libadwaita's `AdwBreakpoint`, WinUI's
+adaptive triggers. Apple's own `Table` is the model to copy — on a
+compact horizontal size class it hides the headers and collapses to a
+single-column list, automatically, which is exactly the one-vocabulary,
+richer-where-the-idiom-fits shape argued for elsewhere in this document.
+Adopting the platforms' size classes is not inventing an adaptivity
+policy; it is declining to invent one.
+
+The rule: **an adaptive lowering keys on the window's size class, never
+on the operating system.** A phone is a compact window, an iPad is
+usually a regular one, and a small window on a desktop is compact — one
+code path serves all three. `primary` stays advisory exactly as
+specified; what changes is which host treats itself as compact.
+
+This has a harness consequence, and a good one. A size-class lowering
+means one scene renders different structure at different window sizes,
+which the byte-identical-expectations doctrine must account for. The
+`resize_window` verb already in the ledger becomes the gate: it drives
+the size-class transition and re-asserts on the far side, so adaptivity
+becomes a matrix fact rather than a claim. The two ledger items merge.
 
 ## Threading model and protocol
 
@@ -1957,6 +2128,22 @@ items, because platform grouping semantics are a trap; and there is no
 Table, because a multi-column row is a row template with an HBox inside
 List.
 
+That second decision holds, and the 2026-07-24 survey sharpened why.
+What a native table buys over List-plus-row-template is not columns —
+it is column HEADERS, drag-to-resize, and click-to-sort. Those are a
+regular-size-class affordance: macOS has `NSTableView` (which SwiftUI's
+own `Table` wraps), Windows has the details-view lineage, and Apple's
+`Table` on a COMPACT horizontal size class already hides the headers and
+collapses to a single-column list. Android is not a capability gap
+either — Material 2 specified data tables, Material 3 dropped the
+component, and Compose's implementation was removed pre-1.0, so the
+community libraries are re-derived from the deleted code; a Compose
+lowering is lowering tier 3, which kaya already ships in. So Table is
+not a separate widget admission: it is column props on the existing list
+vocabulary, lowered richly where the size class and the platform have
+the idiom and degraded to a plain list where they do not. Cost is a
+couple of props, not a milestone.
+
 The first-admissions queue, post-v1 and in rough order: Grid (forms will
 demand cross-row alignment), TextArea, Canvas (with the surface-handle
 transport), Tabs, RadioGroup, ProgressBar, ContextMenu, file dialogs,
@@ -1966,9 +2153,13 @@ during the 2026-07-22 widget run: Grid, TextArea, Tabs — as sections,
 a presentation context rather than a widget — RadioGroup as radio,
 ProgressBar, plus Select and Spacer which never sat in the queue.
 ContextMenu has since joined the MenuBar milestone as its second
-anchor rather than a separate widget admission. Still ahead: Canvas,
-the menu/context command vocabulary, file dialogs, Separator, Splitter,
-Table, Tree, date/time pickers.) Not core: webview (a separate crate, if
+anchor rather than a separate widget admission, and the menu/context
+command vocabulary landed 2026-07-24 with standard commands behind it.
+Still ahead: Canvas, file dialogs — which are a presentation context
+returning a result, the alert grammar with a path instead of a button,
+NOT a widget — Separator, Splitter, Tree, and date/time pickers. Table
+left this queue; see the column-props note above.) Not core: webview (a
+separate crate, if
 ever), rich text (after display lists), and the audio implementation
 (designed above, scheduled when an app needs it).
 

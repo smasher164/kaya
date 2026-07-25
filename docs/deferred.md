@@ -11,44 +11,87 @@ moved to git history; their traps live in docs/traps.md.)
 
 ## Next milestones (in rough priority order)
 
-- **The versioned binding style guide** (DESIGN open question #1) — the
-  current milestone. Construction-prop spellings were RATIFIED
-  2026-07-20 after the ecosystem survey (chains: Rust/Go/Java; named
-  args: Swift/Python/C#/OCaml; config lists: Haskell — see DESIGN's
-  Binding conventions), and OCaml's ambient-transaction spelling was
-  RATIFIED 2026-07-22 (direct style over an ambient tx ref, curried
-  children ending in `()` — see Binding conventions and docs/traps.md's
-  right-to-left entry). Still open here:
-  - ratify per-language tiers;
-  - ambient-transaction spellings for the remaining languages;
-  - container SCOPING for layout props — typed row/column contexts
-    making an orphan `grow` a compile error (the ambient languages'
-    nullary container bodies cannot express a receiver without a
-    redesign, which is why this waited for the style-guide phase);
-  - Rust's chained `.grow()` construction form (rides an ephemeral
-    borrow-checked proxy handle);
-  - the eq/ne/fmt derived-signal vocabulary beyond Python;
-  - blob-signal ergonomics parity (Go has typed Signal[[]byte]; others
-    wrap handles manually);
-  - decision gate for deleting the probe/reflection selector floor that
-    the KayaGen generators superseded;
-  - optional static analyzers (Roslyn for C# is the plausible one;
-    go/analysis; ErrorProne — never load-bearing, the runtime guards
-    are the floor);
-  - whatever the guide ratifies for multi-window ergonomics.
+- **DEFECT — the iPad menu lowering is wrong as of iPadOS 26**
+  (found 2026-07-24). iPadOS 26 gives iPad apps a REAL system menu bar
+  (swipe down from the top edge, or hover a trackpad; third-party apps
+  populate it) plus real windowing with traffic lights. kaya routes the
+  entire catalog into a trailing More overflow on every iOS host:
+  `KayaPhoneMenuToolbar` in swift/KayaSwiftUI.swift, gated
+  `#if os(iOS)`, promoted primaries in `.primaryAction` plus the More
+  `Menu`. So a full command catalog hides behind a phone affordance
+  while the platform's own menu bar sits empty. The `menus/first-cut`
+  stash has the identical structure — this is not a regression from one
+  implementation, it is a shared assumption. Fix rides the form-factor
+  milestone below; the iPad arm wants `UIMenuBuilder`.
+  THE TRAP WORTH KEEPING: the ledger already carried an iPad item, but
+  its trigger was "an artifact running on iPad with a keyboard", framed
+  around `UIKeyCommand` HUD exposure — the pre-26 framing, when a
+  keyboard was the only route to commands on iPad. That trigger can
+  never fire for the thing that now matters (a plain iPad, no keyboard,
+  with a menu bar). A trigger written against a platform's CURRENT
+  shape expires when the platform moves; triggers naming a platform
+  capability need a re-read date, not just an artifact.
+
+- **Form factor as the adaptivity axis** (DESIGN's "Form factor and
+  adaptivity", 2026-07-24). kaya keys adaptivity on PLATFORM —
+  compile-time `#if os(iOS)`, and the compact-overflow rule written as
+  desktop-vs-phone. The correct axis is the window's size class,
+  resolved at runtime, per window. Every backend already has the
+  concept and kaya uses none: SwiftUI's horizontal size class,
+  Compose's `WindowSizeClass`, libadwaita's `AdwBreakpoint`, WinUI's
+  adaptive triggers. Scope: a size-class notion in the core/window
+  model, the four backend readings, re-keying the menus compact rule
+  off `#if os(iOS)`, and the iPad `UIMenuBuilder` arm. The gate is
+  already specified and already in this ledger — `resize_window` drives
+  the size-class transition and re-asserts on the far side, which makes
+  adaptivity a matrix fact instead of a claim. THE TWO ITEMS MERGE;
+  do not schedule `resize_window` separately.
+
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
   beyond the primary set (utility panels, always-on-top).
 - **App-developer capability decisions** (raised 2026-07-23; each
   wants a design pass or an explicit v2 verdict, none is speculative
   protocol work):
-  - **Styling tier 1**: the v1 stance is zero styling API (the
-    dressed floor; DESIGN's Zen Garden passage) — but the stance has
-    no successor decision. The design-safe first tier is SEMANTIC
-    ROLES, not raw values — destructive/primary on buttons,
-    header/caption levels on labels — which map to a native idiom on
-    every platform without breaking each-platform-flows-like-itself.
-    Decide at the styling decision point, not by drift.
+  - **Styling tier 1 — the successor decision is MADE** (2026-07-24,
+    DESIGN's "Brand identity and the styling ceiling"). The v1 stance
+    stays zero *arbitrary* styling; what is admitted is two tiers.
+    (a) SEMANTIC ROLES — destructive/prominent/plain on buttons,
+    title/heading/body/caption on labels — the `role` grammar the
+    menus milestone already built, reused verbatim. (b) A BRAND TIER
+    of app-level slots (accent, typeface family, icon set), each of
+    which every platform already exposes and expects apps to fill.
+    Slots may take per-platform VALUES; the vocabulary stays uniform.
+    What remains open under this heading, each a design pass:
+    - The exact slot list and the four lowerings per slot. Carry the
+      WinUI trap into the lowering: `SystemAccentColor` is NOT
+      overridable (microsoft-ui-xaml#6394) — override the derived
+      `AccentFillColorDefaultBrush` family in `ThemeDictionaries`.
+      A lowering that sets `SystemAccentColor` compiles, runs, and is
+      silently ignored, so this wants a gate, not a comment.
+    - **Semantic icon names.** `icon` is a Blob today (sprop 2 /
+      mprop 5), which is the wrong primitive for STANDARD icons: the
+      platforms draw the same concept differently, and their symbol
+      sets metric-match adjacent text while a blob cannot. Wants a
+      small closed name set mapped per backend (SF Symbols / Material
+      Symbols / Adwaita names / Fluent). The Blob stays for
+      app-specific art. NOT a tinting problem — a single-color raster
+      tints fine on all four.
+    - **Vector/DPI story for the Blob** (separate from the above): all
+      four decoders are raster-only today — `NSImage(data:)`,
+      `BitmapFactory.decodeByteArray`, `gdk::Texture::from_bytes`
+      (PNG/JPEG per its own comment), `BitmapImage::SetSource`. Android
+      cannot be fixed by API choice: `VectorDrawable` needs a compiled
+      resource, with no runtime inflate-from-bytes. A PNG shipped at one
+      size is soft at 2x/3x and kaya has no multi-resolution story. The
+      shape that fits kaya: rasterize SVG IN CORE with `resvg` — one
+      renderer, byte-identical output on all five platforms, the same
+      doctrine as the shared scene scripts, and it routes around the
+      Android limit. Cost: core must learn the target scale factor,
+      which it does not know today.
+    - Typeface substitution must change the FAMILY only, never the
+      scale (Dynamic Type / `sp` both break otherwise), which makes the
+      role tier a precondition rather than an alternative.
   - **Accessibility surfacing**: the architecture carries it for free
     (native widgets ARE the accessibility tree, DESIGN's
     Accessibility passage) but nothing PROVES it and apps cannot
@@ -107,6 +150,32 @@ moved to git history; their traps live in docs/traps.md.)
   layout prop, from grow's landing: native weights on WinUI — `Grid`
   star sizing — and Compose — `Modifier.weight`; constructed on GTK4
   — a custom `GtkLayoutManager` — and SwiftUI — a custom `Layout`.)
+- **The versioned binding style guide** (DESIGN open question #1) —
+  DEPRIORITIZED 2026-07-24 (Akhil): kaya maintains its own bindings, so
+  cross-binding consistency comes from one set of hands plus the gates
+  (check-sugar-surface, the abort checks, the emission checks), not
+  from a document. A style guide is what you write when OUTSIDE
+  contributors author bindings; revisit when the library is mature
+  enough for that to be true. The per-family spellings stay ratified
+  and in force (chains: Rust/Go/Java; named args:
+  Swift/Python/C#/OCaml; config lists: Haskell — DESIGN's Binding
+  conventions; OCaml's ambient-transaction spelling, 2026-07-22).
+  Three items filed under it are NOT style and keep their own standing:
+  - **Container scoping for layout props** — typed row/column contexts
+    making an orphan `grow` a compile error. A safety guard (types over
+    runtime checks), not ergonomics. The ambient languages' nullary
+    container bodies cannot express a receiver without a redesign,
+    which is why it waited.
+  - **Derived-signal vocabulary beyond Python** (eq/ne/fmt) and
+    **blob-signal parity** (Go has typed Signal[[]byte]; others wrap
+    handles) — capability gaps between bindings, not spelling ones.
+  - **Decision gate for deleting the probe/reflection selector floor**
+    that the KayaGen generators superseded — debt with a real deletion
+    behind it.
+  The rest — per-language tiers, ambient-tx spellings for the remaining
+  languages, Rust's chained `.grow()`, optional static analyzers,
+  multi-window ergonomics — waits for the guide, and the guide waits
+  for maturity.
 - STANDING CONSTRAINT — do not bump the flake SDK without preserving
   a compat-generation leg. The nix shell links every non-swift leg
   binary against its pinned SDK (audit 2026-07-21: python3/go/dotnet/
@@ -170,9 +239,12 @@ moved to git history; their traps live in docs/traps.md.)
   proves the dispatch), but nothing binds it to a real iPad keyboard
   or to the hold-Command HUD — that wants `UIKeyCommand` /
   `UIMenuBuilder`, since the macOS lowering is NSMenu rather than
-  SwiftUI `.commands`. TRIGGER: an artifact running on iPad with a
-  keyboard. Android's equivalent route IS live (each host Activity
-  forwards `dispatchKeyShortcutEvent` into the same table).
+  SwiftUI `.commands`. TRIGGER (SUPERSEDED 2026-07-24 — see the iPad
+  DEFECT entry at the top; iPadOS 26's menu bar is not keyboard-gated,
+  so this trigger could never fire for the case that matters): an
+  artifact running on iPad with a keyboard. Android's equivalent route
+  IS live (each host Activity forwards `dispatchKeyShortcutEvent` into
+  the same table).
 - scrollTo + ref markers (per-instance handles): brings the first
   instance-addressed command (TemplateNodeId + key path target) and the
   silent vanished-target no-op (live-zone commands fail loudly; stamped
@@ -283,7 +355,9 @@ moved to git history; their traps live in docs/traps.md.)
   load. The class fix is structural; the missing gate is a scene (or
   an entry-scene opening step) that focuses at mount and asserts
   expect_focused, proving the deferral on all platforms.
-- resize_window harness verb (Akhil asked 2026-07-22): backends
+- resize_window harness verb (Akhil asked 2026-07-22) — MERGED into the
+  form-factor milestone 2026-07-24; the same verb is the size-class
+  transition gate, so do not schedule it separately. Backends
   reflow natively on user resize but the matrix never drives one —
   add a verb that resizes the REAL window then re-asserts
   root_fills/shares/fills, making reflow-under-resize a matrix fact.
