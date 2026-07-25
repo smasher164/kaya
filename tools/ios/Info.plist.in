@@ -16,6 +16,18 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <!-- 1 = iPhone, 2 = iPad. Absent, this defaults to iPhone ONLY,
+         and iPadOS then runs the bundle in iPhone COMPATIBILITY mode:
+         a phone-sized window scaled up on an iPad, reporting a compact
+         horizontal size class. That silently made the iPad leg a
+         second phone leg — the device was a real iPad Pro while the
+         app was not an iPad app at all. Declaring both is what makes
+         a regular size class reachable. -->
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>1</integer>
+        <integer>2</integer>
+    </array>
     <key>UILaunchScreen</key>
     <dict/>
 </dict>

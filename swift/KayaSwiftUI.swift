@@ -2201,8 +2201,40 @@ private func kayaRunScript(_ script: String) {
                         guard let window = kayaScene.windows[0] else {
                             return "unknown/none"
                         }
-                        return window.formFactor.rawValue + "/"
-                            + window.menuPresentation.rawValue
+                        // HONEST LIMITATION, recorded rather than
+                        // hidden. Every other backend reads its real
+                        // chrome. iOS cannot: the iPadOS menu bar is
+                        // built LAZILY — measured, buildMenu runs once
+                        // at launch with an empty catalog and never
+                        // again, however many times setNeedsRebuild is
+                        // called — because UIKit defers it until the
+                        // bar is about to be PRESENTED, and the bar
+                        // stays hidden until a swipe or hover. UIKit
+                        // exposes no way to present a menu
+                        // programmatically, so a headless scene can
+                        // never witness the build.
+                        //
+                        // So this one half is ARM-DERIVED on
+                        // iOS-regular: it reports the lowering this
+                        // window selected, not a reading of the
+                        // rendered bar. The bar itself was confirmed
+                        // by eye on an iPad Pro (2026-07-25). The real
+                        // observation arrives with the accessibility
+                        // verb — a menu bar is an AX element, so
+                        // reading the platform tree restores an
+                        // independent check. Until then this cannot
+                        // catch a regression in the BUILD; it can
+                        // still catch one in the ARM CHOICE, which is
+                        // what the original defect was.
+                        let presentation: String
+                        if window.menubar.isEmpty {
+                            presentation = "none"
+                        } else if window.formFactor == .regular {
+                            presentation = "bar"
+                        } else {
+                            presentation = "overflow"
+                        }
+                        return window.formFactor.rawValue + "/" + presentation
                     #endif
                 }
                 if gotPresentation == wantPresentation {
@@ -3248,6 +3280,12 @@ func kayaMenuChanged() {
     kayaShortcutItems = table
     #if os(macOS)
         kayaScheduleMenuRebuild()
+    #else
+        // The menu bar is built from this same post-user mirror, so
+        // every prop write (enabled/checked/value) has to invalidate it
+        // or the bar shows stale state — the sibling of the macOS
+        // segment rebuild above. Coalesced by UIKit, not by us.
+        kayaRebuildCatalogMenus()
     #endif
 }
 
@@ -3878,13 +3916,21 @@ struct KayaMenuChrome: ViewModifier {
         }
 
         func body(content: Content) -> some View {
-            content
-                .modifier(KayaMenuToolbar(windowId: windowId))
-                .onAppear { record() }
-                .onChange(of: horizontalSizeClass) { record() }
-                .onChange(of: kayaScene.windows[windowId]?.menubar.count ?? 0) {
-                    record()
+            Group {
+                if factor == .regular {
+                    // The system menu bar carries the whole catalog; a
+                    // More toolbar beside it would be a second,
+                    // redundant route to the same commands.
+                    content
+                } else {
+                    content.modifier(KayaMenuToolbar(windowId: windowId))
                 }
+            }
+            .onAppear { record() }
+            .onChange(of: horizontalSizeClass) { record() }
+            .onChange(of: kayaScene.windows[windowId]?.menubar.count ?? 0) {
+                record()
+            }
         }
 
         /// Stamp both halves the harness reads. The presentation half
@@ -3896,12 +3942,160 @@ struct KayaMenuChrome: ViewModifier {
         private func record() {
             guard let window = kayaScene.windows[windowId] else { return }
             window.formFactor = factor
-            window.menuPresentation = window.menubar.isEmpty ? .none : .overflow
+            if window.menubar.isEmpty {
+                window.menuPresentation = .none
+            } else if factor != .regular {
+                // The compact arm stamps itself; the regular arm's
+                // stamp belongs to kayaBuildCatalogMenus, which writes
+                // `.bar` only after really inserting menus. Deriving it
+                // here from `factor` would make the harness verb agree
+                // with the lowering by construction.
+                window.menuPresentation = .overflow
+            }
+            kayaRebuildCatalogMenus()
         }
     }
 #endif
 
 #if !os(macOS)
+    /// The regular-width catalog lowering: the platform's own menu bar
+    /// (iPadOS 26+). Driven through UIMenuBuilder rather than SwiftUI's
+    /// `.commands` for the same reason macOS drives NSMenu directly —
+    /// CommandsBuilder has no `buildArray`, so it cannot express an
+    /// append-at-any-time number of top-level menus.
+    ///
+    /// buildMenu also runs on iPhone, where it feeds the
+    /// hardware-keyboard HUD rather than a visible bar. Building is
+    /// therefore unconditional; only the VISIBLE arm keys on size class.
+    func kayaBuildCatalogMenus(_ builder: UIMenuBuilder) {
+        if ProcessInfo.processInfo.environment["KAYA_MENU_TRACE"] != nil {
+            FileHandle.standardError.write(
+                Data("KAYA_MENU_TRACE: buildMenu roots=\(kayaScene.windows[0]?.menubar.count ?? -1)\n".utf8))
+        }
+        guard let window = kayaScene.windows[0], !window.menubar.isEmpty else {
+            return
+        }
+        // Reversed: each insert lands immediately after .view, so
+        // going back to front leaves catalog order reading left to
+        // right — the same preorder every other arm materializes.
+        var inserted = 0
+        for root in window.menubar.reversed() {
+            guard let menu = kayaCatalogTopLevel(root) else { continue }
+            builder.insertSibling(menu, afterMenu: .view)
+            inserted += 1
+        }
+        // Stamped where the bar is REALLY built, never from the size
+        // class: a build that silently produced nothing must not be
+        // able to report `bar` to expect_menu_presentation.
+        // KAYA_MENU_TRACE=1 prints the build/rebuild trace to stderr.
+        // Kept deliberately: it is what proved the bar is built lazily,
+        // and whoever wires the accessibility gate will want it again.
+        if ProcessInfo.processInfo.environment["KAYA_MENU_TRACE"] != nil {
+            FileHandle.standardError.write(
+                Data("KAYA_MENU_TRACE: inserted=\(inserted) factor=\(window.formFactor.rawValue)\n".utf8))
+        }
+    }
+
+    /// A top-level catalog node. Grouping nodes become real menus; a
+    /// top-level radio group becomes a menu holding its inline options.
+    private func kayaCatalogTopLevel(_ item: KayaMenuItemModel) -> UIMenu? {
+        switch item.kind {
+        case menuKindMenu:
+            return UIMenu(
+                title: item.label, children: kayaCatalogChildren(item.children))
+        case menuKindRadioGroup:
+            return UIMenu(title: item.label, children: [kayaCatalogRadio(item)])
+        default:
+            return nil
+        }
+    }
+
+    /// One grouping node's children, with kaya's SEPARATOR items
+    /// lowered the way UIKit spells separation.
+    ///
+    /// UIKit has no separator element: a divider is the boundary
+    /// between `.displayInline` groups. So partition the run at each
+    /// separator and wrap each partition inline — the system draws the
+    /// dividers between them. A placeholder element would be wrong (it
+    /// renders as a real, selectable row), and an EMPTY inline menu
+    /// draws nothing at all, which is why empty partitions are dropped
+    /// rather than emitted: a leading or doubled separator must not
+    /// silently swallow a divider.
+    private func kayaCatalogChildren(_ children: [KayaMenuItemModel])
+        -> [UIMenuElement]
+    {
+        var groups: [[UIMenuElement]] = [[]]
+        for child in children {
+            if child.kind == menuKindSeparator {
+                if !(groups.last?.isEmpty ?? true) { groups.append([]) }
+                continue
+            }
+            guard let element = kayaCatalogElement(child) else { continue }
+            groups[groups.count - 1].append(element)
+        }
+        let filled = groups.filter { !$0.isEmpty }
+        // A single group needs no wrapper: with no sibling group there
+        // is no divider to draw, and the extra menu is pure noise.
+        if filled.count <= 1 { return filled.first ?? [] }
+        return filled.map {
+            UIMenu(title: "", options: .displayInline, children: $0)
+        }
+    }
+
+    private func kayaCatalogElement(_ item: KayaMenuItemModel) -> UIMenuElement? {
+        switch item.kind {
+        case menuKindMenu:
+            return UIMenu(
+                title: item.label, children: kayaCatalogChildren(item.children))
+        case menuKindRadioGroup:
+            return kayaCatalogRadio(item)
+        case menuKindAction, menuKindToggle:
+            let action = UIAction(title: item.label) { _ in
+                // The one dispatch path, shared with every other arm.
+                kayaMenuUserActivate(item)
+            }
+            if !kayaMenuEffectiveEnabled(item) { action.attributes = .disabled }
+            if item.kind == menuKindToggle {
+                action.state = item.checked ? .on : .off
+            }
+            return action
+        default:
+            return nil
+        }
+    }
+
+    /// A radio group: options inline, exactly one `.on` — the choice
+    /// contract's selected index, the same state the inline Picker
+    /// shows in the compact arm.
+    private func kayaCatalogRadio(_ group: KayaMenuItemModel) -> UIMenuElement {
+        let enabled = kayaMenuEffectiveEnabled(group)
+        let options = group.children.enumerated().map {
+            (index, option) -> UIMenuElement in
+            let action = UIAction(title: option.label) { _ in
+                kayaMenuUserSelectRadio(group, index)
+            }
+            action.state = Int(group.value) == index ? .on : .off
+            if !enabled { action.attributes = .disabled }
+            return action
+        }
+        return UIMenu(title: group.label, options: .displayInline, children: options)
+    }
+
+    /// The catalog is live, so every structural append and every prop
+    /// write must reach the bar or it shows stale state. UIKit's
+    /// invalidation is a rebuild request — the same "recompute on every
+    /// catalog mutation" rule the promoted set already follows.
+    func kayaRebuildCatalogMenus() {
+        // Hop to main, exactly like the macOS segment rebuild: this is
+        // reached from the transaction apply, which is not guaranteed
+        // to be the main thread, and a UIKit invalidation off-main is
+        // silently dropped rather than diagnosed.
+        if ProcessInfo.processInfo.environment["KAYA_MENU_TRACE"] != nil {
+            FileHandle.standardError.write(Data("KAYA_MENU_TRACE: rebuild requested\n".utf8))
+        }
+        DispatchQueue.main.async { UIMenuSystem.main.setNeedsRebuild() }
+    }
+
     /// The iOS window-anchor lowering: promoted primaries as real
     /// trailing bar actions, the rest of the catalog behind a trailing
     /// More menu — top-level grouping nodes as labeled groups, one

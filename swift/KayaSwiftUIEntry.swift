@@ -13,6 +13,10 @@ struct KayaApp: App {
     // staying an accessory (no Dock icon, no activation) keeps a
     // suite's windows from stealing the human's keyboard.
     @NSApplicationDelegateAdaptor(KayaAppDelegate.self) var delegate
+    #else
+    // The catalog's regular-width home: the system menu bar, which
+    // only a UIResponder in the chain can populate.
+    @UIApplicationDelegateAdaptor(KayaUIAppDelegate.self) var delegate
     #endif
     var body: some Scene {
         WindowGroup {
@@ -36,6 +40,19 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
             NSApplication.shared.setActivationPolicy(.accessory)
         }
+    }
+}
+#else
+/// Subclasses UIResponder, NOT NSObject: `buildMenu(with:)` is a
+/// UIResponder method, and a delegate that only conforms to
+/// UIApplicationDelegate is never asked to build menus.
+final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
+    override func buildMenu(with builder: UIMenuBuilder) {
+        super.buildMenu(with: builder)
+        // Only the main system carries a bar; context menu systems
+        // reach this same responder and must be left alone.
+        guard builder.system == .main else { return }
+        kayaBuildCatalogMenus(builder)
     }
 }
 #endif

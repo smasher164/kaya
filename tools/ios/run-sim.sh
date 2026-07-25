@@ -457,13 +457,23 @@ rec_finish() {
 # script from the environment.
 run_swiftui_on() {
     local udid="$1" slot="$2" app="$3" bundle_id="$4" name="$5" selftest="$6" scene="$7"
+    # Optional 8th argument: extra steps appended to the shared scene
+    # for THIS leg only. The scene file itself stays byte-frozen and
+    # shared verbatim; this is how a leg asserts something that is only
+    # true on its own device (the iPad's form factor), the way
+    # panels.steps carries desktop-only capability rejection.
+    local extra="${8:-}"
     xcrun simctl install "$udid" "$app"
     local container
     container=$(xcrun simctl get_app_container "$udid" "$bundle_id" app)
     rec_start "$name" "$slot"
+    local script
+    script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
+    [ -n "$extra" ] && script="$script
+$extra"
     local out
     out=$(SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
-        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")" \
+        SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
     printf '%s\n' "$out"
@@ -780,8 +790,15 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # iPadOS 26 menu-bar defect lived. One device, one scene: if this
     # ever needs a second, reconsider whether the lane wants a real
     # form-factor dimension instead of a bolted-on device.
+    # The assertion is the whole point of this leg, and it guards two
+    # regressions at once. If the bundle ever loses UIDeviceFamily=2 it
+    # runs in iPhone COMPATIBILITY mode and reports compact/overflow —
+    # which is exactly how this leg silently degraded into a second
+    # phone leg once already. And if the regular arm stops selecting
+    # the menu bar (the original iPadOS 26 defect) it reports
+    # regular/overflow. Either way this fails loudly.
     queue_pad_leg run_swiftui_on menus-swiftui-pad "$APP" dev.kaya.menusswiftui \
-        menus-swiftui-pad menus menus
+        menus-swiftui-pad menus menus 'expect_menu_presentation "regular/bar"'
 
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and

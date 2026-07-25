@@ -51,6 +51,30 @@ own the state (see the undo note in this file).
   shape expires when the platform moves; triggers naming a platform
   capability need a re-read date, not just an artifact.
 
+- **The iPad menu bar's gate is OWED, and the accessibility milestone
+  pays it** (2026-07-25). The lowering LANDED and is confirmed working
+  — visually, on an iPad Pro simulator: swipe down and the kaya catalog
+  is there in the system menu bar. What is missing is an automated
+  observation, and the reason is structural, measured, not assumed:
+  the iPadOS menu bar is built LAZILY. `buildMenu(with:)` runs exactly
+  ONCE, at launch, with an empty catalog, and never again no matter how
+  many times `UIMenuSystem.main.setNeedsRebuild()` is called (traced:
+  10 rebuild requests, 1 build). UIKit defers the build until the bar
+  is about to be PRESENTED, the bar stays hidden until a swipe or
+  hover, and UIKit exposes NO way to present a menu programmatically
+  — so a headless scene structurally cannot witness the build.
+  CONSEQUENCE, recorded in the code too: on iOS-regular alone, the
+  presentation half of `expect_menu_presentation` is ARM-DERIVED — it
+  reports the lowering the window selected, not a reading of rendered
+  chrome. Every other backend still reads its real chrome. So the verb
+  can catch a regression in the ARM CHOICE (which is what the original
+  defect was) but NOT one in the build.
+  THE FIX, already scheduled: a menu bar is an accessibility element,
+  so the AX-tree verb in the accessibility milestone restores an
+  independent read. Wire it there rather than inventing bespoke
+  machinery. `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated
+  — it is what proved the laziness and will be wanted again.
+
 - **Form factor as the adaptivity axis** (DESIGN's "Form factor and
   adaptivity", 2026-07-24). kaya keys adaptivity on PLATFORM —
   compile-time `#if os(iOS)`, and the compact-overflow rule written as
