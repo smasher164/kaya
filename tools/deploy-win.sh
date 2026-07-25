@@ -166,12 +166,28 @@ timing vm-ready
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
+# Depth-slice scenes: a rust example + steps exist, the language sweep
+# has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
+# be validated before nine guests exist — the deploy-win twin of
+# validate-mac's DEPTH_SCENES. Without it a new scene must either join
+# SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
+# fail loudly, correctly) or go unexercised on this lane entirely, which
+# is how the WinUI accessibility read ended up committed unproven.
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
 for s in $SCENES; do
     SCENE_EXES+=("$TARGET/examples/$s.exe")
     SCENE_PYS+=("$ROOT/guests/python/$s.py")
+    BUILD_EXAMPLES+=(--example "$s")
+done
+# Depth scenes contribute their EXE only: no .py, no go package, no
+# csharp/java surface — those are exactly the halves that do not exist
+# yet.
+for s in $DEPTH_SCENES; do
+    SCENE_EXES+=("$TARGET/examples/$s.exe")
     BUILD_EXAMPLES+=(--example "$s")
 done
 
@@ -246,7 +262,7 @@ kill_guests() {
     # <scene>_go.exe (the pri-adjacency arrangement), and the C# legs
     # run the kaya-guests.exe apphost — both held kaya.dll through a
     # deploy once (2026-07-22).
-    kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
+    kill_list=$(for s in $SCENES $DEPTH_SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
     run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im kaya-guests.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
 # Is the guest stuck in the state taskkill CANNOT clear? The signature
@@ -903,6 +919,23 @@ case "$SUITE" in
         # and puts the real chord on the system input queue, so a
         # concurrent leg's SetForegroundWindow would steal it.
         # check-steps pins the drain/run/drain barrier on each one.
+        # Depth scenes: rust-only, one leg each, generated on the fly so
+        # a new scene needs no checked-in .cmd. Run BEFORE the menu
+        # block's foreground-sensitive legs, and drained around, since
+        # an accessibility read foregrounds nothing but a scene may.
+        for s in $DEPTH_SCENES; do
+            # WRITTEN HERE AND SHIPPED, not echoed into a batch file on
+            # the VM: generating .cmd via `echo` needs `^^>^^&1`-style
+            # escaping that silently produced `'1&' is not recognized`.
+            # A heredoc with CRLF is legible and cannot misquote.
+            tmp_cmd="$LEGS_DIR/run_${s}_rust.cmd"
+            printf '@echo off\r\ncd /d C:\\kaya\r\nset KAYA_SELFTEST=%s\r\n%s.exe > C:\\kaya\\out_%s_rust.txt 2>&1\r\necho EXIT=%%ERRORLEVEL%% >> C:\\kaya\\out_%s_rust.txt\r\n' \
+                "$s" "$s" "$s" "$s" >"$tmp_cmd"
+            scp -q "$tmp_cmd" "$HOST:C:/kaya/run_${s}_rust.cmd"
+            run_suite "${s}_rust"
+            drain_suites
+        done
+
         drain_suites
         run_suite menus_rust
         drain_suites

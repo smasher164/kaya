@@ -4158,14 +4158,85 @@ impl crate::harness::Stage for WinUiStage {
             use bindings::Microsoft::UI::Xaml::Automation::Peers::{
                 AutomationControlType, FrameworkElementAutomationPeer,
             };
-            let want = widget_id_for_target(core, target);
-            let Some(w) = core.widgets.get(&crate::protocol::WidgetId(want)) else {
-                return Ok("<no such target>".to_owned());
+            // Resolve the ELEMENT from the per-kind registry, the way
+            // every other WinUI verb does (read_label/read_text), with
+            // try_resolve so an out-of-range index reports "no such
+            // target" instead of panicking. The earlier version reused
+            // widget_id_for_target, which serves context_open and
+            // handles Label ONLY — every other kind hit its panic!,
+            // inside the UI closure, surfacing as an opaque RecvError.
+            use crate::harness::{try_resolve, TargetKind as K};
+            let element: bindings::Microsoft::UI::Xaml::UIElement = match target.kind {
+                K::Checkbox => match try_resolve(target.index, core.checkboxes.len()) {
+                    Some(i) => core.checkboxes[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Entry => match try_resolve(target.index, core.entries.len()) {
+                    Some(i) => core.entries[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Textarea => match try_resolve(target.index, core.textareas.len()) {
+                    Some(i) => core.textareas[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Label => match try_resolve(target.index, core.labels.len()) {
+                    Some(i) => core.labels[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Slider => match try_resolve(target.index, core.sliders.len()) {
+                    Some(i) => core.sliders[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Row => match try_resolve(target.index, core.rows.len()) {
+                    Some(i) => core.rows[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Column => match try_resolve(target.index, core.columns.len()) {
+                    Some(i) => core.columns[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                // Buttons live in the registry as CLICK TAGS, not
+                // widgets, and the tag is captured in the click
+                // closure rather than stored on the Button — so there
+                // is no tag->widget link to follow. Both orderings are
+                // CREATION order though: core.buttons is a push-order
+                // Vec and WidgetId is assigned in sequence, so the Nth
+                // button widget by ascending id is the Nth entry. The
+                // ids must be sorted explicitly: core.widgets is a
+                // HashMap and its iteration order is arbitrary.
+                K::Button => {
+                    if try_resolve(target.index, core.buttons.len()).is_none() {
+                        return Ok("<no such target>".to_owned());
+                    }
+                    let i = crate::harness::resolve(target.index, core.buttons.len());
+                    let mut ids: Vec<_> = core
+                        .widgets
+                        .iter()
+                        .filter(|(_, w)| matches!(w, NativeWidget::Button { .. }))
+                        .map(|(id, _)| *id)
+                        .collect();
+                    ids.sort_by_key(|id| id.0);
+                    match ids.get(i).and_then(|id| core.widgets.get(id)) {
+                        Some(NativeWidget::Button { button, .. }) => button.cast()?,
+                        _ => return Ok("<no such target>".to_owned()),
+                    }
+                }
+                _ => return Ok("<no such target>".to_owned()),
             };
-            let element = w.element()?;
             let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
-            let Ok(peer) = FrameworkElementAutomationPeer::FromElement(&fe) else {
-                return Ok("<not in the accessibility tree>".to_owned());
+            // FromElement returns an EXISTING peer; a plain container
+            // (Row/Column are Grids) has none until one is made, so it
+            // reported "<not in the accessibility tree>" for a group
+            // that UIA is perfectly willing to describe. CreatePeerForElement
+            // makes one on demand — the same thing UIA does when a
+            // client walks the tree — and falls back to FromElement for
+            // controls that already carry theirs.
+            let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(&fe) {
+                Ok(p) => p,
+                Err(_) => match FrameworkElementAutomationPeer::FromElement(&fe) {
+                    Ok(p) => p,
+                    Err(_) => return Ok("<not in the accessibility tree>".to_owned()),
+                },
             };
             let kind = peer.GetAutomationControlType()?;
             let role = if kind == AutomationControlType::Button {
@@ -5197,7 +5268,24 @@ fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
                 })
                 .expect("registry labels live in the widget table")
         }
-        other => panic!("kaya: context_open not wired for {other:?} on winui"),
+        // ACCESSIBILITY needs every kind, not just the Label this
+        // function was written for (it served context_open, which is
+        // label-only). a11y_id/a11y_label are universal props, so
+        // Stage::ax can target anything.
+        //
+        // The arm below used to be `panic!` for every non-Label kind,
+        // which is how the WinUI accessibility read died on its first
+        // live run (2026-07-25) — inside the UI closure, so the
+        // dispatcher surfaced it as an opaque `RecvError` rather than
+        // the message. Returning 0 makes the caller report "no such
+        // target", which is a legible failure instead of a crash.
+        //
+        // NOT YET RESOLVED: the remaining kinds need real lookups.
+        // Button and Checkbox are STRUCT variants ({ button, caption }
+        // / { check, caption }), and core.buttons holds tags rather
+        // than widgets, so this wants the same resolution the other
+        // WinUI verbs use rather than a hand-rolled scan.
+        _ => 0,
     }
 }
 

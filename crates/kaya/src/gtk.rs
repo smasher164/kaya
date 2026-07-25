@@ -2457,10 +2457,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // whatever the control derived from its own content, so
                 // an unset label must never be written as "".
                 (w, Prop::A11yLabel, Value::Str(label)) => {
-                    use gtk4::prelude::AccessibleExtManual;
+                    use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
                     if !label.is_empty() {
-                        w.widget()
-                            .update_property(&[gtk4::accessible::Property::Label(label.as_str())]);
+                        let widget = w.widget();
+                        // Promote a CONTAINER to a semantic group. GTK
+                        // made GtkBox's role GENERIC in 4.12 (it was
+                        // GROUP before), and GENERIC is documented as "a
+                        // nameless container with no semantic meaning" —
+                        // so a label set on one simply does not surface
+                        // as an AT-SPI name. Naming a container IS the
+                        // app declaring it a group, which is the same
+                        // rule WinUI enforces (an unnamed Grid has no
+                        // automation peer) and what the ARIA guidance
+                        // says: unnamed containers are flattened, named
+                        // ones are groups.
+                        if matches!(w, NativeWidget::Column(_) | NativeWidget::Row(_)) {
+                            widget.set_accessible_role(gtk4::AccessibleRole::Group);
+                        }
+                        widget.update_property(&[gtk4::accessible::Property::Label(
+                            label.as_str(),
+                        )]);
                     }
                 }
                 // The IDENTIFIER has no GTK setter and no reader below
@@ -3134,7 +3150,14 @@ impl crate::harness::Stage for GtkStage {
                 K::Label => atspi::Role::Label,
                 K::Slider => atspi::Role::Slider,
                 K::Image => atspi::Role::Image,
-                K::Row | K::Column => atspi::Role::Panel,
+                // A container kaya has NAMED carries role Grouping
+                // (the lowering promotes it); an unnamed one stays
+                // GENERIC/Panel and is not a semantic group at all.
+                // Matching Grouping also sidesteps the panel-ordinal
+                // problem: the tree is full of GTK-internal panels (a
+                // check box contains one), so "Nth panel" never lined
+                // up with "Nth container kaya created".
+                K::Row | K::Column => atspi::Role::Grouping,
                 _ => atspi::Role::Unknown,
             };
             let role = match want {
@@ -3144,10 +3167,33 @@ impl crate::harness::Stage for GtkStage {
                 atspi::Role::Label => "label",
                 atspi::Role::Slider => "slider",
                 atspi::Role::Image => "image",
-                atspi::Role::Panel => "group",
+                atspi::Role::Grouping => "group",
                 _ => "unknown",
             };
-            return match atspi_collect(want, target.index as usize) {
+            // CONTAINERS need their ordinal among ALL containers, not
+            // within their own registry. kaya keeps rows and columns in
+            // separate Vecs, but AT-SPI exposes both as role Panel — so
+            // `row#0` was resolving to the FIRST panel in the tree,
+            // which is the enclosing column, and read an empty name off
+            // the wrong element (measured 2026-07-25).
+            //
+            // WidgetId is assigned in creation order and AT-SPI's tree
+            // is depth-first in the same order, so the target's position
+            // among all container widgets IS its panel ordinal. The ids
+            // must be sorted explicitly: core.widgets is a HashMap.
+            // No container special-case: only NAMED containers carry
+            // role Grouping (the lowering promotes them), so the tree's
+            // groupings are exactly kaya's semantic groups, in creation
+            // order. The earlier attempt counted kaya's containers and
+            // indexed panels, which never matched — the tree carries
+            // GTK-internal panels too.
+            //
+            // LIMIT worth knowing: the ordinal is over NAMED containers,
+            // so `row#1` means the second named row, not the second row.
+            // Exact identity is unavailable here (GTK publishes no
+            // settable accessible id below 4.22).
+            let index = target.index;
+            return match atspi_collect(want, index as usize) {
                 Some(name) => format!("{role}/{name}"),
                 None => "<not in the accessibility tree>".to_owned(),
             };

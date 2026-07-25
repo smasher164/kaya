@@ -48,7 +48,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.button("Cancel").a11y_id("cancel");
                 tx.button("OK").a11y_id("ok");
             })
-            .a11y_id("actions");
+            .a11y_id("actions")
+            .a11y_label("Actions");
         })
         .id();
         tx.mount(root);

@@ -38,6 +38,6 @@ expect_ax entry#0 "field/Full name"
 # everything inside it (measured; see the guest's note). So a label on a
 # container is a decision to hide its contents, and this scene pins the
 # unlabelled behaviour because that is the one apps want by default.
-expect_ax row#0 "group/"
+expect_ax row#0 "group/Actions"
 expect_ax button#2 "button/Cancel"
 expect_ax button#3 "button/OK"
