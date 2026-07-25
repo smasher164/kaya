@@ -1320,6 +1320,211 @@ func kayaStartSelftest() {
     }.start()
 }
 
+/// Apply the two universal accessibility props to a widget's own view.
+///
+/// Applied to the CONTROL, never to a wrapping Group: SwiftUI treats a
+/// transparent container's accessibility modifiers differently — a
+/// label set on a Group did reach the element while an identifier set
+/// the same way did not appear in the tree at all.
+///
+/// Empty means unset, and unset stays untouched: SwiftUI derives a
+/// control's name from its own content, and stamping an empty string
+/// would silence it. That derived name is exactly what this milestone
+/// exists to prove kaya gets for free.
+@ViewBuilder
+func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
+    // Containers need an explicit accessibility element first, or these
+    // props do the wrong thing on them — both measured 2026-07-25:
+    // an IDENTIFIER set on a container propagates DOWN and lands on its
+    // first child, and a LABEL collapses the container into one element
+    // and hides everything inside. `.contain` is the API for exactly
+    // this: the container becomes its own element while its children
+    // stay individually reachable, which is what a group means to an
+    // assistive client.
+    let isContainer =
+        node.kind == kindColumn || node.kind == kindRow || node.kind == kindGrid
+        || node.kind == kindScroll
+    let addressed =
+        (isContainer && !(node.a11yId.isEmpty && node.a11yLabel.isEmpty))
+        ? AnyView(view.accessibilityElement(children: .contain)) : AnyView(view)
+    let identified =
+        node.a11yId.isEmpty
+        ? addressed : AnyView(addressed.accessibilityIdentifier(node.a11yId))
+    if node.a11yLabel.isEmpty {
+        identified
+    } else {
+        identified.accessibilityLabel(node.a11yLabel)
+    }
+}
+
+/// Normalize one platform role name into the harness's closed set. The
+/// point of the verb is that the PLATFORM classified the control, so
+/// anything kaya has no name for reports `unknown` rather than being
+/// guessed at — an honest "the platform said something else" is a
+/// finding, and a guess would hide one.
+#if os(macOS)
+    private func kayaAxRole(_ role: String?) -> String {
+        switch role {
+        case kAXButtonRole: return "button"
+        case kAXStaticTextRole: return "label"
+        case kAXTextFieldRole, kAXTextAreaRole: return "field"
+        case kAXCheckBoxRole: return "checkbox"
+        case kAXSliderRole: return "slider"
+        case kAXImageRole: return "image"
+        case kAXProgressIndicatorRole: return "progress"
+        case kAXGroupRole: return "group"
+        default: return "unknown"
+        }
+    }
+
+    /// Read the tree the way an assistive client does: the AXUIElement
+    /// CLIENT API against our own pid.
+    ///
+    /// The server-side NSAccessibility protocol is for SETTING
+    /// accessibility, not reading it back — measured, not assumed: a
+    /// server-side walk found the tree with correct roles but nil for
+    /// every identifier and label, because those are materialized for
+    /// the client API. Reading the server side would also have been the
+    /// wrong test even if it worked, since it is not what VoiceOver
+    /// sees.
+    private func kayaAxCopy(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+        return err == .success ? value : nil
+    }
+
+    private func kayaAxFind(
+        _ element: AXUIElement, _ identifier: String, _ depth: Int = 0
+    ) -> AXUIElement? {
+        if depth > 64 { return nil }
+        if let ident = kayaAxCopy(element, kAXIdentifierAttribute) as? String,
+            ident == identifier
+        {
+            return element
+        }
+        // An AXApplication publishes its WINDOWS under kAXWindows, not
+        // kAXChildren — children there is the menu bar alone. Measured:
+        // walking children only ever reached the menu tree, never a
+        // single widget.
+        for child in kayaAxKids(element) {
+            if let hit = kayaAxFind(child, identifier, depth + 1) { return hit }
+        }
+        return nil
+    }
+
+    private func kayaAxKids(_ element: AXUIElement) -> [AXUIElement] {
+        let children = kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        let windows = kayaAxCopy(element, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        let nav =
+            kayaAxCopy(element, "AXChildrenInNavigationOrder" as String) as? [AXUIElement]
+            ?? []
+        // Deduplicate by element identity: the three attributes overlap.
+        var out = windows + children
+        for n in nav where !out.contains(where: { CFEqual($0, n) }) { out.append(n) }
+        return out
+    }
+
+    /// KAYA_AX_TRACE=1 dumps the real tree — the fastest way to see what
+    /// the platform actually publishes rather than guess at it.
+    private func kayaAxDump(_ element: AXUIElement, _ depth: Int = 0) {
+        if depth > 12 { return }
+        let pad = String(repeating: "  ", count: depth)
+        let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "nil"
+        let ident = kayaAxCopy(element, kAXIdentifierAttribute) as? String ?? "nil"
+        let label = kayaAxCopy(element, kAXDescriptionAttribute) as? String ?? "nil"
+        let title = kayaAxCopy(element, kAXTitleAttribute) as? String ?? "nil"
+        var namesRef: CFArray?
+        AXUIElementCopyAttributeNames(element, &namesRef)
+        let names = (namesRef as? [String] ?? []).joined(separator: ",")
+        FileHandle.standardError.write(
+            Data(
+                "KAYA_AX_TRACE: \(pad)role=\(role) id=\(ident) desc=\(label) title=\(title) attrs=[\(names)]\n"
+                    .utf8))
+        for child in kayaAxKids(element) { kayaAxDump(child, depth + 1) }
+    }
+
+    private func kayaAxRead(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        let app = AXUIElementCreateApplication(getpid())
+        // macOS builds the accessibility tree LAZILY: until an
+        // assistive client attaches, an app publishes a skeleton —
+        // correct top-level roles, but no content and no names. VoiceOver
+        // announces itself with AXEnhancedUserInterface; third-party
+        // assistive technology uses AXManualAccessibility. The harness
+        // IS an assistive client here, so saying so is honest, and it is
+        // the only way to read the tree a real client would receive.
+        AXUIElementSetAttributeValue(
+            app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(
+            app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if ProcessInfo.processInfo.environment["KAYA_AX_TRACE"] != nil {
+            FileHandle.standardError.write(
+                Data("KAYA_AX_TRACE: trusted=\(AXIsProcessTrusted())\n".utf8))
+            kayaAxDump(app)
+        }
+        guard let hit = kayaAxFind(app, identifier) else { return nil }
+        let role = kayaAxRole(kayaAxCopy(hit, kAXRoleAttribute) as? String)
+        // A control's spoken name is its DESCRIPTION when one was
+        // authored and its TITLE when the control derived it from its
+        // own content — both are what the client reads, so take the
+        // authored one first and fall back to the derived one.
+        let label =
+            (kayaAxCopy(hit, kAXDescriptionAttribute) as? String).flatMap {
+                $0.isEmpty ? nil : $0
+            } ?? (kayaAxCopy(hit, kAXTitleAttribute) as? String) ?? ""
+        return role + "/" + label
+    }
+
+#else
+    private func kayaAxRole(_ element: NSObject) -> String {
+        let traits = element.accessibilityTraits
+        if traits.contains(.button) { return "button" }
+        if traits.contains(.image) { return "image" }
+        if traits.contains(.adjustable) { return "slider" }
+        if traits.contains(.staticText) { return "label" }
+        if element is UITextView || element is UITextField { return "field" }
+        if element is UIProgressView { return "progress" }
+        return "unknown"
+    }
+
+    private func kayaAxFind(_ node: NSObject, _ identifier: String, _ depth: Int = 0) -> NSObject? {
+        if depth > 64 { return nil }
+        if node.accessibilityIdentifier == identifier { return node }
+        // UIAccessibilityContainer first — the synthesized tree — then
+        // the view hierarchy, since UIKit publishes both and SwiftUI
+        // uses each in different places.
+        let count = node.accessibilityElementCount()
+        if count != NSNotFound && count > 0 {
+            for i in 0..<count {
+                if let child = node.accessibilityElement(at: i) as? NSObject,
+                    let hit = kayaAxFind(child, identifier, depth + 1)
+                {
+                    return hit
+                }
+            }
+        }
+        if let view = node as? UIView {
+            for sub in view.subviews {
+                if let hit = kayaAxFind(sub, identifier, depth + 1) { return hit }
+            }
+        }
+        return nil
+    }
+
+    private func kayaAxRead(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        let scenes = UIApplication.shared.connectedScenes
+        for scene in scenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                if let hit = kayaAxFind(window, identifier) {
+                    return kayaAxRole(hit) + "/" + (hit.accessibilityLabel ?? "")
+                }
+            }
+        }
+        return nil
+    }
+#endif
+
 /// Resolves `kind#index` against the registry the verb reads, mirroring
 /// harness.rs's parse_target: a kind that names a different registry, a
 /// malformed index, or one out of range is a loud step failure — never
@@ -1522,6 +1727,12 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "select": return kayaTarget(spec, "select", kayaScene.selects)
     case "radio": return kayaTarget(spec, "radio", kayaScene.radios)
     case "grid": return kayaTarget(spec, "grid", kayaScene.grids)
+    // The editable kinds: not reachable from context_open (the root
+    // rejects that attach — their native edit menu is dress), but every
+    // kind is addressable for accessibility, which is the point of a
+    // universal prop.
+    case "entry": return kayaTarget(spec, "entry", kayaScene.entries)
+    case "textarea": return kayaTarget(spec, "textarea", kayaScene.textareas)
     default: return nil
     }
 }
@@ -2195,6 +2406,39 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(got) menus, wanted \(want)")
                 }
+            case "expect_ax":
+                // target -> node -> its authored identifier -> the REAL
+                // accessibility tree. Deliberately routed through the
+                // identifier rather than reading the node: an element
+                // the platform never published simply is not found, and
+                // that failure is the point of the verb.
+                let wantAx = kayaQuoted(Array(parts[2...]))
+                // The identifier is resolved on the main thread (scene
+                // state lives there), but the AX READ ITSELF runs on the
+                // harness thread ON PURPOSE. Accessibility requests are
+                // serviced BY the app's main runloop, so querying
+                // yourself from inside main.sync leaves nothing able to
+                // answer: AppKit chrome still replies from cache, while
+                // SwiftUI's lazily-materialized elements come back empty
+                // — which is exactly the empty AXHostingView subtree
+                // this cost an afternoon to explain.
+                let identifier = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return node.a11yId
+                }
+                let gotAx: String
+                switch identifier {
+                case .none: gotAx = "<no such target>"
+                case .some(let ident) where ident.isEmpty:
+                    gotAx = "<no a11y_id authored on this widget>"
+                case .some(let ident):
+                    gotAx = kayaAxRead(ident) ?? "<not in the accessibility tree>"
+                }
+                if gotAx == wantAx {
+                    observed.append("ax \(wantAx)")
+                } else {
+                    failures.append("ax \(gotAx), wanted \(wantAx)")
+                }
             case "expect_menu_presentation":
                 // `<size class>/<presentation>`. macOS reads the REAL
                 // bar (there are no size classes there, and a desktop
@@ -2425,8 +2669,35 @@ private func kayaRunScript(_ script: String) {
         print("KAYA_SELFTEST: OK (\(observed.joined(separator: ", ")))")
         exit(0)
     }
+    // THE UNMOUNTED-SCENE DIAGNOSIS. A scene that creates widgets and
+    // never calls mount(root) renders an EMPTY window, and every
+    // assertion then measures an invisible app. Target resolution
+    // cannot catch it — the widgets exist in the model, so `kind#index`
+    // resolves happily and the reads simply describe nothing.
+    //
+    // Checked HERE rather than before the run, for two reasons: at
+    // script start the guest's transactions have not arrived yet, so
+    // the scene legitimately looks empty (the first attempt at this
+    // guard fired never); and on the failure path it cannot
+    // false-positive on a scene that mounts late.
+    //
+    // This cost most of an afternoon on 2026-07-25: a missing mount
+    // produced an empty accessibility tree, which was then misdiagnosed
+    // in turn as an SDK-generation problem, a language problem, and a
+    // missing macOS API — three wrong conclusions, all downstream of
+    // one silent omission that no gate mentioned.
+    var reported = failures
+    if !kayaScene.nodes.isEmpty,
+        kayaScene.windows.values.allSatisfy({ $0.root == nil && $0.sections.isEmpty })
+    {
+        reported.insert(
+            "\(kayaScene.nodes.count) widgets exist but NO ROOT IS MOUNTED on any surface "
+                + "— the scene never called mount(root), so every assertion above measured "
+                + "an empty window",
+            at: 0)
+    }
     FileHandle.standardError.write(
-        "KAYA_SELFTEST: FAILED (\(failures.joined(separator: "; ")))\n".data(using: .utf8)!)
+        "KAYA_SELFTEST: FAILED (\(reported.joined(separator: "; ")))\n".data(using: .utf8)!)
     exit(1)
 }
 
@@ -2751,19 +3022,10 @@ struct KayaRender: View {
         // SILENCE it. The whole milestone exists to prove the free
         // accessibility the wrap-native bet gives us; clobbering it here
         // would be the exact opposite.
-        let anchored =
-            Group {
-                if kayaScene.contextRoots[node.id]?.isEmpty == false {
-                    widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }
-                } else {
-                    widget
-                }
-            }
-            .accessibilityIdentifier(node.a11yId)
-        if node.a11yLabel.isEmpty {
-            anchored
+        if kayaScene.contextRoots[node.id]?.isEmpty == false {
+            kayaA11y(widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }, node)
         } else {
-            anchored.accessibilityLabel(node.a11yLabel)
+            kayaA11y(widget, node)
         }
     }
 

@@ -30,11 +30,31 @@ cargo build --lib
 tools/gen-header.sh --check
 
 mkdir -p target/swiftui
-kaya_swiftc \
+OUT=target/swiftui/libkaya_swiftui.dylib
+
+# A FAILED BUILD MUST NOT LEAVE A USABLE ARTIFACT. Compile to a scratch
+# path and move it into place only on success, deleting any previous
+# dylib first. Without this, a broken build leaves yesterday's dylib
+# sitting there and the next run silently tests THAT — a false PASS with
+# no signal anywhere, which is the worst failure shape there is.
+#
+# Measured 2026-07-25: a compile error here was followed by a green
+# scene run against the stale dylib. The build's own exit status was the
+# only evidence, and anything that reads output instead of status (a
+# grep, a tail, a human skimming) misses it entirely. Callers should
+# still check the exit status; this makes the artifact honest even when
+# they do not.
+rm -f "$OUT"
+if ! kaya_swiftc \
     -emit-library \
     -import-objc-header crates/kaya/include/kaya.h \
     swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift \
     -Xlinker -undefined -Xlinker dynamic_lookup \
     -framework AppKit -framework Foundation \
-    -o target/swiftui/libkaya_swiftui.dylib
-echo "built target/swiftui/libkaya_swiftui.dylib"
+    -o "$OUT.tmp"; then
+    rm -f "$OUT.tmp"
+    echo "build-dylib: FAILED — no dylib left in place (a stale one would be tested silently)" >&2
+    exit 1
+fi
+mv -f "$OUT.tmp" "$OUT"
+echo "built $OUT"

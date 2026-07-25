@@ -831,6 +831,111 @@ a platform release re-opens it instead of a deferral quietly becoming
 unreachable. The general form of the bug: the deferral did not go
 stale — its PREMISE did, and nothing was watching the premise.
 
+## A scene that never mounts measures an invisible app
+
+2026-07-25, the a11y depth slice. A guest built its widgets and never
+called `tx.mount(root)`. The window rendered EMPTY — and nothing said
+so. Target resolution could not catch it: the widgets exist in the scene
+model, so `kind#index` resolves happily and every read simply describes
+nothing.
+
+The cost was not the bug, it was the cascade. An empty accessibility
+tree was misdiagnosed in turn as (1) SwiftUI's compatibility design
+generation not publishing accessibility, (2) the guest LANGUAGE
+affecting accessibility, and (3) macOS not exposing AXIdentifier at all.
+Three confident, wrong conclusions, each with evidence, all downstream
+of one silent omission. The third was disproved only when the maintainer
+pushed back with documentation.
+
+Two process lessons worth as much as the guard:
+- CHANGE ONE VARIABLE. The "language matters" conclusion came from
+  comparing a rust A11Y scene against a swift GALLERY scene — two
+  differences at once, and the one that mattered was the broken scene.
+- A conclusion that indicts the PLATFORM should be the last one reached,
+  not the first. Every platform-level theory here was wrong.
+
+Guard (KayaSwiftUI.swift, the failure path): when a run fails and
+widgets exist while no surface has a mounted root, the verdict says so
+first — "N widgets exist but NO ROOT IS MOUNTED … every assertion above
+measured an empty window". Deliberately on the FAILURE path: the first
+attempt checked before the first step and fired never, because the
+guest's transactions have not arrived yet at that point, so the scene
+legitimately looks empty. On the failure path it also cannot
+false-positive on a scene that mounts late.
+
+## A gate that does not compile the layer it is named for
+
+2026-07-25. `swift-typecheck` typechecks the swift GUEST examples and the
+swift BINDINGS. It never touched swift/KayaSwiftUI.swift — ~4300 lines,
+the historic miss layer, which re-implements every harness verb and
+carries private copies of the wire constants. So the interpreter's only
+compiler was build-dylib.sh inside validate-mac, and a broken
+interpreter reported `swift-typecheck: OK` while the dylib build
+rejected it outright (measured: `NSObject.accessibilityIdentifier`).
+CLAUDE.md even described check-compose as "the swift-typecheck sibling",
+implying a coverage that did not exist.
+
+Guard: swift-typecheck now typechecks the interpreter as its last step,
+negative-tested both directions. The general rule: a gate named after a
+LAYER must compile that layer, and "it is in the same directory" is not
+coverage. Check what a gate actually feeds its compiler, not what its
+name suggests.
+
+## A failed build must not leave a usable artifact
+
+2026-07-25. build-dylib.sh compiled straight to
+target/swiftui/libkaya_swiftui.dylib. A compile error therefore left the
+PREVIOUS dylib in place, and the next run tested that — a green scene
+against stale code, with the build's exit status as the only evidence.
+Anything that reads output instead of status (a grep, a tail, a human
+skimming) misses it completely. This is the sibling of the
+never-pipe-a-build-through-tail rule, and it bit within an hour of that
+rule being cited.
+
+Guard: compile to a scratch path, delete the old artifact first, and
+move into place only on success; on failure remove the temp and exit 1.
+A stale dylib then cannot exist, so the next run fails loudly with
+"could not load the SwiftUI backend" instead of lying. Callers should
+still check exit status — this makes the ARTIFACT honest even when they
+do not.
+
+## SwiftUI containers do not take accessibility props the way leaves do
+
+2026-07-25, landing a11y_id/a11y_label as UNIVERSAL props. On a leaf
+control both behave as expected. On a container neither does:
+- an IDENTIFIER set on a container PROPAGATES DOWN and lands on its
+  first child (the row reported its first button's identity);
+- a LABEL set on a container COLLAPSES it into a single accessibility
+  element and HIDES its children entirely (the row became
+  `button/Actions` and neither button inside was reachable).
+Both are correct platform behaviour — a named thing is one thing — but
+they silently make a "universal" prop mean something different per kind.
+
+Fix: containers get `.accessibilityElement(children: .contain)` before
+the props are applied, which makes the container its own element while
+its children stay individually reachable. Also note the related shape: a
+container holding a SINGLE control is collapsed into that control, which
+is correct screen-reader design, so conformance scenes want two children
+when they mean to assert a group.
+
+## macOS builds the accessibility tree lazily
+
+2026-07-25. Until an assistive client attaches, an app publishes a
+SKELETON: correct top-level roles, and under an accessory activation
+policy not even its windows. VoiceOver announces itself with
+`AXEnhancedUserInterface`; third-party assistive technology uses
+`AXManualAccessibility`. Setting both on our own application element
+makes the real tree readable — including under `.accessory`, which is
+what lets the suites read accessibility WITHOUT stealing focus (the
+selftest policy exists so suite windows do not steal the keyboard, and
+the two requirements looked irreconcilable until this).
+
+Reading is the CLIENT API (`AXUIElementCreateApplication` on our own
+pid), never the server-side NSAccessibility protocol — that side is for
+SETTING accessibility, and a server-side walk returns nil for every
+identifier and label. `AXIsProcessTrusted()` is true for processes
+launched from an already-trusted terminal, so no permission prompt.
+
 ## Windows guests wedge UNKILLABLY, and taskkill cannot say so
 
 2026-07-25, second occurrence (first: textarea matrix, 2026-07-22). The

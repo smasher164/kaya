@@ -4094,6 +4094,15 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or(0)
     }
 
+    fn ax(&self, _target: crate::harness::Target) -> String {
+        // FAN-OUT PENDING (the depth slice is SwiftUI on mac). Declared
+        // so the trait is satisfied and the remaining work stays
+        // VISIBLE — a sentinel that can never equal a valid
+        // `<role>/<label>` spelling, so any scene asserting on this
+        // backend fails loudly instead of quietly passing. Reads FrameworkElementAutomationPeer when it lands.
+        "<the WinUI accessibility read is not implemented yet>".to_owned()
+    }
+
     fn menu_presentation(&self) -> String {
         // XAML has no size-class type; its own adaptive triggers are
         // width thresholds (`MinWindowWidth`), so a width rule IS the

@@ -1704,6 +1704,18 @@ object KayaCompose {
                         if (got == want) observed.add("$want menus")
                         else failures.add("$got menus, wanted $want")
                     }
+                    "expect_ax" -> {
+                        // FAN-OUT PENDING (depth slice is SwiftUI on
+                        // mac). The verb is declared here so check-verbs
+                        // holds the remaining work open — a gate that is
+                        // MEANT to stay red mid-milestone — and reports
+                        // honestly rather than silently passing. Compose
+                        // reads its real semantics tree via
+                        // SemanticsNode when this lands.
+                        failures.add(
+                            "ax: the Compose accessibility read is not implemented yet"
+                        )
+                    }
                     "expect_menu_presentation" -> {
                         // `<size class>/<presentation>`: the platform's
                         // width reading, and the lowering that actually
@@ -1879,7 +1891,29 @@ object KayaCompose {
             Log.i("kaya", "KAYA_SELFTEST: OK (${observed.joinToString(", ")})")
             0
         } else {
-            Log.e("kaya", "KAYA_SELFTEST: FAILED (${failures.joinToString("; ")})")
+            // THE UNMOUNTED-SCENE DIAGNOSIS (the SwiftUI sibling —
+            // docs/traps.md). A scene that creates widgets and never
+            // mounts a root renders an EMPTY surface, and every
+            // assertion then measures an invisible app. Target
+            // resolution cannot catch it: the widgets exist in the
+            // model, so kind#index resolves and the reads describe
+            // nothing. Reported on the FAILURE path so it cannot fire
+            // before the guest's transactions have arrived, and cannot
+            // false-positive on a scene that mounts late.
+            val reported =
+                if (KayaSceneModel.nodes.isNotEmpty() &&
+                    KayaSceneModel.root == null &&
+                    KayaSceneModel.sections.isEmpty()
+                ) {
+                    listOf(
+                        "${KayaSceneModel.nodes.size} widgets exist but NO ROOT IS " +
+                            "MOUNTED — the scene never called mount(root), so every " +
+                            "assertion above measured an empty surface"
+                    ) + failures
+                } else {
+                    failures
+                }
+            Log.e("kaya", "KAYA_SELFTEST: FAILED (${reported.joinToString("; ")})")
             1
         }
         activity.runOnUiThread {

@@ -315,6 +315,23 @@ pub enum Step {
     /// The window's top-level catalog count, from the REAL
     /// materialized bar (or the phone overflow's group list) — the
     /// observation menubar_append's topology is verified by.
+    /// The target's accessibility ROLE and spoken LABEL, read from the
+    /// platform's OWN accessibility peer — NSAccessibility /
+    /// UIAccessibility protocol methods, AccessibilityNodeInfo,
+    /// FrameworkElementAutomationPeer, GtkAccessible. Not the scene
+    /// model, and not kaya's copy of what it set: the data an assistive
+    /// client actually receives.
+    ///
+    /// This is the gate DESIGN's accessibility claim never had. kaya
+    /// asserts that native widgets ARE the accessibility tree, which is
+    /// the load-bearing consequence of the wrap-native bet, and until
+    /// now nothing anywhere proved it on any platform.
+    ///
+    /// Spelled `<role>/<label>`. Role comes from each platform's own
+    /// vocabulary normalized to a small closed set, because the point is
+    /// that the PLATFORM classified the control, not that kaya
+    /// remembered what it built.
+    ExpectAx(Target, String),
     ExpectMenus(usize),
     /// How the window catalog is CURRENTLY presented, spelled
     /// `<size class>/<presentation>`: `regular/bar`,
@@ -522,6 +539,19 @@ pub trait Stage: Send + 'static {
     /// bar (or the phone overflow's group list) — never the scene
     /// model's copy. No default.
     fn menu_count(&self) -> usize;
+    /// The target's accessibility ROLE and spoken LABEL as
+    /// `<role>/<label>`, read from the PLATFORM'S OWN accessibility
+    /// peer — never from the scene model and never from kaya's memory
+    /// of what it set. Reading the model would make this verb agree
+    /// with itself and prove nothing; the whole claim under test is
+    /// that the native control publishes a correct accessibility
+    /// surface without kaya doing anything.
+    ///
+    /// Role is each platform's classification normalized to the closed
+    /// set in `check_ax`. `unknown` is legal and honest — a platform
+    /// that classifies something kaya has no name for must say so
+    /// rather than guess. No default.
+    fn ax(&self, target: Target) -> String;
     /// The window catalog's live presentation, `<size class>/<presentation>`
     /// — see Step::ExpectMenuPresentation for the vocabulary.
     ///
@@ -769,6 +799,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_menus wants a count: {line:?}"))?,
             ),
+            "expect_ax" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_ax wants a target and a \"role/label\" string: {line:?}")
+                })?;
+                let want = parse_string(text)?;
+                check_ax(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::ExpectAx(parse_target(target)?, want)
+            }
             "expect_menu_presentation" => {
                 if rest.trim().is_empty() {
                     Step::ExpectMenuPresentation(None)
@@ -929,6 +967,28 @@ fn check_menu_path(path: &str) -> Result<(), String> {
                 "menu path {path:?} pads a label with whitespace"
             ));
         }
+    }
+    Ok(())
+}
+
+/// The spelling of an expect_ax step: `<role>/<label>`. The role half
+/// is a closed set — the platforms' own vocabularies normalized, so a
+/// scene reads the same everywhere — while the label half is free text
+/// (it is whatever the app authored, or whatever the control derived
+/// from its own content). An empty label is legal and meaningful: it
+/// asserts the platform speaks nothing for this element.
+fn check_ax(spec: &str) -> Result<(), String> {
+    const ROLES: [&str; 9] = [
+        "button", "label", "field", "checkbox", "slider", "image", "progress", "group",
+        "unknown",
+    ];
+    let Some((role, _label)) = spec.split_once('/') else {
+        return Err(format!("ax {spec:?} wants <role>/<label>"));
+    };
+    if !ROLES.contains(&role) {
+        return Err(format!(
+            "ax {spec:?} has an unknown role {role:?}; wanted one of {ROLES:?}"
+        ));
     }
     Ok(())
 }
@@ -1502,6 +1562,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 stage.shortcut(spelling);
                 None
             }
+            Step::ExpectAx(target, want) => Some(poll(|| {
+                let got = stage.ax(*target);
+                if got == *want {
+                    Ok(format!("ax {want:?}"))
+                } else {
+                    Err(format!("ax {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectMenus(n) => Some(poll(|| {
                 let got = stage.menu_count();
                 if got == *n {
@@ -1848,6 +1916,9 @@ mod tests {
         fn menu_presentation(&self) -> String {
             "regular/bar".to_owned()
         }
+        fn ax(&self, _: Target) -> String {
+            "button/Save".to_owned()
+        }
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -2031,6 +2102,9 @@ mod tests {
         fn menu_presentation(&self) -> String {
             "regular/none".to_owned()
         }
+        fn ax(&self, _: Target) -> String {
+            "unknown/".to_owned()
+        }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -2165,6 +2239,9 @@ mod tests {
         }
         fn menu_presentation(&self) -> String {
             "regular/none".to_owned()
+        }
+        fn ax(&self, _: Target) -> String {
+            "unknown/".to_owned()
         }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
@@ -2359,6 +2436,36 @@ mod tests {
             "unknown/none",
         ] {
             assert!(menu_presentation_fits(good), "{good} should fit");
+        }
+    }
+
+    /// The ax spelling's closed role set, both directions. The label
+    /// half is free text — including EMPTY, which is a real assertion
+    /// (the platform speaks nothing for this element).
+    #[test]
+    fn ax_spellings() {
+        for good in [
+            "expect_ax button#0 \"button/Save\"",
+            "expect_ax label#0 \"label/Ready\"",
+            "expect_ax entry#0 \"field/\"",
+            "expect_ax column#0 \"group/Controls\"",
+            "expect_ax image#0 \"unknown/\"",
+            // A label may itself contain a slash — only the FIRST
+            // separator splits, or any spoken name with punctuation
+            // would be unassertable.
+            "expect_ax label#0 \"label/on/off\"",
+        ] {
+            assert!(parse(good).is_ok(), "{good} should parse");
+        }
+        for bad in [
+            "expect_ax button#0 \"widget/Save\"",
+            "expect_ax button#0 \"Save\"",
+            "expect_ax button#0 \"/Save\"",
+            "expect_ax button#0 button/Save",
+            "expect_ax button#0",
+            "expect_ax",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
         }
     }
 

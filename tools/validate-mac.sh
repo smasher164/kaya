@@ -793,6 +793,19 @@ run menus-swift-swiftui env KAYA_SELFTEST=menus target/swift-guests/menus
 run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
+# The a11y scene, the DEPTH slice (rust only until the sweep): the two
+# universal accessibility props read back out of the PLATFORM'S OWN
+# accessibility tree — the tree an assistive client walks — so the
+# wrap-native bet's central claim is a matrix fact rather than a
+# paragraph in DESIGN. Asserts both halves: names DERIVED by the control
+# from its own caption (free by construction) and names AUTHORED where
+# there is no caption to derive from.
+# The a11y scene is PENDING: its steps live at
+# guests/rust/a11y.steps.pending until the fan-out gives it legs on the
+# other four lanes (check-steps requires all five, deliberately). It
+# passes on mac today — run it by hand with that file as
+# KAYA_SELFTEST_SCRIPT.
+
 # The commands scene, the DEPTH slice (rust only until the sweep): a
 # chord on every leaf kind — a checkable command and one option of a
 # group, not just plain actions — the punctuation keys those chords

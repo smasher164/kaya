@@ -577,6 +577,20 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This widget's accessibility identifier — the chained spelling of
+    /// [`Tx::a11y_id`], which remains the dynamic path.
+    pub fn a11y_id(self, id: &str) -> Self {
+        self.tx.a11y_id(self.id, id);
+        self
+    }
+
+    /// This widget's spoken accessibility label — the chained spelling
+    /// of [`Tx::a11y_label`], which remains the dynamic path.
+    pub fn a11y_label(self, label: &str) -> Self {
+        self.tx.a11y_label(self.id, label);
+        self
+    }
+
     /// End the chain: the durable id, releasing the transaction
     /// borrow.
     pub fn id(self) -> WidgetId {
@@ -1053,6 +1067,25 @@ impl<'a> Tx<'a> {
     /// rows-only. See [`Prop::Align`].
     pub fn align(&mut self, widget: WidgetId, align: Align) {
         self.set(widget, Prop::Align, align.wire());
+    }
+
+    /// This widget's accessibility IDENTIFIER: a stable authored key
+    /// that assistive tooling and UI automation both address it by, and
+    /// which is NEVER spoken. Universal — every kind carries one. See
+    /// [`Prop::A11yId`].
+    pub fn a11y_id(&mut self, widget: WidgetId, id: &str) {
+        self.set(widget, Prop::A11yId, id);
+    }
+
+    /// This widget's accessibility LABEL: what an assistive client
+    /// speaks for it. Universal, and deliberately separate from
+    /// [`Tx::a11y_id`] — an automation key is not a spoken name. Leave
+    /// it unset to keep whatever the platform derives from the
+    /// control's own content; setting it OVERRIDES that, so a button
+    /// whose caption already reads well needs nothing here. See
+    /// [`Prop::A11yLabel`].
+    pub fn a11y_label(&mut self, widget: WidgetId, label: &str) {
+        self.set(widget, Prop::A11yLabel, label);
     }
 
     /// One-shot commands: momentary verbs into widget-owned state,

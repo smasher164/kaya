@@ -54,4 +54,19 @@ for example in guests/swift/*.swift; do
         exit 1
     fi
 done
+# THE INTERPRETER ITSELF — the layer this gate did not cover until
+# 2026-07-25. swift/KayaSwiftUI.swift is ~4300 lines and is the historic
+# miss layer (it re-implements every harness verb and carries private
+# copies of the wire constants), yet its only compiler was
+# build-dylib.sh inside validate-mac. So a broken interpreter reported
+# "swift-typecheck: OK" and only failed minutes later in the heavy lane
+# — measured: `NSObject.accessibilityIdentifier` typechecked green here
+# while the dylib build rejected it outright.
+if ! kaya_swiftc -typecheck \
+    -import-objc-header crates/kaya/include/kaya.h \
+    swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift; then
+    echo "swift-typecheck: FAIL (the SwiftUI interpreter)"
+    exit 1
+fi
+
 echo "swift-typecheck: OK"
