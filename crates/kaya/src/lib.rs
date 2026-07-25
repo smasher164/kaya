@@ -8,6 +8,7 @@ mod app;
 // and the unit tests; the interpreter platforms run their own Kotlin/
 // Swift step runners against the shared .steps scripts.
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
+#[cfg(feature = "harness")]
 mod harness;
 mod protocol;
 mod ring;

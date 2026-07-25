@@ -1613,6 +1613,10 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
 /// The widget id behind a harness target — the reverse of the
 /// kind#index registries, by object identity (the registries hold the
 /// same native objects the widget map does).
+// Harness-only: its sole caller is the Stage impl below, and it speaks
+// harness types, so it goes with the harness rather than shipping in a
+// user's binary.
+#[cfg(feature = "harness")]
 fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
     use crate::harness::{resolve, TargetKind as K};
     let widget: gtk4::Widget = match t.kind {
@@ -2870,9 +2874,26 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         };
         window.present();
 
+        #[cfg(feature = "harness")]
         if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
             crate::harness::spawn(&scene, GtkStage, |line| println!("{line}"));
         }
+        // A build WITHOUT the harness feature must not silently ignore
+        // KAYA_SELFTEST. The feature is off by default so users do not
+        // ship the scene interpreter, which means a runner that forgets
+        // `--features harness` would otherwise start the app, run no
+        // steps, print no verdict, and hang until its timeout — the
+        // silent-no-op shape this repo keeps paying for. Fail loudly
+        // instead, naming the fix.
+        #[cfg(not(feature = "harness"))]
+        if std::env::var("KAYA_SELFTEST").is_ok() {
+            panic!(
+                "kaya: KAYA_SELFTEST is set but this build has no harness \
+                 — rebuild with `--features harness` (it is off by default \
+                 so shipped apps do not carry the scene interpreter)"
+            );
+        }
+
 
         CORE.with_borrow_mut(|core| {
             *core = Some(CoreState {
@@ -2969,8 +2990,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 /// The harness stage: GTK's native calls, each hopping to the main
 /// context. Programmatic set_text/set_active/set_value fire the real
 /// signals, so every step travels the path a user's gesture would.
+#[cfg(feature = "harness")]
 struct GtkStage;
 
+#[cfg(feature = "harness")]
 impl GtkStage {
     /// The mutable twin of on_main, for stage actions that reconcile
     /// core-owned state (select_section's user route).
@@ -3009,6 +3032,7 @@ impl GtkStage {
     }
 }
 
+#[cfg(feature = "harness")]
 impl crate::harness::Stage for GtkStage {
     fn menu_activate(&self, path: &str) {
         let path = path.to_owned();

@@ -3803,11 +3803,28 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     window.Closed(&closed)?;
     window.Activate()?;
 
+    #[cfg(feature = "harness")]
     if let Ok(scene) = std::env::var("KAYA_SELFTEST") {
         let scene = scene.trim().to_owned();
         eprintln!("kaya: winui selftest armed ({scene})");
         crate::harness::spawn(&scene, WinUiStage, |line| println!("{line}"));
     }
+    // A build WITHOUT the harness feature must not silently ignore
+    // KAYA_SELFTEST. The feature is off by default so users do not
+    // ship the scene interpreter, which means a runner that forgets
+    // `--features harness` would otherwise start the app, run no
+    // steps, print no verdict, and hang until its timeout — the
+    // silent-no-op shape this repo keeps paying for. Fail loudly
+    // instead, naming the fix.
+    #[cfg(not(feature = "harness"))]
+    if std::env::var("KAYA_SELFTEST").is_ok() {
+        panic!(
+            "kaya: KAYA_SELFTEST is set but this build has no harness \
+             — rebuild with `--features harness` (it is off by default \
+             so shipped apps do not carry the scene interpreter)"
+        );
+    }
+
 
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
@@ -3882,8 +3899,10 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
 /// dispatcher. Programmatic SetIsChecked/SetText/SetValue raise the
 /// real event paths; clicks emit the button's stored tag, the same
 /// bytes the pointer path would.
+#[cfg(feature = "harness")]
 struct WinUiStage;
 
+#[cfg(feature = "harness")]
 impl WinUiStage {
     /// The mutable twin of on_ui, for stage actions that reconcile
     /// core-owned state (select_section's user route).
@@ -3958,6 +3977,7 @@ impl WinUiStage {
     }
 }
 
+#[cfg(feature = "harness")]
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
         let spec = path.to_owned();
@@ -5090,6 +5110,9 @@ impl crate::harness::Stage for WinUiStage {
 /// Context anchors in the scenes are labels; other kinds join as
 /// scenes demand them — an unwired kind fails loudly, never silently
 /// (the is_focused stance).
+// Harness-only, like GTK's context_anchor_id: its sole caller is the
+// Stage impl and it speaks harness types.
+#[cfg(feature = "harness")]
 fn widget_id_for_target(core: &CoreState, t: crate::harness::Target) -> u64 {
     match t.kind {
         crate::harness::TargetKind::Label => {

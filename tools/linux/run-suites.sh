@@ -96,7 +96,7 @@ run_build java build_java
 # dominated by debuginfo, and nothing in the container asserts on
 # symbols. This removes the pressure at its source instead of racing
 # the example count against the container's RAM.
-CARGO_PROFILE_DEV_DEBUG=0 cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
+CARGO_PROFILE_DEV_DEBUG=0 cargo build --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
 timing core-build
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"

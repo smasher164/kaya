@@ -176,8 +176,8 @@ for s in $SCENES; do
 done
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
-(cd "$ROOT" && cargo xwin build --release --target aarch64-pc-windows-msvc --lib \
-    && cargo xwin build --release --target aarch64-pc-windows-msvc \
+(cd "$ROOT" && cargo xwin build --features harness --release --target aarch64-pc-windows-msvc --lib \
+    && cargo xwin build --features harness --release --target aarch64-pc-windows-msvc \
         "${BUILD_EXAMPLES[@]}")
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check

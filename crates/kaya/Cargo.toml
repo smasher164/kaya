@@ -11,6 +11,16 @@ repository = "https://github.com/smasher164/kaya"
 # Swift validation leg links libkaya.a directly.
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[features]
+# The scene-script harness: the parser, the Step vocabulary, all the
+# verbs, and each backend's ~1000-line Stage implementation. OFF BY
+# DEFAULT because none of it belongs in a shipped app — a user building
+# a GUI should not carry kaya's test interpreter, and any dependency the
+# harness needs (an AT-SPI/dbus client for the GTK accessibility read)
+# would otherwise land in every user's binary to serve a verb only the
+# suites ever call. The runners build with --features harness.
+harness = []
+
 [dependencies]
 # Compile-time only (proc-macro): #[derive(KayaGen)] — the type's shape
 # is the schema.

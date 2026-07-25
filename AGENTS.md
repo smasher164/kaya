@@ -60,8 +60,13 @@ in docs/deferred.md.
 
 ## The validation ladder (in order; "done" means the top rung)
 
-1. `cargo test -p kaya` — unit tests, wire round-trips, pin tables,
-   compile_fail doc-tests.
+1. `cargo test -p kaya --features harness` — unit tests, wire
+   round-trips, pin tables,
+   compile_fail doc-tests. THE FEATURE IS REQUIRED: `harness` is off by
+   default so shipped apps do not carry the scene interpreter, and
+   without it the 21 harness tests silently vanish (188 -> 167) rather
+   than failing. GTK and WinUI builds need it too — mac/iOS do not,
+   since the SwiftUI interpreter carries its own harness.
 2. Fast gates (all run by validate-mac, all runnable standalone):
    `tools/gen-header.sh --check`, `tools/gen-bindings.sh --check`,
    `tools/gen-guests.sh --check` (NOTE: diffs generated surfaces against
