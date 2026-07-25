@@ -1141,6 +1141,19 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
 /// GtkApplicationWindow, whose own ActionMap exports the "win" prefix;
 /// an auxiliary window is plain, so CreateWindow inserted a group
 /// under the same prefix (only GtkApplicationWindow reserves it).
+/// Where a window's own actions live — the read side of
+/// [`add_window_action`]: the primary IS a GtkApplicationWindow (its
+/// own ActionMap exports "win"), an auxiliary carries the group
+/// CreateWindow inserted under the same prefix.
+#[cfg(debug_assertions)]
+fn action_group_for(core: &CoreState, window: u64) -> Option<gio::SimpleActionGroup> {
+    if window == 0 {
+        None // the primary's map is the window itself; checked below
+    } else {
+        core.menu_action_groups.get(&window).cloned()
+    }
+}
+
 fn add_window_action(core: &CoreState, window: u64, action: &gio::SimpleAction) {
     use gtk4::gio::prelude::ActionMapExt;
     if window == 0 {
@@ -1304,8 +1317,60 @@ fn rebuild_menubar(core: &CoreState, window: u64) {
             model.append_submenu(Some(&item.label), &submenu);
         }
     }
+    assert_model_actions_resolve(core, window, model);
     refresh_menu_accels(core, window);
 }
+
+
+/// Every action a rendered ROW names must exist in the window's action
+/// group. GTK draws a row whose action is missing as insensitive — a
+/// user sees a permanently gray command — while a registry-side read
+/// happily reports it enabled, so a typo or a stale name in the model
+/// is invisible to a state assertion. Walking the model the chrome
+/// actually renders closes that gap end to end: model row -> action
+/// name -> the group the accel controller and the click path resolve
+/// against. Debug-only: the lanes build debug, and this is a BACKEND
+/// invariant, never a guest error.
+#[cfg(debug_assertions)]
+fn assert_model_actions_resolve(core: &CoreState, window: u64, model: &gio::Menu) {
+    use gtk4::gio::prelude::ActionGroupExt;
+    use gtk4::prelude::Cast;
+    fn walk(core: &CoreState, window: u64, model: &gio::MenuModel) {
+        use gtk4::gio::prelude::MenuModelExt;
+        for i in 0..model.n_items() {
+            if let Some(name) = model
+                .item_attribute_value(i, gio::MENU_ATTRIBUTE_ACTION, None)
+                .and_then(|v| v.get::<String>())
+            {
+                let bare = name.strip_prefix("win.").unwrap_or(&name);
+                let known = if window == 0 {
+                    core.window
+                        .clone()
+                        .downcast::<gtk4::ApplicationWindow>()
+                        .is_ok_and(|w| w.has_action(bare))
+                } else {
+                    action_group_for(core, window)
+                        .is_some_and(|group| group.has_action(bare))
+                };
+                assert!(
+                    known,
+                    "kaya: menu row names action {name:?}, which the window's \
+                     action group does not hold — GTK would render it \
+                     permanently insensitive"
+                );
+            }
+            for link in [gio::MENU_LINK_SUBMENU, gio::MENU_LINK_SECTION] {
+                if let Some(child) = model.item_link(i, link) {
+                    walk(core, window, &child);
+                }
+            }
+        }
+    }
+    walk(core, window, model.upcast_ref());
+}
+
+#[cfg(not(debug_assertions))]
+fn assert_model_actions_resolve(_core: &CoreState, _window: u64, _model: &gio::Menu) {}
 
 /// Rebuild one context attachment's model from its root list.
 fn rebuild_context(core: &CoreState, widget: u64) {
@@ -2175,25 +2240,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::SetMenuProp { item, prop, value } => {
             use gtk4::glib::prelude::ToVariant;
-            match (prop, &value) {
-                (MenuProp::Label, Value::Str(label)) => {
+            // EXHAUSTIVE over the prop: a new MENU_PROPS row fails to
+            // compile here rather than reaching a catch-all at runtime.
+            match prop {
+                MenuProp::Label => {
+                    let label = crate::protocol::prop_str(&value);
                     core.menus
                         .borrow_mut()
                         .items
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
-                        .label = label.clone();
+                        .label = label.to_owned();
                     // Labels are live: whatever chrome presents the
                     // tree re-renders (GMenu snapshots are immutable).
                     rebuild_menu_anchors(core, item.0);
                 }
-                (MenuProp::Enabled, Value::Bool(on)) => {
+                MenuProp::Enabled => {
                     {
                         let mut reg = core.menus.borrow_mut();
                         reg.items
                             .get_mut(&item.0)
                             .expect("scene validated the item id")
-                            .enabled = *on;
+                            .enabled = crate::protocol::prop_bool(&value);
                     }
                     // The inherited AND lands on every descendant's
                     // REAL action; no model rebuild — enablement is
@@ -2201,21 +2269,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let reg = core.menus.borrow();
                     menu_sync_enabled(&reg, item.0);
                 }
-                (MenuProp::Checked, Value::Bool(on)) => {
+                MenuProp::Checked => {
                     // QUIET (the echo doctrine): set_state never fires
                     // activate, so the write configures the native
                     // checkmark without an occurrence.
+                    let on = crate::protocol::prop_bool(&value);
                     let mut reg = core.menus.borrow_mut();
                     let state = reg
                         .items
                         .get_mut(&item.0)
                         .expect("scene validated the item id");
-                    state.checked = *on;
+                    state.checked = on;
                     for action in &state.actions {
                         action.set_state(&on.to_variant());
                     }
                 }
-                (MenuProp::Value, Value::F64(index)) => {
+                MenuProp::Value => {
                     // QUIET, same as checked (the choice contract's
                     // programmatic side). The state lives on the
                     // OPTIONS' actions, one per option, so the group's
@@ -2224,10 +2293,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     reg.items
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
-                        .value = *index;
+                        .value = crate::protocol::prop_f64(&value);
                     menu_sync_radio_state(&reg, item.0);
                 }
-                (MenuProp::Primary, Value::Bool(on)) => {
+                MenuProp::Primary => {
                     // The phone-promotion hint: INERT on desktop by
                     // design (DESIGN.md, Menus) — recorded, never
                     // materialized.
@@ -2236,15 +2305,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .items
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
-                        .primary = *on;
+                        .primary = crate::protocol::prop_bool(&value);
                 }
-                (MenuProp::Shortcut, Value::Str(spelling)) => {
+                MenuProp::Shortcut => {
                     core.menus
                         .borrow_mut()
                         .items
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
-                        .shortcut = spelling.clone();
+                        .shortcut = crate::protocol::prop_str(&value).to_owned();
                     let window = {
                         let reg = core.menus.borrow();
                         reg.bar_of.get(&menu_root_of(&reg, item.0)).copied()
@@ -2253,18 +2322,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         refresh_menu_accels(core, window);
                     }
                 }
-                (MenuProp::Icon, Value::Blob(_)) => {
+                MenuProp::Icon => {
                     // Day-one slot: accepted; GTK's menu dress carries
                     // no item icons and phone promotion is not this
                     // platform (DESIGN.md, Menus — ignored where the
                     // dress has none).
                 }
-                // A standard-command role is a placement REQUEST that
-                // this host has nowhere to honor: there is no
-                // dress-owned application menu here, so the item stays
-                // exactly where the app declared it (DESIGN.md, Menus).
-                (MenuProp::Role, Value::Str(_)) => {}
-                (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
+                MenuProp::Role => {
+                    // A standard-command role is a placement REQUEST
+                    // this host has nowhere to honor: there is no
+                    // dress-owned application menu here, so the item
+                    // stays exactly where the app declared it.
+                }
             }
         }
 

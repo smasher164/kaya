@@ -78,11 +78,29 @@ dune exec bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
     || { cat "$TMP/ml.log"; fail ocaml; }
 
 # Haskell: the kaya-abort-check executable beside the scene guests.
-(cd guests/haskell && cabal build kaya-abort-check \
+# This gate builds in its OWN build tree, never the shared
+# dist-newstyle: the repo is mounted into the linux container, so
+# wiping the shared one destroys the docker lane's freshly built
+# Haskell guests mid-run (caught by the matrix, 2026-07-24).
+#
+# Inside that private tree the component's build directory goes EVERY
+# run, so the library and the executable genuinely recompile and LINK
+# here. The class this
+# closes is a gate that passes without doing its work: cabal skips a
+# link whose inputs are unchanged — and trusts its plan cache over the
+# artifact's existence, so neither deleting the binary nor
+# -fforce-recomp forces it (both measured) — which is how this binding
+# went weeks never linking, green throughout, and then failed the
+# moment a regenerated binding forced a real build (docs/traps.md).
+# Costs about ten seconds, and the mac lane is not the matrix's
+# bottleneck.
+HS_DIST="$ROOT/target/hs-abort-dist"
+rm -rf "$HS_DIST"/build/*/*/kaya-guests-0
+(cd guests/haskell && cabal build kaya-abort-check --builddir="$HS_DIST" \
     --extra-lib-dirs="$ROOT/target/debug" \
     --ghc-options="-L$ROOT/target/debug -optl-Wl,-rpath,$ROOT/target/debug" -v0) >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell-build; }
-"$(cd guests/haskell && cabal list-bin kaya-abort-check -v0)" >"$TMP/hs.log" 2>&1 \
+"$(cd guests/haskell && cabal list-bin kaya-abort-check --builddir="$HS_DIST" -v0)" >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell; }
 
 # Haskell's mirror-read guard is the Build/Tpl monad wall itself; pin

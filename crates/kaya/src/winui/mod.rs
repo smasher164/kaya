@@ -1569,6 +1569,7 @@ fn virtual_key(name: &str) -> Option<VirtualKey> {
 /// write preserves the user's toggle/radio state (docs/traps.md). Also
 /// re-derives the shortcut table. Coalesced per drain (menus_touched).
 fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
+    assert_chord_premise();
     if std::env::var_os("KAYA_WINUI_MENU_PROBE").is_some() {
         menu_probe();
     }
@@ -2015,6 +2016,57 @@ fn invoke_menu_native(native: &MenuNative) -> windows_core::Result<()> {
         return invoke.Invoke();
     }
     peer.cast::<IToggleProvider>()?.Toggle()
+}
+
+
+/// The PREMISE this backend's chord dispatch rests on, checked once per
+/// process — not flag-gated, because a silent change here is a
+/// double-fire or a dead chord.
+///
+/// A KeyboardAccelerator's default action is a UI Automation pattern
+/// lookup, and only Invoke raises Click (this backend's one dispatch
+/// path). `MenuFlyoutItem` has Invoke, so a plain command's chord rides
+/// the platform whole. `ToggleMenuFlyoutItem` does NOT, which is the
+/// entire reason a checkable command's chord goes through a
+/// thread-scoped key hook instead (docs/traps.md). If a future WinUI
+/// gives the toggle peer an Invoke pattern, the platform would raise
+/// Click AND the hook would fire — two occurrences for one chord — so
+/// the premise fails loudly here rather than as a doubled occurrence in
+/// somebody's app.
+fn assert_chord_premise() {
+    static CHECKED: OnceLock<()> = OnceLock::new();
+    if CHECKED.set(()).is_err() {
+        return;
+    }
+    let probe: windows_core::Result<()> = (|| {
+        use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+        use bindings::Microsoft::UI::Xaml::Automation::Provider::IInvokeProvider;
+        use windows_core::Interface as _;
+        let action: UIElement = MenuFlyoutItem::new()?.cast()?;
+        let action_invokes = FrameworkElementAutomationPeer::CreatePeerForElement(&action)?
+            .cast::<IInvokeProvider>()
+            .is_ok();
+        let toggle: UIElement = ToggleMenuFlyoutItem::new()?.cast()?;
+        let toggle_invokes = FrameworkElementAutomationPeer::CreatePeerForElement(&toggle)?
+            .cast::<IInvokeProvider>()
+            .is_ok();
+        assert!(
+            action_invokes,
+            "kaya: MenuFlyoutItem lost its Invoke automation pattern — a plain \
+             command's chord no longer raises Click, and this backend's \
+             accelerator dispatch is dead (docs/traps.md)"
+        );
+        assert!(
+            !toggle_invokes,
+            "kaya: ToggleMenuFlyoutItem GAINED an Invoke automation pattern — its \
+             chord now raises Click on its own, so the thread-scoped key hook \
+             would fire a SECOND occurrence. Retire the hook (docs/traps.md)"
+        );
+        Ok(())
+    })();
+    if let Err(e) = probe {
+        eprintln!("kaya: chord-premise check failed: {:?} {}", e.code(), e.message());
+    }
 }
 
 /// KAYA_WINUI_MENU_PROBE: the flag-gated instrument (the
@@ -2757,29 +2809,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .menu_models
                 .get_mut(&item.0)
                 .expect("scene validated the item id");
-            match (prop, &value) {
-                (MenuProp::Label, Value::Str(s)) => model.label = s.clone(),
-                (MenuProp::Enabled, Value::Bool(b)) => model.enabled = *b,
+            // EXHAUSTIVE over the prop: a new MENU_PROPS row fails to
+            // compile here rather than reaching a catch-all at runtime
+            // — which `role` did, panicking this backend (docs/traps.md).
+            match prop {
+                MenuProp::Label => model.label = crate::protocol::prop_str(&value).to_owned(),
+                MenuProp::Enabled => model.enabled = crate::protocol::prop_bool(&value),
                 // Programmatic checked/value writes are configuration
                 // and stay QUIET (the echo doctrine): the rebuild
                 // restamps the native state and no Click fires on a
                 // programmatic set (the MENU PROBE's first canary).
-                (MenuProp::Checked, Value::Bool(b)) => model.checked = *b,
-                (MenuProp::Value, Value::F64(v)) => model.value = *v,
+                MenuProp::Checked => model.checked = crate::protocol::prop_bool(&value),
+                MenuProp::Value => model.value = crate::protocol::prop_f64(&value),
                 // The phone-promotion hint, INERT on desktop by the
                 // ratified design — stored, never materialized here.
-                (MenuProp::Primary, Value::Bool(b)) => model.primary = *b,
-                (MenuProp::Shortcut, Value::Str(s)) => model.shortcut = s.clone(),
+                MenuProp::Primary => model.primary = crate::protocol::prop_bool(&value),
+                MenuProp::Shortcut => {
+                    model.shortcut = crate::protocol::prop_str(&value).to_owned();
+                }
                 // Icons dress phone promotion; native Windows menu
                 // rows carry no icon in this lowering (the section
                 // Icon precedent: accepted, day-one slot).
-                (MenuProp::Icon, Value::Blob(_)) => {}
+                MenuProp::Icon => {}
                 // A standard-command role is a placement REQUEST that
                 // this host has nowhere to honor: there is no
                 // dress-owned application menu here, so the item stays
                 // exactly where the app declared it (DESIGN.md, Menus).
-                (MenuProp::Role, Value::Str(_)) => {}
-                (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
+                MenuProp::Role => {}
             }
             core.menus_touched = true;
         }

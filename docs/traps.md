@@ -802,6 +802,27 @@ The general lesson pairs with the materialization class: liveness is
 proven by the layer you actually talk to (sshd), never by the
 supervisor's state word.
 
+Sibling case, 2026-07-24: the VM stayed perfectly reachable while two
+GUEST processes wedged. `tasklist` listed `progress.exe` and a
+`java.exe`, but `taskkill` — by image name AND by pid — answered
+"there is no running instance of the task" for both: processes stuck
+mid-termination, which Windows reports as gone and lists as present.
+No new `C:\kaya\out_*.txt` appeared, so the lane sat in a poll for a
+scheduled task that could never produce output, and the other four
+lanes had long since finished.
+
+Recognizing it matters because every symptom says "slow lane": ssh
+answers, utmctl says started, and the runner's own 300-try bound only
+fires after five minutes per leg — then the next leg wedges the same
+way. The tells are (1) the newest `out_*.txt` stops advancing while
+the run continues, and (2) taskkill disagreeing with tasklist about
+the same pid. The remedy is the one the boot block already knows,
+applied by hand: `utmctl stop --kill`, then let the lane's own boot
+path bring it up fresh. Nothing softer clears a process the kernel
+will not reap — and the wedged scenes had no bearing on the change
+under test, which is exactly why the state, not the code, is where to
+look when four lanes pass and one goes quiet.
+
 ## Container linker OOM scales with the example count
 
 Same day: the linux lane died with `ld terminated with signal 9`

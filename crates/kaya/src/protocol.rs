@@ -410,6 +410,39 @@ impl MenuItemKind {
     }
 }
 
+/// Value accessors for a prop apply. The ROOT validated every (prop,
+/// value) pairing, so a mismatch here is a core bug rather than a guest
+/// one — which is exactly why a backend should match EXHAUSTIVELY over
+/// the prop enum and read the value through these, instead of matching
+/// the pair and catching the rest. A new prop then fails to COMPILE in
+/// every backend; the previous shape let `role` reach a catch-all and
+/// panic on Windows at runtime (docs/traps.md).
+// (Their callers are the cfg'd NATIVE backends — gtk and winui — so a
+// mac-native build sees no use at all.)
+#[allow(dead_code)]
+pub fn prop_str(value: &Value) -> &str {
+    match value {
+        Value::Str(s) => s,
+        other => unreachable!("kaya: prop wants Str, the root passed {other:?}"),
+    }
+}
+
+#[allow(dead_code)]
+pub fn prop_bool(value: &Value) -> bool {
+    match value {
+        Value::Bool(b) => *b,
+        other => unreachable!("kaya: prop wants Bool, the root passed {other:?}"),
+    }
+}
+
+#[allow(dead_code)]
+pub fn prop_f64(value: &Value) -> f64 {
+    match value {
+        Value::F64(f) => *f,
+        other => unreachable!("kaya: prop wants F64, the root passed {other:?}"),
+    }
+}
+
 /// Menu property keys — separate from widget, window, entry, and
 /// section props (spec::MENU_PROPS; DESIGN.md, Menus). `label` and
 /// `enabled` apply to every kind but `separator`; `checked` is
