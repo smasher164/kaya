@@ -3114,13 +3114,54 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn ax(&self, _target: crate::harness::Target) -> String {
+    fn ax(&self, target: crate::harness::Target) -> String {
+        // Correspondence is ORDINAL: the Nth element of the matching
+        // role in the app's AT-SPI tree, which is what `kind#index`
+        // already means. GTK <= 4.21 publishes no settable accessible
+        // id (verified: set_widget_name does NOT surface as one), so
+        // identity matching is unavailable here — unlike macOS, where
+        // the identifier works and is used instead. Strongest
+        // correspondence each platform offers.
+        #[cfg(feature = "harness")]
+        {
+            use crate::harness::TargetKind as K;
+            let want = match target.kind {
+                K::Button => atspi::Role::Button,
+                K::Checkbox => atspi::Role::CheckBox,
+                // GTK exposes an entry as AT-SPI role TEXT, not Entry —
+                // read off the live bus with the probe, not guessed.
+                K::Entry | K::Textarea => atspi::Role::Text,
+                K::Label => atspi::Role::Label,
+                K::Slider => atspi::Role::Slider,
+                K::Image => atspi::Role::Image,
+                K::Row | K::Column => atspi::Role::Panel,
+                _ => atspi::Role::Unknown,
+            };
+            let role = match want {
+                atspi::Role::Button => "button",
+                atspi::Role::CheckBox => "checkbox",
+                atspi::Role::Text => "field",
+                atspi::Role::Label => "label",
+                atspi::Role::Slider => "slider",
+                atspi::Role::Image => "image",
+                atspi::Role::Panel => "group",
+                _ => "unknown",
+            };
+            return match atspi_collect(want, target.index as usize) {
+                Some(name) => format!("{role}/{name}"),
+                None => "<not in the accessibility tree>".to_owned(),
+            };
+        }
+        #[allow(unreachable_code)]
+        {
+            let _ = target;
         // FAN-OUT PENDING (the depth slice is SwiftUI on mac). Declared
         // so the trait is satisfied and the remaining work stays
         // VISIBLE — a sentinel that can never equal a valid
         // `<role>/<label>` spelling, so any scene asserting on this
         // backend fails loudly instead of quietly passing. Reads GtkAccessible / AT-SPI when it lands.
-        "<the GTK accessibility read is not implemented yet>".to_owned()
+            "<the GTK accessibility read is not implemented yet>".to_owned()
+        }
     }
 
     fn menu_presentation(&self) -> String {
@@ -3968,4 +4009,79 @@ impl crate::harness::Stage for GtkStage {
         // request_exit reads the main thread's CORE; hop before asking.
         Self::on_main(move |_| request_exit(code));
     }
+}
+
+/// Read this app's accessibility tree over AT-SPI, as a real assistive
+/// client does.
+///
+/// GTK exposes NO getter for accessible properties — the accessible
+/// surface IS AT-SPI — so an in-process read would only return kaya's
+/// own writes. Going over the bus is the only honest route, and it is
+/// why the harness (and this dependency) is feature-gated: a shipped
+/// app must never link a dbus client to serve a test verb.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .ok()?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .ok()?
+            .path("/org/a11y/atspi/accessible/root")
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        let me = std::process::id();
+        let mut found: Vec<(atspi::Role, String)> = Vec::new();
+        // Depth-first over OUR application only. Roles are matched on
+        // the enum, not a localized name string.
+        async fn walk(
+            node: AccessibleProxy<'_>,
+            out: &mut Vec<(atspi::Role, String)>,
+            depth: usize,
+        ) {
+            if depth > 24 {
+                return;
+            }
+            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
+                out.push((role, name));
+            }
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, out, depth + 1)).await;
+                }
+            }
+        }
+        for app in root.get_children().await.ok()? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            // Only our own process's application node.
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            let _ = me;
+            Box::pin(walk(proxy, &mut found, 0)).await;
+        }
+        let nth = found.into_iter().filter(|(r, _)| *r == want).nth(index)?;
+        Some(nth.1)
+    })
 }

@@ -54,6 +54,37 @@ use std::time::{Duration, Instant};
 
 /// The scene scripts, embedded from tools/scenes at build time.
 pub fn script(scene: &str) -> Option<&'static str> {
+    // THE ENVIRONMENT WINS. The interpreters have always read
+    // KAYA_SELFTEST_SCRIPT; the Rust backends embedded theirs at build
+    // time instead, so the two halves of the matrix failed differently
+    // for the same mistake and a new scene had to be registered in the
+    // match below or it silently ran nothing.
+    //
+    // Reading the env first makes ONE transport for all five backends,
+    // and it passes the LIVE .steps file rather than a copy frozen into
+    // the binary. The match is now a FALLBACK for standalone runs, not
+    // a registry a new scene must join — one less hand-maintained list,
+    // which is the class check-steps already exists to police.
+    //
+    // Leaked on purpose: the script lives as long as the process, this
+    // is harness-only code, and the alternative is threading a lifetime
+    // through every backend's spawn call for no benefit.
+    //
+    // The match below is NOT dead and is not merely legacy: deleting it
+    // means every Rust leg on Linux AND Windows must carry the script's
+    // full text through its own transport, and on Windows that
+    // transport is a checked-in .cmd batch file per leg
+    // (tools/guest/run_<scene>_<lang>.cmd, which today just says
+    // `set KAYA_SELFTEST=menus`). Multi-line quoted text through batch
+    // is the same carrier problem as Android's intent extras, which
+    // already need `;` as a newline stand-in. Removing it is a real
+    // slice across two runners and a cross-machine transport — worth
+    // doing, but not a deletion.
+    if let Ok(text) = std::env::var("KAYA_SELFTEST_SCRIPT") {
+        if !text.trim().is_empty() {
+            return Some(Box::leak(text.into_boxed_str()));
+        }
+    }
     match scene {
         "entry" => Some(include_str!("../../../tools/scenes/entry.steps")),
         "gallery" => Some(include_str!("../../../tools/scenes/gallery.steps")),
@@ -363,6 +394,59 @@ pub enum Step {
     /// silent like click.
     Shortcut(String),
 }
+
+impl Step {
+    /// Does this step ASSERT something, as opposed to driving the UI?
+    ///
+    /// Exhaustive on purpose. This began as a hand-written list of
+    /// seven variants inside the "script has no expects" guard, and by
+    /// 2026-07-25 it had silently fallen eight behind — a scene built
+    /// only from menu or accessibility assertions was reported as
+    /// having no expects at all. An exhaustive match turns that
+    /// forgotten-list class into a COMPILE ERROR: a new Step cannot
+    /// ship without someone deciding which side of this line it is on.
+    fn is_assertion(&self) -> bool {
+        match self {
+            Step::Settle { .. } => false,
+            Step::Click { .. } => false,
+            Step::Toggle { .. } => false,
+            Step::SetValue { .. } => false,
+            Step::SetText { .. } => false,
+            Step::Expect { .. } => true,
+            Step::ExpectOrder { .. } => true,
+            Step::ExpectFocused { .. } => true,
+            Step::ExpectShares { .. } => true,
+            Step::ExpectRootFills { .. } => true,
+            Step::ExpectFills { .. } => true,
+            Step::ExpectAligned { .. } => true,
+            Step::ExpectTitle { .. } => true,
+            Step::ExpectSections { .. } => true,
+            Step::ExpectSection { .. } => true,
+            Step::SelectSection { .. } => false,
+            Step::ExpectWindowSize { .. } => true,
+            Step::CloseWindow { .. } => false,
+            Step::ExpectWindows { .. } => true,
+            Step::ExpectAlert { .. } => true,
+            Step::AlertChoose { .. } => false,
+            Step::ExpectAlerts { .. } => true,
+            Step::ExpectEntries { .. } => true,
+            Step::Back { .. } => false,
+            Step::ExpectOverflow { .. } => true,
+            Step::ScrollEnd { .. } => false,
+            Step::ExpectAtEnd { .. } => true,
+            Step::Choose { .. } => false,
+            Step::ExpectGridColumns { .. } => true,
+            Step::MenuActivate { .. } => false,
+            Step::ContextOpen { .. } => false,
+            Step::ExpectMenu { .. } => true,
+            Step::ExpectAx { .. } => true,
+            Step::ExpectMenus { .. } => true,
+            Step::ExpectMenuPresentation { .. } => true,
+            Step::Shortcut { .. } => false,
+        }
+    }
+}
+
 
 /// What a backend supplies: its native calls, each hopping to its UI
 /// thread internally and blocking until applied (reads return the
@@ -1068,7 +1152,22 @@ fn parse_menu_state(spec: &str) -> Result<MenuState, String> {
 /// and the verdict joins their observed values — "urgent: true,
 /// volume: 75%" — exactly the strings the suites have always printed.
 pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
-    let Some(text) = script(scene) else { return };
+    // A scene with no script used to return SILENTLY: the app ran, no
+    // steps executed, no verdict printed, and the runner waited out its
+    // whole timeout with nothing to show. That is the silent-no-op shape
+    // this repo keeps paying for, and it is worse on the Rust backends
+    // because they carry 434 of the matrix's 686 legs.
+    let Some(text) = script(scene) else {
+        stage.finish(
+            1,
+            &format!(
+                "KAYA_SELFTEST: FAILED (no script for scene {scene:?} — export \
+                 KAYA_SELFTEST_SCRIPT with the scene's steps, or add an arm to \
+                 harness::script for a standalone run)"
+            ),
+        );
+        return;
+    };
     let steps = match parse(text) {
         Ok(steps) => steps,
         Err(e) => {
@@ -1170,20 +1269,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     }
     // A script with no expects proves nothing; a transport that
     // mangled the text into a comment must fail, not pass.
-    if !steps
-        .iter()
-        .any(|s| {
-            matches!(
-                s,
-                Step::Expect(..)
-                    | Step::ExpectOrder(..)
-                    | Step::ExpectFocused(..)
-                    | Step::ExpectShares(..)
-                    | Step::ExpectRootFills
-                    | Step::ExpectFills(..)
-                    | Step::ExpectAligned(..)
-            )
-        })
+    if !steps.iter().any(Step::is_assertion)
     {
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
         return;

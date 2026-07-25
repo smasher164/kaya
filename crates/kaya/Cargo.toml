@@ -64,7 +64,7 @@ jni = "0.21"
 # read kaya's own writes back. That makes a dbus client the honest
 # route, and makes it doubly important that it never reaches a shipped
 # app — a GUI library has no business linking dbus to serve a test verb.
-atspi = { version = "0.30", optional = true }
+atspi = { version = "0.30", optional = true, features = ["zbus"] }
 # v4_10 gates gtk::AlertDialog (the alert vocabulary's 1:1 dialog;
 # 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
 # image ships GTK 4.18.

@@ -633,6 +633,25 @@ run_one_suite() {
             # cannot hold kaya.dll into the next suite or deploy, and
             # fail this leg loudly.
             echo "$name: timed out waiting for output; killing guests" >&2
+            # IS THE VM EVEN ALIVE? The startup check runs ONCE, so an
+            # OS hang mid-lane is invisible: every remaining leg waits
+            # out its own 300s in silence while UTM still reports
+            # "started". Measured 2026-07-25 — a 14-minute stall with
+            # zero verdicts and no guests in tasklist, because the guest
+            # OS had died, not the guests. The wedge fingerprint below
+            # cannot see this either: it needs ssh to ask.
+            #
+            # Checked FIRST, because "the VM is gone" makes every other
+            # diagnosis wrong.
+            if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
+                echo "$name: THE VM IS UNREACHABLE mid-lane — the guest OS hung," \
+                    "not the guests (utmctl will still say \"started\"; that is the" \
+                    "documented class in docs/traps.md). This lane is over; every" \
+                    "remaining leg would just burn its own timeout. Most likely" \
+                    "cause is host contention: the windows lane is reliable" \
+                    "standalone and degrades under the full five-lane matrix." >&2
+                return 1
+            fi
             kill_guests
             # A plain timeout is recoverable; the WEDGED state is not,
             # and taskkill cannot tell you which you have. Fingerprint

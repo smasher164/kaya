@@ -971,6 +971,44 @@ start, wait for sshd, grace for the /it console session). Once per run:
 a wedge that RECURS after a restart is not this class and says so
 loudly instead of retrying forever.
 
+## The windows lane degrades under the full matrix — three shapes
+
+2026-07-25. The windows lane failed three DIFFERENT ways in one day,
+and all three share a cause that took until the third to see.
+
+    windows alone      110/110, 67s   green, repeatedly
+    windows alone      110/110, 64s   green
+    under validate-all 843s, guests wedged unkillably
+    under validate-all OS hang, 0 legs, 14 minutes of silence
+
+Standalone it is fast and green every time. Concurrent with the other
+four lanes it degrades or dies. The mechanism is host starvation:
+validate-all runs a Docker VM building 324 legs 8-wide, four iOS
+simulators, an Android emulator, the mac legs, AND a 4-core QEMU
+Windows guest on one machine. The Windows guest is the one that cannot
+take it. This also retroactively explains the confirm_* timeouts that
+would not reproduce standalone earlier the same day.
+
+THE THREE SHAPES, so the next one is recognized fast:
+1. Guests hang but are killable — ordinary timeout, kill_guests clears.
+2. Guests unkillable — tasklist lists them, taskkill says "no running
+   instance". Needs a VM restart; see the entry below.
+3. The guest OS itself hangs — no guests at all in tasklist, tasks
+   never start, ssh dies, and utmctl still reports "started".
+
+Shape 3 was the expensive one because nothing looked for it: the ssh
+reachability check ran ONCE at lane startup and never again, so every
+remaining leg burned its own 300s in silence. Guard: on any leg
+timeout, deploy-win now probes ssh FIRST — before the wedge
+fingerprint, which cannot work when the host is gone — and aborts the
+lane immediately with the diagnosis rather than stalling.
+
+The GUARD is not the FIX. The fix is resourcing: give the VM more
+cores, or stop running the windows lane fully concurrent with the other
+four. Until then a red windows lane under validate-all that is green
+standalone is a contention artifact, not a regression — check
+standalone before believing it.
+
 ## The wedged-VM class: "started" is not "reachable"
 
 2026-07-22, textarea matrix: the UTM Windows guest OS hung mid-suite
