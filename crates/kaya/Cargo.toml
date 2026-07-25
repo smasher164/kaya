@@ -19,7 +19,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # harness needs (an AT-SPI/dbus client for the GTK accessibility read)
 # would otherwise land in every user's binary to serve a verb only the
 # suites ever call. The runners build with --features harness.
-harness = []
+harness = ["dep:atspi"]
 
 [dependencies]
 # Compile-time only (proc-macro): #[derive(KayaGen)] — the type's shape
@@ -56,6 +56,15 @@ objc2-foundation = "0.3.2"
 jni = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# The AT-SPI client, for the harness accessibility read ONLY — hence
+# optional, pulled in by the `harness` feature, and Linux-only.
+#
+# GTK deliberately exposes no getter for accessible properties: the
+# accessible surface IS AT-SPI, so reading it any other way would only
+# read kaya's own writes back. That makes a dbus client the honest
+# route, and makes it doubly important that it never reaches a shipped
+# app — a GUI library has no business linking dbus to serve a test verb.
+atspi = { version = "0.30", optional = true }
 # v4_10 gates gtk::AlertDialog (the alert vocabulary's 1:1 dialog;
 # 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
 # image ships GTK 4.18.
