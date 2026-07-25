@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x0e4b7f4f716cc749;
+    public const ulong SpecHash = 0xc844be516d78a8ed;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -66,6 +66,7 @@ static class KayaWire
     public const uint MpropIcon = 5;
     public const uint MpropPrimary = 6;
     public const uint MpropShortcut = 7;
+    public const uint MpropRole = 8;
     public const uint SectionsPresentationAuto = 0;
     public const uint SectionsPresentationBar = 1;
     public const uint SectionsPresentationSidebar = 2;
@@ -973,7 +974,7 @@ static class KayaWire
         return Finish(stream, w, TxKindSetSectionProp);
     }
 
-    static readonly HashSet<string> ShortcutNamedKeys = new HashSet<string> { "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12" };
+    static readonly HashSet<string> ShortcutNamedKeys = new HashSet<string> { "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket" };
 
     /// Canonicalize a shortcut spelling to the wire form: lowercase
     /// '+'-joined tokens, modifiers ordered primary, shift, alt, then one
@@ -1107,6 +1108,15 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(item); w.Write(MpropShortcut); w.Write(SourceConst);
         EncodeValue(w, CanonicalizeShortcut(shortcut));
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant role value.
+    public static byte[] TxSetMenuRole(ulong item, string role)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropRole); w.Write(SourceConst);
+        EncodeValue(w, role);
         return Finish(stream, w, TxKindSetMenuProp);
     }
 

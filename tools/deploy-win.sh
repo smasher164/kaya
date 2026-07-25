@@ -90,6 +90,7 @@ for arg in "$@"; do
         sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
+        commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -164,7 +165,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
 SCENE_EXES=()
 SCENE_PYS=()
 BUILD_EXAMPLES=()
@@ -257,7 +258,12 @@ kill_guests
 # full ship).
 deploy_stamp() {
     {
-        shasum -a 256 \
+        # THIS SCRIPT is part of the stamp: the shipped bytes are not the
+        # whole deploy — the remote javac/dotnet command lines live here,
+        # and a flag change with unchanged sources would otherwise reuse
+        # stale classes (caught 2026-07-24: adding `javac -encoding
+        # UTF-8` fixed nothing until the stamp was cleared by hand).
+        shasum -a 256 "$0" \
             "${SCENE_EXES[@]}" \
             "$TARGET/kaya.dll" \
             "$BOOTSTRAP" \
@@ -341,7 +347,7 @@ else
         "$ROOT"/guests/java/dev/kaya/milestone2kt/*.java \
         "$ROOT/guests/java-desktop/dev/kaya/milestone2kt/Main.java" \
         "$HOST:C:/kaya/java/src/"
-    run_ssh 'cmd /c javac -d C:\kaya\java\classes C:\kaya\java\src\*.java' || {
+    run_ssh 'cmd /c javac -encoding UTF-8 -d C:\kaya\java\classes C:\kaya\java\src\*.java' || {
         echo "javac failed on the VM" >&2
         exit 1
     }
@@ -823,6 +829,18 @@ case "$SUITE" in
         run_suite menus_csharp
         drain_suites
         run_suite menus_java
+        drain_suites
+        # The commands scene joins the same serial block: its chords ride
+        # the same OS-global injection.
+        run_suite commands_rust
+        drain_suites
+        run_suite commands_python
+        drain_suites
+        run_suite commands_go
+        drain_suites
+        run_suite commands_csharp
+        drain_suites
+        run_suite commands_java
         drain_suites
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;

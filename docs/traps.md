@@ -298,6 +298,34 @@ the same patterns return through interpreter drop-downs
   bar, and re-synchronizes it after SwiftUI rebuilds and key-window
   changes — a one-shot insertion races the same asynchronous scene
   machinery as a one-shot window registration.
+- **A WinUI accelerator's default action is a UI Automation PATTERN,
+  and only Invoke raises Click.** The framework looks the element up
+  for Invoke, else Toggle, else Selection. A `MenuFlyoutItem` has
+  Invoke (so its chord raises Click, the backend's one dispatch path)
+  and a `RadioMenuFlyoutItem` has SelectionItem (which also raises
+  Click and updates the native selection — suppressing it with
+  `Handled = true` BREAKS the selection). A `ToggleMenuFlyoutItem` has
+  Toggle, which flips `IsChecked` and raises nothing, and its
+  accelerator is never matched at all: measured every way this backend
+  can reach it — on the item, on the MenuBar, on the content Grid, as a
+  collapsed companion, with an explicit Invoked handler, with
+  ScopeOwner (which SCOPES rather than widens, breaking the kind that
+  worked), and with routed KeyDown/PreviewKeyDown. That one kind takes
+  its dispatch from a thread-scoped `WH_KEYBOARD` hook instead.
+- **A harness verb gated on a table is a chord that never fires.**
+  deploy-win's shortcut verb injects a real OS chord only for a
+  spelling the catalog table holds, and that table was built from
+  ACTIONS alone. A checkable command's chord was therefore never
+  pressed, and eight platform experiments "explaining" the silence were
+  all measuring an uninjected key (2026-07-24). Check the gate before
+  theorizing about the platform.
+- **javac takes the PLATFORM charset, and Windows is not UTF-8.** A
+  non-ASCII menu label ("Settings…") reached the wire as mojibake from
+  the VM's classes while the same source worked on mac and linux; every
+  javac invocation now pins `-encoding UTF-8`. deploy-win's
+  skip-unchanged stamp hashes the shipped BYTES, so a build-flag change
+  with unchanged sources reused the stale classes until the script
+  itself joined the stamp.
 - **Accessibility reads of a CLOSED NSMenu are pre-validation.**
   Scripting a mac menu check through System Events reports what the
   menu was built with, not what it will show: items whose live flag is

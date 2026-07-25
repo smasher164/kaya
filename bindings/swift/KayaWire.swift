@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x0e4b7f4f716cc749
+let kayaSpecHash: UInt64 = 0xc844be516d78a8ed
 
 struct KayaTx {
     var bytes = Data()
@@ -1017,6 +1017,16 @@ struct KayaTx {
         self.end(start)
     }
 
+    /// set_menu_prop with a constant role value.
+    mutating func setMenuRole(_ item: UInt64, _ role: String) {
+        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_ROLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(role))
+        self.end(start)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -1024,7 +1034,7 @@ struct KayaTx {
     }
 }
 
-let kayaShortcutNamedKeys: Set<String> = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"]
+let kayaShortcutNamedKeys: Set<String> = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]
 
 /// The one binding-tier shortcut parser (DESIGN.md, Menus).
 /// Canonicalize a shortcut spelling to the wire form: lowercase

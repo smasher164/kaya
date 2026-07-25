@@ -550,7 +550,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # measured 2026-07-22); legs queue only after every binary
     # exists. The list is explicit: window/panels are desktop-only
     # by design and must not ride $SCENES here.
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus"
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus commands"
     swift_pids=()
     swift_names=()
     for guest in $IOS_SWIFT_SCENES; do
@@ -693,6 +693,16 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle menusrs-swiftui dev.kaya.menusswiftui "$TARGET_DIR/examples/menus")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on menus-swiftui "$APP" dev.kaya.menusswiftui menus-swiftui menus menus
+
+    # The commands scene, the DEPTH slice (rust only until the sweep):
+    # the chords run through the interpreter's one dispatch table, and
+    # the `settings` role is inert here — iOS has no application menu to
+    # move it into, so the item stays where the app declared it.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example commands
+    APP=$(make_bundle commandsrs-swiftui dev.kaya.commandsswiftui "$TARGET_DIR/examples/commands")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on commands-swiftui "$APP" dev.kaya.commandsswiftui commands-swiftui \
+        commands commands
     drain
     timing swiftui-build+legs
 fi

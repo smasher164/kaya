@@ -200,6 +200,7 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("icon", 5, PropKind::Blob),
     ("primary", 6, PropKind::Bool),
     ("shortcut", 7, PropKind::Str),
+    ("role", 8, PropKind::Str),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -1190,6 +1191,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("icon", 5),
                 ("primary", 6),
                 ("shortcut", 7),
+                ("role", 8),
             ],
         },
         EnumSpec {
@@ -1551,6 +1553,7 @@ mod tests {
                     ("mprop", "icon") => wire::MPROP_ICON,
                     ("mprop", "primary") => wire::MPROP_PRIMARY,
                     ("mprop", "shortcut") => wire::MPROP_SHORTCUT,
+                    ("mprop", "role") => wire::MPROP_ROLE,
                     ("sections_presentation", "auto") => wire::SECTIONS_PRESENTATION_AUTO,
                     ("sections_presentation", "bar") => wire::SECTIONS_PRESENTATION_BAR,
                     ("sections_presentation", "sidebar") => {

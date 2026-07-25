@@ -33,6 +33,11 @@ import java.util.function.Consumer;
  * </ul>
  */
 public final class KayaApp {
+    /** The closed standard-command vocabulary (DESIGN.md, Menus):
+     * macOS places this one in the application menu, and every other
+     * host leaves the item where the app declared it. */
+    public static final String ROLE_SETTINGS = "settings";
+
     /**
      * A container's cross-axis child placement (the align spec enum;
      * wire values pinned by the generated KayaWire constants).
@@ -515,7 +520,25 @@ public final class KayaApp {
             return this;
         }
 
-        /** The action's shortcut (window-anchored actions only).
+        /** Declares this action a standard command (actions only —
+         * root-checked). The declaration is uniform; PLACEMENT is each
+         * host's business: macOS shows {@link #ROLE_SETTINGS} in the
+         * application menu, everyone else leaves the item where it was
+         * declared. One item per role, and a role never invents a
+         * chord — spell shortcut() too if the app wants one.
+         * Const-only. */
+        public MenuItem role(String name) {
+            if (ctx) {
+                throw new IllegalStateException(
+                        "kaya: a context item takes no role — a role names a"
+                                + " standard command in the window catalog");
+            }
+            chain().records.add(KayaWire.txSetMenuRole(id, name));
+            return this;
+        }
+
+        /** The shortcut of any LEAF command — an action, a toggle, or
+         * one option of a group (window-anchored only).
          * Canonicalized by the binding's one parser
          * (KayaWire.canonicalizeShortcut); the shortcut is another
          * affordance of the same item — it fires the SAME

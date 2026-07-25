@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x0e4b7f4f716cc749
+let kayaSpecHash: UInt64 = 0xc844be516d78a8ed
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -84,6 +84,7 @@ private let mpropValue: UInt32 = 4
 private let mpropIcon: UInt32 = 5
 private let mpropPrimary: UInt32 = 6
 private let mpropShortcut: UInt32 = 7
+private let mpropRole: UInt32 = 8
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -233,6 +234,11 @@ final class KayaMenuItemModel: Identifiable {
     var primary = false
     /// The canonical shortcut spelling (root-validated), "" = none.
     var shortcut = ""
+    /// A standard-command role from the closed vocabulary, "" = none.
+    /// macOS relocates `settings` into the application menu; the item
+    /// keeps its authored place in the model, so paths and reads are
+    /// unaffected by where the chrome ends up showing it.
+    var role = ""
     /// Optional icon, used by phone promotion; ignored where native
     /// menu dress has no icon.
     var icon: KayaPlatformImage?
@@ -1211,6 +1217,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (mpropShortcut, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + mvLen)]
                     item.shortcut = String(decoding: bytes, as: UTF8.self)
+                case (mpropRole, valueStr):
+                    // A standard-command role: macOS relocates the item
+                    // into the application menu (the one place a role
+                    // may enter dress-owned chrome); every other host
+                    // leaves it where the app put it.
+                    let bytes = raw[(body + 24)..<(body + 24 + mvLen)]
+                    item.role = String(decoding: bytes, as: UTF8.self)
                 case (mpropIcon, valueBlob):
                     // Used by phone promotion; ignored where native
                     // menu dress has no icon. Failed decode is the
@@ -2233,16 +2246,22 @@ private func kayaRunScript(_ script: String) {
                     failures.append("shortcut wants a quoted spelling: \(line)")
                     break
                 }
-                DispatchQueue.main.sync {
+                let unowned: Bool = DispatchQueue.main.sync {
                     #if os(macOS)
-                        kayaMacShortcut(spelling)
+                        return kayaMacShortcut(spelling)
                     #else
-                        if let id = kayaShortcutItems[spelling],
+                        guard let id = kayaShortcutItems[spelling],
                             let item = kayaScene.menuItems[id]
-                        {
-                            kayaMenuUserActivate(item)
-                        }
+                        else { return true }
+                        kayaMenuUserActivate(item)
+                        return false
                     #endif
+                }
+                if unowned {
+                    // A chord no catalog item owns is a SCRIPT error,
+                    // not a silent pass (docs/traps.md).
+                    failures.append(
+                        "shortcut \(spelling): no catalog item owns this chord")
                 }
             default:
                 failures.append("unknown step \(line)")
@@ -3146,8 +3165,14 @@ func kayaMenuUserSelectRadio(_ group: KayaMenuItemModel, _ index: Int, noun: [UI
 /// would mutate, and the expect retry contract absorbs the hop.
 func kayaMenuChanged() {
     var table: [String: UInt64] = [:]
+    // Every LEAF command may carry a chord — a toggle and one option of
+    // a group as readily as a plain action — so the table indexes all
+    // three kinds (the root's own rule).
     for item in kayaCatalogPreorder(kayaPresentedCatalog())
-    where item.kind == menuKindAction && !item.shortcut.isEmpty {
+    where !item.shortcut.isEmpty
+        && (item.kind == menuKindAction || item.kind == menuKindToggle
+            || item.kind == menuKindRadioOption)
+    {
         table[item.shortcut] = item.id
     }
     kayaShortcutItems = table
@@ -3197,6 +3222,19 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         switch aspect {
         case .enablement:
             guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
+            // VALIDATED state, not merely the state we set: AppKit
+            // settles an item's enablement when its menu is about to
+            // display, so this reads what the user's next click will
+            // get — and it fails loudly if a Kaya menu ever loses
+            // `autoenablesItems = false` (docs/traps.md), which an
+            // unvalidated read cannot see. The top-level holders sit in
+            // the DRESS-owned main menu, whose automatic enabling is
+            // not ours to interpret, so a grouping node keeps answering
+            // with the declared state (DESIGN.md, "Where a platform
+            // cannot say it").
+            if let owner = nsItem.menu, owner !== NSApp.mainMenu {
+                owner.update()
+            }
             return nsItem.isEnabled ? "enabled" : "disabled"
         case .checkedness:
             guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
@@ -3243,6 +3281,18 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             else { return }
             kayaMenuUserActivate(item)
         }
+
+        /// Kaya-owned menus set `autoenablesItems = false`, so this is
+        /// dead weight for the segment — but the role item lands in the
+        /// DRESS-owned application menu, which validates. Answering
+        /// with the inherited AND keeps that one item's enablement ours
+        /// instead of AppKit's (docs/traps.md, the auto-enable trap).
+        @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+            guard let number = item.representedObject as? NSNumber,
+                let model = kayaScene.menuItems[number.uint64Value]
+            else { return true }
+            return kayaMenuEffectiveEnabled(model)
+        }
     }
     let kayaMenuDispatch = KayaMenuDispatcher()
 
@@ -3274,6 +3324,17 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         case "right": return String(UnicodeScalar(0xF703 as UInt32)!)
         case "up": return String(UnicodeScalar(0xF700 as UInt32)!)
         case "down": return String(UnicodeScalar(0xF701 as UInt32)!)
+        // The punctuation set names UNSHIFTED US positions; AppKit
+        // takes the character itself and draws the chord its own way
+        // (primary+shift+equal shows as Command-plus).
+        case "comma": return ","
+        case "period": return "."
+        case "slash": return "/"
+        case "backslash": return "\\"
+        case "minus": return "-"
+        case "equal": return "="
+        case "leftbracket": return "["
+        case "rightbracket": return "]"
         default:
             // escape never arrives (the root rejects every spelling);
             // fN maps into the function-key private-use plane.
@@ -3310,9 +3371,15 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                     nsItem.representedObject = NSNumber(value: option.id)
                     nsItem.isEnabled = kayaMenuEffectiveEnabled(option)
                     nsItem.state = Int(child.value) == index ? .on : .off
+                    kayaApplyKeyEquivalent(nsItem, option.shortcut)
                     menu.addItem(nsItem)
                 }
             case menuKindAction, menuKindToggle:
+                // A role relocates its item: `settings` is rendered in
+                // the application menu instead of here (macOS's own
+                // placement), so it must not also appear in the menu
+                // that declared it.
+                if child.role == "settings" { continue }
                 let nsItem = NSMenuItem(
                     title: child.label,
                     action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
@@ -3322,17 +3389,23 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 if child.kind == menuKindToggle {
                     nsItem.state = child.checked ? .on : .off
                 }
-                if child.kind == menuKindAction, !child.shortcut.isEmpty,
-                    let (key, mask) = kayaKeyEquivalent(child.shortcut)
-                {
-                    nsItem.keyEquivalent = key
-                    nsItem.keyEquivalentModifierMask = mask
-                }
+                // A chord rides any leaf command: "Show Sidebar" wants
+                // its checkmark AND its key, and AppKit has never cared
+                // which kind of item carries a key equivalent.
+                kayaApplyKeyEquivalent(nsItem, child.shortcut)
                 menu.addItem(nsItem)
             default:
                 break  // radio_option outside its group: the closed grammar forbids it
             }
         }
+    }
+
+    /// One place applies a chord to a native item, so every leaf kind
+    /// gets identical treatment and an empty spelling is simply no key.
+    private func kayaApplyKeyEquivalent(_ nsItem: NSMenuItem, _ spelling: String) {
+        guard !spelling.isEmpty, let (key, mask) = kayaKeyEquivalent(spelling) else { return }
+        nsItem.keyEquivalent = key
+        nsItem.keyEquivalentModifierMask = mask
     }
 
     /// The segment's insertion point among DRESS items: after the
@@ -3406,6 +3479,46 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             kayaOwnedMenuItems.append(holder)
             index += 1
         }
+        // The one place a role may enter dress-owned chrome. macOS
+        // expects Settings in the application menu, so the item MOVES
+        // there; the model keeps it where the app declared it, so
+        // paths, reads, and activation are unaffected by the move. The
+        // role never invents a chord — an app that wants Command-comma
+        // declares it and every host then agrees.
+        if let settings = kayaCatalogRoleItem("settings", kayaPresentedCatalog()),
+            let appMenu = mainMenu.items.first?.submenu
+        {
+            let nsItem = NSMenuItem(
+                title: settings.label,
+                action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
+            nsItem.target = kayaMenuDispatch
+            nsItem.representedObject = NSNumber(value: settings.id)
+            nsItem.isEnabled = kayaMenuEffectiveEnabled(settings)
+            kayaApplyKeyEquivalent(nsItem, settings.shortcut)
+            appMenu.insertItem(nsItem, at: kayaSettingsInsertionIndex(appMenu.items))
+            kayaOwnedMenuItems.append(nsItem)
+        }
+    }
+
+    /// The catalog item claiming a role, if any (the root allows one).
+    private func kayaCatalogRoleItem(
+        _ role: String, _ roots: [KayaMenuItemModel]
+    ) -> KayaMenuItemModel? {
+        for item in roots {
+            if item.role == role { return item }
+            if let found = kayaCatalogRoleItem(role, item.children) { return found }
+        }
+        return nil
+    }
+
+    /// Where Settings sits in an application menu: after the separator
+    /// that follows About. Falling back to the end keeps a stripped
+    /// app menu (no About, no separators) from losing the item.
+    private func kayaSettingsInsertionIndex(_ items: [NSMenuItem]) -> Int {
+        if let separator = items.firstIndex(where: { $0.isSeparatorItem }) {
+            return separator + 1
+        }
+        return items.count
     }
 
     /// Idempotent segment assert — the kayaEnsureOpen shape: belt, not
@@ -3553,17 +3666,20 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// is a no-op on every platform, so the catalog table gates the
     /// walk — the dress bar must never swallow an unowned chord (a
     /// stray primary+w would close the window under the leg).
-    func kayaMacShortcut(_ spelling: String) {
+    /// Returns true when NO catalog item owns the chord — the caller
+    /// turns that into a script failure rather than a silent pass.
+    func kayaMacShortcut(_ spelling: String) -> Bool {
         kayaEnsureMenuSegment()
-        guard kayaShortcutItems[spelling] != nil,
-            let (key, mask) = kayaKeyEquivalent(spelling),
+        guard kayaShortcutItems[spelling] != nil else { return true }
+        guard let (key, mask) = kayaKeyEquivalent(spelling),
             let event = NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: mask,
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
                 context: nil, characters: key, charactersIgnoringModifiers: key,
                 isARepeat: false, keyCode: 0)
-        else { return }
+        else { return true }
         _ = NSApp.mainMenu?.performKeyEquivalent(with: event)
+        return false
     }
 #endif
 

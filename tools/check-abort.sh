@@ -66,7 +66,7 @@ KAYA_CHECK=abort dotnet exec guests/csharp/bin/Debug/net10.0/kaya-guests.dll \
 # Java: pure JVM against the ring stub — no natives, so mutating
 # transactions always abort (the check's header explains the shape).
 rm -rf "$TMP/java"
-javac -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.java \
+javac -encoding UTF-8 -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/*.java tools/checks/java-abort/AbortCheck.java \
     >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java-build; }
 java -cp "$TMP/java" AbortCheck >"$TMP/java.log" 2>&1 || { cat "$TMP/java.log"; fail java; }
@@ -80,7 +80,7 @@ dune exec bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
 # Haskell: the kaya-abort-check executable beside the scene guests.
 (cd guests/haskell && cabal build kaya-abort-check \
     --extra-lib-dirs="$ROOT/target/debug" \
-    --ghc-options="-optl-Wl,-rpath,$ROOT/target/debug" -v0) >"$TMP/hs.log" 2>&1 \
+    --ghc-options="-L$ROOT/target/debug -optl-Wl,-rpath,$ROOT/target/debug" -v0) >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell-build; }
 "$(cd guests/haskell && cabal list-bin kaya-abort-check -v0)" >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell; }

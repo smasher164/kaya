@@ -177,7 +177,7 @@ pub(crate) fn menu_prop_variants(
 pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
     match prop {
         "label" | "enabled" | "checked" | "value" => true,
-        "icon" | "primary" | "shortcut" => false,
+        "icon" | "primary" | "shortcut" | "role" => false,
         other => panic!(
             "menu prop {other:?}: declare its signal bindability here, in \
              lockstep with scene.rs is_bindable_menu_prop"
@@ -203,6 +203,13 @@ pub(crate) const SHORTCUT_MODIFIERS: &[&str] = &["primary", "shift", "alt"];
 pub(crate) const SHORTCUT_NAMED_KEYS: &[&str] = &[
     "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5",
     "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+    // The punctuation set, named rather than spelled with the
+    // character: `enter`/`delete` are the precedent, and a name keeps
+    // the wire spelling clear of characters the step grammar and menu
+    // paths already use. Each names the UNSHIFTED US position — the
+    // host binds its own key code — so Command-plus is asked for as
+    // primary+shift+equal and no `plus` key exists.
+    "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket",
 ];
 
 /// The normative canonicalizer every emitter transcribes into its

@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x0e4b7f4f716cc749
+SPEC_HASH = 0xc844be516d78a8ed
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -64,6 +64,7 @@ MPROP_VALUE = 4
 MPROP_ICON = 5
 MPROP_PRIMARY = 6
 MPROP_SHORTCUT = 7
+MPROP_ROLE = 8
 SECTIONS_PRESENTATION_AUTO = 0
 SECTIONS_PRESENTATION_BAR = 1
 SECTIONS_PRESENTATION_SIDEBAR = 2
@@ -592,7 +593,7 @@ def tx_bind_section_icon(section, signal_id):
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_ICON, SOURCE_SIGNAL, signal_id))
 
 
-_SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"))
+_SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"))
 
 
 def canonicalize_shortcut(spelling):
@@ -683,6 +684,11 @@ def tx_set_menu_primary(item, primary):
 def tx_set_menu_shortcut(item, shortcut):
     """set_menu_prop with a constant shortcut value (str, canonicalized here — the one binding-tier shortcut parser)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SHORTCUT, SOURCE_CONST) + _enc.value(canonicalize_shortcut(shortcut)))
+
+
+def tx_set_menu_role(item, role):
+    """set_menu_prop with a constant role value (str)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ROLE, SOURCE_CONST) + _enc.value(role))
 
 
 def parse_value(buf, at):

@@ -1536,6 +1536,17 @@ fn virtual_key(name: &str) -> Option<VirtualKey> {
         "up" => return Some(VirtualKey(0x26)),
         "right" => return Some(VirtualKey(0x27)),
         "down" => return Some(VirtualKey(0x28)),
+        // The punctuation set onto the OEM keys. VK_OEM_* are defined
+        // by POSITION on the US layout, which is exactly what the
+        // canonical names denote.
+        "minus" => return Some(VirtualKey(0xBD)),        // VK_OEM_MINUS
+        "equal" => return Some(VirtualKey(0xBB)),        // VK_OEM_PLUS (the = key)
+        "comma" => return Some(VirtualKey(0xBC)),        // VK_OEM_COMMA
+        "period" => return Some(VirtualKey(0xBE)),       // VK_OEM_PERIOD
+        "slash" => return Some(VirtualKey(0xBF)),        // VK_OEM_2
+        "backslash" => return Some(VirtualKey(0xDC)),    // VK_OEM_5
+        "leftbracket" => return Some(VirtualKey(0xDB)),  // VK_OEM_4
+        "rightbracket" => return Some(VirtualKey(0xDD)), // VK_OEM_6
         _ => {}
     }
     if let Some(n) = name.strip_prefix('f').and_then(|s| s.parse::<u32>().ok()) {
@@ -1574,6 +1585,7 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
         };
         let items = bar.Items()?;
         items.Clear()?;
+        ensure_key_hook();
         for top in tops {
             let (label, kind) = {
                 let m = &core.menu_models[&top];
@@ -1614,7 +1626,11 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
     menu_preorder(core, &roots, &mut order);
     for id in order {
         let m = &core.menu_models[&id];
-        if m.kind == MenuItemKind::Action && !m.shortcut.is_empty() {
+        // Every LEAF command may carry a chord — a checkable item and
+        // one option of a group as readily as a plain action. This
+        // table also GATES the shortcut verb, so a kind missing here is
+        // a chord the harness silently never presses.
+        if !m.shortcut.is_empty() && m.kind.takes_shortcut() {
             core.menu_shortcuts.insert(m.shortcut.clone(), id);
         }
     }
@@ -1628,6 +1644,44 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
 /// rebuild order can cross the stamped copies' nouns. Every native
 /// is stamped with the inherited AND of enablement and keyed under
 /// its attachment.
+/// Attach a chord to a native item — every LEAF command may carry one
+/// (a checkable item and one option of a group as readily as a plain
+/// action), and the accelerator IS the dispatch: its default
+/// invocation raises the same Click the pointer path does, so tooltip
+/// display and key handling both come from the platform.
+fn attach_accelerator(
+    accels: &windows_collections::IVector<KeyboardAccelerator>,
+    shortcut: &str,
+) -> windows_core::Result<()> {
+    if shortcut.is_empty() {
+        return Ok(());
+    }
+    let Some((key, mods)) = accelerator_chord(shortcut) else {
+        return Ok(());
+    };
+    let accel = KeyboardAccelerator::new()?;
+    accel.SetKey(key)?;
+    accel.SetModifiers(mods)?;
+    // An accelerator's DEFAULT action is a UI Automation pattern
+    // lookup, prioritized Invoke > Toggle > Selection, and ONLY Invoke
+    // raises Click. MenuFlyoutItem has Invoke, which is why plain
+    // commands worked; ToggleMenuFlyoutItem and RadioMenuFlyoutItem
+    // expose Toggle and SelectionItem, so their chords did nothing
+    // this backend could hear. Handling Invoked and marking it handled
+    // is the documented override: it skips the pattern lookup and
+    // sends every leaf kind down the ONE activation path a click
+    // takes.
+    // The default action is a UI Automation pattern lookup — Invoke,
+    // else Toggle, else Selection. Invoke (plain command) and
+    // SelectionItem (one option of a group) both raise Click, this
+    // backend's one dispatch path, so those kinds ride the platform
+    // whole. Toggle raises nothing, which is why a checkable command's
+    // chord goes through the key hook above; its accelerator stays here
+    // for the chord text WinUI draws beside the item.
+    accels.Append(&accel)?;
+    Ok(())
+}
+
 fn build_menu_items(
     core: &mut CoreState,
     dest: &windows_collections::IVector<MenuFlyoutItemBase>,
@@ -1656,18 +1710,7 @@ fn build_menu_items(
                 let item = MenuFlyoutItem::new()?;
                 item.SetText(&HSTRING::from(&*label))?;
                 item.SetIsEnabled(enabled)?;
-                if !shortcut.is_empty() {
-                    if let Some((key, mods)) = accelerator_chord(&shortcut) {
-                        // The accelerator is the REAL dispatch (and the
-                        // tooltip display comes free): the chord's
-                        // default invocation raises the same Click the
-                        // pointer path does — one dispatch path.
-                        let accel = KeyboardAccelerator::new()?;
-                        accel.SetKey(key)?;
-                        accel.SetModifiers(mods)?;
-                        item.KeyboardAccelerators()?.Append(&accel)?;
-                    }
-                }
+                attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
                     Ok(())
@@ -1681,6 +1724,7 @@ fn build_menu_items(
                 item.SetText(&HSTRING::from(&*label))?;
                 item.SetIsChecked(checked)?;
                 item.SetIsEnabled(enabled)?;
+                attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
                     Ok(())
@@ -1703,13 +1747,17 @@ fn build_menu_items(
                 // (RadioMenuFlyoutItem.GroupName per radio group);
                 // the GROUP mints no chrome of its own here.
                 for (index, &option) in children.iter().enumerate() {
-                    let option_label = core.menu_models[&option].label.clone();
+                    let (option_label, option_shortcut) = {
+                        let m = &core.menu_models[&option];
+                        (m.label.clone(), m.shortcut.clone())
+                    };
                     let option_enabled = menu_effective_enabled(core, option);
                     let radio = RadioMenuFlyoutItem::new()?;
                     radio.SetText(&HSTRING::from(&*option_label))?;
                     radio.SetGroupName(&HSTRING::from(format!("kmg{id}")))?;
                     radio.SetIsChecked(value == index as f64)?;
                     radio.SetIsEnabled(option_enabled)?;
+                    attach_accelerator(&radio.KeyboardAccelerators()?, &option_shortcut)?;
                     let handler = RoutedEventHandler::new(move |_, _| {
                         menu_user_activate(option, attachment);
                         Ok(())
@@ -1725,6 +1773,121 @@ fn build_menu_items(
         }
     }
     Ok(())
+}
+
+
+
+
+// --- The checkable-chord route (Win32) ---------------------------------
+//
+// ToggleMenuFlyoutItem is the one leaf kind whose KeyboardAccelerator
+// WinUI never matches. Measured on the VM, with the chord genuinely
+// injected: a plain command's accelerator fires (Invoke pattern), one
+// option of a group fires (SelectionItem pattern), and a checkable
+// command's does nothing — not the pattern, not an explicit Invoked
+// handler, not a copy on the MenuBar or on the content Grid, and not a
+// collapsed companion item.
+//
+// So that kind takes its dispatch from the window's own message
+// stream, where a real keystroke lives before XAML sees it. The hook is
+// THREAD-scoped (never global): it watches this UI thread's key-downs,
+// matches the canonical spelling against the same catalog table the
+// verb gates on, and consumes only a chord this catalog owns.
+unsafe extern "system" {
+    fn SetWindowsHookExW(id: i32, proc_: HookProc, module: isize, thread: u32) -> isize;
+    fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
+    fn GetCurrentThreadId() -> u32;
+    fn GetKeyState(vkey: i32) -> i16;
+}
+type HookProc = unsafe extern "system" fn(i32, usize, isize) -> isize;
+
+thread_local! {
+    static KEY_HOOK: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
+
+fn modifier_down(vkey: i32) -> bool {
+    (unsafe { GetKeyState(vkey) }) < 0
+}
+
+/// The canonical key name for a virtual-key code — the reverse of
+/// [`virtual_key`], over the same closed floor.
+fn key_name(code: u32) -> Option<String> {
+    Some(match code {
+        0x0D => "enter".to_owned(),
+        0x2E => "delete".to_owned(),
+        0x25 => "left".to_owned(),
+        0x26 => "up".to_owned(),
+        0x27 => "right".to_owned(),
+        0x28 => "down".to_owned(),
+        0xBD => "minus".to_owned(),
+        0xBB => "equal".to_owned(),
+        0xBC => "comma".to_owned(),
+        0xBE => "period".to_owned(),
+        0xBF => "slash".to_owned(),
+        0xDC => "backslash".to_owned(),
+        0xDB => "leftbracket".to_owned(),
+        0xDD => "rightbracket".to_owned(),
+        0x30..=0x39 => char::from(b'0' + (code - 0x30) as u8).to_string(),
+        0x41..=0x5A => char::from(b'a' + (code - 0x41) as u8).to_string(),
+        0x70..=0x7B => format!("f{}", code - 0x70 + 1),
+        _ => return None,
+    })
+}
+
+unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> isize {
+    const HC_ACTION: i32 = 0;
+    // Bit 31 set = the key is coming up; bit 30 set = it was already
+    // down (auto-repeat), which a menu chord ignores.
+    if code == HC_ACTION && (lparam & (1 << 31)) == 0 && (lparam & (1 << 30)) == 0 {
+        if let Some(key) = key_name(wparam as u32) {
+            let mut spelling = String::new();
+            if modifier_down(0x11) {
+                spelling.push_str("primary+");
+            }
+            if modifier_down(0x10) {
+                spelling.push_str("shift+");
+            }
+            if modifier_down(0x12) {
+                spelling.push_str("alt+");
+            }
+            spelling.push_str(&key);
+            let hit = CORE.with_borrow(|core| {
+                let core = core.as_ref()?;
+                let item = *core.menu_shortcuts.get(&spelling)?;
+                let kind = core.menu_models.get(&item)?.kind;
+                (kind == MenuItemKind::Toggle).then_some(item)
+            });
+            if let Some(item) = hit {
+                // The native owns the immediate user change, exactly as
+                // it does for a click; menu_user_activate mirrors from
+                // it and emits.
+                let _ = CORE.with_borrow(|core| -> windows_core::Result<()> {
+                    let Some(core) = core.as_ref() else { return Ok(()) };
+                    if let Some(MenuNative::Toggle(native)) =
+                        core.menu_natives.get(&(MenuAttachment::Window(0), item))
+                    {
+                        let now = native.IsChecked()?;
+                        native.SetIsChecked(!now)?;
+                    }
+                    Ok(())
+                });
+                menu_user_activate(item, MenuAttachment::Window(0));
+                return 1; // consumed: this catalog owns the chord
+            }
+        }
+    }
+    let hook = KEY_HOOK.with(|h| h.get());
+    unsafe { CallNextHookEx(hook, code, wparam, lparam) }
+}
+
+/// Install the thread-scoped key hook once, on the UI thread.
+fn ensure_key_hook() {
+    const WH_KEYBOARD: i32 = 2;
+    KEY_HOOK.with(|slot| {
+        if slot.get() == 0 {
+            slot.set(unsafe { SetWindowsHookExW(WH_KEYBOARD, key_hook, 0, GetCurrentThreadId()) });
+        }
+    });
 }
 
 /// THE user dispatch path: chrome clicks, the KeyboardAccelerator
@@ -2611,6 +2774,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // rows carry no icon in this lowering (the section
                 // Icon precedent: accepted, day-one slot).
                 (MenuProp::Icon, Value::Blob(_)) => {}
+                // A standard-command role is a placement REQUEST that
+                // this host has nowhere to honor: there is no
+                // dress-owned application menu here, so the item stays
+                // exactly where the app declared it (DESIGN.md, Menus).
+                (MenuProp::Role, Value::Str(_)) => {}
                 (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
             }
             core.menus_touched = true;
@@ -3961,9 +4129,19 @@ impl crate::harness::Stage for WinUiStage {
             move |core| Ok(core.menu_shortcuts.contains_key(&spec))
         })
         .unwrap_or(false);
-        if !owned {
-            return;
-        }
+        // A chord no catalog item owns is a SCRIPT error, said out
+        // loud. The gate itself is load-bearing (injection is
+        // OS-global — docs/traps.md), but a silent return makes a
+        // never-pressed key look exactly like a platform that ignored
+        // it: that mistake cost eight platform experiments on
+        // 2026-07-24, every one of them measuring a keystroke this
+        // gate had swallowed.
+        assert!(
+            owned,
+            "kaya: shortcut {spec:?}: no catalog item owns this chord \
+             (the leaf kinds that may carry one are action, toggle, and \
+             radio option)"
+        );
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
             native.window_handle()
@@ -3993,6 +4171,7 @@ impl crate::harness::Stage for WinUiStage {
             confirmed,
             "kaya: could not foreground the guest window for shortcut injection"
         );
+
         // The REAL KeyboardAccelerator path: the chord goes onto the
         // system input queue; XAML routes it to the accelerator whose
         // default invocation raises the item's own Click — the SAME

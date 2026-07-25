@@ -2409,14 +2409,18 @@ impl<'t, 'a> WindowRef<'t, 'a> {
     pub fn radio_group<R>(
         self,
         label: impl Into<MenuSource<StrKind>>,
-        body: impl FnOnce(&mut RadioOptions<'_, 'a>) -> R,
+        body: impl FnOnce(&mut RadioOptions<'_, 'a, BarAnchor>) -> R,
     ) -> RadioGroupRef<'t, 'a, R> {
         let WindowRef { tx, window } = self;
         let item = tx.menu_item(MenuItemKind::RadioGroup);
         label.into().apply(tx, item, MenuProp::Label);
         tx.ops.push(TxOp::MenubarAppend { window, item });
         let out = {
-            let mut options = RadioOptions { tx: &mut *tx, group: item };
+            let mut options = RadioOptions {
+                tx: &mut *tx,
+                group: item,
+                _anchor: PhantomData,
+            };
             body(&mut options)
         };
         RadioGroupRef { out, item, tx }
@@ -2700,13 +2704,64 @@ pub trait MenuAnchor: menu_sealed::Sealed {}
 /// }
 /// ```
 ///
+/// The rule covers every leaf kind — a checkable item and one option of
+/// a group take chords in a catalog and nowhere else:
+///
+/// ```compile_fail
+/// fn toggle_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
+///     m.toggle("Details").shortcut("primary+backslash"); // no catalog home
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn option_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
+///     m.radio_group("Sort", |o| {
+///         o.option("Name").shortcut("primary+1"); // no catalog home
+///     });
+/// }
+/// ```
+///
+/// Those four are honest only if the same code MINUS the gated call
+/// compiles — a compile_fail test that dies on an unrelated error
+/// pins nothing (this crate has shipped that mistake before). The
+/// base forms:
+///
+/// ```
+/// fn legal_context_forms(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
+///     m.item("Rename");
+///     m.toggle("Details");
+///     m.radio_group("Sort", |o| {
+///         o.option("Name");
+///     });
+/// }
+/// fn legal_catalog_forms(m: &mut kaya::MenuItems<'_, '_, kaya::BarAnchor>) {
+///     m.item("Save").shortcut("primary+s");
+///     m.item("Settings…").role(kaya::MenuRole::Settings);
+///     m.toggle("Details").shortcut("primary+backslash");
+///     m.radio_group("Sort", |o| {
+///         o.option("Name").shortcut("primary+1");
+///     });
+/// }
+/// ```
+///
+/// A role names a standard command in the window catalog, so it is a
+/// compile error on a context anchor too:
+///
+/// ```compile_fail
+/// fn role_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
+///     m.item("Settings…").role(kaya::MenuRole::Settings); // no catalog home
+/// }
+/// ```
+///
 /// [`AnyAnchor`] (reopened chains) keeps the method and defers the same
 /// judgment to the root, which knows the retained item's real anchor.
-pub trait ShortcutHome: MenuAnchor {}
+pub trait CatalogHome: MenuAnchor {}
 
-/// The window catalog (the bar): a shortcut home.
+/// The window catalog (the bar): a catalog home — shortcuts and
+/// roles live here.
 pub struct BarAnchor;
-/// A widget/node context menu: no shortcuts, held by the type.
+/// A widget/node context menu: no shortcuts and no roles, held by
+/// the type.
 pub struct ContextAnchor;
 /// A reopened chain over a retained item ([`Tx::menu`]): the anchor is
 /// known to the root, not the type — shortcut stays spellable and the
@@ -2715,12 +2770,12 @@ pub struct AnyAnchor;
 
 impl menu_sealed::Sealed for BarAnchor {}
 impl MenuAnchor for BarAnchor {}
-impl ShortcutHome for BarAnchor {}
+impl CatalogHome for BarAnchor {}
 impl menu_sealed::Sealed for ContextAnchor {}
 impl MenuAnchor for ContextAnchor {}
 impl menu_sealed::Sealed for AnyAnchor {}
 impl MenuAnchor for AnyAnchor {}
-impl ShortcutHome for AnyAnchor {}
+impl CatalogHome for AnyAnchor {}
 
 /// Where a builder seats the items it creates: under a grouping parent,
 /// attached to a live widget's context anchor, or collected free for a
@@ -2789,11 +2844,12 @@ impl<'t, 'b, A: MenuAnchor> MenuItems<'t, 'b, A> {
     /// A toggle — a stateful leaf reusing the Checkbox contract: user
     /// flips emit `menu_toggled`; programmatic `checked` writes are
     /// quiet. Bind [`Messages::on_menu_toggle`] to the handle.
-    pub fn toggle(&mut self, label: impl Into<MenuSource<StrKind>>) -> ToggleRef<'_, 'b> {
+    pub fn toggle(&mut self, label: impl Into<MenuSource<StrKind>>) -> ToggleRef<'_, 'b, A> {
         let item = self.create(MenuItemKind::Toggle, Some(label.into()));
         ToggleRef {
             tx: &mut *self.tx,
             item,
+            _anchor: PhantomData,
         }
     }
 
@@ -2829,13 +2885,14 @@ impl<'t, 'b, A: MenuAnchor> MenuItems<'t, 'b, A> {
     pub fn radio_group<R>(
         &mut self,
         label: impl Into<MenuSource<StrKind>>,
-        body: impl FnOnce(&mut RadioOptions<'_, 'b>) -> R,
+        body: impl FnOnce(&mut RadioOptions<'_, 'b, A>) -> R,
     ) -> RadioGroupRef<'_, 'b, R> {
         let item = self.create(MenuItemKind::RadioGroup, Some(label.into()));
         let out = {
             let mut options = RadioOptions {
                 tx: &mut *self.tx,
                 group: item,
+                _anchor: PhantomData,
             };
             body(&mut options)
         };
@@ -2861,15 +2918,16 @@ impl<'t, 'b, A: MenuAnchor> MenuItems<'t, 'b, A> {
 ///     o.item("Save"); // a radio group admits only options
 /// }
 /// ```
-pub struct RadioOptions<'t, 'b> {
+pub struct RadioOptions<'t, 'b, A: MenuAnchor> {
     tx: &'t mut Tx<'b>,
     group: MenuItemId,
+    _anchor: PhantomData<A>,
 }
 
-impl<'t, 'b> RadioOptions<'t, 'b> {
+impl<'t, 'b, A: MenuAnchor> RadioOptions<'t, 'b, A> {
     /// One labeled option, appended in declaration order — the order
     /// IS the index vocabulary the group's `value` selects over.
-    pub fn option(&mut self, label: impl Into<MenuSource<StrKind>>) -> OptionRef<'_, 'b> {
+    pub fn option(&mut self, label: impl Into<MenuSource<StrKind>>) -> OptionRef<'_, 'b, A> {
         let item = self.tx.menu_item(MenuItemKind::RadioOption);
         label.into().apply(self.tx, item, MenuProp::Label);
         self.tx.ops.push(TxOp::MenuItemAppend {
@@ -2879,12 +2937,38 @@ impl<'t, 'b> RadioOptions<'t, 'b> {
         OptionRef {
             tx: &mut *self.tx,
             item,
+            _anchor: PhantomData,
+        }
+    }
+}
+
+/// A standard-command role (DESIGN.md, Menus): a uniform declaration
+/// whose PLACEMENT is each platform's business. `Settings` tells macOS
+/// to show the command in the application menu, where users press
+/// Command-comma to look for it; every other host leaves the item where
+/// the app declared it. The vocabulary is closed — one role names one
+/// command per app, and a role is the only thing that can move an
+/// authored item into dress-owned chrome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MenuRole {
+    /// The app's settings command.
+    Settings,
+}
+
+impl MenuRole {
+    /// The canonical wire spelling the root validates against its
+    /// closed vocabulary.
+    fn wire(self) -> &'static str {
+        match self {
+            MenuRole::Settings => "settings",
         }
     }
 }
 
 /// A just-built action's chain: `enabled`/`icon`/`primary`, plus
-/// `shortcut` where the anchor is a catalog home ([`ShortcutHome`]).
+/// `shortcut` and `role` where the anchor is a catalog home
+/// ([`CatalogHome`]).
 /// `primary` and `shortcut` are const-only by signature — no signal
 /// spelling exists. Ends with [`ActionRef::id`].
 #[must_use = "end the chain with .id() — handlers bind to the item handle"]
@@ -2926,7 +3010,7 @@ impl<A: MenuAnchor> ActionRef<'_, '_, A> {
     }
 }
 
-impl<A: ShortcutHome> ActionRef<'_, '_, A> {
+impl<A: CatalogHome> ActionRef<'_, '_, A> {
     /// The action's shortcut. Any ASCII case and modifier order is
     /// accepted and canonicalized here (the binding's ONE parser);
     /// policy — the key floor, shift rules, `escape`, the reserved
@@ -2940,17 +3024,31 @@ impl<A: ShortcutHome> ActionRef<'_, '_, A> {
             .set_menu_prop(self.item, MenuProp::Shortcut, canonical);
         self
     }
+
+    /// Declare this action a standard command ([`MenuRole`]). The
+    /// declaration is uniform; where it lands is the host's business —
+    /// macOS moves `Settings` into the application menu, everyone else
+    /// leaves it here. One item per role, judged at the root. The role
+    /// never invents a chord: an app that wants Command-comma spells
+    /// `.shortcut("primary+comma")` and every host then agrees.
+    /// Const-only, window-anchored actions only.
+    pub fn role(self, role: MenuRole) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Role, role.wire());
+        self
+    }
 }
 
 /// A just-built toggle's chain: `enabled`, `checked`, `icon`. Ends with
 /// [`ToggleRef::id`].
 #[must_use = "end the chain with .id() — handlers bind to the item handle"]
-pub struct ToggleRef<'t, 'b> {
+pub struct ToggleRef<'t, 'b, A: MenuAnchor> {
     tx: &'t mut Tx<'b>,
     item: MenuItemId,
+    _anchor: PhantomData<A>,
 }
 
-impl ToggleRef<'_, '_> {
+impl<A: MenuAnchor> ToggleRef<'_, '_, A> {
     /// Whether the item is enabled (default true): constant or bound.
     pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
         src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
@@ -2978,14 +3076,30 @@ impl ToggleRef<'_, '_> {
     }
 }
 
-/// A just-built radio option's chain: `enabled`, `icon`. Options carry
-/// no state of their own — selection lives on the group (`value`).
-pub struct OptionRef<'t, 'b> {
-    tx: &'t mut Tx<'b>,
-    item: MenuItemId,
+/// A toggle's chord, where the anchor is a catalog home: "Show
+/// Sidebar" wants its checkmark AND its key, and every desktop toolkit
+/// has always allowed both. Same canonicalizer, same root policy, same
+/// one occurrence as a click.
+impl<A: CatalogHome> ToggleRef<'_, '_, A> {
+    /// The toggle's shortcut — see [`ActionRef::shortcut`]. Const-only,
+    /// window-anchored.
+    pub fn shortcut(self, spelling: &str) -> Self {
+        let canonical = normalize_shortcut(spelling);
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Shortcut, canonical);
+        self
+    }
 }
 
-impl OptionRef<'_, '_> {
+/// A just-built radio option's chain: `enabled`, `icon`. Options carry
+/// no state of their own — selection lives on the group (`value`).
+pub struct OptionRef<'t, 'b, A: MenuAnchor> {
+    tx: &'t mut Tx<'b>,
+    item: MenuItemId,
+    _anchor: PhantomData<A>,
+}
+
+impl<A: MenuAnchor> OptionRef<'_, '_, A> {
     /// Whether the option is enabled (default true): constant or bound.
     pub fn enabled(self, src: impl Into<MenuSource<BoolKind>>) -> Self {
         src.into().apply(&mut *self.tx, self.item, MenuProp::Enabled);
@@ -3002,6 +3116,21 @@ impl OptionRef<'_, '_> {
     /// End the chain: the durable handle.
     pub fn id(self) -> MenuItemId {
         self.item
+    }
+}
+
+/// One option's chord, where the anchor is a catalog home: the
+/// view-mode pattern (Command-1, Command-2) selects a single option
+/// straight from the keyboard, emitting the group's own
+/// `menu_value_changed`.
+impl<A: CatalogHome> OptionRef<'_, '_, A> {
+    /// The option's shortcut — see [`ActionRef::shortcut`]. Const-only,
+    /// window-anchored.
+    pub fn shortcut(self, spelling: &str) -> Self {
+        let canonical = normalize_shortcut(spelling);
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Shortcut, canonical);
+        self
     }
 }
 
@@ -3172,10 +3301,11 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
 
     /// Reopen a retained `radio_group` and append more options — the
     /// option-flavored terminal.
-    pub fn options<R>(self, body: impl FnOnce(&mut RadioOptions<'_, 'b>) -> R) -> R {
+    pub fn options<R>(self, body: impl FnOnce(&mut RadioOptions<'_, 'b, AnyAnchor>) -> R) -> R {
         let mut options = RadioOptions {
             tx: self.tx,
             group: self.item,
+            _anchor: PhantomData,
         };
         body(&mut options)
     }

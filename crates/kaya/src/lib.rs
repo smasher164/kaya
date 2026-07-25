@@ -62,7 +62,7 @@ pub use app::{
     ActionRef, Align, AnyAnchor, AppCtx, BarAnchor, Collection, ContextAnchor, ContextCatalog,
     Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    ShortcutHome, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
+    CatalogHome, MenuRole, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
 };
 
 /// The type's own shape is the schema: an enum derives the element

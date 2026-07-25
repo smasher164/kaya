@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x0e4b7f4f716cc749L
+let spec_hash = 0xc844be516d78a8edL
 
 let value_bool = 1
 let value_i64 = 2
@@ -69,6 +69,7 @@ let mprop_value = 4
 let mprop_icon = 5
 let mprop_primary = 6
 let mprop_shortcut = 7
+let mprop_role = 8
 let sections_presentation_auto = 0
 let sections_presentation_bar = 1
 let sections_presentation_sidebar = 2
@@ -860,7 +861,7 @@ let tx_bind_section_icon section signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
-let shortcut_named_keys = [ "enter"; "escape"; "delete"; "left"; "right"; "up"; "down"; "f1"; "f2"; "f3"; "f4"; "f5"; "f6"; "f7"; "f8"; "f9"; "f10"; "f11"; "f12" ]
+let shortcut_named_keys = [ "enter"; "escape"; "delete"; "left"; "right"; "up"; "down"; "f1"; "f2"; "f3"; "f4"; "f5"; "f6"; "f7"; "f8"; "f9"; "f10"; "f11"; "f12"; "comma"; "period"; "slash"; "backslash"; "minus"; "equal"; "leftbracket"; "rightbracket" ]
 
 (* Canonicalize a shortcut spelling to the wire form: lowercase
    '+'-joined tokens, modifiers ordered primary, shift, alt, then one
@@ -1007,6 +1008,14 @@ let tx_set_menu_shortcut item shortcut =
       Buffer.add_int32_le b (Int32.of_int mprop_shortcut);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (Str (canonicalize_shortcut shortcut)))
+
+(* set_menu_prop with a constant role value. *)
+let tx_set_menu_role item role =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_role);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str role))
 
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)

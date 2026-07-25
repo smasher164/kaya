@@ -59,6 +59,8 @@ mod textarea;
 mod sections;
 #[path = "menus.rs"]
 mod menus;
+#[path = "commands.rs"]
+mod commands;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -87,6 +89,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("textarea") => textarea::app(ctx),
         Ok("sections") => sections::app(ctx),
         Ok("menus") => menus::app(ctx),
+        Ok("commands") => commands::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

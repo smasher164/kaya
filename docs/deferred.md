@@ -143,6 +143,14 @@ moved to git history; their traps live in docs/traps.md.)
   on a container the uniqueness convention cannot name — the layout
   scene already qualifies whenever its rows deserve assertions.
 
+- **Standard commands LANDED 2026-07-24** (the follow-up milestone to
+  menus): a chord rides any window-anchored LEAF command rather than
+  plain actions alone, the key floor admits eight named punctuation
+  keys, and `role` names a standard command with `settings` as its one
+  v1 value. DESIGN.md's "Standard commands" and the shortcut policy
+  carry the rules; the `commands` scene proves all three in nine
+  languages on every lane. Still open, trigger-gated: roles beyond
+  `settings`, and punctuation keys beyond the admitted set.
 - **Menus follow-ons.** The command vocabulary LANDED 2026-07-24 —
   both anchors, all four backends, all 8 bindings plus the C floor,
   and the menus scene green on every lane. DESIGN.md's "Menus and the

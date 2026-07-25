@@ -42,14 +42,14 @@ run_javac() {
         nix shell nixpkgs#jdk17 -c javac "$@"
     fi
 }
-run_javac -d "$TMP/japt" \
+run_javac -encoding UTF-8 -d "$TMP/japt" \
     bindings/java/dev/kaya/KayaGen.java \
     tools/java-processor/dev/kaya/processor/KayaProcessor.java || exit 1
 JAVA_GUESTS=()
 while IFS= read -r f; do
     JAVA_GUESTS+=("$f")
 done < <(find guests/java -name '*.java' ! -name '*Kaya.java')
-run_javac -proc:only \
+run_javac -encoding UTF-8 -proc:only \
     -processorpath "$TMP/japt" -processor dev.kaya.processor.KayaProcessor \
     -Akaya.out=guests/java \
     bindings/java-desktop/dev/kaya/KayaRing.java \

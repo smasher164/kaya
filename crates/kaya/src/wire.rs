@@ -151,6 +151,7 @@ pub const MPROP_VALUE: u32 = 4;
 pub const MPROP_ICON: u32 = 5;
 pub const MPROP_PRIMARY: u32 = 6;
 pub const MPROP_SHORTCUT: u32 = 7;
+pub const MPROP_ROLE: u32 = 8;
 
 /// The sections_presentation enum's wire values (spec enum
 /// "sections_presentation"): ADVISORY, the width/height precedent.
@@ -425,6 +426,7 @@ fn menu_prop(raw: u32) -> MenuProp {
         MPROP_ICON => MenuProp::Icon,
         MPROP_PRIMARY => MenuProp::Primary,
         MPROP_SHORTCUT => MenuProp::Shortcut,
+        MPROP_ROLE => MenuProp::Role,
         other => panic!("kaya: unknown menu property {other}"),
     }
 }
@@ -438,6 +440,7 @@ fn menu_prop_raw(p: MenuProp) -> u32 {
         MenuProp::Icon => MPROP_ICON,
         MenuProp::Primary => MPROP_PRIMARY,
         MenuProp::Shortcut => MPROP_SHORTCUT,
+        MenuProp::Role => MPROP_ROLE,
     }
 }
 

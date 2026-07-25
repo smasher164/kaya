@@ -157,6 +157,10 @@ path = "../../guests/rust/sections.rs"
 name = "menus"
 path = "../../guests/rust/menus.rs"
 
+[[example]]
+name = "commands"
+path = "../../guests/rust/commands.rs"
+
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a
 # cdylib exporting the JNI entry rather than a bin.

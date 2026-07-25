@@ -167,6 +167,8 @@ module KayaApp
     setMenuIcon,
     setMenuPrimary,
     setMenuShortcut,
+    setMenuRole,
+    roleSettings,
     menuAppend,
     menuOptions,
   )
@@ -771,6 +773,12 @@ newtype MOption (s :: MScope) = MOption Word64
 -- anchor — the root rejects a second attach.
 newtype Catalog = Catalog [Word64]
 
+-- | The closed standard-command vocabulary (DESIGN.md, Menus): macOS
+-- places this one in the application menu, and every other host leaves
+-- the item where the app declared it.
+roleSettings :: String
+roleSettings = "settings"
+
 -- | Menu item construction attributes — the config-list spelling over
 -- a closed GADT indexed by anchor scope. Label and enablement are
 -- signal-bindable ('ILabel'/'IEnabledBy'); 'IChecked'/'IValue' bind
@@ -791,9 +799,16 @@ data IAttr (s :: MScope) where
   IValueBy :: Signal -> IAttr s
   IIcon :: BS.ByteString -> IAttr s
   IPrimary :: Bool -> IAttr s
-  -- | Window-anchored actions only: a shortcut needs a window catalog
-  -- as its native dispatch home — the type carries the rule.
+  -- | Any window-anchored LEAF command — an action, a toggle, or one
+  -- option of a group: a chord needs a window catalog as its native
+  -- dispatch home, and the type carries that rule (the root carries
+  -- the kind rule).
   IShortcut :: String -> IAttr 'BarM
+  -- | Window-anchored actions only: a role names a standard command in
+  -- the window catalog. Uniform declaration, per-host placement —
+  -- macOS shows 'roleSettings' in the application menu, everyone else
+  -- leaves the item where it was declared.
+  IRole :: String -> IAttr 'BarM
   IOnActivate :: IO () -> IAttr s
   IOnActivateNode :: ([W.Value] -> IO ()) -> IAttr 'CtxM
   IOnToggle :: (Bool -> IO ()) -> IAttr s
@@ -815,6 +830,7 @@ applyIAttr n attr = case attr of
   IIcon bytes -> emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
   IPrimary v -> emitB (W.txSetMenuPrimary n v)
   IShortcut spelling -> emitB (W.txSetMenuShortcut n spelling)
+  IRole name -> emitB (W.txSetMenuRole n name)
   IOnActivate handler -> pendB (PMenuActivated n handler)
   IOnActivateNode handler -> pendB (PMenuActivatedNode n handler)
   IOnToggle handler -> pendB (PMenuToggled n handler)
@@ -952,6 +968,12 @@ setMenuPrimary (MItem n) v = emitB (W.txSetMenuPrimary n v)
 -- click.
 setMenuShortcut :: MItem s -> String -> Build ()
 setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n spelling)
+
+-- | Declare a retained action a standard command (actions only —
+-- root-checked). Uniform declaration, per-host placement; a role never
+-- invents a chord. Const-only.
+setMenuRole :: MItem 'BarM -> String -> Build ()
+setMenuRole (MItem n) name = emitB (W.txSetMenuRole n name)
 
 -- | Reopen a RETAINED grouping node and append more children — the
 -- append-at-any-time discipline: @menuAppend file [item "Publish"

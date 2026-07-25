@@ -1525,7 +1525,26 @@ func (m MenuItem) Primary(on bool) MenuItem {
 	return m
 }
 
-// Shortcut sets the action's shortcut (window-anchored actions only).
+// RoleSettings names the app's settings command — the closed
+// standard-command vocabulary (DESIGN.md, Menus).
+const RoleSettings = "settings"
+
+// Role declares this action a standard command (actions only —
+// root-checked). The declaration is uniform; PLACEMENT is each host's
+// business: macOS shows RoleSettings in the application menu, everyone
+// else leaves the item where it was declared. One item per role, and a
+// role never invents a chord — spell Shortcut too if the app wants one.
+// Const-only.
+func (m MenuItem) Role(name string) MenuItem {
+	if m.ctx {
+		panic("kaya: a context item takes no role — a role names a standard command in the window catalog")
+	}
+	m.chain().records = append(m.tx.records, TxSetMenuRole(m.id, name))
+	return m
+}
+
+// Shortcut sets the shortcut of any LEAF command — an action, a
+// toggle, or one option of a group (window-anchored only).
 // Canonicalized by the binding's one parser (CanonicalizeShortcut);
 // the shortcut is another affordance of the same item — it fires the
 // SAME menu_activated occurrence as a click. Const-only.

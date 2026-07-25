@@ -1231,7 +1231,8 @@ is:
 | `value` | F64, integral | Radio group only; the selected option index under the Choice contract. |
 | `icon` | Blob | Optional; available to phone promotion and ignored where native menu dress has no icon. |
 | `primary` | Bool | Defaults false; action only; a phone-promotion hint and inert on desktops. |
-| `shortcut` | Str | A normalized shortcut spelling; window-anchored action only. |
+| `shortcut` | Str | A normalized shortcut spelling; any window-anchored LEAF command — action, toggle, or radio option. |
+| `role` | Str | A standard-command role from the closed vocabulary; action only. |
 
 State follows the echo doctrine without a new exception. User
 activation emits; programmatic `checked` and `value` writes are
@@ -1262,7 +1263,15 @@ portable modifiers are `primary`, `shift`, and `alt`; `primary` means
 Command on Apple hosts and Control elsewhere. The strict key floor is
 one ASCII alphanumeric (`a` through `z`, `0` through `9`) or one member
 of the closed named set: `enter`, `escape`, `delete`, `f1` through
-`f12`, `left`, `right`, `up`, `down`.
+`f12`, `left`, `right`, `up`, `down`, `comma`, `period`, `slash`,
+`backslash`, `minus`, `equal`, `leftbracket`, `rightbracket`.
+
+Punctuation is NAMED rather than spelled with the character itself, for
+the same reason `enter` is: a name keeps the wire spelling clear of
+characters the step grammar and menu paths already use. Each name
+denotes the UNSHIFTED US position, and the host binds its own key code
+and draws the chord its own way, so an app asks for what macOS shows as
+Command-plus by spelling `primary+shift+equal`. There is no `plus` key.
 
 The binding parser accepts ASCII case variants and any ordering of the
 modifiers before the final key, then emits lowercase canonical wire
@@ -1278,8 +1287,8 @@ The intentionally strict, later-relaxable floor protects ordinary
 typing and native dismissal:
 
 - `shift` is valid only when `primary` or `alt` is also present;
-- an ASCII alphanumeric key requires `primary` or `alt`, so bare `s` and
-  `shift+s` are invalid;
+- an ASCII alphanumeric or punctuation key requires `primary` or `alt`,
+  so bare `s`, `shift+s`, and bare `comma` are invalid;
 - named keys may be unmodified, but `shift+enter` is invalid under the
   same modifier rule; and
 - `escape` is a recognized spelling but is invalid whether unmodified
@@ -1294,8 +1303,12 @@ also rejects:
   chord in separate windows is valid);
 - the strict cross-platform reserved union `primary+q` and `alt+f4`;
 - a non-canonical wire spelling or a key outside the closed floor;
-- a shortcut anywhere except a window-anchored action;
-- `primary` on a non-action;
+- a shortcut anywhere except a window-anchored leaf command (a
+  grouping node or separator carrying one is a root error, as is any
+  context-anchored item);
+- `primary` or `role` on a non-action, a role on a context-anchored
+  item, or a second item claiming a role another already holds;
+- a role value outside the closed vocabulary;
 - an anchor or parent/child edge outside the closed kind grammar;
 - depth beyond bar > grouping node > one nested grouping node > leaf;
   a context anchor may hold root items plus at most one grouping-node
@@ -1309,6 +1322,31 @@ also rejects:
 Each rejection is a deterministic scene error with a `#[should_panic]`
 test. The reserved union does not grow, and the modifier floor does
 not loosen, by implementation accident.
+
+### Standard commands
+
+A command may declare itself a STANDARD command with `role`, from a
+closed vocabulary holding one value in v1: `settings`. The declaration
+is uniform and its PLACEMENT is each host's business — macOS shows the
+settings command in the application menu, where users press
+Command-comma to look for it, and every other host leaves the item
+exactly where the app declared it. This is the same shape as the
+phone-promotion hint: one uniform bit, lowered per platform, inert
+where it does not apply.
+
+Two rules keep the vocabulary from becoming a placement grammar. One
+item per role per app, judged at the root: the host that relocates a
+role has exactly one slot to put it in. And a role never invents a
+chord — an app that wants Command-comma spells the shortcut too, so
+every host answers the same key. A role is the only thing that can move
+an authored item into dress-owned chrome, which is why it stays this
+small; roles beyond `settings` wait for the trigger recorded under the
+deliberate cuts.
+
+macOS keeps the item addressable where it was DECLARED: paths, reads,
+and activation all resolve through the model, so a scene written
+against `File>Settings…` works on every host regardless of where the
+chrome shows it.
 
 ### Compact overflow and `primary`
 
@@ -1377,16 +1415,14 @@ of being re-decided per binding.
 - **Item removal** waits for a command lifetime shorter than its
   owning window/widget; **context-item shortcuts** wait for a portable
   native dispatch home.
-- **Role-based standard items** (including native
-  Settings/Preferences placement, close-window, and responder-chain
-  edit roles) wait for an artifact needing their placement and
+- **Roles beyond `settings`** (close-window, the responder-chain edit
+  roles, About) wait for an artifact needing their placement and
   lifecycle semantics. About, Quit, and the standard Edit menu remain
   dress meanwhile.
-- **Punctuation shortcut keys** wait for an artifact needing a
-  layout-sensitive chord. The expected first trigger is zoom's
-  `primary+plus` / `primary+minus` pair; until then the alphanumeric
-  floor avoids physical-key ambiguity such as plus versus equals
-  across keyboard layouts.
+- **Punctuation keys beyond the closed set** (semicolon, quote, grave,
+  and the numeric-keypad keys) wait for an artifact. The set admitted
+  in v1 covers the common chords — settings, zoom, comment, and
+  bracket navigation.
 - **A toolbar grammar is not on the roadmap.** It is admitted only if
   an artifact demands semantics that adaptive menu promotion cannot
   express.

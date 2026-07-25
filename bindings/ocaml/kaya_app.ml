@@ -1092,11 +1092,12 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon () =
    first — the keys ARE the noun. The shortcut is canonicalized by the
    binding's one parser; the root judges its anchor (window catalogs
    only). *)
-let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?on_activate
+let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?role ?on_activate
     ?on_activate_node ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_action (Some label) in
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
+  Option.iter (fun r -> emit tx (Kaya_wire.tx_set_menu_role id r)) role;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ();
   Option.iter (fun p -> emit tx (Kaya_wire.tx_set_menu_primary id p)) primary;
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_activated id f) on_activate;
@@ -1109,10 +1110,11 @@ let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?on_activate
    flips emit menu_toggled ([~on_toggle] receives the new state; the
    [_node] flavor gets the stamped keys first); programmatic checked
    writes are QUIET (the echo doctrine). *)
-let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?on_toggle
-    ?on_toggle_node ~label () =
+let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?shortcut
+    ?on_toggle ?on_toggle_node ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_toggle (Some label) in
+  Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
   Option.iter (fun c -> emit tx (Kaya_wire.tx_set_menu_checked id c)) checked;
   Option.iter
     (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_checked id s))
@@ -1126,8 +1128,10 @@ let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?on_toggle
 
 (* One labeled radio option, appended in declaration order — the order
    IS the index vocabulary the group's value selects over. *)
-let option ?enabled ?bind_enabled ?icon ~label () =
+let option ?enabled ?bind_enabled ?icon ?shortcut ~label () =
+  let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_radio_option (Some label) in
+  Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ();
   MenuItem id
 
@@ -1244,7 +1248,19 @@ let set_menu_icon (MenuItem id) data =
 let set_menu_primary (MenuItem id) on =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_primary id on)
 
-(* The action's shortcut (window-anchored actions only). Canonicalized
+(* The closed standard-command vocabulary (DESIGN.md, Menus): macOS
+   places this one in the application menu, and every other host leaves
+   the item where the app declared it. *)
+let role_settings = "settings"
+
+(* Declare a retained action a standard command (actions only —
+   root-checked). Uniform declaration, per-host placement; a role never
+   invents a chord. Const-only. *)
+let set_menu_role (MenuItem id) name =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_role id name)
+
+(* The shortcut of any LEAF command — an action, a toggle, or one
+   option of a group (window-anchored only). Canonicalized
    by the binding's one parser (Kaya_wire.canonicalize_shortcut); the
    shortcut is another affordance of the same item — it fires the SAME
    menu_activated occurrence as a click. *)

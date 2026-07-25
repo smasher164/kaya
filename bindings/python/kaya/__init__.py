@@ -1063,8 +1063,19 @@ class MenuItem:
         INERT on desktops — not a toolbar grammar. Const-only."""
         _records().append(wire.tx_set_menu_primary(self.id, bool(on)))
 
+    def role(self, name):
+        """Declare this action a standard command (actions only —
+        root-checked). The declaration is uniform; PLACEMENT is each
+        host's business: macOS shows `kaya.ROLE_SETTINGS` in the
+        application menu, everyone else leaves the item where it was
+        declared. One item per role, and the role never invents a
+        chord — spell the shortcut too if the app wants one.
+        Const-only."""
+        _records().append(wire.tx_set_menu_role(self.id, name))
+
     def shortcut(self, spelling):
-        """The action's shortcut (window-anchored actions only — the
+        """The shortcut of any LEAF command — action, toggle, or one
+        option of a group (window-anchored only — the
         root knows the retained item's anchor and judges). Canonicalized
         by the binding's one parser (wire.canonicalize_shortcut); the
         shortcut is another affordance of the same item — it fires the
@@ -1162,8 +1173,25 @@ def _menu_seat(item):
     return scope
 
 
+#: The closed standard-command vocabulary (DESIGN.md, Menus). macOS
+#: places this one in the application menu; every other host leaves the
+#: item where the app declared it.
+ROLE_SETTINGS = "settings"
+
+
+def _menu_require_catalog(scope):
+    """A chord and a role both need a window catalog as their home: the
+    root rejects either on a context anchor, and the binding says so at
+    the call site (the Rust tier makes it a compile error)."""
+    if not scope._shortcut_ok:
+        raise ValueError(
+            "kaya: a context item takes no shortcut — a shortcut "
+            "needs a window catalog as its native dispatch home"
+        )
+
+
 def item(label, shortcut=None, enabled=None, icon=None, primary=None,
-         on_activate=None):
+         role=None, on_activate=None):
     """An action — a leaf command firing exactly one menu_activated
     occurrence (menu click OR its shortcut: ONE occurrence, one
     dispatch path). The handler rides the declaration; on a
@@ -1172,11 +1200,7 @@ def item(label, shortcut=None, enabled=None, icon=None, primary=None,
     it = _menu_create(wire.MENU_KIND_ACTION, label)
     scope = _menu_seat(it)
     if shortcut is not None:
-        if not scope._shortcut_ok:
-            raise ValueError(
-                "kaya: a context item takes no shortcut — a shortcut "
-                "needs a window catalog as its native dispatch home"
-            )
+        _menu_require_catalog(scope)
         it.shortcut(shortcut)
     if enabled is not None:
         it.enabled(enabled)
@@ -1184,18 +1208,29 @@ def item(label, shortcut=None, enabled=None, icon=None, primary=None,
         it.icon(icon)
     if primary is not None:
         it.primary(primary)
+    if role is not None:
+        if not scope._shortcut_ok:
+            raise ValueError(
+                "kaya: a context item takes no role — a role names a "
+                "standard command in the window catalog"
+            )
+        it.role(role)
     if on_activate is not None:
         _app._menu_handlers[(wire.OCC_MENU_ACTIVATED, it.id)] = on_activate
     return it
 
 
-def toggle(label, checked=None, enabled=None, icon=None, on_toggle=None):
+def toggle(label, checked=None, enabled=None, icon=None, shortcut=None,
+           on_toggle=None):
     """A toggle — a stateful leaf reusing the Checkbox contract: user
     flips emit menu_toggled (the handler receives the new state;
     template-node copies get the stamped keys first); programmatic
     checked writes are quiet."""
     it = _menu_create(wire.MENU_KIND_TOGGLE, label)
-    _menu_seat(it)
+    scope = _menu_seat(it)
+    if shortcut is not None:
+        _menu_require_catalog(scope)
+        it.shortcut(shortcut)
     if checked is not None:
         it.checked(checked)
     if enabled is not None:
@@ -1207,13 +1242,16 @@ def toggle(label, checked=None, enabled=None, icon=None, on_toggle=None):
     return it
 
 
-def option(label, enabled=None, icon=None):
+def option(label, enabled=None, icon=None, shortcut=None):
     """One labeled radio option, appended in declaration order — the
     order IS the index vocabulary the group's value selects over.
     Options carry no state of their own; selection lives on the
     group."""
     it = _menu_create(wire.MENU_KIND_RADIO_OPTION, label)
-    _menu_seat(it)
+    scope = _menu_seat(it)
+    if shortcut is not None:
+        _menu_require_catalog(scope)
+        it.shortcut(shortcut)
     if enabled is not None:
         it.enabled(enabled)
     if icon is not None:

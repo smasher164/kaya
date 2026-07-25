@@ -1360,6 +1360,17 @@ fn menu_accel(spelling: &str) -> Option<String> {
         "right" => "Right".to_owned(),
         "up" => "Up".to_owned(),
         "down" => "Down".to_owned(),
+        // The punctuation set onto X keysym names (the canonical
+        // spellings name UNSHIFTED US positions, which is exactly what
+        // these keysyms are).
+        "comma" => "comma".to_owned(),
+        "period" => "period".to_owned(),
+        "slash" => "slash".to_owned(),
+        "backslash" => "backslash".to_owned(),
+        "minus" => "minus".to_owned(),
+        "equal" => "equal".to_owned(),
+        "leftbracket" => "bracketleft".to_owned(),
+        "rightbracket" => "bracketright".to_owned(),
         f if f.len() > 1 && f.starts_with('f') && f[1..].chars().all(|c| c.is_ascii_digit()) => {
             f.to_uppercase()
         }
@@ -1380,11 +1391,30 @@ fn refresh_menu_accels(core: &CoreState, window: u64) {
     for &root in reg.bars.get(&window).map(Vec::as_slice).unwrap_or(&[]) {
         for id in menu_preorder(&reg, root) {
             let item = &reg.items[&id];
-            if item.kind != MenuItemKind::Action || item.shortcut.is_empty() {
+            if item.shortcut.is_empty() {
                 continue;
             }
+            // Every LEAF command may carry a chord. An option's action
+            // is its own and takes the option index as target, so its
+            // accelerator names the DETAILED action — GTK's
+            // `win.kmi-7(1)` spelling — which is also what the rendered
+            // row activates.
+            debug_assert!(item.kind.takes_shortcut(), "the root rejects chords elsewhere");
+            let action = match item.kind {
+                MenuItemKind::Action | MenuItemKind::Toggle => format!("win.kmi-{id}"),
+                MenuItemKind::RadioOption => {
+                    let group = item.parent.expect("scene validated option parentage");
+                    let index = reg.items[&group]
+                        .children
+                        .iter()
+                        .position(|option| *option == id)
+                        .expect("options list under their group");
+                    format!("win.kmi-{id}({index})")
+                }
+                MenuItemKind::Menu | MenuItemKind::RadioGroup | MenuItemKind::Separator => continue,
+            };
             if let Some(accel) = menu_accel(&item.shortcut) {
-                app.set_accels_for_action(&format!("win.kmi-{id}"), &[&accel]);
+                app.set_accels_for_action(&action, &[&accel]);
             }
         }
     }
@@ -2229,6 +2259,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // platform (DESIGN.md, Menus — ignored where the
                     // dress has none).
                 }
+                // A standard-command role is a placement REQUEST that
+                // this host has nowhere to honor: there is no
+                // dress-owned application menu here, so the item stays
+                // exactly where the app declared it (DESIGN.md, Menus).
+                (MenuProp::Role, Value::Str(_)) => {}
                 (p, v) => unreachable!("scene validated menu prop {p:?}/{v:?}"),
             }
         }
@@ -3042,10 +3077,11 @@ impl crate::harness::Stage for GtkStage {
             // interpreters' rule), which the map gates structurally:
             // only catalog actions are ever registered in it.
             let Some(app) = core.app.as_ref() else { return };
-            let Some(accel) = menu_accel(&spelling) else { return };
-            let Some(want) = gtk4::accelerator_parse(&accel) else {
-                return;
-            };
+            let accel = menu_accel(&spelling)
+                .unwrap_or_else(|| panic!("kaya: shortcut {spelling:?}: unmappable spelling"));
+            let want = gtk4::accelerator_parse(&accel).unwrap_or_else(|| {
+                panic!("kaya: shortcut {spelling:?}: GTK rejected accelerator {accel:?}")
+            });
             for description in app.list_action_descriptions() {
                 let owns = app
                     .accels_for_action(&description)
@@ -3059,7 +3095,15 @@ impl crate::harness::Stage for GtkStage {
                 // where the accel controller lands a key event — so
                 // the SAME GSimpleAction handler emits the SAME
                 // menu_activated a direct activation would.
-                let target = description
+                // A DETAILED name carries an option's target —
+                // `win.kmi-7(1)` — and activate_action takes a plain
+                // name plus the parameter, never the detailed
+                // spelling. Splitting it is what lets one option of a
+                // group answer its own chord.
+                let Ok((name, param)) = gio::Action::parse_detailed_name(&description) else {
+                    continue;
+                };
+                let target = name
                     .strip_prefix("win.kmi-")
                     .and_then(|id| id.parse::<u64>().ok())
                     .and_then(|id| {
@@ -3068,9 +3112,17 @@ impl crate::harness::Stage for GtkStage {
                     })
                     .map(|window| gtk_window(core, window))
                     .unwrap_or_else(|| core.window.clone());
-                let _ = target.activate_action(&description, None);
+                let _ = target.activate_action(&name, param.as_ref());
                 return;
             }
+            // Nothing in the catalog owns this chord — a script error,
+            // said out loud rather than passing as a no-op (the WinUI
+            // lesson, docs/traps.md).
+            panic!(
+                "kaya: shortcut {spelling:?}: no catalog item owns this chord \
+                 (the leaf kinds that may carry one are action, toggle, and \
+                 radio option)"
+            );
         });
     }
 

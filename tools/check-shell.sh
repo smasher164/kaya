@@ -46,6 +46,19 @@ for f in tools/*.sh tools/ios/*.sh tools/android/*.sh tools/swiftui/*.sh tools/l
     fi
 done
 
+# javac takes the PLATFORM charset, and the hosts disagree: UTF-8 on
+# mac and linux, a legacy code page on the Windows VM. A scene label
+# with a non-ASCII character therefore reached the wire as mojibake
+# from one host only, and no gate could see it (docs/traps.md). Every
+# invocation must pin the encoding rather than inherit a default.
+unpinned=$(grep -rnE "(javac|run_javac) .*(-d |-proc:only)" tools/ --include="*.sh" \
+    | grep -v "encoding UTF-8") || true
+if [ -n "$unpinned" ]; then
+    echo "check-shell: javac without -encoding UTF-8 (the host charset differs per platform):" >&2
+    echo "$unpinned" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

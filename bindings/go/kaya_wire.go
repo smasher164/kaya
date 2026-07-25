@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x0e4b7f4f716cc749
+	SpecHash uint64 = 0xc844be516d78a8ed
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -68,6 +68,7 @@ const (
 	MpropIcon = 5
 	MpropPrimary = 6
 	MpropShortcut = 7
+	MpropRole = 8
 	SectionsPresentationAuto = 0
 	SectionsPresentationBar = 1
 	SectionsPresentationSidebar = 2
@@ -1054,7 +1055,7 @@ func TxBindSectionIcon(section uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
-var shortcutNamedKeys = map[string]bool{"enter": true, "escape": true, "delete": true, "left": true, "right": true, "up": true, "down": true, "f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true, "f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true}
+var shortcutNamedKeys = map[string]bool{"enter": true, "escape": true, "delete": true, "left": true, "right": true, "up": true, "down": true, "f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true, "f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true, "comma": true, "period": true, "slash": true, "backslash": true, "minus": true, "equal": true, "leftbracket": true, "rightbracket": true}
 
 // CanonicalizeShortcut canonicalizes a shortcut spelling to the wire
 // form: lowercase '+'-joined tokens, modifiers ordered primary,
@@ -1222,6 +1223,16 @@ func TxSetMenuShortcut(item uint64, shortcut string) []byte {
 	b = binary.LittleEndian.AppendUint32(b, MpropShortcut)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, CanonicalizeShortcut(shortcut))
+	return endRecord(b)
+}
+
+// TxSetMenuRole: set_menu_prop with a constant role value.
+func TxSetMenuRole(item uint64, role string) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropRole)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, role)
 	return endRecord(b)
 }
 

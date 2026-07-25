@@ -120,6 +120,11 @@ executable menus
   main-is: menus.hs
   build-depends: kaya-guests
 
+executable commands
+  import: shared
+  main-is: commands.hs
+  build-depends: kaya-guests
+
 executable layout
   import: shared
   main-is: layout.hs

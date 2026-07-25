@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x0e4b7f4f716cc749L;
+    public static final long SPEC_HASH = 0xc844be516d78a8edL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -67,6 +67,7 @@ public final class KayaWire {
     public static final int MPROP_ICON = 5;
     public static final int MPROP_PRIMARY = 6;
     public static final int MPROP_SHORTCUT = 7;
+    public static final int MPROP_ROLE = 8;
     public static final int SECTIONS_PRESENTATION_AUTO = 0;
     public static final int SECTIONS_PRESENTATION_BAR = 1;
     public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
@@ -884,7 +885,7 @@ public final class KayaWire {
     }
 
     private static final java.util.Set<String> SHORTCUT_NAMED_KEYS =
-            java.util.Set.of("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12");
+            java.util.Set.of("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket");
 
     /** Canonicalize a shortcut spelling to the wire form: lowercase
      * '+'-joined tokens, modifiers ordered primary, shift, alt, then one
@@ -1025,6 +1026,14 @@ public final class KayaWire {
         ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_SHORTCUT).putInt(SOURCE_CONST);
         encodeValue(b, canonicalizeShortcut(shortcut));
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant role value. */
+    public static byte[] txSetMenuRole(long item, String role) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_ROLE).putInt(SOURCE_CONST);
+        encodeValue(b, role);
         return finish(b);
     }
 

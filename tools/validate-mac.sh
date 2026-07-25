@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. (Empty since the menus sweep
@@ -387,7 +387,7 @@ build_haskell() {
     # One cabal build for the binding library and all scenes.
     cd guests/haskell && cabal build all \
         --extra-lib-dirs="$ROOT/target/debug" \
-        --ghc-options="-optl-Wl,-rpath,$ROOT/target/debug" -v0
+        --ghc-options="-L$ROOT/target/debug -optl-Wl,-rpath,$ROOT/target/debug" -v0
 }
 
 build_csharp() {
@@ -449,7 +449,7 @@ build_java() {
     # Main selector, one javac.
     rm -rf target/java-guests
     mkdir -p target/java-guests
-    javac -d target/java-guests \
+    javac -encoding UTF-8 -d target/java-guests \
         bindings/java-desktop/dev/kaya/KayaRing.java \
         bindings/java/dev/kaya/*.java \
         guests/java/dev/kaya/milestone2kt/*.java \
@@ -791,6 +791,25 @@ run menus-ocaml-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/lib
 run menus-haskell-swiftui env KAYA_SELFTEST=menus "$(hs_bin menus)"
 run menus-swift-swiftui env KAYA_SELFTEST=menus target/swift-guests/menus
 run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The commands scene, the DEPTH slice (rust only until the sweep): a
+# chord on every leaf kind — a checkable command and one option of a
+# group, not just plain actions — the punctuation keys those chords
+# need, and the `settings` role, which macOS shows in the APPLICATION
+# menu while the item stays addressable where the app declared it.
+KAYA_SELFTEST_SCRIPT="$(scene_script commands)"
+export KAYA_SELFTEST_SCRIPT
+run commands-rust-swiftui env KAYA_SELFTEST=commands target/debug/examples/commands
+run commands-python-swiftui env KAYA_SELFTEST=commands python3 guests/python/commands.py
+run commands-go-swiftui env KAYA_SELFTEST=commands target/go-guests/commands
+run commands-csharp-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run commands-ocaml-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/commands.exe
+run commands-haskell-swiftui env KAYA_SELFTEST=commands "$(hs_bin commands)"
+run commands-swift-swiftui env KAYA_SELFTEST=commands target/swift-guests/commands
+run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The confirm scene: the modal-alert grammar — the REAL platform

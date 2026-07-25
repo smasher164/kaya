@@ -39,7 +39,7 @@ run_javac() {
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-if run_javac -d "$TMP" \
+if run_javac -encoding UTF-8 -d "$TMP" \
     bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/*.java \
     guests/java/dev/kaya/milestone2kt/*.java \

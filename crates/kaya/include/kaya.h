@@ -266,6 +266,8 @@
 
 #define MPROP_SHORTCUT 7
 
+#define MPROP_ROLE 8
+
 /**
  * The sections_presentation enum's wire values (spec enum
  * "sections_presentation"): ADVISORY, the width/height precedent.
@@ -723,6 +725,8 @@
 #define KAYA_MPROP_PRIMARY 6
 
 #define KAYA_MPROP_SHORTCUT 7
+
+#define KAYA_MPROP_ROLE 8
 
 /**
  * The window prop naming how sections present, and its enum values

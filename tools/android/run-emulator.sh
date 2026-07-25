@@ -383,6 +383,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The commands scene, the DEPTH slice (rust only until the sweep).
+    run_apk commands-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity commands \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
     drain
     timing legs-compose
 fi
@@ -483,6 +488,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The commands scene through the JVM binding (see the compose leg).
+    run_apk commands-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity commands \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
     drain
     timing legs-jvm
 fi

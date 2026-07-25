@@ -482,6 +482,7 @@ pub const KAYA_MPROP_VALUE: u32 = 4;
 pub const KAYA_MPROP_ICON: u32 = 5;
 pub const KAYA_MPROP_PRIMARY: u32 = 6;
 pub const KAYA_MPROP_SHORTCUT: u32 = 7;
+pub const KAYA_MPROP_ROLE: u32 = 8;
 const _: () = assert!(
     KAYA_MPROP_LABEL == wire::MPROP_LABEL
         && KAYA_MPROP_ENABLED == wire::MPROP_ENABLED
@@ -490,11 +491,12 @@ const _: () = assert!(
         && KAYA_MPROP_ICON == wire::MPROP_ICON
         && KAYA_MPROP_PRIMARY == wire::MPROP_PRIMARY
         && KAYA_MPROP_SHORTCUT == wire::MPROP_SHORTCUT
+        && KAYA_MPROP_ROLE == wire::MPROP_ROLE
 );
 // Completeness for the menu-prop exports (the SECTION_PROPS count-pin
 // sibling): a new MENU_PROPS row trips this count.
 const _: () = assert!(
-    crate::spec::MENU_PROPS.len() == 7,
+    crate::spec::MENU_PROPS.len() == 8,
     "spec::MENU_PROPS grew: export the new KAYA_MPROP_* above, extend the pin, and bump this \
      count"
 );

@@ -394,12 +394,29 @@ pub enum MenuItemKind {
     Separator,
 }
 
+impl MenuItemKind {
+    /// Whether this kind may carry a `shortcut` — every LEAF command
+    /// (DESIGN.md, Menus). ONE statement of the rule: the root's
+    /// validation and every backend's dispatch table read it here, so a
+    /// backend cannot quietly disagree with the root about which chords
+    /// exist. It did once: a table built from actions alone gated the
+    /// harness verb, so a checkable command's chord was never pressed
+    /// and the silence read as a platform limitation (docs/traps.md).
+    pub fn takes_shortcut(self) -> bool {
+        matches!(
+            self,
+            MenuItemKind::Action | MenuItemKind::Toggle | MenuItemKind::RadioOption
+        )
+    }
+}
+
 /// Menu property keys — separate from widget, window, entry, and
 /// section props (spec::MENU_PROPS; DESIGN.md, Menus). `label` and
 /// `enabled` apply to every kind but `separator`; `checked` is
-/// toggle-only, `value` radio-group-only; `primary` and `shortcut` are
-/// action-only. `label`, `enabled`, `checked`, and `value` are
-/// signal-bindable; `icon`, `primary`, and `shortcut` are const-only.
+/// toggle-only, `value` radio-group-only; `primary` and `role` are
+/// action-only, `shortcut` rides any leaf command. `label`, `enabled`,
+/// `checked`, and `value` are signal-bindable; `icon`, `primary`,
+/// `shortcut`, and `role` are const-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MenuProp {
     /// The item's label (Str). Required except on separators;
@@ -420,10 +437,16 @@ pub enum MenuProp {
     /// The phone-bar promotion hint (Bool, default false); action-only,
     /// inert on desktops.
     Primary,
-    /// A normalized shortcut spelling (Str); window-anchored action
-    /// only. The core validates the canonical wire form and rejects
-    /// non-canonical spellings — it never rewrites guest data.
+    /// A normalized shortcut spelling (Str); any window-anchored LEAF
+    /// command — action, toggle, or radio option. The core validates
+    /// the canonical wire form and rejects non-canonical spellings — it
+    /// never rewrites guest data.
     Shortcut,
+    /// A standard-command role (Str) from the closed vocabulary;
+    /// action-only. `settings` is the one v1 value: macOS places that
+    /// item in the application menu, every other host leaves it where
+    /// the app put it.
+    Role,
 }
 
 /// Which materialized attachment a backend's menu native belongs to:

@@ -1536,6 +1536,11 @@ sealed class Tx
             Records.Add(KayaWire.TxMenuItemAppend(parent.Id, child.Id));
     }
 
+    /// The closed standard-command vocabulary (DESIGN.md, Menus):
+    /// macOS places this one in the application menu, and every other
+    /// host leaves the item where the app declared it.
+    public const string RoleSettings = "settings";
+
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one
     /// dispatch path; the handler rides the declaration and covers
@@ -1543,10 +1548,11 @@ sealed class Tx
     /// parser; the root judges its anchor (window catalogs only).
     public MenuItem Item(TextSource label, string shortcut = null,
         BoolSource? enabled = null, byte[] icon = null, bool primary = false,
-        Action<Tx> onActivate = null)
+        string role = null, Action<Tx> onActivate = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
+        if (role != null) Records.Add(KayaWire.TxSetMenuRole(m.Id, role));
         MenuTail(m, enabled, icon);
         if (primary) Records.Add(KayaWire.TxSetMenuPrimary(m.Id, true));
         if (onActivate != null) App.menuActivated[m.Id] = onActivate;
@@ -1570,11 +1576,12 @@ sealed class Tx
     /// flips emit menu_toggled (the handler receives the new state);
     /// programmatic isChecked writes are QUIET (the echo doctrine).
     public MenuItem Toggle(TextSource label, BoolSource? isChecked = null,
-        BoolSource? enabled = null, byte[] icon = null,
+        BoolSource? enabled = null, byte[] icon = null, string shortcut = null,
         Action<Tx, bool> onToggle = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindToggle, label);
         if (isChecked is { } c) MenuChecked(m, c);
+        if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
         MenuTail(m, enabled, icon);
         if (onToggle != null) App.menuToggled[m.Id] = onToggle;
         return m;
@@ -1595,9 +1602,10 @@ sealed class Tx
     /// One labeled radio option, appended in declaration order — the
     /// order IS the index vocabulary the group's value selects over.
     public MenuItem Option(TextSource label, BoolSource? enabled = null,
-        byte[] icon = null)
+        byte[] icon = null, string shortcut = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioOption, label);
+        if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
         MenuTail(m, enabled, icon);
         return m;
     }
@@ -1627,7 +1635,7 @@ sealed class Tx
     public void Menu(MenuItem item, TextSource? label = null,
         BoolSource? enabled = null, BoolSource? isChecked = null,
         IndexSource? value = null, byte[] icon = null, bool? primary = null,
-        string shortcut = null, MenuItem[] items = null)
+        string shortcut = null, string role = null, MenuItem[] items = null)
     {
         MenuAppendAll(item, items);
         if (label is { } l) MenuLabel(item, l);
@@ -1637,6 +1645,7 @@ sealed class Tx
         if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(item.Id, Kaya.RegisterBlob(icon)));
         if (primary is { } p) Records.Add(KayaWire.TxSetMenuPrimary(item.Id, p));
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(item.Id, shortcut));
+        if (role != null) Records.Add(KayaWire.TxSetMenuRole(item.Id, role));
     }
 
     /// A radio group — the Choice contract with the platform's

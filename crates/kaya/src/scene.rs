@@ -205,6 +205,10 @@ struct MenuItem {
     anchor: Option<MenuAnchor>,
     children: Vec<MenuItemId>,
     shortcut: Option<String>,
+    /// The standard-command role this item claims, if any. Kept per
+    /// item (not only in the app-wide table) so a subtree walk can
+    /// reject a role that would land under a context anchor.
+    role: Option<String>,
 }
 
 #[derive(Default)]
@@ -250,6 +254,11 @@ pub(crate) struct Scene {
     /// Per-window catalog shortcuts, for the duplicate-within-a-window
     /// check (the same chord in separate windows is fine).
     window_shortcuts: HashMap<WindowId, std::collections::HashSet<String>>,
+    /// role -> the item that claimed it. App-wide, unlike shortcuts: a
+    /// role names ONE standard command for the whole program, and the
+    /// host that relocates it (macOS's application menu) has exactly
+    /// one slot to put it in.
+    menu_roles: HashMap<String, MenuItemId>,
     /// signal -> the (item, property) pairs it feeds. Only the
     /// signal-bindable menu props (label, enabled, checked, value) land
     /// here; the coalesced value is domain-validated at the barrier.
@@ -437,8 +446,11 @@ fn is_menu_group(kind: MenuItemKind) -> bool {
 
 /// Which kinds carry which property (DESIGN.md, Menus): label/enabled
 /// on everything but a separator; checked toggle-only; value
-/// radio-group-only; primary/shortcut action-only; icon on everything
-/// but a separator. Misuse dies at the root, the check_prop precedent.
+/// radio-group-only; primary and role action-only; shortcut on any LEAF
+/// command — a checkable item takes a chord as readily as a plain one
+/// on every host, and "Show Sidebar" wants both its checkmark and its
+/// key; icon on everything but a separator. Misuse dies at the root,
+/// the check_prop precedent.
 fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     let ok = match prop {
         MenuProp::Label | MenuProp::Enabled | MenuProp::Icon => {
@@ -446,16 +458,32 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
         }
         MenuProp::Checked => matches!(kind, MenuItemKind::Toggle),
         MenuProp::Value => matches!(kind, MenuItemKind::RadioGroup),
-        MenuProp::Primary | MenuProp::Shortcut => matches!(kind, MenuItemKind::Action),
+        MenuProp::Primary | MenuProp::Role => matches!(kind, MenuItemKind::Action),
+        MenuProp::Shortcut => kind.takes_shortcut(),
     };
     assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
+}
+
+/// The closed role vocabulary (DESIGN.md, Menus). One value in v1:
+/// `settings` names the app's settings command, which macOS places in
+/// the application menu and every other host leaves where the app put
+/// it. Closed on purpose — a role is the only thing that can move an
+/// authored item into dress-owned chrome.
+fn check_menu_role(value: &Value) {
+    let Value::Str(role) = value else {
+        return;
+    };
+    assert!(
+        role == "settings",
+        "kaya: menu role {role:?} is not in the closed role vocabulary (settings)"
+    );
 }
 
 /// Every menu property has one value type (spec::MENU_PROPS). The match
 /// is exhaustive: a new prop cannot ship without declaring its type.
 fn menu_prop_value_type(prop: MenuProp) -> ValueType {
     match prop {
-        MenuProp::Label | MenuProp::Shortcut => ValueType::Str,
+        MenuProp::Label | MenuProp::Shortcut | MenuProp::Role => ValueType::Str,
         MenuProp::Enabled | MenuProp::Checked | MenuProp::Primary => ValueType::Bool,
         MenuProp::Value => ValueType::F64,
         MenuProp::Icon => ValueType::Blob,
@@ -495,6 +523,29 @@ fn check_menu_prop_value(prop: MenuProp, value: &Value) {
 fn is_named_key(key: &str) -> bool {
     matches!(key, "enter" | "escape" | "delete" | "left" | "right" | "up" | "down")
         || is_function_key(key)
+        || is_punctuation_key(key)
+}
+
+/// The closed punctuation set, named rather than spelled with the
+/// character itself — `enter`/`delete` are the precedent, and a name
+/// keeps the wire spelling free of characters the step grammar and the
+/// path syntax already use. Each names the UNSHIFTED US position; the
+/// host binds its own key code and displays the chord its own way, so
+/// `primary+shift+equal` is how an app asks for what macOS draws as
+/// Command-plus. Typing protection is the alphanumeric rule: these
+/// keys need primary or alt too.
+fn is_punctuation_key(key: &str) -> bool {
+    matches!(
+        key,
+        "comma"
+            | "period"
+            | "slash"
+            | "backslash"
+            | "minus"
+            | "equal"
+            | "leftbracket"
+            | "rightbracket"
+    )
 }
 
 /// `f1`..`f12`, exactly — no leading zeros, no `f0`, no `f13`.
@@ -579,9 +630,9 @@ fn validate_shortcut(spelling: &str) -> Result<(), String> {
              (one of a-z, 0-9, or the closed named set)"
         ));
     }
-    if alnum && !(has_primary || has_alt) {
+    if (alnum || is_punctuation_key(key)) && !(has_primary || has_alt) {
         return Err(format!(
-            "kaya: shortcut {spelling:?}: an alphanumeric key needs primary or alt \
+            "kaya: shortcut {spelling:?}: an alphanumeric or punctuation key needs primary or alt \
              (bare and shift-only spellings are ordinary typing)"
         ));
     }
@@ -1185,6 +1236,7 @@ impl Scene {
                                 anchor: None,
                                 children: Vec::new(),
                                 shortcut: None,
+                                role: None,
                             },
                         )
                         .is_some();
@@ -1649,6 +1701,13 @@ impl Scene {
                 );
             }
         }
+        if let Some(role) = &it.role {
+            assert!(
+                is_bar,
+                "kaya: role {role:?} on a context menu item {item:?} — a role \
+                 names a standard command in the window catalog"
+            );
+        }
         for &child in &it.children {
             let child_depth = depth
                 + u32::from(is_menu_group(self.menu_items[&child].kind));
@@ -1780,6 +1839,31 @@ impl Scene {
         self.menu_items.get_mut(&item).unwrap().shortcut = Some(spelling);
     }
 
+    /// One standard command per role, window-anchored: a role can move
+    /// an authored item into dress-owned chrome (macOS puts `settings`
+    /// in the application menu), so two claimants would be two items
+    /// racing for one native slot, and a context anchor has no such
+    /// slot at all. Re-setting the same role on the same item is idle,
+    /// the shortcut precedent.
+    fn claim_menu_role(&mut self, item: MenuItemId, value: &Value) {
+        let Value::Str(role) = value else { return };
+        if let Some(MenuAnchor::Context) = self.anchored_root(item) {
+            panic!(
+                "kaya: role {role:?} on a context menu item {item:?} — a role \
+                 names a standard command in the window catalog"
+            );
+        }
+        if let Some(held) = self.menu_roles.get(role) {
+            assert!(
+                *held == item,
+                "kaya: role {role:?} is already claimed by menu item {held:?} \
+                 (one standard command per role)"
+            );
+        }
+        self.menu_roles.insert(role.clone(), item);
+        self.menu_items.get_mut(&item).unwrap().role = Some(role.clone());
+    }
+
     fn set_menu_prop(
         &mut self,
         item: MenuItemId,
@@ -1806,13 +1890,17 @@ impl Scene {
                 if prop == MenuProp::Value {
                     self.check_radio_value_range(item, &v);
                 }
+                if prop == MenuProp::Role {
+                    check_menu_role(&v);
+                    self.claim_menu_role(item, &v);
+                }
                 out.push(ApplyOp::SetMenuProp { item, prop, value: v });
             }
             PropValue::Signal(id) => {
                 assert!(
                     is_bindable_menu_prop(prop),
                     "kaya: menu property {prop:?} is not signal-bindable \
-                     (icon, primary, and shortcut are const-only)"
+                     (icon, primary, shortcut, and role are const-only)"
                 );
                 let current = self
                     .signals
@@ -4332,6 +4420,13 @@ mod tests {
             value: PropValue::Const(v(spelling)),
         }
     }
+    fn role(id: u64, name: &str) -> TxOp {
+        TxOp::SetMenuProp {
+            item: MenuItemId(id),
+            prop: MenuProp::Role,
+            value: PropValue::Const(v(name)),
+        }
+    }
 
     /// A bar catalog builds, a signal-bound `enabled` fans out on write,
     /// and a bar-anchored action's shortcut joins the window catalog.
@@ -4464,6 +4559,20 @@ mod tests {
             "f12",
             "primary+f5",
             "alt+f7",
+            // The punctuation set, named rather than spelled with the
+            // character (DESIGN.md, Menus). Command-plus is
+            // primary+shift+equal — no separate `plus` key exists.
+            "primary+comma",
+            "primary+period",
+            "primary+slash",
+            "primary+backslash",
+            "primary+minus",
+            "primary+equal",
+            "primary+shift+equal",
+            "primary+leftbracket",
+            "primary+rightbracket",
+            "alt+comma",
+            "primary+shift+slash",
         ] {
             assert!(validate_shortcut(ok).is_ok(), "expected accept: {ok:?}");
         }
@@ -4495,8 +4604,16 @@ mod tests {
             "primary+primary+s",      // duplicate modifier
             "shift+shift+enter",      // duplicate modifier
             "primary+S",              // uppercase key
-            "primary+.",              // punctuation key
-            "primary+,",              // punctuation key
+            "primary+.",              // the character, not the name
+            "primary+,",              // the character, not the name
+            "comma",                  // bare punctuation
+            "shift+comma",            // shift-only punctuation
+            "period",                 // bare punctuation
+            "primary+plus",           // not in the closed set (shift+equal)
+            "primary+semicolon",      // not in the closed set
+            "primary+quote",          // not in the closed set
+            "primary+grave",          // not in the closed set
+            "primary+Comma",          // uppercase
             "primary+f0",             // f0 is not a function key
             "primary+f13",            // f13 is out of range
             "primary+tab",            // unknown named key
@@ -4703,7 +4820,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "alphanumeric key needs primary or alt")]
+    #[should_panic(expected = "punctuation key needs primary or alt")]
     fn bare_alnum_shortcut_rejected() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -4732,7 +4849,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "has no property")]
-    fn shortcut_on_non_action_rejected() {
+    fn shortcut_on_grouping_node_rejected() {
         let mut scene = Scene::new();
         scene.apply(vec![
             item(1, MenuItemKind::Menu),
@@ -4741,6 +4858,144 @@ mod tests {
                 prop: MenuProp::Shortcut,
                 value: PropValue::Const(v("primary+s")),
             },
+        ]);
+    }
+
+    /// A shortcut rides any LEAF command: a checkable item takes a
+    /// chord as readily as a plain one ("Show Sidebar" wants both its
+    /// checkmark and its key), and so does one option of a group
+    /// (the view-mode 1/2/3 pattern).
+    #[test]
+    fn shortcut_rides_toggle_and_radio_option() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "View"),
+            item(2, MenuItemKind::Toggle),
+            label(2, "Details"),
+            sc(2, "primary+backslash"),
+            append(1, 2),
+            item(3, MenuItemKind::RadioGroup),
+            label(3, "Sort"),
+            item(4, MenuItemKind::RadioOption),
+            label(4, "Name"),
+            sc(4, "primary+1"),
+            item(5, MenuItemKind::RadioOption),
+            label(5, "Date"),
+            sc(5, "primary+2"),
+            append(3, 4),
+            append(3, 5),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    /// The duplicate-within-a-window rule spans every leaf kind, not
+    /// just plain commands.
+    #[test]
+    #[should_panic(expected = "duplicate shortcut")]
+    fn duplicate_shortcut_across_leaf_kinds_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "View"),
+            item(2, MenuItemKind::Action),
+            label(2, "Save"),
+            sc(2, "primary+comma"),
+            item(3, MenuItemKind::Toggle),
+            label(3, "Details"),
+            sc(3, "primary+comma"),
+            append(1, 2),
+            append(1, 3),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    /// The settings role: accepted on a window-anchored action, and it
+    /// is the one value the closed vocabulary holds.
+    #[test]
+    fn settings_role_accepted() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "App"),
+            item(2, MenuItemKind::Action),
+            label(2, "Settings…"),
+            role(2, "settings"),
+            sc(2, "primary+comma"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "closed role vocabulary")]
+    fn unknown_role_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Action), role(1, "about")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn role_on_non_action_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Toggle), role(1, "settings")]);
+    }
+
+    /// One standard command per role: the host that relocates it has
+    /// exactly one slot to put it in.
+    #[test]
+    #[should_panic(expected = "already claimed")]
+    fn duplicate_settings_role_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            role(1, "settings"),
+            item(2, MenuItemKind::Action),
+            role(2, "settings"),
+        ]);
+    }
+
+    /// Re-setting the same role on the same item is idle, not a clash
+    /// (the shortcut precedent).
+    #[test]
+    fn resetting_same_role_on_same_item_is_idle() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            role(1, "settings"),
+            role(1, "settings"),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "names a standard command")]
+    fn role_on_context_item_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Action),
+            label(1, "Settings…"),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+            role(1, "settings"),
+        ]);
+    }
+
+    /// Direction two, the context-attach scan: a role-carrying subtree
+    /// cannot be attached to a context anchor either.
+    #[test]
+    #[should_panic(expected = "names a standard command")]
+    fn context_attach_of_subtree_with_role_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Menu),
+            label(1, "Stuff"),
+            item(2, MenuItemKind::Action),
+            label(2, "Settings…"),
+            role(2, "settings"),
+            append(1, 2),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
         ]);
     }
 
@@ -5057,7 +5312,7 @@ mod tests {
     /// Shift-only alphanumeric through the scene root (the grammar
     /// table's direct assert is not the root path).
     #[test]
-    #[should_panic(expected = "alphanumeric key needs primary or alt")]
+    #[should_panic(expected = "punctuation key needs primary or alt")]
     fn shift_only_alnum_shortcut_rejected() {
         let mut scene = Scene::new();
         scene.apply(vec![item(1, MenuItemKind::Action), sc(1, "shift+s")]);

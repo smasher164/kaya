@@ -278,6 +278,9 @@ class KayaMenuItem(val id: Long, val kind: Int) {
     // Window-anchored action only: the canonical wire spelling; the
     // catalog walk IS the dispatch table.
     var shortcut by mutableStateOf("")
+    /// A standard-command role, "" = none. Recorded for parity; this
+    /// host has no dress-owned menu to relocate an item into.
+    var role by mutableStateOf("")
     // Optional icon blob, decoded like Image; promoted bar actions
     // show it, overflow rows stay textual (native menu dress).
     var iconBitmap by mutableStateOf<ImageBitmap?>(null)
@@ -308,7 +311,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x0e4b7f4f716cc749uL
+    private const val SPEC_HASH: ULong = 0xc844be516d78a8eduL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -371,6 +374,7 @@ object KayaCompose {
     private const val MPROP_ICON = 5
     private const val MPROP_PRIMARY = 6
     private const val MPROP_SHORTCUT = 7
+    private const val MPROP_ROLE = 8
     /**
      * How many promoted primary actions the top bar carries: k is this
      * PLATFORM's idiom, never computed by kaya (DESIGN.md, Menus). M3
@@ -485,6 +489,16 @@ object KayaCompose {
             KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
             KeyEvent.KEYCODE_DPAD_UP -> "up"
             KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+            // The punctuation set names UNSHIFTED US positions, which
+            // is exactly what these key codes are.
+            KeyEvent.KEYCODE_COMMA -> "comma"
+            KeyEvent.KEYCODE_PERIOD -> "period"
+            KeyEvent.KEYCODE_SLASH -> "slash"
+            KeyEvent.KEYCODE_BACKSLASH -> "backslash"
+            KeyEvent.KEYCODE_MINUS -> "minus"
+            KeyEvent.KEYCODE_EQUALS -> "equal"
+            KeyEvent.KEYCODE_LEFT_BRACKET -> "leftbracket"
+            KeyEvent.KEYCODE_RIGHT_BRACKET -> "rightbracket"
             else -> return null
         }
         val mods = StringBuilder()
@@ -825,6 +839,11 @@ object KayaCompose {
                         MPROP_VALUE -> item.value = readF64(b)
                         MPROP_PRIMARY -> item.primary = readBool(b)
                         MPROP_SHORTCUT -> item.shortcut = readString(b)
+                        // A standard-command role. Android has no
+                        // application menu to relocate into, so the
+                        // item stays exactly where the app declared it
+                        // — the role is recorded, never materialized.
+                        MPROP_ROLE -> item.role = readString(b)
                         MPROP_ICON -> {
                             // The image-source path's twin: a
                             // batch-local blob handle the pump
@@ -1764,12 +1783,17 @@ object KayaCompose {
                         ) {
                             failures.add("shortcut wants a quoted spelling: $line")
                         } else {
-                            // A SILENT action on every platform: a
-                            // chord no catalog action owns is a no-op
-                            // — exactly what the hardware-key route
-                            // does with an unowned chord — and the
-                            // following expect is the observable.
-                            onUi(activity) { kayaDispatchShortcut(spelling) }
+                            // The hardware-key route leaves an unowned
+                            // chord alone (the dress must never swallow
+                            // it), but a SCRIPT asking for one is an
+                            // error said out loud: a silent pass makes
+                            // a never-pressed key look like a platform
+                            // that ignored it (docs/traps.md).
+                            val owned = onUi(activity) { kayaDispatchShortcut(spelling) }
+                            if (!owned) {
+                                failures.add(
+                                    "shortcut $spelling: no catalog item owns this chord")
+                            }
                         }
                     }
                     else -> failures.add("unknown step $line")
@@ -2589,7 +2613,11 @@ fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
 fun kayaDispatchShortcut(spelling: String): Boolean {
     fun find(items: List<KayaMenuItem>): KayaMenuItem? {
         for (item in items) {
-            if (item.kind == KayaCompose.MENU_KIND_ACTION && item.shortcut == spelling) {
+            if (item.shortcut == spelling &&
+                (item.kind == KayaCompose.MENU_KIND_ACTION ||
+                    item.kind == KayaCompose.MENU_KIND_TOGGLE ||
+                    item.kind == KayaCompose.MENU_KIND_RADIO_OPTION)
+            ) {
                 return item
             }
             find(item.children)?.let { return it }

@@ -75,6 +75,7 @@ pub fn script(scene: &str) -> Option<&'static str> {
         "textarea" => Some(include_str!("../../../tools/scenes/textarea.steps")),
         "sections" => Some(include_str!("../../../tools/scenes/sections.steps")),
         "menus" => Some(include_str!("../../../tools/scenes/menus.steps")),
+        "commands" => Some(include_str!("../../../tools/scenes/commands.steps")),
         // "1" is the plain selftest flag: the milestone-2 scene.
         _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
     }

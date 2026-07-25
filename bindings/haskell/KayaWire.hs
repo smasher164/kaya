@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x0e4b7f4f716cc749
+specHash = 0xc844be516d78a8ed
 
 valueBool :: Word32
 valueBool = 1
@@ -130,6 +130,8 @@ mpropPrimary :: Word32
 mpropPrimary = 6
 mpropShortcut :: Word32
 mpropShortcut = 7
+mpropRole :: Word32
+mpropRole = 8
 sectionsPresentationAuto :: Word32
 sectionsPresentationAuto = 0
 sectionsPresentationBar :: Word32
@@ -792,7 +794,7 @@ txBindSectionIcon section signalId = wireRecord txKindSetSectionProp
     <> word64LE signalId)
 
 shortcutNamedKeys :: [String]
-shortcutNamedKeys = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"]
+shortcutNamedKeys = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]
 
 -- | Canonicalize a shortcut spelling to the wire form: lowercase
 -- '+'-joined tokens, modifiers ordered primary, shift, alt, then one
@@ -899,6 +901,12 @@ txSetMenuShortcut :: Word64 -> String -> Builder
 txSetMenuShortcut item shortcut = wireRecord txKindSetMenuProp
   (word64LE item <> word32LE mpropShortcut <> word32LE sourceConst
     <> encodeValue (VStr (canonicalizeShortcut shortcut)))
+
+-- set_menu_prop with a constant role value.
+txSetMenuRole :: Word64 -> String -> Builder
+txSetMenuRole item role = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropRole <> word32LE sourceConst
+    <> encodeValue (VStr role))
 
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.

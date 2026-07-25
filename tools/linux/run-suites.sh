@@ -27,10 +27,9 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-# Empty since the menus sweep landed its guests here and on mac.
 DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -76,7 +75,7 @@ drain_builds() {
 build_csharp() { dotnet build --nologo -v q /tmp/cs/kaya-guests.csproj >/dev/null; }
 build_java() {
     mkdir -p /tmp/java-guests
-    javac -d /tmp/java-guests \
+    javac -encoding UTF-8 -d /tmp/java-guests \
         bindings/java-desktop/dev/kaya/KayaRing.java \
         bindings/java/dev/kaya/*.java \
         guests/java/dev/kaya/milestone2kt/*.java \
@@ -262,7 +261,7 @@ run_build ocaml build_ocaml
 build_haskell() {
     cd guests/haskell && cabal build all \
         --extra-lib-dirs="$CARGO_TARGET_DIR/debug" \
-        --ghc-options="-optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0
+        --ghc-options="-L$CARGO_TARGET_DIR/debug -optl-Wl,-rpath,$CARGO_TARGET_DIR/debug" -v0
 }
 run_build haskell build_haskell
 hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
@@ -538,6 +537,24 @@ for proto in x11 wayland; do
     run "$proto" menus-ocaml env KAYA_SELFTEST=menus KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/menus.exe
     run "$proto" menus-haskell env KAYA_SELFTEST=menus "$(hs_bin menus)"
     run "$proto" menus-java env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The commands scene, the DEPTH slice (rust only until the sweep):
+    # chords on checkable commands and on single options, the
+    # punctuation keys they need, and the `settings` role — which has no
+    # placement effect here, so the item stays exactly where the app
+    # declared it.
+    run "$proto" commands-rust env KAYA_SELFTEST=commands \
+        "$CARGO_TARGET_DIR/debug/examples/commands"
+    run "$proto" commands-c env KAYA_SELFTEST=commands /tmp/c-guests/commands
+    run "$proto" commands-python env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
+        python3 guests/python/commands.py
+    run "$proto" commands-go env KAYA_SELFTEST=commands /tmp/go-guests/commands
+    run "$proto" commands-csharp env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" commands-ocaml env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/commands.exe
+    run "$proto" commands-haskell env KAYA_SELFTEST=commands "$(hs_bin commands)"
+    run "$proto" commands-java env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The layout scene: the cross-backend observation vehicle the
     # recordings are compared from, so it has to be a recorded leg here

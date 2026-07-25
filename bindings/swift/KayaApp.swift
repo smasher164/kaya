@@ -1588,6 +1588,11 @@ final class KayaAppTx {
         if let icon { tx.setMenuIcon(m.id, kayaRegisterBlob(icon)) }
     }
 
+    /// The closed standard-command vocabulary (DESIGN.md, Menus):
+    /// macOS places this one in the application menu, and every other
+    /// host leaves the item where the app declared it.
+    static let roleSettings = "settings"
+
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one
     /// dispatch path; the handler rides the declaration and covers
@@ -1596,10 +1601,12 @@ final class KayaAppTx {
     func item(
         _ label: KayaMenuText, shortcut: String? = nil,
         enabled: KayaMenuBool? = nil, icon: Data? = nil, primary: Bool = false,
+        role: String? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
+        if let role { tx.setMenuRole(m.id, role) }
         menuTail(m, enabled, icon)
         if primary { tx.setMenuPrimary(m.id, true) }
         if let onActivate { app.menuActivated[m.id] = onActivate }
@@ -1625,11 +1632,12 @@ final class KayaAppTx {
     /// programmatic checked writes are QUIET (the echo doctrine).
     func toggle(
         _ label: KayaMenuText, checked: KayaMenuBool? = nil,
-        enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil, shortcut: String? = nil,
         onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_TOGGLE, label)
         if let checked { menuChecked(m, checked) }
+        if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
         menuTail(m, enabled, icon)
         if let onToggle { app.menuToggled[m.id] = onToggle }
         return m
@@ -1652,9 +1660,11 @@ final class KayaAppTx {
     /// One labeled radio option, appended in declaration order — the
     /// order IS the index vocabulary the group's value selects over.
     func option(
-        _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil
+        _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        shortcut: String? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_RADIO_OPTION, label)
+        if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
         menuTail(m, enabled, icon)
         return m
     }
@@ -1688,7 +1698,7 @@ final class KayaAppTx {
         _ item: KayaMenuItem, label: KayaMenuText? = nil,
         enabled: KayaMenuBool? = nil, checked: KayaMenuBool? = nil,
         value: KayaMenuIndex? = nil, icon: Data? = nil, primary: Bool? = nil,
-        shortcut: String? = nil, items: [KayaMenuItem] = []
+        shortcut: String? = nil, role: String? = nil, items: [KayaMenuItem] = []
     ) {
         for child in items { tx.menuItemAppend(item.id, child.id) }
         if let label { menuLabel(item, label) }
@@ -1698,6 +1708,7 @@ final class KayaAppTx {
         if let icon { tx.setMenuIcon(item.id, kayaRegisterBlob(icon)) }
         if let primary { tx.setMenuPrimary(item.id, primary) }
         if let shortcut { tx.setMenuShortcut(item.id, shortcut) }
+        if let role { tx.setMenuRole(item.id, role) }
     }
 
     /// A radio group — the Choice contract with the platform's
