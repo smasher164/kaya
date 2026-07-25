@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc844be516d78a8ed
+	SpecHash uint64 = 0x55065c142eebf54b
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -46,6 +46,8 @@ const (
 	PropAlign = 9
 	PropIndeterminate = 10
 	PropColumns = 11
+	PropA11yId = 12
+	PropA11yLabel = 13
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -869,6 +871,70 @@ func TxBindColumnsElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropColumns)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetA11yId: set_property with a constant a11y_id value.
+func TxSetA11yId(widgetID uint64, a11yId string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yId)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, a11yId)
+	return endRecord(b)
+}
+
+// TxBindA11yId: set_property with a signal-bound a11y_id value.
+func TxBindA11yId(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yId)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindA11yIdElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindA11yIdElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yId)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetA11yLabel: set_property with a constant a11y_label value.
+func TxSetA11yLabel(widgetID uint64, a11yLabel string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, a11yLabel)
+	return endRecord(b)
+}
+
+// TxBindA11yLabel: set_property with a signal-bound a11y_label value.
+func TxBindA11yLabel(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yLabel)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindA11yLabelElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindA11yLabelElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropA11yLabel)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc844be516d78a8ed;
+    public const ulong SpecHash = 0x55065c142eebf54b;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -44,6 +44,8 @@ static class KayaWire
     public const uint PropAlign = 9;
     public const uint PropIndeterminate = 10;
     public const uint PropColumns = 11;
+    public const uint PropA11yId = 12;
+    public const uint PropA11yLabel = 13;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -818,6 +820,56 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropColumns); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant a11y_id value.
+    public static byte[] TxSetA11yId(ulong widgetId, string a11yId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yId); w.Write(SourceConst);
+        EncodeValue(w, a11yId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound a11y_id value.
+    public static byte[] TxBindA11yId(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yId); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindA11yIdElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yId); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant a11y_label value.
+    public static byte[] TxSetA11yLabel(ulong widgetId, string a11yLabel)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yLabel); w.Write(SourceConst);
+        EncodeValue(w, a11yLabel);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound a11y_label value.
+    public static byte[] TxBindA11yLabel(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yLabel); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindA11yLabelElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropA11yLabel); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

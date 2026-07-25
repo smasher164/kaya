@@ -332,6 +332,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The grid's own shape: how many columns children fill
         // row-major.
         Prop::Columns => matches!(kind, WidgetKind::Grid),
+        // The first UNIVERSAL props. Every other prop is kind-scoped
+        // because it names something only some controls have; these
+        // name something every element in the tree has — an identity
+        // and a spoken name. Containers included, deliberately: a
+        // column is a labelled group to an assistive client, and a
+        // harness must be able to address one.
+        Prop::A11yId | Prop::A11yLabel => true,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -370,6 +377,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
+        Prop::A11yId | Prop::A11yLabel => ValueType::Str,
     }
 }
 

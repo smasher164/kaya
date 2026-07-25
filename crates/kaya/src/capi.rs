@@ -415,6 +415,11 @@ pub const KAYA_PROP_SPACING: u32 = 8;
 pub const KAYA_PROP_ALIGN: u32 = 9;
 pub const KAYA_PROP_INDETERMINATE: u32 = 10;
 pub const KAYA_PROP_COLUMNS: u32 = 11;
+/// The accessibility identifier and label (spec::PROPS). The
+/// identifier is a stable authored key and is never spoken; the label
+/// is what an assistive client says. Separate on purpose.
+pub const KAYA_PROP_A11Y_ID: u32 = 12;
+pub const KAYA_PROP_A11Y_LABEL: u32 = 13;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -555,6 +560,8 @@ const _: () = assert!(
         && KAYA_PROP_ALIGN == wire::PROP_ALIGN
         && KAYA_PROP_INDETERMINATE == wire::PROP_INDETERMINATE
         && KAYA_PROP_COLUMNS == wire::PROP_COLUMNS
+        && KAYA_PROP_A11Y_ID == wire::PROP_A11Y_ID
+        && KAYA_PROP_A11Y_LABEL == wire::PROP_A11Y_LABEL
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -582,7 +589,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 11,
+    crate::spec::PROPS.len() == 13,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

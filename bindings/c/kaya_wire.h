@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xc844be516d78a8edULL
+#define KAYA_SPEC_HASH 0x55065c142eebf54bULL
 
 
 /* Create a signal holding `initial`. */
@@ -770,6 +770,70 @@ static inline void kaya_tx_bind_columns_element(KayaTx *tx, uint64_t widget_id, 
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_COLUMNS);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a constant a11y_id value. */
+static inline void kaya_tx_set_a11y_id(KayaTx *tx, uint64_t widget_id, const char *a11y_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(a11y_id));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound a11y_id value. */
+static inline void kaya_tx_bind_a11y_id(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_a11y_id_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a constant a11y_label value. */
+static inline void kaya_tx_set_a11y_label(KayaTx *tx, uint64_t widget_id, const char *a11y_label) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(a11y_label));
+    kaya_wire_end(tx, start);
+}
+
+/* set_property with a signal-bound a11y_label value. */
+static inline void kaya_tx_bind_a11y_label(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, start);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_a11y_label_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

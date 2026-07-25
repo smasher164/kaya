@@ -568,6 +568,21 @@ pub enum Prop {
     /// fill row-major. Columns take their NATURAL width, aligned
     /// across rows — the thing nested rows cannot express.
     Columns,
+    /// The accessibility IDENTIFIER (Str): a stable authored key,
+    /// NEVER spoken. Every platform's automation identifier is the
+    /// same idea — accessibilityIdentifier, testTag,
+    /// AutomationProperties.AutomationId — which is why this is a
+    /// product surface rather than test plumbing: assistive tooling
+    /// and UI automation both key on it, and kaya's harness is simply
+    /// its first consumer.
+    A11yId,
+    /// The accessibility LABEL (Str): what an assistive client SPEAKS
+    /// for this widget. Separate from [`Prop::A11yId`] on purpose —
+    /// conflating them would read every automation key aloud to
+    /// screen-reader users. Maps to accessibilityLabel,
+    /// contentDescription, AutomationProperties.Name, and GTK's LABEL
+    /// accessible property.
+    A11yLabel,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],

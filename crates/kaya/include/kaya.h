@@ -211,6 +211,13 @@
 #define PROP_COLUMNS 11
 
 /**
+ * The accessibility identifier (never spoken) and label (spoken).
+ */
+#define PROP_A11Y_ID 12
+
+#define PROP_A11Y_LABEL 13
+
+/**
  * Window property ids (spec::WINDOW_PROPS) — their own namespace;
  * windows are not widgets.
  */
@@ -661,6 +668,15 @@
 #define KAYA_PROP_INDETERMINATE 10
 
 #define KAYA_PROP_COLUMNS 11
+
+/**
+ * The accessibility identifier and label (spec::PROPS). The
+ * identifier is a stable authored key and is never spoken; the label
+ * is what an assistive client says. Separate on purpose.
+ */
+#define KAYA_PROP_A11Y_ID 12
+
+#define KAYA_PROP_A11Y_LABEL 13
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

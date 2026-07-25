@@ -76,6 +76,13 @@ import kotlinx.coroutines.launch
  */
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var text by mutableStateOf("")
+    // The accessibility identifier and label (universal props). The
+    // identifier is never spoken — it lowers to Modifier.testTag, which
+    // is what surfaces as the automation key — while the label IS what
+    // TalkBack reads (contentDescription). Empty means unset: the
+    // platform keeps whatever it derives from the control's own content.
+    var a11yId by mutableStateOf("")
+    var a11yLabel by mutableStateOf("")
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -321,7 +328,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xc844be516d78a8eduL
+    private const val SPEC_HASH: ULong = 0x55065c142eebf54buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -418,6 +425,10 @@ object KayaCompose {
     private const val PROP_ALIGN = 9
     private const val PROP_INDETERMINATE = 10
     private const val PROP_COLUMNS = 11
+    // The accessibility identifier (never spoken) and label (spoken).
+    // Universal: every widget kind carries both.
+    private const val PROP_A11Y_ID = 12
+    private const val PROP_A11Y_LABEL = 13
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -622,6 +633,10 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.indeterminate = readBool(b)
                         PROP_COLUMNS ->
                             KayaSceneModel.nodes[id]!!.columns = readF64(b).toInt()
+                        PROP_A11Y_ID ->
+                            KayaSceneModel.nodes[id]!!.a11yId = readString(b)
+                        PROP_A11Y_LABEL ->
+                            KayaSceneModel.nodes[id]!!.a11yLabel = readString(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into

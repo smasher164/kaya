@@ -120,6 +120,19 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // Grid-only: how many columns children fill row-major (F64 like
     // every numeric slot; integral >= 1, domain-checked at the root).
     ("columns", 11, PropKind::F64),
+    // The accessibility IDENTIFIER: a stable authored key, never
+    // spoken. Its platform mappings are the automation identifiers —
+    // accessibilityIdentifier, testTag, AutomationProperties.AutomationId
+    // — so it is a real product surface (a11y tooling and UI automation
+    // both key on it) with kaya's own harness as first consumer, not
+    // test plumbing on the production wire.
+    ("a11y_id", 12, PropKind::Str),
+    // The accessibility LABEL: what an assistive client SPEAKS for this
+    // widget. Deliberately separate from a11y_id — conflating them
+    // would read every automation key aloud to screen-reader users.
+    // Maps to accessibilityLabel, contentDescription,
+    // AutomationProperties.Name, and GTK's LABEL accessible property.
+    ("a11y_label", 13, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -1145,6 +1158,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("align", 9),
                 ("indeterminate", 10),
                 ("columns", 11),
+                ("a11y_id", 12),
+                ("a11y_label", 13),
             ],
         },
         EnumSpec {
@@ -1531,6 +1546,8 @@ mod tests {
                     ("prop", "align") => wire::PROP_ALIGN,
                     ("prop", "indeterminate") => wire::PROP_INDETERMINATE,
                     ("prop", "columns") => wire::PROP_COLUMNS,
+                    ("prop", "a11y_id") => wire::PROP_A11Y_ID,
+                    ("prop", "a11y_label") => wire::PROP_A11Y_LABEL,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

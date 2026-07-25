@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xc844be516d78a8ed
+let kayaSpecHash: UInt64 = 0x55065c142eebf54b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -104,6 +104,10 @@ private let kindTextarea: UInt32 = 14
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
+/// The accessibility identifier (never spoken) and label (spoken).
+/// Universal: every widget kind carries both.
+private let propA11yId: UInt32 = 12
+private let propA11yLabel: UInt32 = 13
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -136,6 +140,13 @@ final class KayaNode: Identifiable {
     let kind: UInt32
     let tag: [UInt8]
     var text = ""
+    /// The accessibility identifier and label (universal props). The
+    /// identifier is never spoken — it lowers to
+    /// accessibilityIdentifier, the automation key — while the label
+    /// IS what VoiceOver reads. Empty means unset: the platform keeps
+    /// whatever it derives from the control's own content.
+    var a11yId = ""
+    var a11yLabel = ""
     var checked = false
     var value = 0.0
     var minValue = 0.0
@@ -991,6 +1002,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propColumns, valueF64):
                     kayaScene.nodes[id]!.columns =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
+                case (propA11yId, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.a11yId = String(decoding: bytes, as: UTF8.self)
+                case (propA11yLabel, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.a11yLabel = String(decoding: bytes, as: UTF8.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -2723,10 +2740,30 @@ struct KayaRender: View {
         // gesture (right-click on macOS, long-press on iOS). Editable
         // text never reaches here (the root rejects the attach; its
         // native edit menu is dress).
-        if kayaScene.contextRoots[node.id]?.isEmpty == false {
-            widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }
+        // The accessibility props ride EVERY kind, applied at the one
+        // place every node's view passes through — containers included,
+        // which is the point: an assistive client sees a labelled group,
+        // and the harness can address one.
+        //
+        // Empty means unset, and unset must stay untouched rather than
+        // written as "": SwiftUI derives a control's label from its own
+        // content (a Button's title), and stamping an empty label would
+        // SILENCE it. The whole milestone exists to prove the free
+        // accessibility the wrap-native bet gives us; clobbering it here
+        // would be the exact opposite.
+        let anchored =
+            Group {
+                if kayaScene.contextRoots[node.id]?.isEmpty == false {
+                    widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }
+                } else {
+                    widget
+                }
+            }
+            .accessibilityIdentifier(node.a11yId)
+        if node.a11yLabel.isEmpty {
+            anchored
         } else {
-            widget
+            anchored.accessibilityLabel(node.a11yLabel)
         }
     }
 

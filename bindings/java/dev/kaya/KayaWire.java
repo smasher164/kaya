@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xc844be516d78a8edL;
+    public static final long SPEC_HASH = 0x55065c142eebf54bL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -45,6 +45,8 @@ public final class KayaWire {
     public static final int PROP_ALIGN = 9;
     public static final int PROP_INDETERMINATE = 10;
     public static final int PROP_COLUMNS = 11;
+    public static final int PROP_A11Y_ID = 12;
+    public static final int PROP_A11Y_LABEL = 13;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -745,6 +747,52 @@ public final class KayaWire {
     public static byte[] txBindColumnsElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_COLUMNS).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant a11y_id value. */
+    public static byte[] txSetA11yId(long widgetId, String a11yId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_CONST);
+        encodeValue(b, a11yId);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound a11y_id value. */
+    public static byte[] txBindA11yId(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindA11yIdElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_ID).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant a11y_label value. */
+    public static byte[] txSetA11yLabel(long widgetId, String a11yLabel) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_CONST);
+        encodeValue(b, a11yLabel);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound a11y_label value. */
+    public static byte[] txBindA11yLabel(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindA11yLabelElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }
