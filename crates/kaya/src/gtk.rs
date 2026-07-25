@@ -2442,6 +2442,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     dropdown.set_selected(v as u32);
                     core.apply_quiet.set(false);
                 }
+                // THE UNIVERSAL PROPS. Every other arm keys on a
+                // (kind, prop) pair because every other prop names
+                // something only some controls have; these name
+                // something every element has, so they match the prop
+                // alone and reach the widget through NativeWidget::widget.
+                //
+                // The LABEL is a real accessible property — it is what
+                // an assistive client speaks, and setting it OVERRIDES
+                // whatever the control derived from its own content, so
+                // an unset label must never be written as "".
+                (w, Prop::A11yLabel, Value::Str(label)) => {
+                    use gtk4::prelude::AccessibleExtManual;
+                    if !label.is_empty() {
+                        w.widget()
+                            .update_property(&[gtk4::accessible::Property::Label(label.as_str())]);
+                    }
+                }
+                // The IDENTIFIER has no GTK setter and no reader below
+                // 4.22 (gtk_accessible_get_accessible_id landed there;
+                // this build pins v4_10 and Debian trixie ships 4.18).
+                // The widget NAME is what GTK's AT-SPI backend publishes
+                // for a widget's identity, so that is where it goes —
+                // and it is what the AT-SPI reader will match on.
+                (w, Prop::A11yId, Value::Str(id)) => {
+                    use gtk4::prelude::WidgetExt;
+                    w.widget().set_widget_name(id.as_str());
+                }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
                     let grid = grid.clone();

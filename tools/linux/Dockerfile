@@ -52,4 +52,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
+# Accessibility: the AT-SPI bus and registry. GTK deliberately exposes
+# no getter for accessible properties — the accessible surface IS
+# AT-SPI, so reading it any other way would only read kaya's own writes
+# back. `expect_ax` therefore reads as a real assistive client would,
+# which needs the a11y bus running (at-spi2-core), a session bus for it
+# to sit on (dbus), and the GI typelib so a probe/reader can walk the
+# tree (gir1.2-atspi-2.0 + python3-gi).
+#
+# A trailing layer on purpose, per the note above: appending rebuilds in
+# seconds where touching the first apt list rebuilds the toolchain world.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    at-spi2-core dbus dbus-x11 gir1.2-atspi-2.0 python3-gi \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work
