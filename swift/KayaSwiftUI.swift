@@ -208,11 +208,33 @@ final class KayaWindowModel: Identifiable {
     /// it into the top bar's trailing More menu with promoted
     /// primaries as real bar actions.
     var menubar: [KayaMenuItemModel] = []
+    /// The window's live FORM FACTOR, written by the view layer from
+    /// the platform's own size-class reading and read by the harness.
+    /// The adaptivity axis is THIS, never the operating system
+    /// (DESIGN.md, "Form factor and adaptivity"): a phone is a compact
+    /// window, an iPad is usually a regular one, and a narrow window on
+    /// a desktop is compact. macOS has no size classes and its windows
+    /// carry the menu bar unconditionally, so it reports `regular`.
+    /// `unknown` is the pre-appearance value and no lowering may branch
+    /// on it — it exists so the harness can tell "not yet observed"
+    /// from "observed compact".
+    var formFactor: KayaFormFactor = .unknown
 
     init(id: UInt64, title: String = "") {
         self.id = id
         self.title = title
     }
+}
+
+/// The window size classes kaya lowers against. Deliberately the
+/// two-valued intersection of what every backend already exposes
+/// (SwiftUI's horizontal size class, Compose's WindowSizeClass,
+/// AdwBreakpoint, WinUI's adaptive triggers) rather than a new scale:
+/// adopting the platforms' notion is the point.
+enum KayaFormFactor: String {
+    case unknown
+    case compact
+    case regular
 }
 
 /// One menu item: kind fixed at create, every applicable prop live.
@@ -3769,18 +3791,50 @@ struct KayaContextMenuItems: View {
 
 /// The window catalog's chrome, attached to every surface root: a
 /// no-op on macOS (the global-bar synchronizer owns the lowering
-/// there), the top-bar toolbar on iOS.
+/// there), and elsewhere the FORM-FACTOR-keyed choice of lowering.
+///
+/// The axis is the window's size class, never the operating system
+/// (DESIGN.md, "Form factor and adaptivity"). The `#if os(iOS)` this
+/// replaced was wrong as of iPadOS 26, which gives every iPad app a
+/// real system menu bar reachable without a keyboard — so a full
+/// command catalog sat behind a phone affordance on a device that had
+/// the desktop one.
 struct KayaMenuChrome: ViewModifier {
     let windowId: UInt64
 
     func body(content: Content) -> some View {
         #if os(macOS)
-            content
+            content.onAppear { kayaScene.windows[windowId]?.formFactor = .regular }
         #else
-            content.modifier(KayaMenuToolbar(windowId: windowId))
+            content.modifier(KayaMenuFormFactorChrome(windowId: windowId))
         #endif
     }
 }
+
+#if !os(macOS)
+    /// Reads the live horizontal size class, records it on the window
+    /// model so the harness can observe the transition, and picks the
+    /// lowering. Recording happens in `onAppear`/`onChange` rather than
+    /// in `body`, because a write during body evaluation is a mutation
+    /// inside the render pass.
+    struct KayaMenuFormFactorChrome: ViewModifier {
+        let windowId: UInt64
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+        private var factor: KayaFormFactor {
+            horizontalSizeClass == .regular ? .regular : .compact
+        }
+
+        func body(content: Content) -> some View {
+            content
+                .modifier(KayaMenuToolbar(windowId: windowId))
+                .onAppear { kayaScene.windows[windowId]?.formFactor = factor }
+                .onChange(of: horizontalSizeClass) {
+                    kayaScene.windows[windowId]?.formFactor = factor
+                }
+        }
+    }
+#endif
 
 #if !os(macOS)
     /// The iOS window-anchor lowering: promoted primaries as real

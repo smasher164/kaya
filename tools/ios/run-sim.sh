@@ -89,25 +89,77 @@ make_bundle() {
 # the user's own simulators.
 POOL="${KAYA_IOS_SIMS:-3}"
 UDIDS=()
+# One iPad alongside the phone pool. It exists for exactly one reason:
+# the phone pool is ALWAYS a compact horizontal size class, so nothing
+# in this lane could observe the regular-width lowering, and the iPad
+# menu-bar defect (DESIGN.md, "Form factor and adaptivity") shipped
+# unseen because of it. It is a single device carrying a single scene,
+# not a second pool — form-factor coverage, not device-matrix breadth.
+PAD_UDID=""
+
+# Resolve a pool device by name, RECREATING it if its type has drifted.
+# Reuse-by-name alone is a trap: a device created under a different
+# selector or a different Xcode keeps its old type forever, so the pool
+# silently goes heterogeneous — this machine's held two iPhone 11 Pros
+# and an iPhone 17 Pro before this guard, and since slot claiming is a
+# race, which screen a leg got varied run to run. For the iPad it is
+# worse than flaky: a stale kaya-sim-pad of the wrong type would make
+# the form-factor gate VACUOUS while still reporting PASS, and a gate
+# that passes without exercising the real thing is a bug in the gate.
+device_of() { # name dtype runtime -> udid
+    local name="$1" dtype="$2" runtime="$3" udid have
+    udid=$(xcrun simctl list devices | grep -m1 "$name (" \
+        | grep -oE '[0-9A-F-]{36}' || true)
+    if [ -n "$udid" ]; then
+        have=$(xcrun simctl list devices -j | python3 -c "
+import json, sys
+for devs in json.load(sys.stdin)['devices'].values():
+    for x in devs:
+        if x.get('udid') == '$udid':
+            print(x.get('deviceTypeIdentifier', ''))
+")
+        if [ "$have" != "$dtype" ]; then
+            echo "recreating $name: type drifted ($have != $dtype)" >&2
+            xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+            udid=""
+        fi
+    fi
+    [ -n "$udid" ] || udid=$(xcrun simctl create "$name" "$dtype" "$runtime")
+    printf '%s\n' "$udid"
+}
+
 boot_pool() {
-    local dtype runtime i udid
+    local dtype pad_dtype runtime i udid
+    # simctl lists device types NEWEST FIRST, so `head -1` is the newest
+    # and `tail -1` is the oldest. The phone selector below says
+    # "newest" and takes the tail, which resolves to an iPhone 11 Pro —
+    # a real (pre-existing) mismatch between its comment and its
+    # behavior. Left alone deliberately: changing the phone changes the
+    # screen size every geometry expectation in this lane was frozen
+    # against, so it wants its own slice with a full iOS re-validation.
+    # Do not copy the tail idiom.
     dtype=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro \(" \
         | tail -1 | grep -oE 'com.apple.CoreSimulator.SimDeviceType[^)]*')
+    # Large iPad Pro: unambiguously a regular width in full screen. The
+    # trailing `\(com` keeps the "(16GB)" memory variants out.
+    pad_dtype=$(xcrun simctl list devicetypes \
+        | grep -E "iPad Pro [0-9]+-inch \(M[0-9]+\) \(com" \
+        | head -1 | grep -oE 'com.apple.CoreSimulator.SimDeviceType[^)]*')
     runtime=$(xcrun simctl list runtimes | grep -m1 -oE 'com.apple.CoreSimulator.SimRuntime.iOS[0-9-]+')
     [ -n "$dtype" ] && [ -n "$runtime" ] \
         || { echo "no iPhone device type / iOS runtime; install one in Xcode" >&2; exit 1; }
+    [ -n "$pad_dtype" ] \
+        || { echo "no M-series iPad Pro device type; install one in Xcode" >&2; exit 1; }
     i=0
     while [ "$i" -lt "$POOL" ]; do
-        udid=$(xcrun simctl list devices | grep -m1 "kaya-sim-$i (" \
-            | grep -oE '[0-9A-F-]{36}' || true)
-        if [ -z "$udid" ]; then
-            udid=$(xcrun simctl create "kaya-sim-$i" "$dtype" "$runtime")
-        fi
+        udid=$(device_of "kaya-sim-$i" "$dtype" "$runtime")
         xcrun simctl boot "$udid" 2>/dev/null || true
         UDIDS+=("$udid")
         i=$((i + 1))
     done
-    for udid in "${UDIDS[@]}"; do
+    PAD_UDID=$(device_of "kaya-sim-pad" "$pad_dtype" "$runtime")
+    xcrun simctl boot "$PAD_UDID" 2>/dev/null || true
+    for udid in "${UDIDS[@]}" "$PAD_UDID"; do
         # Bounded: bootstatus blocks forever on a wedged device.
         timeout 180 xcrun simctl bootstatus "$udid" -b >/dev/null \
             || { echo "simulator $udid did not boot within 180s" >&2; exit 1; }
@@ -428,6 +480,11 @@ LEGS_DIR="$(mktemp -d)"
 trap 'rm -rf "$LEGS_DIR"' EXIT
 leg_names=()
 leg_pids=()
+# The iPad's legs are tracked apart from the phone pool's. If they rode
+# leg_pids, a running pad leg would count against the phone pool's
+# saturation gate below, throttling the pool it does not use and
+# eventually tripping its wedge watchdog.
+pad_pids=()
 
 # Count live leg subshells only: recorders and emulators are
 # background jobs of this same shell, and a jobs-based gate counts
@@ -484,11 +541,35 @@ queue_leg() { # fn name args...
     done
 }
 
+# The iPad leg: same verdict/timing protocol as queue_leg, bound to the
+# one pad device instead of the phone pool. Recording is suppressed
+# because the fiducial scheme indexes films by phone-pool slot and the
+# pad has none — the pad leg is a state gate, not a visual record.
+queue_pad_leg() { # fn name args...
+    local fn="$1" name="$2"
+    shift 2
+    leg_names+=("$name")
+    (
+        unset KAYA_RECORD
+        while ! mkdir "$LEGS_DIR/.dev-pad" 2>/dev/null; do sleep 0.2; done
+        local t0=$SECONDS
+        local verdict=FAIL
+        if "$fn" "$PAD_UDID" pad "$@"; then
+            verdict=PASS
+        fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
+        rmdir "$LEGS_DIR/.dev-pad" 2>/dev/null
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
+    ) >"$LEGS_DIR/$name.log" 2>&1 &
+    pad_pids+=($!)
+}
+
 drain() {
-    if [ ${#leg_pids[@]} -gt 0 ]; then
-        wait "${leg_pids[@]}" 2>/dev/null || true
+    if [ ${#leg_pids[@]} -gt 0 ] || [ ${#pad_pids[@]} -gt 0 ]; then
+        wait "${leg_pids[@]}" "${pad_pids[@]}" 2>/dev/null || true
     fi
     leg_pids=()
+    pad_pids=()
     local name verdict
     for name in "${leg_names[@]}"; do
         verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
@@ -693,6 +774,14 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle menusrs-swiftui dev.kaya.menusswiftui "$TARGET_DIR/examples/menus")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on menus-swiftui "$APP" dev.kaya.menusswiftui menus-swiftui menus menus
+    # The same bundle and the same scene on the iPad. The phone leg
+    # above proves the compact lowering; this one is the only thing in
+    # any lane that observes the REGULAR one, which is where the
+    # iPadOS 26 menu-bar defect lived. One device, one scene: if this
+    # ever needs a second, reconsider whether the lane wants a real
+    # form-factor dimension instead of a bolted-on device.
+    queue_pad_leg run_swiftui_on menus-swiftui-pad "$APP" dev.kaya.menusswiftui \
+        menus-swiftui-pad menus menus
 
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and

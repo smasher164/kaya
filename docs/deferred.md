@@ -11,6 +11,25 @@ moved to git history; their traps live in docs/traps.md.)
 
 ## Next milestones (in rough priority order)
 
+THE NAMED FORCING ARTIFACT IS A **TEXT EDITOR** (Akhil, 2026-07-24).
+This is a roadmap-selection decision, not a build order — the editor is
+written once enough features exist. Its purpose is to resolve the
+admission policy: this ledger is full of items that "wait for an
+artifact", and until one is named those triggers cannot fire, so the
+items sit unordered. Anything the editor needs is now trigger-SATISFIED
+and can be scheduled on its merits; anything it does not need stays
+gated. What it forces: file dialogs, clipboard, the edit roles
+(cut/copy/paste, currently deferred past `settings`), undo/redo,
+dirty-state window titles (the close veto already exists), and find.
+Chosen over chat / todo / media on COMPOUNDING — those four features
+are wanted by every other candidate app too, whereas media's are wanted
+by exactly one, and todo is largely proven already by the `todos`,
+`reorder`, and `feed` scenes. Two further reasons: the editor is the
+field's standard litmus test for the text/IME stack, which kaya passes
+by construction and has never demonstrated; and it forces undo/redo,
+which core can offer far more cheaply than any framework that does not
+own the state (see the undo note in this file).
+
 - **DEFECT — the iPad menu lowering is wrong as of iPadOS 26**
   (found 2026-07-24). iPadOS 26 gives iPad apps a REAL system menu bar
   (swipe down from the top edge, or hover a trackpad; third-party apps
@@ -212,6 +231,34 @@ moved to git history; their traps live in docs/traps.md.)
   on a container the uniqueness convention cannot name — the layout
   scene already qualifies whenever its rows deserve assertions.
 
+- **Undo/redo and session restoration — core-owned, and cheap only
+  here** (from the 2026-07-24 survey; TRIGGER SATISFIED by the text
+  editor). Every other cross-platform framework bolts undo onto
+  application state it does not own; macOS has `NSUndoManager` and the
+  other three platforms have nothing portable. kaya owns all state at
+  rest and every mutation already arrives as a transaction, so an undo
+  stack is a log of objects core materializes anyway. The same
+  machinery gives window/session restoration — serialize the core
+  scene, not the app's state — which cmyr's ingredient list names and
+  nobody enjoys writing. NOT free: the design pass has to answer which
+  transactions are undoable, whether an undo re-runs handlers or simply
+  applies the inverse transaction, and what happens to occurrences
+  emitted during an undo. Do the design pass before any protocol work;
+  the machinery being present is not the same as the semantics being
+  obvious.
+- **The system-integration floor** (from the survey; the editor
+  triggers the first three). Four surfaces, native on every platform,
+  none previously in this ledger, and collectively what separates a
+  demo from an app. In the order real apps need them: **file dialogs**
+  — NOT a widget, a presentation context returning a result, i.e. the
+  alert grammar with a path instead of a button (DESIGN's admissions
+  queue has been corrected); **clipboard** — note it is SYNCHRONOUS on
+  mac/Windows and ASYNCHRONOUS on Linux, so the API must be
+  async-shaped or it is wrong on one platform, and it is also the
+  unblocker for the deferred cut/copy/paste roles; **notifications** —
+  the four platform models are close; **drag and drop** — the most
+  divergent, and it interacts with window management on both mac and
+  Windows. **Printing** sits behind all four and is not editor-forced.
 - **Standard commands LANDED 2026-07-24** (the follow-up milestone to
   menus): a chord rides any window-anchored LEAF command rather than
   plain actions alone, the key floor admits eight named punctuation
