@@ -7939,7 +7939,1116 @@ pub mod Microsoft {
             unsafe impl Send for XamlRoot {}
             unsafe impl Sync for XamlRoot {}
             pub mod Automation {
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct AutomationProperties(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    AutomationProperties,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl AutomationProperties {
+                    pub fn GetAcceleratorKey<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetAcceleratorKey)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetAcceleratorKey<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetAcceleratorKey)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetAccessKey<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetAccessKey)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetAccessKey<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetAccessKey)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetAutomationId<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetAutomationId)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetAutomationId<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetAutomationId)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetHelpText<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetHelpText)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetHelpText<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetHelpText)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetIsRequiredForForm<P0>(element: P0) -> windows_core::Result<bool>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetIsRequiredForForm)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetIsRequiredForForm<P0>(
+                        element: P0,
+                        value: bool,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetIsRequiredForForm)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetItemStatus<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetItemStatus)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetItemStatus<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetItemStatus)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetItemType<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetItemType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetItemType<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetItemType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetLabeledBy<P0>(element: P0) -> windows_core::Result<super::UIElement>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetLabeledBy)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn SetLabeledBy<P0, P1>(element: P0, value: P1) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                        P1: windows_core::Param<super::UIElement>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetLabeledBy)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetName<P0>(element: P0) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetName)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetName<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetName)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetControlledPeers<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_collections::IVector<super::UIElement>>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetControlledPeers)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetPositionInSet<P0>(element: P0) -> windows_core::Result<i32>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetPositionInSet)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetPositionInSet<P0>(element: P0, value: i32) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetPositionInSet)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetSizeOfSet<P0>(element: P0) -> windows_core::Result<i32>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetSizeOfSet)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetSizeOfSet<P0>(element: P0, value: i32) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetSizeOfSet)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetLevel<P0>(element: P0) -> windows_core::Result<i32>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetLevel)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetLevel<P0>(element: P0, value: i32) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetLevel)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetLocalizedLandmarkType<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetLocalizedLandmarkType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetLocalizedLandmarkType<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetLocalizedLandmarkType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetIsPeripheral<P0>(element: P0) -> windows_core::Result<bool>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetIsPeripheral)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetIsPeripheral<P0>(element: P0, value: bool) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetIsPeripheral)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetIsDataValidForForm<P0>(element: P0) -> windows_core::Result<bool>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetIsDataValidForForm)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetIsDataValidForForm<P0>(
+                        element: P0,
+                        value: bool,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetIsDataValidForForm)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetFullDescription<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetFullDescription)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetFullDescription<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetFullDescription)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetLocalizedControlType<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_core::HSTRING>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetLocalizedControlType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        })
+                    }
+                    pub fn SetLocalizedControlType<P0>(
+                        element: P0,
+                        value: &windows_core::HSTRING,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetLocalizedControlType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetDescribedBy<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_collections::IVector<super::DependencyObject>>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetDescribedBy)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetFlowsTo<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_collections::IVector<super::DependencyObject>>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetFlowsTo)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetFlowsFrom<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<windows_collections::IVector<super::DependencyObject>>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetFlowsFrom)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn GetCulture<P0>(element: P0) -> windows_core::Result<i32>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetCulture)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetCulture<P0>(element: P0, value: i32) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetCulture)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetIsDialog<P0>(element: P0) -> windows_core::Result<bool>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetIsDialog)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetIsDialog<P0>(element: P0, value: bool) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetIsDialog)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    pub fn GetAutomationControlType<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<Peers::AutomationControlType>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        Self::IAutomationPropertiesStatics2(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetAutomationControlType<P0>(
+                        element: P0,
+                        value: Peers::AutomationControlType,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::UIElement>,
+                    {
+                        Self::IAutomationPropertiesStatics2(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetAutomationControlType)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
+                    fn IAutomationPropertiesStatics<
+                        R,
+                        F: FnOnce(&IAutomationPropertiesStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            AutomationProperties,
+                            IAutomationPropertiesStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    fn IAutomationPropertiesStatics2<
+                        R,
+                        F: FnOnce(&IAutomationPropertiesStatics2) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            AutomationProperties,
+                            IAutomationPropertiesStatics2,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for AutomationProperties {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IAutomationProperties>();
+                }
+                unsafe impl windows_core::Interface for AutomationProperties {
+                    type Vtable = <IAutomationProperties as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IAutomationProperties as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for AutomationProperties {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Automation.AutomationProperties";
+                }
+                unsafe impl Send for AutomationProperties {}
+                unsafe impl Sync for AutomationProperties {}
+                windows_core::imp::define_interface!(
+                    IAutomationProperties,
+                    IAutomationProperties_Vtbl,
+                    0x525c6a71_dd8a_52a0_977b_db1b02f8e896
+                );
+                impl windows_core::RuntimeType for IAutomationProperties {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IAutomationProperties_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IAutomationPropertiesStatics,
+                    IAutomationPropertiesStatics_Vtbl,
+                    0xb1e3e0f3_112f_5966_87dc_7862d4ad50e5
+                );
+                impl windows_core::RuntimeType for IAutomationPropertiesStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IAutomationPropertiesStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    AcceleratorKeyProperty: usize,
+                    pub GetAcceleratorKey: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetAcceleratorKey: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    AccessKeyProperty: usize,
+                    pub GetAccessKey: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetAccessKey: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    AutomationIdProperty: usize,
+                    pub GetAutomationId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetAutomationId: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    HelpTextProperty: usize,
+                    pub GetHelpText: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHelpText: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    IsRequiredForFormProperty: usize,
+                    pub GetIsRequiredForForm: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIsRequiredForForm: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    ItemStatusProperty: usize,
+                    pub GetItemStatus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetItemStatus: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    ItemTypeProperty: usize,
+                    pub GetItemType: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetItemType: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LabeledByProperty: usize,
+                    pub GetLabeledBy: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetLabeledBy: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    NameProperty: usize,
+                    pub GetName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LiveSettingProperty: usize,
+                    GetLiveSetting: usize,
+                    SetLiveSetting: usize,
+                    AccessibilityViewProperty: usize,
+                    GetAccessibilityView: usize,
+                    SetAccessibilityView: usize,
+                    ControlledPeersProperty: usize,
+                    pub GetControlledPeers: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    PositionInSetProperty: usize,
+                    pub GetPositionInSet: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetPositionInSet: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        i32,
+                    )
+                        -> windows_core::HRESULT,
+                    SizeOfSetProperty: usize,
+                    pub GetSizeOfSet: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetSizeOfSet: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        i32,
+                    )
+                        -> windows_core::HRESULT,
+                    LevelProperty: usize,
+                    pub GetLevel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetLevel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        i32,
+                    )
+                        -> windows_core::HRESULT,
+                    AnnotationsProperty: usize,
+                    GetAnnotations: usize,
+                    LandmarkTypeProperty: usize,
+                    GetLandmarkType: usize,
+                    SetLandmarkType: usize,
+                    LocalizedLandmarkTypeProperty: usize,
+                    pub GetLocalizedLandmarkType:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                    pub SetLocalizedLandmarkType:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
+                    IsPeripheralProperty: usize,
+                    pub GetIsPeripheral: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIsPeripheral: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    IsDataValidForFormProperty: usize,
+                    pub GetIsDataValidForForm: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIsDataValidForForm: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                    FullDescriptionProperty: usize,
+                    pub GetFullDescription: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFullDescription: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    LocalizedControlTypeProperty: usize,
+                    pub GetLocalizedControlType: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetLocalizedControlType: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    DescribedByProperty: usize,
+                    pub GetDescribedBy: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    FlowsToProperty: usize,
+                    pub GetFlowsTo: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    FlowsFromProperty: usize,
+                    pub GetFlowsFrom: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    CultureProperty: usize,
+                    pub GetCulture: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetCulture: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        i32,
+                    )
+                        -> windows_core::HRESULT,
+                    HeadingLevelProperty: usize,
+                    GetHeadingLevel: usize,
+                    SetHeadingLevel: usize,
+                    IsDialogProperty: usize,
+                    pub GetIsDialog: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIsDialog: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IAutomationPropertiesStatics2,
+                    IAutomationPropertiesStatics2_Vtbl,
+                    0xd933a3ed_e90a_5df0_853d_cad17a0b9ec8
+                );
+                impl windows_core::RuntimeType for IAutomationPropertiesStatics2 {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IAutomationPropertiesStatics2_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    AutomationControlTypeProperty: usize,
+                    pub GetAutomationControlType:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut Peers::AutomationControlType,
+                        ) -> windows_core::HRESULT,
+                    pub SetAutomationControlType:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            Peers::AutomationControlType,
+                        ) -> windows_core::HRESULT,
+                }
                 pub mod Peers {
+                    #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct AutomationControlType(pub i32);
+                    impl AutomationControlType {
+                        pub const Button: Self = Self(0i32);
+                        pub const Calendar: Self = Self(1i32);
+                        pub const CheckBox: Self = Self(2i32);
+                        pub const ComboBox: Self = Self(3i32);
+                        pub const Edit: Self = Self(4i32);
+                        pub const Hyperlink: Self = Self(5i32);
+                        pub const Image: Self = Self(6i32);
+                        pub const ListItem: Self = Self(7i32);
+                        pub const List: Self = Self(8i32);
+                        pub const Menu: Self = Self(9i32);
+                        pub const MenuBar: Self = Self(10i32);
+                        pub const MenuItem: Self = Self(11i32);
+                        pub const ProgressBar: Self = Self(12i32);
+                        pub const RadioButton: Self = Self(13i32);
+                        pub const ScrollBar: Self = Self(14i32);
+                        pub const Slider: Self = Self(15i32);
+                        pub const Spinner: Self = Self(16i32);
+                        pub const StatusBar: Self = Self(17i32);
+                        pub const Tab: Self = Self(18i32);
+                        pub const TabItem: Self = Self(19i32);
+                        pub const Text: Self = Self(20i32);
+                        pub const ToolBar: Self = Self(21i32);
+                        pub const ToolTip: Self = Self(22i32);
+                        pub const Tree: Self = Self(23i32);
+                        pub const TreeItem: Self = Self(24i32);
+                        pub const Custom: Self = Self(25i32);
+                        pub const Group: Self = Self(26i32);
+                        pub const Thumb: Self = Self(27i32);
+                        pub const DataGrid: Self = Self(28i32);
+                        pub const DataItem: Self = Self(29i32);
+                        pub const Document: Self = Self(30i32);
+                        pub const SplitButton: Self = Self(31i32);
+                        pub const Window: Self = Self(32i32);
+                        pub const Pane: Self = Self(33i32);
+                        pub const Header: Self = Self(34i32);
+                        pub const HeaderItem: Self = Self(35i32);
+                        pub const Table: Self = Self(36i32);
+                        pub const TitleBar: Self = Self(37i32);
+                        pub const Separator: Self = Self(38i32);
+                        pub const SemanticZoom: Self = Self(39i32);
+                        pub const AppBar: Self = Self(40i32);
+                        pub const FlipView: Self = Self(41i32);
+                    }
+                    impl windows_core::TypeKind for AutomationControlType {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for AutomationControlType {
+                        const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Microsoft.UI.Xaml.Automation.Peers.AutomationControlType;i4)" ) ;
+                    }
                     #[repr(transparent)]
                     #[derive(Clone, Debug, Eq, PartialEq)]
                     pub struct AutomationPeer(windows_core::IUnknown);
@@ -7999,6 +9108,19 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetAutomationId(
@@ -8461,6 +9583,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -9055,6 +10187,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -9503,6 +10648,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -10126,6 +11281,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -10574,6 +11742,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -11188,6 +12366,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -11636,6 +12827,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -12268,7 +13469,12 @@ pub mod Microsoft {
                             *mut *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
-                        GetAutomationControlType: usize,
+                        pub GetAutomationControlType:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut AutomationControlType,
+                            )
+                                -> windows_core::HRESULT,
                         pub GetAutomationId: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut *mut core::ffi::c_void,
@@ -12507,7 +13713,12 @@ pub mod Microsoft {
                             *mut *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
-                        GetAutomationControlTypeCore: usize,
+                        pub GetAutomationControlTypeCore:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut AutomationControlType,
+                            )
+                                -> windows_core::HRESULT,
                         pub GetAutomationIdCore: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut *mut core::ffi::c_void,
@@ -13061,6 +14272,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -13509,6 +14733,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -14158,6 +15392,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -14606,6 +15853,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(
@@ -15235,6 +16492,19 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetAutomationControlType(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAutomationControlType)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetAutomationId(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -15683,6 +16953,16 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetAutomationControlTypeCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationControlType> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                ( windows_core::Interface::vtable ( this ) . GetAutomationControlTypeCore ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
                             }
                         }
                         pub fn GetAutomationIdCore(

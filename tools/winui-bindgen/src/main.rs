@@ -190,6 +190,18 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ButtonBaseAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer".to_string(),
+        // Accessibility (DESIGN.md, the a11y_id/a11y_label props):
+        // AutomationProperties is the SETTER side — AutomationId is the
+        // automation identifier and Name is what a screen reader speaks
+        // — while the peers above are the READ side. Unlike GTK, WinUI
+        // publishes a settable identifier, so the harness matches by
+        // identity here rather than by ordinal.
+        "Microsoft.UI.Xaml.Automation.AutomationProperties".to_string(),
+        // The control-type enum the peer's GetAutomationControlType
+        // returns. Without it windows-bindgen filters the type out AND
+        // drops the method that returns it — the vtable slot survives as
+        // a bare usize, so the omission reads as "no such method".
+        "Microsoft.UI.Xaml.Automation.Peers.AutomationControlType".to_string(),
         // Menus (DESIGN.md, Menus and the command vocabulary): the
         // ratified WinUI lowering — MenuBar in its own Auto row of the
         // window shell Grid, MenuBarItem per top-level grouping node,

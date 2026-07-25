@@ -45,7 +45,14 @@ check() {
     # Warnings stay quiet (some cfg'd backends carry known ones); the
     # full output appears only when the check fails.
     local out
-    if out="$(cargo check -p kaya --lib --quiet "$@" 2>&1)"; then
+    # BOTH feature configurations. The harness is off by default, so a
+    # default-only check compiles neither Stage impl nor any
+    # harness-gated backend code — and deploy-win/run-suites build WITH
+    # the feature. Measured 2026-07-25: this gate reported "windows OK"
+    # while the windows lane failed to build the WinUI accessibility
+    # read, because that code only exists under --features harness.
+    if out="$(cargo check -p kaya --lib --quiet "$@" 2>&1 \
+        && cargo check -p kaya --lib --quiet --features harness "$@" 2>&1)"; then
         echo "check-targets: $name OK"
     else
         echo "$out"

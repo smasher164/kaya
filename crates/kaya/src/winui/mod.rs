@@ -3038,6 +3038,32 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
                 }
+                // THE UNIVERSAL PROPS. Every other arm keys on a
+                // (kind, prop) pair; these name something every element
+                // has, so they match the prop alone.
+                //
+                // AutomationProperties is UIA's setter side: AutomationId
+                // is the automation identifier (never spoken) and Name is
+                // what a screen reader says. Unlike GTK, WinUI publishes a
+                // settable identifier, so the harness read below matches
+                // by identity rather than by ordinal.
+                (w, Prop::A11yId, Value::Str(id)) => {
+                    let element = w.element()?;
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAutomationId(
+                        &element,
+                        &windows_core::HSTRING::from(id.as_str()),
+                    )?;
+                }
+                // Empty means unset, and unset stays untouched: UIA
+                // derives a control's name from its content, and writing
+                // "" would SILENCE it.
+                (w, Prop::A11yLabel, Value::Str(label)) if !label.is_empty() => {
+                    let element = w.element()?;
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+                        &element,
+                        &windows_core::HSTRING::from(label.as_str()),
+                    )?;
+                }
                 (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
                     reflow_grid(core, id.0)?;
@@ -4114,13 +4140,58 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or(0)
     }
 
-    fn ax(&self, _target: crate::harness::Target) -> String {
-        // FAN-OUT PENDING (the depth slice is SwiftUI on mac). Declared
-        // so the trait is satisfied and the remaining work stays
-        // VISIBLE — a sentinel that can never equal a valid
-        // `<role>/<label>` spelling, so any scene asserting on this
-        // backend fails loudly instead of quietly passing. Reads FrameworkElementAutomationPeer when it lands.
-        "<the WinUI accessibility read is not implemented yet>".to_owned()
+    fn ax(&self, target: crate::harness::Target) -> String {
+        // UNPROVEN: compiles and cross-builds, but no scene exercises it
+        // yet — the a11y scene cannot join deploy-win's SCENES until its
+        // per-language guests exist (the runner globs for sources), so
+        // nothing has read a real UIA peer on Windows. Treat the role
+        // mapping below as a hypothesis until a leg runs; the GTK read
+        // needed two corrections that only a live run surfaced (an entry
+        // is AT-SPI role Text, not Entry).
+        //
+        // Read UIA's own peer, not kaya's model: FrameworkElementAutomationPeer
+        // is what an assistive client (Narrator, an automation harness)
+        // sees. Correspondence is by IDENTITY — WinUI publishes a
+        // settable AutomationId, unlike GTK where none exists below 4.22
+        // and the read has to match by ordinal.
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::{
+                AutomationControlType, FrameworkElementAutomationPeer,
+            };
+            let want = widget_id_for_target(core, target);
+            let Some(w) = core.widgets.get(&crate::protocol::WidgetId(want)) else {
+                return Ok("<no such target>".to_owned());
+            };
+            let element = w.element()?;
+            let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
+            let Ok(peer) = FrameworkElementAutomationPeer::FromElement(&fe) else {
+                return Ok("<not in the accessibility tree>".to_owned());
+            };
+            let kind = peer.GetAutomationControlType()?;
+            let role = if kind == AutomationControlType::Button {
+                "button"
+            } else if kind == AutomationControlType::CheckBox {
+                "checkbox"
+            } else if kind == AutomationControlType::Edit {
+                "field"
+            } else if kind == AutomationControlType::Text {
+                "label"
+            } else if kind == AutomationControlType::Slider {
+                "slider"
+            } else if kind == AutomationControlType::Image {
+                "image"
+            } else if kind == AutomationControlType::ProgressBar {
+                "progress"
+            } else if kind == AutomationControlType::Group
+                || kind == AutomationControlType::Pane
+            {
+                "group"
+            } else {
+                "unknown"
+            };
+            Ok(format!("{role}/{}", peer.GetName()?))
+        })
+        .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
     fn menu_presentation(&self) -> String {
