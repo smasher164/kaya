@@ -1700,7 +1700,27 @@ object KayaCompose {
                                     "/" +
                                     KayaSceneModel.menuPresentation
                             }
-                        if (got == want) observed.add("presentation $want")
+                        if (want.isEmpty()) {
+                            // The BARE form: the invariant only, with a
+                            // LANE-INDEPENDENT observation string — a
+                            // shared scene compares observations
+                            // byte-for-byte across platforms, so it
+                            // cannot echo a value that legitimately
+                            // differs. Asymmetric on purpose: a compact
+                            // window showing a bar is fine.
+                            val halves = got.split("/", limit = 2)
+                            if (halves.size == 2 &&
+                                halves[0] == "regular" &&
+                                halves[1] == "overflow"
+                            ) {
+                                failures.add(
+                                    "presentation $got: a regular window must not " +
+                                        "hide its catalog behind the compact overflow"
+                                )
+                            } else {
+                                observed.add("presentation fits")
+                            }
+                        } else if (got == want) observed.add("presentation $want")
                         else failures.add("presentation $got, wanted $want")
                     }
                     "expect_menu" -> {

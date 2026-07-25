@@ -237,6 +237,44 @@ kill_guests() {
     kill_list=$(for s in $SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
     run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im kaya-guests.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
+# Is the guest stuck in the state taskkill CANNOT clear? The signature
+# is a contradiction: tasklist still LISTS an image while taskkill says
+# "There is no running instance of the task" — a process past the point
+# where it can be signalled, not a permissions failure (that reports
+# "Access is denied", which is a different message and a different
+# problem). Confirmed 2026-07-25 after the second occurrence; the class
+# is in docs/traps.md. Only a VM restart clears it.
+guests_wedged() {
+    local listed killed
+    listed=$(run_ssh "tasklist" 2>/dev/null \
+        | grep -icE "^(go|java|python|dotnet|kaya-guests)\.exe" || true)
+    [ "${listed:-0}" -gt 0 ] || return 1
+    killed=$(run_ssh "cmd /c \"taskkill /f /im go.exe & taskkill /f /im java.exe & taskkill /f /im python.exe & taskkill /f /im dotnet.exe & exit /b 0\"" 2>&1 || true)
+    grep -qi "no running instance" <<<"$killed"
+}
+
+# Force the VM down and back up, then wait for sshd. The ONLY escape
+# from the wedged state above.
+vm_restart() {
+    echo "== force-restarting VM \"$VM_NAME\" ==" >&2
+    "$(utmctl_bin)" stop --kill "$VM_NAME" || true
+    local tries=0
+    while "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; do
+        tries=$((tries + 1))
+        [ "$tries" -le 12 ] || { echo "VM would not stop" >&2; return 1; }
+        sleep 5
+    done
+    "$(utmctl_bin)" start "$VM_NAME" || true
+    tries=0
+    until ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; do
+        tries=$((tries + 1))
+        [ "$tries" -le 60 ] || { echo "VM did not come back" >&2; return 1; }
+        sleep 5
+    done
+    sleep 20 # the /it scheduled tasks need a logged-in console session
+    echo "== VM back =="  >&2
+}
+
 LEGS_DIR="$(mktemp -d)"
 cleanup() {
     kill_guests
@@ -596,6 +634,21 @@ run_one_suite() {
             # fail this leg loudly.
             echo "$name: timed out waiting for output; killing guests" >&2
             kill_guests
+            # A plain timeout is recoverable; the WEDGED state is not,
+            # and taskkill cannot tell you which you have. Fingerprint
+            # it, because otherwise EVERY remaining leg pays this same
+            # 300s (110 legs of that is the hours-long silent stall this
+            # guard exists to stop, measured 2026-07-25). Restart once
+            # per run: if the wedge recurs after a restart it is not
+            # this class and must not be papered over.
+            if guests_wedged; then
+                if mkdir "$LEGS_DIR/.vm-restarted" 2>/dev/null; then
+                    echo "$name: guests are WEDGED (tasklist lists them, taskkill reports no running instance) — the documented unkillable-terminating-state class; taskkill cannot clear it, restarting the VM" >&2
+                    vm_restart || true
+                else
+                    echo "$name: guests WEDGED AGAIN after a VM restart — not the known transient class; investigate rather than retrying" >&2
+                fi
+            fi
             return 1
         fi
         sleep 1

@@ -831,6 +831,41 @@ a platform release re-opens it instead of a deferral quietly becoming
 unreachable. The general form of the bug: the deferral did not go
 stale — its PREMISE did, and nothing was watching the premise.
 
+## Windows guests wedge UNKILLABLY, and taskkill cannot say so
+
+2026-07-25, second occurrence (first: textarea matrix, 2026-07-22). The
+windows lane stalled ~20 minutes with ZERO verdicts. Two guests —
+`go.exe` running `reorder`, `java.exe` running `milestone2kt` — sat in a
+state where `tasklist` LISTS them but `taskkill /F` answers:
+
+    ERROR: The process ... could not be terminated.
+    Reason: There is no running instance of the task.
+
+That message is the diagnosis, and it is NOT a permissions failure:
+insufficient rights report "Access is denied", a different message and a
+different fix. "No running instance" means the process is past the point
+where it can be signalled — a terminating/zombie state. Elevating the
+ssh session or the scheduled task changes nothing; the documented escape
+for this class is a reboot, which is why `utmctl stop --kill` worked
+when nothing else did. Consistent with kaya's known WinUI teardown
+hazards (XAML COM refs must be LEAKED after Start returns;
+MddBootstrapShutdown must run while the process is healthy) and with
+both occurrences being GUI guests on a virtual GPU.
+
+WHY IT COST 20 MINUTES rather than 5: run_one_suite ALREADY had a 300s
+per-leg timeout, and it fired. The gap was recovery — its remedy is
+`kill_guests`, i.e. taskkill, which by definition cannot clear this
+state. So every REMAINING leg hit the same 300s wall; at 110 legs that
+is hours of silence, and the lane looked hung rather than failing.
+A timeout without a recovery path is not a guard, it is a slower hang.
+
+Guard (deploy-win.sh): `guests_wedged` fingerprints the contradiction —
+tasklist lists an image AND taskkill reports "no running instance" — and
+on a leg timeout escalates to `vm_restart` (stop --kill, wait stopped,
+start, wait for sshd, grace for the /it console session). Once per run:
+a wedge that RECURS after a restart is not this class and says so
+loudly instead of retrying forever.
+
 ## The wedged-VM class: "started" is not "reachable"
 
 2026-07-22, textarea matrix: the UTM Windows guest OS hung mid-suite

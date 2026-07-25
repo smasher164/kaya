@@ -4239,6 +4239,21 @@ impl crate::harness::Stage for WinUiStage {
                 break;
             }
             unsafe { SetForegroundWindow(hwnd) };
+            if attempt == 10 {
+                // An ACTIVE MENU categorically blocks SetForegroundWindow
+                // — "no menus are active" is one of the documented
+                // preconditions, so retrying and the ALT tap below can
+                // never win against an open Start menu. ESC dismisses it.
+                // This is not hypothetical: an unattended run on
+                // 2026-07-25 lost two legs to a Start menu left open by
+                // an earlier wedged run, which held the foreground until
+                // something else happened to dismiss it. Nothing about
+                // that required a human at the VM.
+                unsafe {
+                    keybd_event(0x1B, 0, 0, 0);
+                    keybd_event(0x1B, 0, 2, 0);
+                }
+            }
             if attempt == 50 {
                 // The classic foreground-lock release: a bare ALT tap
                 // grants the next SetForegroundWindow call.
@@ -4251,7 +4266,11 @@ impl crate::harness::Stage for WinUiStage {
         }
         assert!(
             confirmed,
-            "kaya: could not foreground the guest window for shortcut injection"
+            "kaya: could not foreground the guest window for shortcut \
+             injection after 3s (an ACTIVE MENU blocks SetForegroundWindow \
+             outright — a Start menu or popup left open on the VM is the \
+             usual cause; ESC and the ALT foreground-lock release were \
+             both tried)"
         );
 
         // The REAL KeyboardAccelerator path: the chord goes onto the

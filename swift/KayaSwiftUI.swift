@@ -2188,7 +2188,8 @@ private func kayaRunScript(_ script: String) {
                 // actually rendered — never a derivation from the
                 // other half, which would make this verb agree with
                 // the lowering by construction.
-                let wantPresentation = kayaQuoted(Array(parts[1...]))
+                let wantPresentation =
+                    parts.count > 1 ? kayaQuoted(Array(parts[1...])) : ""
                 let gotPresentation = DispatchQueue.main.sync { () -> String in
                     #if os(macOS)
                         kayaEnsureMenuSegment()
@@ -2237,7 +2238,22 @@ private func kayaRunScript(_ script: String) {
                         return window.formFactor.rawValue + "/" + presentation
                     #endif
                 }
-                if gotPresentation == wantPresentation {
+                if wantPresentation.isEmpty {
+                    // The BARE form: assert only the invariant, and
+                    // report a LANE-INDEPENDENT string — a shared scene
+                    // compares observations byte-for-byte across every
+                    // platform, so it cannot echo a value that
+                    // legitimately differs. Asymmetric on purpose: a
+                    // compact window showing a bar is fine.
+                    let halves = gotPresentation.split(separator: "/", maxSplits: 1)
+                    if halves.count == 2, halves[0] == "regular", halves[1] == "overflow" {
+                        failures.append(
+                            "presentation \(gotPresentation): a regular window must not "
+                                + "hide its catalog behind the compact overflow")
+                    } else {
+                        observed.append("presentation fits")
+                    }
+                } else if gotPresentation == wantPresentation {
                     observed.append("presentation \(wantPresentation)")
                 } else {
                     failures.append("presentation \(gotPresentation), wanted \(wantPresentation)")

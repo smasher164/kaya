@@ -75,6 +75,32 @@ own the state (see the undo note in this file).
   machinery. `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated
   — it is what proved the laziness and will be wanted again.
 
+- **Adaptive LAYOUT is the second form-factor surface, and it owns
+  `resize_window`** (Akhil, 2026-07-25; deferred until after the
+  accessibility milestone). The menus milestone re-keyed adaptivity
+  onto size class but menus are the only lowering that obeys the rule.
+  The surface that makes the axis pay is layout: a regular window
+  wanting multi-column / list-detail where a compact one gets a single
+  column. REFRAMING WORTH KEEPING — `resize_window` was filed as this
+  milestone's gate, but a verb that drives a transition no code
+  specializes gates nothing. It belongs WITH adaptive layout, as that
+  feature's gate, not before it.
+  Encouraging for admission: the adaptive split IS a 4/4 native
+  intersection, unlike the DRAGGABLE splitter (2/4) it is easily
+  confused with — SwiftUI `NavigationSplitView`, Compose's Material 3
+  adaptive scaffolds (`ListDetailPaneScaffold`) driven by
+  `WindowSizeClass`, libadwaita's `AdwBreakpoint` +
+  `AdwNavigationSplitView`, and WinUI's `TwoPaneView` / NavigationView
+  display modes and adaptive triggers. Every one is size-class-driven
+  by design, which is exactly the axis now in place.
+  Also still open from the menus milestone: `menus.steps` carries no
+  presentation assertion, because the right literal differs per lane
+  (`regular/bar` desktop, `compact/overflow` phones). The shared-scene
+  form wants the ASYMMETRIC INVARIANT — regular implies not overflow —
+  which is true on every platform and is exactly the original defect. A
+  compact window showing a bar is legitimate (a narrow desktop window),
+  so the symmetric form would false-alarm on GTK/WinUI.
+
 - **Form factor as the adaptivity axis** (DESIGN's "Form factor and
   adaptivity", 2026-07-24). kaya keys adaptivity on PLATFORM —
   compile-time `#if os(iOS)`, and the compact-overflow rule written as

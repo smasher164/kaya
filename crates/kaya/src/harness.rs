@@ -329,7 +329,16 @@ pub enum Step {
     /// size class, Compose's WindowSizeClass) and from the 600dp width
     /// boundary those APIs themselves use where it does not (GTK4,
     /// WinUI — whose adaptive triggers are width thresholds anyway).
-    ExpectMenuPresentation(String),
+    /// `Some(spelling)` asserts an exact `<class>/<presentation>`.
+    /// `None` — the BARE form — asserts only the invariant: a regular
+    /// window must not hide its catalog behind the compact overflow.
+    /// The bare form is what a SHARED scene can carry, because the
+    /// exact literal differs per lane (`regular/bar` on desktops,
+    /// `compact/overflow` on phones) while the invariant holds
+    /// everywhere. Deliberately ASYMMETRIC: a compact window showing a
+    /// bar is legitimate — a narrow GTK or WinUI window keeps its menu
+    /// bar — so only the one direction is a defect.
+    ExpectMenuPresentation(Option<String>),
     /// Drive the platform's key-equivalent dispatch for a canonical
     /// shortcut spelling — at minimum the same table the platform's
     /// own key event traverses, emitting the SAME menu_activated the
@@ -761,9 +770,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("expect_menus wants a count: {line:?}"))?,
             ),
             "expect_menu_presentation" => {
-                let want = parse_string(rest)?;
-                check_menu_presentation(&want).map_err(|e| format!("{e}: {line:?}"))?;
-                Step::ExpectMenuPresentation(want)
+                if rest.trim().is_empty() {
+                    Step::ExpectMenuPresentation(None)
+                } else {
+                    let want = parse_string(rest)?;
+                    check_menu_presentation(&want)
+                        .map_err(|e| format!("{e}: {line:?}"))?;
+                    Step::ExpectMenuPresentation(Some(want))
+                }
             }
             "shortcut" => {
                 let spelling = parse_string(rest)?;
@@ -919,6 +933,17 @@ fn check_menu_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The invariant the BARE expect_menu_presentation step asserts: a
+/// regular-width window must not hide its catalog behind the compact
+/// overflow. Deliberately ASYMMETRIC — a compact window showing a bar
+/// is legitimate (a narrow GTK or WinUI window keeps its menu bar), so
+/// the reverse is not a defect. Extracted from the step so it is
+/// directly testable; the two interpreters mirror it.
+fn menu_presentation_fits(spelling: &str) -> bool {
+    let (class, presentation) = spelling.split_once('/').unwrap_or(("unknown", "none"));
+    !(class == "regular" && presentation == "overflow")
+}
+
 /// The presentation spelling of an expect_menu_presentation step:
 /// `<size class>/<presentation>`, both halves from closed sets. A
 /// typo here would otherwise read as a backend disagreeing with the
@@ -991,7 +1016,34 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             return;
         }
     };
-    std::thread::spawn(move || run_with_log(steps, stage, Some(log)));
+    std::thread::spawn(move || {
+        // A panic here unwinds only THIS thread; the UI thread keeps the
+        // process alive, so the runner — which waits for process EXIT —
+        // sees nothing and burns its whole timeout. Measured 2026-07-25
+        // on Windows: a shortcut verb panicked at +714ms and the leg was
+        // reported as a 328-SECOND HANG, with the real diagnosis sitting
+        // unread in the output file the entire time.
+        //
+        // So a harness panic terminates the process. The message has
+        // already been printed by the default hook; the exit code is
+        // what lets the runner's `EXIT=` appear at once, turning a
+        // multi-minute silent stall into a one-second labelled failure.
+        // This is the harness thread, and its panic IS the verdict —
+        // there is nothing left for the process to do.
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_with_log(steps, stage, Some(log))
+            }));
+        if outcome.is_err() {
+            // Flush what the default hook wrote before leaving; an
+            // orderly exit is not available from a foreign thread on
+            // every backend (WinUI's XAML apartment in particular).
+            use std::io::Write;
+            let _ = std::io::stderr().flush();
+            let _ = std::io::stdout().flush();
+            std::process::exit(1);
+        }
+    });
 }
 
 /// The synchronous run loop, factored out of spawn so tests can drive
@@ -1460,6 +1512,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             })),
             Step::ExpectMenuPresentation(want) => Some(poll(|| {
                 let got = stage.menu_presentation();
+                let Some(want) = want else {
+                    // The bare form. The observation string must be
+                    // lane-INDEPENDENT: a shared scene compares it
+                    // byte-for-byte across every platform, so it cannot
+                    // echo a value that legitimately differs.
+                    return if menu_presentation_fits(&got) {
+                        Ok("presentation fits".to_owned())
+                    } else {
+                        Err(format!(
+                            "presentation {got}: a regular window must not \
+                             hide its catalog behind the compact overflow"
+                        ))
+                    };
+                };
                 if got == *want {
                     Ok(format!("presentation {want}"))
                 } else {
@@ -2254,6 +2320,9 @@ mod tests {
             // Legal on purpose: a backend that has not observed its
             // window yet must be able to say so rather than guess.
             "expect_menu_presentation \"unknown/none\"",
+            // The BARE form: the invariant a shared scene can carry,
+            // since the exact literal differs per lane.
+            "expect_menu_presentation",
         ] {
             assert!(parse(good).is_ok(), "{good} should parse");
         }
@@ -2268,9 +2337,28 @@ mod tests {
             "expect_menu_presentation \"bar/regular\"",
             "expect_menu_presentation \"regular/bar/extra\"",
             "expect_menu_presentation regular/bar",
-            "expect_menu_presentation",
         ] {
             assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// The bare form's invariant, both directions. The failing case is
+    /// the iPadOS 26 defect exactly: a regular window whose catalog
+    /// sits behind the compact overflow.
+    #[test]
+    fn menu_presentation_invariant() {
+        assert!(!menu_presentation_fits("regular/overflow"));
+        // Every legitimate combination, including the asymmetry: a
+        // compact window MAY show a bar (a narrow desktop window does).
+        for good in [
+            "regular/bar",
+            "regular/none",
+            "compact/overflow",
+            "compact/bar",
+            "compact/none",
+            "unknown/none",
+        ] {
+            assert!(menu_presentation_fits(good), "{good} should fit");
         }
     }
 

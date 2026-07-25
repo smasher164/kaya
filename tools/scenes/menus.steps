@@ -73,3 +73,13 @@ expect_menu "Tools>Inspect" enabled
 # resolves the same semantic path through its full catalog.
 menu_activate "Document>Publish"
 expect label#0 "shared"
+
+# The catalog's presentation must FIT the window's size class on every
+# host (DESIGN.md, "Form factor and adaptivity"). Bare form on purpose:
+# the exact literal differs per lane — regular/bar on desktops,
+# compact/overflow on phones — while the invariant holds everywhere, so
+# only the bare form can ride a scene shared verbatim. Asymmetric by
+# design: a compact window showing a bar is legitimate (a narrow GTK or
+# WinUI window keeps its menu bar); a REGULAR window hiding its catalog
+# behind the compact overflow is the iPadOS 26 defect this guards.
+expect_menu_presentation
