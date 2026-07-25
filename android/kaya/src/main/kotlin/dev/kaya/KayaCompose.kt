@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
@@ -200,6 +201,15 @@ object KayaSceneModel {
     // node, or surface ids (DESIGN.md, Menus).
     val menuItems = HashMap<Long, KayaMenuItem>() // UI thread only
     val menubar = androidx.compose.runtime.mutableStateListOf<KayaMenuItem>()
+    // The window's live FORM FACTOR and the catalog lowering that
+    // ACTUALLY rendered, the two halves expect_menu_presentation reads
+    // (DESIGN.md, "Form factor and adaptivity"). The adaptivity axis is
+    // the window's size class, never the operating system. Nothing
+    // derives one of these from the other: deriving would make the
+    // harness verb agree with the lowering by construction, and the
+    // failure being gated is exactly the two disagreeing.
+    var formFactor = "unknown" // unknown | compact | regular
+    var menuPresentation = "none" // none | bar | overflow
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
     // emit one attach per root), never replace. A template attachment
@@ -1679,6 +1689,20 @@ object KayaCompose {
                         if (got == want) observed.add("$want menus")
                         else failures.add("$got menus, wanted $want")
                     }
+                    "expect_menu_presentation" -> {
+                        // `<size class>/<presentation>`: the platform's
+                        // width reading, and the lowering that actually
+                        // rendered.
+                        val want = quotedHead(line.substring(parts[0].length))?.first ?: ""
+                        val got =
+                            onUi(activity) {
+                                KayaSceneModel.formFactor +
+                                    "/" +
+                                    KayaSceneModel.menuPresentation
+                            }
+                        if (got == want) observed.add("presentation $want")
+                        else failures.add("presentation $got, wanted $want")
+                    }
                     "expect_menu" -> {
                         // Quoted path first, then the state token(s);
                         // the token names WHICH axis is read (an item
@@ -2238,14 +2262,25 @@ fun KayaRoot() {
     // where composition provides one (expect_fills sums it between
     // tracks).
     kayaDensity = LocalDensity.current.density.toDouble()
+    // The size class, from the platform's own width in dp against the
+    // 600dp boundary — the same boundary androidx's WindowSizeClass
+    // draws, taken directly so the interpreter needs no extra artifact.
+    KayaSceneModel.formFactor =
+        if (LocalConfiguration.current.screenWidthDp >= 600) "regular" else "compact"
     if (KayaSceneModel.menubar.isEmpty()) {
         // No catalog: the surface keeps its exact pre-menus shape (no
         // phantom bar over scenes that declared no commands).
+        KayaSceneModel.menuPresentation = "none"
         KayaSurface()
     } else {
         // The window catalog's phone lowering (DESIGN.md, Menus): the
         // catalog folds into the top app bar — promoted primaries as
         // real bar actions, everything in the overflow ⋮.
+        // Stamped by the arm that renders, not inferred from the size
+        // class above. Android has no menu-bar lowering yet, so this is
+        // `overflow` in BOTH classes — which is the honest report, and
+        // is what a tablet-width assertion would correctly fail on.
+        KayaSceneModel.menuPresentation = "overflow"
         Column(modifier = Modifier.fillMaxSize()) {
             KayaMenuTopBar()
             Box(modifier = Modifier.weight(1f)) { KayaSurface() }

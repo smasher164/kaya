@@ -3063,6 +3063,34 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn menu_presentation(&self) -> String {
+        Self::on_main(|core| {
+            use gtk4::prelude::GtkWindowExt;
+            // GTK4 has no size-class API of its own (libadwaita's
+            // AdwBreakpoint is the nearest, and this backend does not
+            // depend on it), so the class comes from the window's real
+            // content width against the same 600 boundary the other
+            // platforms draw — default_size on a mapped toplevel, the
+            // notion window_content_size already reads.
+            let width = gtk_window(core, 0).default_size().0;
+            let class = if width >= 600 { "regular" } else { "compact" };
+            // The presentation is read off the REAL chrome — a
+            // PopoverMenuBar exists or it does not. GTK has only the
+            // bar lowering, so there is no arm to disagree with the
+            // class; that is a fact about this backend, recorded, not
+            // an inference.
+            let bar = core
+                .menu_models
+                .get(&0)
+                .map(|model| {
+                    use gtk4::gio::prelude::MenuModelExt;
+                    model.n_items() > 0
+                })
+                .unwrap_or(false);
+            format!("{class}/{}", if bar { "bar" } else { "none" })
+        })
+    }
+
     fn menu_state(&self, path: &str, aspect: crate::harness::MenuAspect) -> String {
         let path = path.to_owned();
         Self::on_main(move |core| {

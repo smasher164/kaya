@@ -4094,6 +4094,32 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or(0)
     }
 
+    fn menu_presentation(&self) -> String {
+        // XAML has no size-class type; its own adaptive triggers are
+        // width thresholds (`MinWindowWidth`), so a width rule IS the
+        // platform idiom here. Same 600 boundary as the others, read
+        // off the real root's ActualWidth in effective pixels.
+        Self::on_ui_read(|core| {
+            // The XamlRoot's size is the client area in DIP — the same
+            // notion window_content_size and root_fills read, so the
+            // 600 boundary means the same thing here as elsewhere.
+            let target = winui_window(core, 0)?;
+            let root: FrameworkElement = target.Content()?.cast()?;
+            let width = f64::from(root.XamlRoot()?.Size()?.Width);
+            let class = if width >= 600.0 { "regular" } else { "compact" };
+            // Read off the REAL chrome, like menu_count: a MenuBar with
+            // items or nothing. WinUI has only the bar lowering.
+            let bar = core
+                .menubars
+                .get(&0)
+                .map(|bar| bar.Items()?.Size().map(|n| n > 0))
+                .transpose()?
+                .unwrap_or(false);
+            Ok(format!("{class}/{}", if bar { "bar" } else { "none" }))
+        })
+        .unwrap_or_else(|_| "unknown/none".to_owned())
+    }
+
     fn menu_state(&self, path: &str, aspect: crate::harness::MenuAspect) -> String {
         use crate::harness::MenuAspect;
         let path = path.to_owned();

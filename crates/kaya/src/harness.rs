@@ -316,6 +316,20 @@ pub enum Step {
     /// materialized bar (or the phone overflow's group list) — the
     /// observation menubar_append's topology is verified by.
     ExpectMenus(usize),
+    /// How the window catalog is CURRENTLY presented, spelled
+    /// `<size class>/<presentation>`: `regular/bar`,
+    /// `compact/overflow`, or `<class>/none` when the catalog is empty.
+    ///
+    /// The PAIR is the assertion on purpose. The iPadOS 26 defect was a
+    /// regular-width window wearing the compact lowering, and neither
+    /// half alone catches that — the size class was right and the
+    /// presentation was right, only for different windows (DESIGN.md,
+    /// "Form factor and adaptivity"). Size class comes from the
+    /// platform's own reading where it has one (SwiftUI's horizontal
+    /// size class, Compose's WindowSizeClass) and from the 600dp width
+    /// boundary those APIs themselves use where it does not (GTK4,
+    /// WinUI — whose adaptive triggers are width thresholds anyway).
+    ExpectMenuPresentation(String),
     /// Drive the platform's key-equivalent dispatch for a canonical
     /// shortcut spelling — at minimum the same table the platform's
     /// own key event traverses, emitting the SAME menu_activated the
@@ -499,6 +513,15 @@ pub trait Stage: Send + 'static {
     /// bar (or the phone overflow's group list) — never the scene
     /// model's copy. No default.
     fn menu_count(&self) -> usize;
+    /// The window catalog's live presentation, `<size class>/<presentation>`
+    /// — see Step::ExpectMenuPresentation for the vocabulary.
+    ///
+    /// Both halves must come FROM THE PLATFORM, not from the scene
+    /// model. Reading the model would make this verb agree with itself:
+    /// the whole failure being gated is a lowering that disagrees with
+    /// the window it is in, and a model-sourced answer cannot see that.
+    /// No default.
+    fn menu_presentation(&self) -> String;
     /// The menu item's state along one axis, read from the platform's
     /// real menu chrome and spelled in the steps grammar's own words
     /// ("enabled"/"disabled", "checked"/"unchecked", "value N") —
@@ -737,6 +760,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_menus wants a count: {line:?}"))?,
             ),
+            "expect_menu_presentation" => {
+                let want = parse_string(rest)?;
+                check_menu_presentation(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::ExpectMenuPresentation(want)
+            }
             "shortcut" => {
                 let spelling = parse_string(rest)?;
                 // Grammar-level sanity only: emptiness and whitespace
@@ -887,6 +915,37 @@ fn check_menu_path(path: &str) -> Result<(), String> {
                 "menu path {path:?} pads a label with whitespace"
             ));
         }
+    }
+    Ok(())
+}
+
+/// The presentation spelling of an expect_menu_presentation step:
+/// `<size class>/<presentation>`, both halves from closed sets. A
+/// typo here would otherwise read as a backend disagreeing with the
+/// scene, which is the most expensive way to learn you misspelled
+/// "overflow" — so the grammar rejects it at parse. `unknown` IS a
+/// legal size class to write: a backend that has not observed its
+/// window yet must be able to say so, and a scene that asserts it is
+/// making a real (if unusual) claim.
+fn check_menu_presentation(spec: &str) -> Result<(), String> {
+    const CLASSES: [&str; 3] = ["unknown", "compact", "regular"];
+    const PRESENTATIONS: [&str; 3] = ["bar", "overflow", "none"];
+    let Some((class, presentation)) = spec.split_once('/') else {
+        return Err(format!(
+            "menu presentation {spec:?} wants <size class>/<presentation>"
+        ));
+    };
+    if !CLASSES.contains(&class) {
+        return Err(format!(
+            "menu presentation {spec:?} has an unknown size class {class:?}; \
+             wanted one of {CLASSES:?}"
+        ));
+    }
+    if !PRESENTATIONS.contains(&presentation) {
+        return Err(format!(
+            "menu presentation {spec:?} has an unknown presentation \
+             {presentation:?}; wanted one of {PRESENTATIONS:?}"
+        ));
     }
     Ok(())
 }
@@ -1399,6 +1458,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Err(format!("{got} menus, wanted {n}"))
                 }
             })),
+            Step::ExpectMenuPresentation(want) => Some(poll(|| {
+                let got = stage.menu_presentation();
+                if got == *want {
+                    Ok(format!("presentation {want}"))
+                } else {
+                    Err(format!("presentation {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectMenu(path, want) => {
                 let want_s = want.spelling();
                 Some(poll(|| {
@@ -1712,6 +1779,9 @@ mod tests {
         fn menu_count(&self) -> usize {
             3
         }
+        fn menu_presentation(&self) -> String {
+            "regular/bar".to_owned()
+        }
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -1892,6 +1962,9 @@ mod tests {
         fn menu_count(&self) -> usize {
             0
         }
+        fn menu_presentation(&self) -> String {
+            "regular/none".to_owned()
+        }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -2023,6 +2096,9 @@ mod tests {
         fn context_open(&self, _: Target) {}
         fn menu_count(&self) -> usize {
             0
+        }
+        fn menu_presentation(&self) -> String {
+            "regular/none".to_owned()
         }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
@@ -2160,6 +2236,39 @@ mod tests {
             "expect_menu \"\" enabled",
             "expect_menu \"File>\" enabled",
             "expect_menu \"File>Save disabled",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// Menu-chrome spellings are a closed set on BOTH halves. A typo
+    /// here would otherwise surface as a backend apparently disagreeing
+    /// with the scene, which is the most expensive way to discover you
+    /// wrote "overflowed" — so both halves are checked at parse.
+    #[test]
+    fn menu_presentation_spellings() {
+        for good in [
+            "expect_menu_presentation \"regular/bar\"",
+            "expect_menu_presentation \"compact/overflow\"",
+            "expect_menu_presentation \"regular/none\"",
+            // Legal on purpose: a backend that has not observed its
+            // window yet must be able to say so rather than guess.
+            "expect_menu_presentation \"unknown/none\"",
+        ] {
+            assert!(parse(good).is_ok(), "{good} should parse");
+        }
+        for bad in [
+            // No separator, either half unknown, empty halves, the
+            // halves swapped, a third component, and an unquoted arg.
+            "expect_menu_presentation \"regular\"",
+            "expect_menu_presentation \"regular/overflowed\"",
+            "expect_menu_presentation \"wide/bar\"",
+            "expect_menu_presentation \"/bar\"",
+            "expect_menu_presentation \"regular/\"",
+            "expect_menu_presentation \"bar/regular\"",
+            "expect_menu_presentation \"regular/bar/extra\"",
+            "expect_menu_presentation regular/bar",
+            "expect_menu_presentation",
         ] {
             assert!(parse(bad).is_err(), "{bad} should not parse");
         }

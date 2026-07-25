@@ -219,6 +219,12 @@ final class KayaWindowModel: Identifiable {
     /// on it — it exists so the harness can tell "not yet observed"
     /// from "observed compact".
     var formFactor: KayaFormFactor = .unknown
+    /// Which catalog lowering ACTUALLY rendered for this window. Each
+    /// arm stamps its own value as it renders; nothing derives this
+    /// from `formFactor`. That is the whole point — deriving it would
+    /// make the harness verb agree with the lowering by construction,
+    /// and the defect being gated is precisely the two disagreeing.
+    var menuPresentation: KayaMenuPresentation = .none
 
     init(id: UInt64, title: String = "") {
         self.id = id
@@ -235,6 +241,16 @@ enum KayaFormFactor: String {
     case unknown
     case compact
     case regular
+}
+
+/// How a window's command catalog is currently materialized. `bar` is a
+/// real menu bar (the macOS NSMenu segment; the iPadOS 26 system menu
+/// bar); `overflow` is the compact top-bar treatment; `none` is an
+/// empty catalog.
+enum KayaMenuPresentation: String {
+    case none
+    case bar
+    case overflow
 }
 
 /// One menu item: kind fixed at create, every applicable prop live.
@@ -2162,6 +2178,38 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(got) menus, wanted \(want)")
                 }
+            case "expect_menu_presentation":
+                // `<size class>/<presentation>`. macOS reads the REAL
+                // bar (there are no size classes there, and a desktop
+                // window carries the global bar unconditionally, so the
+                // class is always regular). Elsewhere both halves come
+                // off the window model, where the view layer stamped
+                // the platform's size-class reading and the arm that
+                // actually rendered — never a derivation from the
+                // other half, which would make this verb agree with
+                // the lowering by construction.
+                let wantPresentation = kayaQuoted(Array(parts[1...]))
+                let gotPresentation = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        kayaEnsureMenuSegment()
+                        let owned =
+                            NSApp.mainMenu.map { mainMenu in
+                                kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
+                            } ?? 0
+                        return "regular/" + (owned > 0 ? "bar" : "none")
+                    #else
+                        guard let window = kayaScene.windows[0] else {
+                            return "unknown/none"
+                        }
+                        return window.formFactor.rawValue + "/"
+                            + window.menuPresentation.rawValue
+                    #endif
+                }
+                if gotPresentation == wantPresentation {
+                    observed.append("presentation \(wantPresentation)")
+                } else {
+                    failures.append("presentation \(gotPresentation), wanted \(wantPresentation)")
+                }
             case "expect_menu":
                 // Real item state wherever the item surfaced (bar,
                 // More, open context menu); the bounded retry doubles
@@ -3804,7 +3852,11 @@ struct KayaMenuChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(macOS)
-            content.onAppear { kayaScene.windows[windowId]?.formFactor = .regular }
+            // No stamping here: macOS answers the chrome verb by
+            // counting the kaya-owned segment in the REAL NSApp.mainMenu,
+            // which is a stronger read than anything this view could
+            // record.
+            content
         #else
             content.modifier(KayaMenuFormFactorChrome(windowId: windowId))
         #endif
@@ -3828,10 +3880,23 @@ struct KayaMenuChrome: ViewModifier {
         func body(content: Content) -> some View {
             content
                 .modifier(KayaMenuToolbar(windowId: windowId))
-                .onAppear { kayaScene.windows[windowId]?.formFactor = factor }
-                .onChange(of: horizontalSizeClass) {
-                    kayaScene.windows[windowId]?.formFactor = factor
+                .onAppear { record() }
+                .onChange(of: horizontalSizeClass) { record() }
+                .onChange(of: kayaScene.windows[windowId]?.menubar.count ?? 0) {
+                    record()
                 }
+        }
+
+        /// Stamp both halves the harness reads. The presentation half
+        /// names THE ARM THIS BODY TOOK — today the toolbar in both
+        /// size classes, which is exactly the state the iPad defect
+        /// leaves behind and exactly what `expect_menu_presentation
+        /// "regular/bar"` is meant to fail on until the menu-bar arm
+        /// lands.
+        private func record() {
+            guard let window = kayaScene.windows[windowId] else { return }
+            window.formFactor = factor
+            window.menuPresentation = window.menubar.isEmpty ? .none : .overflow
         }
     }
 #endif
