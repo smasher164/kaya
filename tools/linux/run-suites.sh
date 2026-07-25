@@ -99,6 +99,12 @@ run_build java build_java
 CARGO_PROFILE_DEV_DEBUG=0 cargo build --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
 timing core-build
 
+# The Rust backends resolve a scene NAME to tools/scenes/<name>.steps.
+# The repo is mounted at /work here, so point at it explicitly rather
+# than relying on the compile-time default (which is right for local
+# runs but not for a container whose source path differs).
+export KAYA_SCENES_DIR=/work/tools/scenes
+
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
 

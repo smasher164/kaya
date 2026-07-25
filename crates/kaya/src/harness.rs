@@ -54,62 +54,45 @@ use std::time::{Duration, Instant};
 
 /// The scene scripts, embedded from tools/scenes at build time.
 pub fn script(scene: &str) -> Option<&'static str> {
-    // THE ENVIRONMENT WINS. The interpreters have always read
-    // KAYA_SELFTEST_SCRIPT; the Rust backends embedded theirs at build
-    // time instead, so the two halves of the matrix failed differently
-    // for the same mistake and a new scene had to be registered in the
-    // match below or it silently ran nothing.
+    // TWO transports, one per platform shape, and NO registry.
     //
-    // Reading the env first makes ONE transport for all five backends,
-    // and it passes the LIVE .steps file rather than a copy frozen into
-    // the binary. The match is now a FALLBACK for standalone runs, not
-    // a registry a new scene must join — one less hand-maintained list,
-    // which is the class check-steps already exists to police.
+    // 1. KAYA_SELFTEST_SCRIPT — the script's TEXT. The interpreters
+    //    need this: an iOS bundle or an Android intent has no shared
+    //    filesystem with the runner. (Android's intent extras cannot
+    //    carry newlines, hence the `;` stand-in in the grammar.)
+    // 2. KAYA_SCENES_DIR/<scene>.steps — the FILE. The Rust backends
+    //    run where a filesystem exists, so they read the live .steps
+    //    rather than a copy. On Windows the runner ships tools/scenes
+    //    to the VM and points this at it; on Linux the repo is already
+    //    mounted.
     //
-    // Leaked on purpose: the script lives as long as the process, this
-    // is harness-only code, and the alternative is threading a lifetime
-    // through every backend's spawn call for no benefit.
-    //
-    // The match below is NOT dead and is not merely legacy: deleting it
-    // means every Rust leg on Linux AND Windows must carry the script's
-    // full text through its own transport, and on Windows that
-    // transport is a checked-in .cmd batch file per leg
-    // (tools/guest/run_<scene>_<lang>.cmd, which today just says
-    // `set KAYA_SELFTEST=menus`). Multi-line quoted text through batch
-    // is the same carrier problem as Android's intent extras, which
-    // already need `;` as a newline stand-in. Removing it is a real
-    // slice across two runners and a cross-machine transport — worth
-    // doing, but not a deletion.
+    // This replaced a hand-written `match scene` of include_str! arms
+    // that ended in `_ => milestone2.steps` — a CATCH-ALL. An unknown
+    // scene therefore ran the WRONG SCENE's script rather than failing:
+    // a GTK run of the a11y scene silently executed milestone2's steps
+    // and reported assertion failures about labels the scene never had
+    // (2026-07-25). A missing scene now returns None and spawn fails
+    // loudly, and a scene is just a file rather than a registry entry —
+    // the same forgotten-list class check-steps already polices.
+    // `KAYA_SELFTEST=1` is the original plain selftest flag and still
+    // names the milestone-2 scene; the runners use it for those legs.
+    let scene = if scene == "1" { "milestone2" } else { scene };
     if let Ok(text) = std::env::var("KAYA_SELFTEST_SCRIPT") {
         if !text.trim().is_empty() {
             return Some(Box::leak(text.into_boxed_str()));
         }
     }
-    match scene {
-        "entry" => Some(include_str!("../../../tools/scenes/entry.steps")),
-        "gallery" => Some(include_str!("../../../tools/scenes/gallery.steps")),
-        "todos" => Some(include_str!("../../../tools/scenes/todos.steps")),
-        "reorder" => Some(include_str!("../../../tools/scenes/reorder.steps")),
-        "feed" => Some(include_str!("../../../tools/scenes/feed.steps")),
-        "layout" => Some(include_str!("../../../tools/scenes/layout.steps")),
-        "grow" => Some(include_str!("../../../tools/scenes/grow.steps")),
-        "align" => Some(include_str!("../../../tools/scenes/align.steps")),
-        "window" => Some(include_str!("../../../tools/scenes/window.steps")),
-        "panels" => Some(include_str!("../../../tools/scenes/panels.steps")),
-        "confirm" => Some(include_str!("../../../tools/scenes/confirm.steps")),
-        "nav" => Some(include_str!("../../../tools/scenes/nav.steps")),
-        "scroll" => Some(include_str!("../../../tools/scenes/scroll.steps")),
-        "progress" => Some(include_str!("../../../tools/scenes/progress.steps")),
-        "select" => Some(include_str!("../../../tools/scenes/select.steps")),
-        "radio" => Some(include_str!("../../../tools/scenes/radio.steps")),
-        "grid" => Some(include_str!("../../../tools/scenes/grid.steps")),
-        "textarea" => Some(include_str!("../../../tools/scenes/textarea.steps")),
-        "sections" => Some(include_str!("../../../tools/scenes/sections.steps")),
-        "menus" => Some(include_str!("../../../tools/scenes/menus.steps")),
-        "commands" => Some(include_str!("../../../tools/scenes/commands.steps")),
-        // "1" is the plain selftest flag: the milestone-2 scene.
-        _ => Some(include_str!("../../../tools/scenes/milestone2.steps")),
-    }
+    // Default: the repo's own tools/scenes, resolved at COMPILE time so
+    // local runs and `cargo test` work with no environment at all.
+    // KAYA_SCENES_DIR overrides it wherever the binary is deployed away
+    // from the source tree.
+    let dir = std::env::var("KAYA_SCENES_DIR").unwrap_or_else(|_| {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/scenes").to_owned()
+    });
+    let path = std::path::Path::new(&dir).join(format!("{scene}.steps"));
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|t| &*Box::leak(t.into_boxed_str()))
 }
 
 /// One widget, named by kind and creation order. `index` of -1 is

@@ -198,6 +198,18 @@ timing build
 run_ssh 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\python mkdir C:\kaya\bindings\python'
 run_ssh 'cmd /c if not exist C:\kaya\bindings\go mkdir C:\kaya\bindings\go'
+# The scenes: the Rust backends resolve a scene NAME to
+# <KAYA_SCENES_DIR>/<name>.steps, so the .steps files must reach the VM.
+# EVERY run, not the --provision block: legs depend on these, and a
+# provisioning-only ship means a scene edit never arrives (cost a
+# debugging round on 2026-07-25, and the empty C:\kaya\scenes was
+# briefly misread as the deploy stamp masking a change — the stamp
+# hashes $0 and was innocent).
+run_ssh 'cmd /c if not exist C:\kaya\scenes mkdir C:\kaya\scenes'
+scp -q "$ROOT"/tools/scenes/*.steps "$HOST:C:/kaya/scenes/"
+# Set once for the machine rather than in forty checked-in .cmd files:
+# every leg runs through schtasks, which inherits the user environment.
+run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul' 
 for guest in $SCENES; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum
