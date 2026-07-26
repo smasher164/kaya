@@ -61,6 +61,8 @@ mod sections;
 mod menus;
 #[path = "commands.rs"]
 mod commands;
+#[path = "a11y.rs"]
+mod a11y;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -90,6 +92,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("sections") => sections::app(ctx),
         Ok("menus") => menus::app(ctx),
         Ok("commands") => commands::app(ctx),
+        Ok("a11y") => a11y::app(ctx),
         _ => milestone2::app(ctx),
     }
 }

@@ -29,6 +29,9 @@ public final class Main {
         String scene = System.getenv("KAYA_SELFTEST");
         Runnable app;
         switch (scene == null ? "" : scene) {
+            case "a11y":
+                app = A11y::app;
+                break;
             case "entry":
                 app = Entry::app;
                 break;

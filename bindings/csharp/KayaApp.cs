@@ -824,6 +824,21 @@ sealed class Tx
     public void SetAlign(Widget w, Align align) =>
         Records.Add(KayaWire.TxSetAlign(w.Id, (long)align));
 
+    /// A widget's accessibility IDENTIFIER: a stable authored key that
+    /// assistive tooling and UI automation address it by, and which is
+    /// NEVER spoken. Universal — every kind carries one.
+    public void SetA11yId(Widget w, string id) =>
+        Records.Add(KayaWire.TxSetA11yId(w.Id, id));
+
+    /// What an assistive client SPEAKS for a widget. Universal, and
+    /// deliberately separate from the identifier — an automation key is
+    /// not a spoken name. Leave it unset to keep whatever the platform
+    /// derives from the control's own content; setting it OVERRIDES
+    /// that, so a button whose caption already reads well needs nothing
+    /// here.
+    public void SetA11yLabel(Widget w, string label) =>
+        Records.Add(KayaWire.TxSetA11yLabel(w.Id, label));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 

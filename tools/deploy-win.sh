@@ -83,6 +83,7 @@ for arg in "$@"; do
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
+        a11y_rust|a11y_python|a11y_go|a11y_csharp|a11y_java) SUITE="$arg" ;;
         select_rust|select_python|select_go|select_csharp|select_java) SUITE="$arg" ;;
         radio_rust|radio_python|radio_go|radio_csharp|radio_java) SUITE="$arg" ;;
         grid_rust|grid_python|grid_go|grid_csharp|grid_java) SUITE="$arg" ;;
@@ -165,7 +166,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -872,6 +873,14 @@ case "$SUITE" in
         run_suite progress_go
         run_suite progress_csharp
         run_suite progress_java
+        # The a11y scene: every widget kind's role and NAME read back
+        # off the REAL UIA peer — the tree Narrator walks — so the
+        # wrap-native bet's central claim is a matrix fact here too.
+        run_suite a11y_rust
+        run_suite a11y_python
+        run_suite a11y_go
+        run_suite a11y_csharp
+        run_suite a11y_java
         # The select scene: ComboBox — same XamlControlsResources
         # dependency as ProgressBar, so the legs reuse the
         # pri-adjacency arrangement above.

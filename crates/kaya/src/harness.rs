@@ -1045,9 +1045,16 @@ fn check_menu_path(path: &str) -> Result<(), String> {
 /// from its own content). An empty label is legal and meaningful: it
 /// asserts the platform speaks nothing for this element.
 fn check_ax(spec: &str) -> Result<(), String> {
-    const ROLES: [&str; 9] = [
-        "button", "label", "field", "checkbox", "slider", "image", "progress", "group",
-        "unknown",
+    // NORMALIZED, not exhaustive: a platform role that no other
+    // platform can match is normalized DOWN to the coarsest one they
+    // all publish (macOS's AXRadioGroup and AXScrollArea are both
+    // `group`), because a name only one backend can produce is a name
+    // no shared scene can assert. `combobox` earns its place the other
+    // way: every platform has a chooser role, and only the spelling
+    // differs (AXPopUpButton, Compose's dropdown, AT-SPI/UIA ComboBox).
+    const ROLES: [&str; 10] = [
+        "button", "label", "field", "checkbox", "slider", "image", "progress",
+        "combobox", "group", "unknown",
     ];
     let Some((role, _label)) = spec.split_once('/') else {
         return Err(format!("ax {spec:?} wants <role>/<label>"));

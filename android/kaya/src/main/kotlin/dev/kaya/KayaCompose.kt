@@ -10,6 +10,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,8 +50,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -1114,6 +1123,192 @@ object KayaCompose {
         return target(spec, kind, registry)
     }
 
+    /**
+     * Normalize what Compose classified this node as into the harness's
+     * closed role set. The point of the verb is that the PLATFORM
+     * classified the control, so anything kaya has no name for reports
+     * `unknown` rather than being guessed at — an honest "the platform
+     * said something else" is a finding, and a guess would hide one.
+     *
+     * TWO SOURCES, in the order Compose itself trusts them:
+     *
+     *  * `Role` is Compose's own classification of its own widgets, and
+     *    it is what the accessibility delegate turns into a class name
+     *    for a service. Reading it is asking Compose, not asking kaya:
+     *    nothing in kaya's model has a notion of Role, and Compose says
+     *    `Role.Button` because the thing really is a button.
+     *  * `className` for the controls Compose classifies WITHOUT a Role.
+     *    A slider and a progress bar are the same semantics
+     *    (ProgressBarRangeInfo) told apart by whether the range can be
+     *    set, and Compose already draws that distinction when it fills
+     *    in SeekBar vs ProgressBar. Text fields and text are the same
+     *    shape of case. Deriving those here from the raw semantics
+     *    would be kaya reclassifying; taking the class name is still
+     *    Compose's answer.
+     *
+     * Android has no group class: a node with no Role and no class of
+     * its own comes out as the generic `android.view.View`. A generic
+     * node WITH children is what a group is here; a generic LEAF is a
+     * control we failed to classify, and stays `unknown`.
+     */
+    private fun kayaAxRole(role: Role?, className: CharSequence?, childCount: Int): String {
+        val byRole =
+            when (role) {
+                Role.Button -> "button"
+                Role.Checkbox -> "checkbox"
+                Role.Image -> "image"
+                // The chooser, which every platform spells its own way
+                // (AXPopUpButton on macOS, ComboBox on AT-SPI and UIA).
+                Role.DropdownList -> "combobox"
+                // Role.Switch, Role.RadioButton and Role.Tab are
+                // deliberately NOT mapped: the closed set has no name
+                // for them, and inventing one would report a role no
+                // scene can spell. They fall through to the class name.
+                else -> null
+            }
+        if (byRole != null) return byRole
+        val byClass =
+            when (className?.toString()) {
+                "android.widget.Button" -> "button"
+                "android.widget.TextView" -> "label"
+                "android.widget.EditText" -> "field"
+                "android.widget.CheckBox" -> "checkbox"
+                "android.widget.SeekBar" -> "slider"
+                "android.widget.ImageView" -> "image"
+                "android.widget.ProgressBar" -> "progress"
+                "android.widget.Spinner" -> "combobox"
+                else -> null
+            }
+        if (byClass != null) return byClass
+        return if (childCount > 0) "group" else "unknown"
+    }
+
+    /**
+     * The name a service would speak for this node: the authored
+     * description first, then whatever the control derived from its own
+     * content — the same precedence every other backend reads (a
+     * derived name is the free-by-construction half of the wrap-native
+     * bet, an authored one overrides it).
+     *
+     * Both properties are LISTS after merging, because merging is what
+     * gathers a control's own text plus its descendants'. Joined with a
+     * space: a service reads them as one utterance.
+     */
+    private fun kayaAxName(node: SemanticsNode): String {
+        val described = node.config.getOrNull(SemanticsProperties.ContentDescription)
+        if (!described.isNullOrEmpty()) return described.joinToString(" ")
+        val text = node.config.getOrNull(SemanticsProperties.Text)
+        if (!text.isNullOrEmpty()) return text.joinToString(" ") { it.text }
+        return ""
+    }
+
+    private fun kayaComposeRoot(v: android.view.View): android.view.View? {
+        if (v is RootForTest) return v
+        if (v is android.view.ViewGroup) {
+            for (i in 0 until v.childCount) {
+                kayaComposeRoot(v.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Read the MERGED semantics tree — the post-merge truth an
+     * assistive client consumes.
+     *
+     * Compose does not hand a service a finished tree. It sends the
+     * UNMERGED nodes plus `mergeDescendants` instructions and the
+     * SERVICE does the merging, so `createAccessibilityNodeInfo(id)` —
+     * the obvious "what does the platform publish" call — returns a
+     * pre-merge node that no client ever sees as such. Reading that is
+     * how a Button came back as a nameless generic view with children:
+     * its `Role` sat on a node the service would have folded into its
+     * parent. `SemanticsOwner.rootSemanticsNode` is merging-enabled, so
+     * walking it IS the merged view, one node per thing a client
+     * focuses.
+     *
+     * This is the same trap the macOS backend documents from the other
+     * side: reading the server side instead of what the client sees.
+     *
+     * Identity is the merged `TestTag`, which is where `a11y_id` lands
+     * and what Compose's own test framework matches on. The node info
+     * is consulted for ONE thing — the class name of the controls
+     * Compose classifies without a Role (see [kayaAxRole]).
+     */
+    private fun kayaAxFind(node: SemanticsNode, tag: String, depth: Int = 0): SemanticsNode? {
+        if (depth > 64) return null
+        if (node.config.getOrNull(SemanticsProperties.TestTag) == tag) return node
+        for (child in node.children) {
+            kayaAxFind(child, tag, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * What the walk actually saw, for the miss path. A silent "not
+     * found" is the shape that costs a whole emulator round-trip to
+     * diagnose; naming every merged node's id, tag, role, class name
+     * and name turns one run into the answer.
+     */
+    private fun kayaAxDump(activity: ComponentActivity): String {
+        val view = kayaComposeRoot(activity.window.decorView)
+            ?: return "no Compose root under decorView"
+        val provider = view.accessibilityNodeProvider
+        val owner = (view as RootForTest).semanticsOwner
+        val out = StringBuilder()
+        var seen = 0
+        fun walk(node: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            seen++
+            out.append(" [").append(node.id)
+                .append(" tag=").append(node.config.getOrNull(SemanticsProperties.TestTag))
+                .append(" role=").append(node.config.getOrNull(SemanticsProperties.Role))
+                .append(" class=")
+                .append(provider?.createAccessibilityNodeInfo(node.id)?.className ?: "no-info")
+                .append(" name=").append(kayaAxName(node))
+                .append(" kids=").append(node.children.size)
+                .append(']')
+            node.children.forEach { walk(it, depth + 1) }
+        }
+        walk(owner.rootSemanticsNode, 0)
+        return "walked " + seen + " merged nodes:" + out
+    }
+
+    /**
+     * MAIN THREAD ONLY (callers go through [onUi]). Compose owns its
+     * semantics tree from the thread that measures and lays out, and
+     * reading it from the selftest thread trips
+     * SnapshotStateObserver's multithreaded-access check — measured, as
+     * a hard crash rather than a wrong answer.
+     */
+    private fun kayaAx(activity: ComponentActivity, tag: String): String? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val owner = (view as RootForTest).semanticsOwner
+        val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
+        val className = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
+            ?.className
+        val role = node.config.getOrNull(SemanticsProperties.Role)
+        return kayaAxRole(role, className, node.children.size) + "/" + kayaAxName(node)
+    }
+
+    /**
+     * The two inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…`
+     * says the platform classified the control as something the closed
+     * set has no name for, and the next question is always which
+     * something — one emulator round-trip per answer without this, and
+     * the whole point of reading the real tree is that its answers are
+     * not guessable from here.
+     */
+    private fun kayaAxWhy(activity: ComponentActivity, tag: String): String {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return ""
+        val owner = (view as RootForTest).semanticsOwner
+        val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return ""
+        val className = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
+            ?.className
+        return " (role=" + node.config.getOrNull(SemanticsProperties.Role) +
+            " class=" + className + " kids=" + node.children.size + ")"
+    }
+
     private fun quoted(parts: List<String>): String {
         val inner = parts.joinToString(" ").removeSurrounding("\"")
         // The grammar's escapes (harness.rs is the norm): \\n ->
@@ -1705,16 +1900,33 @@ object KayaCompose {
                         else failures.add("$got menus, wanted $want")
                     }
                     "expect_ax" -> {
-                        // FAN-OUT PENDING (depth slice is SwiftUI on
-                        // mac). The verb is declared here so check-verbs
-                        // holds the remaining work open — a gate that is
-                        // MEANT to stay red mid-milestone — and reports
-                        // honestly rather than silently passing. Compose
-                        // reads its real semantics tree via
-                        // SemanticsNode when this lands.
-                        failures.add(
-                            "ax: the Compose accessibility read is not implemented yet"
-                        )
+                        val want = quoted(parts.drop(2))
+                        val node = kayaWidgetTarget(parts[1])
+                        when {
+                            node == null ->
+                                failures.add("no such target ${parts[1]}")
+                            node.a11yId.isEmpty() ->
+                                failures.add(
+                                    "ax ${parts[1]}: no a11y_id to find it by"
+                                )
+                            else -> {
+                                val got = onUi(activity) { kayaAx(activity, node.a11yId) }
+                                if (got == null) {
+                                    failures.add(
+                                        "ax ${parts[1]}: nothing carries " +
+                                            "test tag \"${node.a11yId}\"; " +
+                                            onUi(activity) { kayaAxDump(activity) }
+                                    )
+                                } else if (got != want) {
+                                    failures.add(
+                                        "ax \"$got\", wanted \"$want\"" +
+                                            onUi(activity) { kayaAxWhy(activity, node.a11yId) }
+                                    )
+                                } else {
+                                    observed.add("ax \"$want\"")
+                                }
+                            }
+                        }
                     }
                     "expect_menu_presentation" -> {
                         // `<size class>/<presentation>`: the platform's
@@ -2030,6 +2242,42 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
     // spanned the window; nested containers keep wrapping, exactly as
     // everywhere else.
     val rootFill = if (isRoot) Modifier.fillMaxSize() else Modifier
+    // THE UNIVERSAL ACCESSIBILITY PROPS, folded into the base modifier
+    // every kind already threads.
+    //
+    // contentDescription is the semantics property a service speaks, so
+    // a11y_label reaches assistive tech directly.
+    //
+    // a11y_id is a plain testTag. Android has no accessibility-identifier
+    // concept the way accessibilityIdentifier (AppKit) and AutomationId
+    // (WinUI) are genuine platform properties; the testTag is the
+    // identity slot in the semantics tree, and it is what Compose's own
+    // test framework matches on. The detour worth naming is
+    // testTagsAsResourceId, which additionally copies the tag into the
+    // node's resource-id: it is experimental, and it exists for
+    // out-of-process clients like UIAutomator, which can only match on
+    // properties that survive into AccessibilityNodeInfo. The read here
+    // is in-process against the merged semantics tree, so it would cost
+    // an experimental opt-in to buy nothing.
+    //
+    // Empty stays unset: Compose derives a control's description from
+    // its own content, and writing "" would silence it.
+    //
+    // The two halves are separately named because ONE kind cannot take
+    // the name this way: Image publishes Role.Image only when the name
+    // rides its own contentDescription PARAMETER (measured 2026-07-25 —
+    // an image named through the modifier read `unknown/Logo`, since
+    // `contentDescription = null` is Compose's spelling of "decorative,
+    // hide me"). That arm takes a11yTag and hands the name to Image
+    // itself; everything else takes both through `a11y`.
+    val a11yTag = if (node.a11yId.isNotEmpty()) Modifier.testTag(node.a11yId) else Modifier
+    val a11yName =
+        if (node.a11yLabel.isNotEmpty()) {
+            Modifier.semantics { contentDescription = node.a11yLabel }
+        } else {
+            Modifier
+        }
+    val a11y = a11yTag.then(a11yName)
     when (node.kind) {
         KayaCompose.KIND_SELECT -> {
             // The dressed floor: M3's exposed dropdown menu — the
@@ -2048,7 +2296,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     value = selectedLabel,
                     onValueChange = {},
                     readOnly = true,
-                    modifier = Modifier.menuAnchor(),
+                    modifier = a11y.menuAnchor(),
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
@@ -2077,6 +2325,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             val gapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
             androidx.compose.ui.layout.Layout(
                 content = { node.children.forEach { child -> KayaRender(child) } },
+                modifier = a11y,
             ) { measurables, _ ->
                 val placeables = measurables.map {
                     it.measure(androidx.compose.ui.unit.Constraints())
@@ -2111,7 +2360,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // selectable group of RadioButton rows. Every USER pick
             // emits with the group's identity tag — the select's
             // uncontrolled contract.
-            Column(modifier = Modifier.selectableGroup()) {
+            Column(modifier = a11y.selectableGroup()) {
                 node.children.forEachIndexed { i, option ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -2137,9 +2386,10 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // determinate over the 0..=1 fraction, or the activity
             // flavor while indeterminate is on.
             if (node.indeterminate) {
-                androidx.compose.material3.LinearProgressIndicator()
+                androidx.compose.material3.LinearProgressIndicator(modifier = a11y)
             } else {
                 androidx.compose.material3.LinearProgressIndicator(
+                    modifier = a11y,
                     progress = { node.value.toFloat() })
             }
         KayaCompose.KIND_SCROLL ->
@@ -2148,7 +2398,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // node's own ScrollState — the toolkit's real scrolling
             // machinery, which the runner's verbs read and drive.
             Box(
-                rootFill.verticalScroll(node.scrollState)
+                rootFill.then(a11y).verticalScroll(node.scrollState)
             ) {
                 node.children.firstOrNull()?.let { KayaRender(it) }
             }
@@ -2156,7 +2406,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
             Column(
-                modifier = rootFill.onGloballyPositioned {
+                modifier = rootFill.then(a11y).onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
                     kayaContainerCross[node.id] = it.size.width.toDouble()
                 },
@@ -2188,14 +2438,14 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                 }
             }
         KayaCompose.KIND_BUTTON ->
-            Button(onClick = { KayaPresent.emitClicked(node.tag) }) {
+            Button(onClick = { KayaPresent.emitClicked(node.tag) }, modifier = a11y) {
                 Text(node.text)
             }
         KayaCompose.KIND_ROW ->
             // Normalized default: children packed to the leading edge at
             // natural size, top-aligned (Alignment.Top), 8 dp between them.
             Row(
-                modifier = rootFill.onGloballyPositioned {
+                modifier = rootFill.then(a11y).onGloballyPositioned {
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
                     kayaContainerCross[node.id] = it.size.height.toDouble()
                 },
@@ -2228,23 +2478,41 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     Box(cell) { KayaRender(child) }
                 }
             }
-        KayaCompose.KIND_LABEL -> Text(node.text)
+        KayaCompose.KIND_LABEL -> Text(node.text, modifier = a11y)
         KayaCompose.KIND_CHECKBOX ->
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (Compose needs it), and every
             // flip is emitted with the box's identity tag. The caption
             // rides beside the box, the labeled-checkbox idiom.
+            //
+            // The TOGGLE LIVES ON THE ROW, not on the box, and the box
+            // takes onCheckedChange = null — Material's own labeled
+            // checkbox recipe, and here it is what makes the control ONE
+            // thing to an assistive client. A box with its own
+            // onCheckedChange is independently screen-reader-focusable,
+            // and Compose's merging deliberately STOPS at such a node
+            // (an independently focusable descendant is not absorbed):
+            // measured 2026-07-25, the caption row then read
+            // `group/Details` with a separate unnamed checkbox inside
+            // it, instead of the single `checkbox/Details` every other
+            // backend publishes. Moving the toggle up also makes the
+            // whole row the hit target, which is what the caption
+            // beside a box means everywhere else.
             Row(
+                modifier = a11y
+                    .toggleable(
+                        value = node.checked,
+                        role = Role.Checkbox,
+                        onValueChange = { newValue ->
+                            node.checked = newValue
+                            KayaPresent.emitToggled(node.tag, newValue)
+                        },
+                    )
+                    .semantics(mergeDescendants = true) {},
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(
-                    checked = node.checked,
-                    onCheckedChange = { newValue ->
-                        node.checked = newValue
-                        KayaPresent.emitToggled(node.tag, newValue)
-                    },
-                )
+                Checkbox(checked = node.checked, onCheckedChange = null)
                 Text(node.text)
             }
         KayaCompose.KIND_SLIDER ->
@@ -2252,6 +2520,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // mirrors the slider's position (Compose needs the state),
             // and every move is emitted with the slider's identity tag.
             Slider(
+                modifier = a11y,
                 value = node.value.toFloat(),
                 onValueChange = { newValue ->
                     node.value = newValue.toDouble()
@@ -2264,8 +2533,19 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
             // defaults to it), matching the harness's size
             // observation; null is the placeholder class — nothing
             // renders.
+            //
+            // The one kind whose NAME does not ride the shared modifier:
+            // Image's own contentDescription parameter is what declares
+            // Role.Image, and null there is Compose's spelling of "this
+            // is decoration, hide it from assistive tech" — which is the
+            // right default for an unnamed image and the wrong answer
+            // for a named one.
             node.imageBitmap?.let { bitmap ->
-                Image(bitmap = bitmap, contentDescription = null)
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = node.a11yLabel.ifEmpty { null },
+                    modifier = a11yTag,
+                )
             }
         KayaCompose.KIND_TEXTAREA -> {
             // The multi-line editor: the entry's exact contract
@@ -2281,7 +2561,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                 },
                 singleLine = false,
                 minLines = 3,
-                modifier = Modifier
+                modifier = a11y
                     .focusRequester(focusRequester)
                     .onFocusChanged { state ->
                         if (state.isFocused) KayaSceneModel.focusedId = node.id
@@ -2308,7 +2588,7 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     node.text = value
                     KayaPresent.emitTextChanged(node.tag, value)
                 },
-                modifier = Modifier
+                modifier = a11y
                     .focusRequester(focusRequester)
                     // Gain-only back-propagation: onFocusChanged also
                     // fires with the initial unfocused state at attach,

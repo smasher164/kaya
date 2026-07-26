@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. (Empty since the menus sweep
@@ -72,11 +72,13 @@ tools/check-targets.sh || exit 1
 tools/check-shell.sh || exit 1
 tools/check-mirror.sh || exit 1
 tools/check-sugar-surface.sh || exit 1
+tools/check-universal-props.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
 tools/check-verbs.sh || exit 1
 tools/check-stubs.sh || exit 1
 tools/check-compose.sh || exit 1
+tools/check-detekt.sh || exit 1
 tools/swift-typecheck.sh || exit 1
 tools/java-typecheck.sh || exit 1
 timing core-build+gates
@@ -351,6 +353,28 @@ drain() {
             # Stage::finish exit path, once bitten on GTK and WinUI).
             if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
                 echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
+            fi
+            # A SILENT leg has two very different meanings and the bare
+            # verdict cannot tell them apart — the linux runner's note,
+            # split by duration because the mac timeout is a KILL: a
+            # killed guest loses whatever its block-buffered stdout was
+            # holding, so an empty log there means "hung with its trace
+            # in the buffer", not "never started". Read the wrong way
+            # (2026-07-25) it sends you hunting a startup failure while
+            # the real answer needs `sample $pid` on the live process.
+            if ! grep -q "KAYA_HARNESS" "$LEGS_DIR/$name.log" 2>/dev/null; then
+                if [ "$(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo 0)" -ge 115 ]; then
+                    echo "$name: note — NO OUTPUT, and it ran to the 120s timeout." \
+                        "It was KILLED: its buffered trace died with it, so this is" \
+                        "a HANG, not a failure to start. Reproduce it and sample the" \
+                        "live process — that is what named the accessibility legs'" \
+                        "layout stall (docs/traps.md)."
+                else
+                    echo "$name: note — NO OUTPUT AT ALL and it exited early. The" \
+                        "guest never reached the harness: a bad library load, a" \
+                        "missing display, or a blocking connect at startup. Look" \
+                        "before the scene, not inside it."
+                fi
             fi
             status=1
         fi
@@ -793,18 +817,33 @@ run menus-swift-swiftui env KAYA_SELFTEST=menus target/swift-guests/menus
 run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The a11y scene, the DEPTH slice (rust only until the sweep): the two
-# universal accessibility props read back out of the PLATFORM'S OWN
-# accessibility tree — the tree an assistive client walks — so the
-# wrap-native bet's central claim is a matrix fact rather than a
-# paragraph in DESIGN. Asserts both halves: names DERIVED by the control
-# from its own caption (free by construction) and names AUTHORED where
-# there is no caption to derive from.
-# The a11y scene is PENDING: its steps live at
-# guests/rust/a11y.steps.pending until the fan-out gives it legs on the
-# other four lanes (check-steps requires all five, deliberately). It
-# passes on mac today — run it by hand with that file as
-# KAYA_SELFTEST_SCRIPT.
+# The a11y scene: the two universal accessibility props read back out
+# of the PLATFORM'S OWN accessibility tree — the tree an assistive
+# client walks — so the wrap-native bet's central claim is a matrix
+# fact rather than a paragraph in DESIGN. Asserts both halves: names
+# DERIVED by the control from its own caption (free by construction)
+# and names AUTHORED where there is no caption to derive from, over
+# EVERY widget kind, because the props are universal.
+# These legs run POOLED like every other scene. They were serialized for
+# a few hours on 2026-07-25 while the read's hangs were misread as
+# contention; the actual defect was a lock inversion inside the read
+# itself (docs/traps.md), and with that fixed nine concurrent
+# accessibility guests pass — so the barrier came back out. A carve-out
+# that no longer earns its keep is worse than none: it hides the class
+# of failure it was invented for.
+KAYA_SELFTEST_SCRIPT="$(scene_script a11y)"
+export KAYA_SELFTEST_SCRIPT
+run a11y-rust-swiftui env KAYA_SELFTEST=a11y target/debug/examples/a11y
+run a11y-python-swiftui env KAYA_SELFTEST=a11y python3 guests/python/a11y.py
+run a11y-go-swiftui env KAYA_SELFTEST=a11y target/go-guests/a11y
+run a11y-csharp-swiftui env KAYA_SELFTEST=a11y KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run a11y-ocaml-swiftui env KAYA_SELFTEST=a11y KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/a11y.exe
+run a11y-haskell-swiftui env KAYA_SELFTEST=a11y "$(hs_bin a11y)"
+run a11y-swift-swiftui env KAYA_SELFTEST=a11y target/swift-guests/a11y
+run a11y-java-swiftui env KAYA_SELFTEST=a11y KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The commands scene, the DEPTH slice (rust only until the sweep): a
 # chord on every leaf kind — a checkable command and one option of a

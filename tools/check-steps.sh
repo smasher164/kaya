@@ -236,6 +236,36 @@ wired() {
 }
 wired || status=1
 
+# EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win runs a leg by
+# scheduling C:\kaya\run_<scene>_<lang>.cmd on the VM, and those .cmd
+# files are CHECKED IN under tools/guest. A leg whose launcher does not
+# exist does not fail — schtasks starts nothing, no output ever appears,
+# and the runner waits out its full 300s timeout before calling it a
+# hang. Measured 2026-07-25: a scene joined SCENES with four of its five
+# launchers missing and cost four silent 300s timeouts, diagnosed as
+# load because the lane's duration anomaly fired first.
+launchers() {
+    local status=0 leg scene lang
+    for leg in $(grep -oE '^[[:space:]]*run_suite [a-z0-9_]+' tools/deploy-win.sh \
+        | awk '{print $2}' | sort -u); do
+        case "$leg" in
+            # The milestone2 legs are the unprefixed originals
+            # (run_rust.cmd, run_python.cmd, ...).
+            rust | python | go | csharp | java) continue ;;
+        esac
+        scene="${leg%_*}"
+        lang="${leg##*_}"
+        if [ ! -f "tools/guest/run_${scene}_${lang}.cmd" ]; then
+            echo "check-steps: deploy-win runs leg \"$leg\" but" \
+                "tools/guest/run_${scene}_${lang}.cmd does not exist —" \
+                "that leg would wait out its whole timeout in silence" >&2
+            status=1
+        fi
+    done
+    return "$status"
+}
+launchers || status=1
+
 # The staged WinUI menus ruling (docs/traps.md): shortcut injection is
 # OS-global — the harness foregrounds the guest and puts the real
 # chord on the system input queue — so deploy-win must run every menu

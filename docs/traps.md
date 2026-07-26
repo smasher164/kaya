@@ -918,6 +918,138 @@ container holding a SINGLE control is collapsed into that control, which
 is correct screen-reader design, so conformance scenes want two children
 when they mean to assert a group.
 
+## Filtering compiler output through `grep -E "^e:"` discards warnings
+
+2026-07-25, iterating on the Compose backend. The build loop in a
+handoff doc read `gradle :kaya:compileDebugKotlin | grep -E "^e:"` —
+errors only. It ran green for several rounds while the compiler was
+reporting a deprecation the whole time, and that deprecation was the
+first clue to a real API mismatch.
+
+This is the `tail`/`head` rule's sibling: anything that reads a filtered
+VIEW of a build instead of its whole output loses the diagnostics that
+are not errors yet. Warnings are where a build tells you it is about to
+break. Read the output, check the status, filter nothing.
+
+The related guard that does work: a gate for the diagnostics the
+compiler CANNOT produce (tools/check-detekt.sh — K2 moved the UNUSED_*
+diagnostics into IDE inspections, KT-69698).
+
+## iOS materializes no accessibility tree until automation is enabled
+
+2026-07-25, the same day macOS's lazy tree was measured — the Apple
+platforms share the laziness and spell the cure differently.
+
+Under SwiftUI on iOS, a walk of the whole UIView hierarchy found the
+real controls (UISwitch, UITextField, UISlider, UISegmentedControl) and
+EVERY ONE reported `isAccessibilityElement=false`, zero accessibility
+elements and a nil identifier. Nothing to read, no error, no warning:
+the verb simply reported "not in the accessibility tree" for every
+element in the scene, which reads exactly like a lowering bug.
+
+VoiceOver cannot be started from inside the app, but the AX runtime's
+automation switch can be (`_AXSSetAutomationEnabled` in
+libAccessibility, resolved with dlsym — what XCUITest, KIF and EarlGrey
+all flip). With it on, the tree appears in full.
+
+Two more iOS-only shapes worth knowing, both measured the same session:
+- SwiftUI's accessibility elements are NOT UIViews and do not conform to
+  `UIAccessibilityIdentification`, so `as? UIAccessibilityIdentification`
+  misses them. The ObjC selector `accessibilityIdentifier` reaches them.
+- UIKit publishes no role vocabulary at all — classification is a TRAIT
+  BITMASK plus the element's class, and the same trait rides several
+  kinds (a toggle is button|toggleButton, a chooser is a plain button
+  that owns a `menu`). Specific signals must be weighed before
+  `.button`, or every one of them reads as a plain button.
+
+## Compose sends services the UNMERGED tree, and the SERVICE merges it
+
+2026-07-25. `provider.createAccessibilityNodeInfo(id)` looks like the
+answer to "what does the platform publish for this node", and it is
+not. Compose hands an accessibility service the UNMERGED semantics
+nodes plus `mergeDescendants` instructions, and the SERVICE applies its
+own merging — so that call returns a PRE-MERGE node that no client ever
+sees in that form. TalkBack sees the merged result.
+
+Read `SemanticsOwner.rootSemanticsNode` instead: it is merging-enabled,
+so walking it is the post-merge view, one node per thing a client
+focuses. Same trap the macOS backend documents from the other side —
+reading the server's private view rather than the client's.
+
+THE `extras` PUZZLE THIS EXPLAINS, recorded because a handoff left it
+open as "unresolved, do not build on extras": a dump showed
+`cd=Full name` and `tag=null` on what looked like the SAME node, which
+seemed to disprove the documented rule that Compose republishes testTags
+into `AccessibilityNodeInfo.extras`. Nothing was wrong with extras. In
+the UNMERGED tree those two properties genuinely sit on DIFFERENT nodes
+of one modifier chain, and the walk was conflating them. The AOSP notes
+were right; the read was mismodelled. The merged read needs neither
+`extras` nor the experimental `testTagsAsResourceId` opt-in, so the
+question stops mattering — but "everyone else's docs are wrong" should
+have been read as a signal about our model, and it is the second time
+that signal was ignored in this file.
+
+Two more Compose-specific shapes, both measured the same day:
+- `className` is a compatibility fiction. There is no class in a Compose
+  world, so Compose fills one in only for particular semantics. Take
+  `Role` first and fall back to the class name for the controls it
+  classifies without one (a slider and a progress bar are one semantics
+  told apart by whether the range can be set).
+- An INDEPENDENTLY FOCUSABLE descendant is not merged into its parent —
+  that is deliberate. A caption row wrapping a `Checkbox` that owns its
+  own `onCheckedChange` therefore publishes a group containing a
+  separate checkbox, not one control. Material's own labeled-checkbox
+  recipe (toggle on the row, `onCheckedChange = null` on the box) is
+  what makes it one element to a service.
+
+## Reading your OWN process's accessibility tree runs INLINE, on your thread
+
+2026-07-25, and it cost most of a day because every symptom pointed
+somewhere else. Accessibility legs hung forever — never a wrong answer,
+always a 120s timeout — at roughly one leg per lane run, a different
+language each time, and never reproducibly standalone.
+
+THE ACTUAL DEFECT, off a `sample` of a wedged process: for your own pid
+`AXUIElementCopyAttributeValue` does not send a message at all. It
+short-circuits into AppKit and runs
+`-[NSObject _accessibilityValueForAttribute:]` INLINE on the calling
+thread. That is main-thread-only API, so a read from the harness thread
+executed AppKit's accessibility server code concurrently with the main
+thread's layout pass and inverted AppKit's own locks.
+
+The fix is one line of thread discipline: do the read inside
+`DispatchQueue.main.sync`. An older comment in the backend argued the
+opposite — that a main-thread read returns empty subtrees — but that
+was the LAZY TREE (docs above), measured before the client announcement
+existed; with the announcement in place a main-thread read sees
+everything.
+
+THREE WRONG DIAGNOSES, worth knowing because each one was plausible and
+each one "improved" things enough to be believable:
+1. AX messaging timeout. `AXUIElementSetMessagingTimeout` cannot bound a
+   call that never sends a message. It changed nothing.
+2. Cost of announcing. Announcing DOES make AppKit rebuild its
+   accessibility hierarchy and drive a layout pass, so announcing once
+   per process instead of once per read is a real improvement — keep it
+   — but it only shifted the odds.
+3. Pool contention. Serializing the legs made lane runs mostly green,
+   which is exactly what a load explanation predicts. It was wrong:
+   load merely widened the window in which the main thread was inside
+   layout. With the lock inversion fixed, nine concurrent accessibility
+   guests pass, and the serialization was removed again.
+
+The tell that should have been read sooner: a HANG, not a wrong answer,
+and never standalone. Contention makes things slow; deadlocks make them
+stop. When a leg stops dead with its window up, sample it before
+theorizing — `sample <pid>` named this in one shot after three
+theories had not.
+
+Its sibling trap, still true: a leg killed at its timeout loses
+block-buffered stdout, so the harness trace vanishes exactly when it is
+most needed. The Swift interpreter line-buffers stdout for that reason;
+without it the log shows only the backend's stderr and the hang looks
+like a failure to start.
+
 ## macOS builds the accessibility tree lazily
 
 2026-07-25. Until an assistive client attaches, an app publishes a
@@ -935,6 +1067,20 @@ pid), never the server-side NSAccessibility protocol — that side is for
 SETTING accessibility, and a server-side walk returns nil for every
 identifier and label. `AXIsProcessTrusted()` is true for processes
 launched from an already-trusted terminal, so no permission prompt.
+
+The GTK sibling is the opposite shape: there is no in-process read at
+all. GTK exposes no getter for accessible properties — the accessible
+surface IS AT-SPI — so a read that stays in-process can only return
+kaya's own writes. And the bus tree is not kaya's tree: every button and
+check box contains a real Label node, an entry's internal text widget is
+hidden, and an unmapped popover publishes nothing, so any ordinal that
+counts kaya's widgets instead of the bus's is silently off.
+
+One more GTK precedence rule worth knowing: the accessible name comes
+from the LABELLED_BY relation FIRST and the label property second
+(gtkatcontext.c), so a control that points a relation at its own content
+outranks anything an app authors — a named GtkDropDown reads back as its
+selected option until that relation is reset.
 
 ## Windows guests wedge UNKILLABLY, and taskkill cannot say so
 

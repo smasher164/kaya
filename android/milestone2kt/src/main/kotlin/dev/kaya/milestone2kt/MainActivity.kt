@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
         // through the ring.
         KayaCompose.mount(this)
         val scene = when (System.getenv("KAYA_SELFTEST")) {
+            "a11y" -> A11y::app
             "entry" -> Entry::app
             "gallery" -> Gallery::app
             "todos" -> Todos::app

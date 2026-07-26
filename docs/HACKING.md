@@ -114,6 +114,14 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 - Windows: `tools/deploy-win.sh <user@host> [rust|python|go|all]` — the
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
+- The accessibility scene is the one leg with an environment
+  requirement of its own: GTK publishes an accessibility tree only
+  under `GTK_A11Y=atspi` with a session bus and the AT-SPI launcher
+  running, so the Linux legs go through `tools/linux/a11y-leg.sh`,
+  which builds that session per leg and tears it down with it. It is
+  per-leg because exported lane-wide it timed out eleven legs that
+  never asked for accessibility. `tools/linux/atspi_probe.py` walks the
+  bus by hand when a role or name needs measuring rather than guessing.
 - Scene selection everywhere: KAYA_SELFTEST=<scene>. There is no
   backend selection — the roster is one backend per platform
   (KAYA_BACKEND is gone); what remains is locating the SwiftUI

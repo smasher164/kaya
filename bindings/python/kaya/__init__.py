@@ -330,6 +330,27 @@ class Widget:
         argument at construction; this is the dynamic path."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
+    def a11y_id(self, ident):
+        """Set this widget's accessibility IDENTIFIER: a stable authored
+        key that assistive tooling and UI automation address it by, and
+        which is NEVER spoken. Universal — every kind carries one.
+
+        Returns the widget, so the two props chain:
+        `kaya.entry().a11y_id("name").a11y_label("Full name")`."""
+        _records().append(wire.tx_set_a11y_id(self.id, str(ident)))
+        return self
+
+    def a11y_label(self, label):
+        """Set this widget's accessibility LABEL: what an assistive
+        client speaks for it. Universal, and deliberately separate from
+        `a11y_id` — an automation key is not a spoken name. Leave it
+        unset to keep whatever the platform derives from the control's
+        own content; setting it OVERRIDES that, so a button whose
+        caption already reads well needs nothing here. Returns the
+        widget, so the two props chain."""
+        _records().append(wire.tx_set_a11y_label(self.id, str(label)))
+        return self
+
     def context_menu(self):
         """The live-widget context anchor: `with target.context_menu():`
         declares the catalog — the same command vocabulary scoped to a

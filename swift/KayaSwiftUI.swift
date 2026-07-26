@@ -1372,6 +1372,19 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         case kAXSliderRole: return "slider"
         case kAXImageRole: return "image"
         case kAXProgressIndicatorRole: return "progress"
+        // A chooser is a chooser everywhere and spelled differently
+        // everywhere: AXPopUpButton here, a dropdown role on Compose,
+        // ComboBox on AT-SPI and UIA. `combobox` is the closed set's
+        // one name for it (harness.rs check_ax).
+        case kAXPopUpButtonRole: return "combobox"
+        // NORMALIZED DOWN to the coarsest role every platform agrees
+        // on. macOS publishes finer container roles than the others do
+        // — a radio group is its own role here and a plain container of
+        // choices elsewhere, a scroll area is a container of content —
+        // and the closed set exists to make a scene read the same
+        // everywhere, so the finer name is not information a scene can
+        // use.
+        case kAXRadioGroupRole, kAXScrollAreaRole: return "group"
         case kAXGroupRole: return "group"
         default: return "unknown"
         }
@@ -1443,8 +1456,39 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         for child in kayaAxKids(element) { kayaAxDump(child, depth + 1) }
     }
 
+    private var kayaAxAnnounced = false
+
     private func kayaAxRead(_ identifier: String) -> String? {
         guard !identifier.isEmpty else { return nil }
+        // WAIT FOR THE WINDOW, ON THE EVENT — never on a clock. The
+        // scene's first step is an expect (check-steps enforces that,
+        // and its bounded retry is the readiness wait), so the first AX
+        // call can land while AppKit is still inside the appear/layout
+        // pass that materializes the window. Reading your own process
+        // then deadlocks rather than failing: the messaging timeout
+        // does not save it, because a same-process read never reaches
+        // the messaging layer. Measured 2026-07-25 — legs hung at 120s
+        // with the trace showing `+0ms expect_ax` and the window
+        // registering microseconds later.
+        //
+        // kayaAwaitWindow parks on the registration signal itself, so
+        // this is the same event-driven wait the harness uses
+        // everywhere else, not the `settle 300` that used to hide the
+        // race at the top of the scene.
+        _ = kayaAwaitWindow(0)
+        // …then read ON THE MAIN THREAD. Reading your OWN process does
+        // not go out through the messaging layer at all: measured
+        // 2026-07-25 from a sampled deadlock, AXUIElementCopyAttributeValue
+        // short-circuits into AppKit and runs
+        // `-[NSObject _accessibilityValueForAttribute:]` INLINE on the
+        // calling thread. That is main-thread-only API, so servicing it
+        // on the harness thread while the main thread was in layout
+        // inverted AppKit's own locks and hung the leg forever — and no
+        // messaging timeout can bound a call that never sends a message.
+        return DispatchQueue.main.sync { kayaAxReadOnMain(identifier) }
+    }
+
+    private func kayaAxReadOnMain(_ identifier: String) -> String? {
         let app = AXUIElementCreateApplication(getpid())
         // macOS builds the accessibility tree LAZILY: until an
         // assistive client attaches, an app publishes a skeleton —
@@ -1453,10 +1497,33 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         // assistive technology uses AXManualAccessibility. The harness
         // IS an assistive client here, so saying so is honest, and it is
         // the only way to read the tree a real client would receive.
-        AXUIElementSetAttributeValue(
-            app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(
-            app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        // EVERY AX CALL HERE IS BOUNDED, AND THE BOUND COMES FIRST.
+        // Reading your own process is still a client/server round trip
+        // serviced by the MAIN RUNLOOP, so a busy main thread blocks
+        // the reader, and the default messaging timeout is long enough
+        // to eat a whole leg.
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        // ANNOUNCED ONCE PER PROCESS, not once per read. Setting these
+        // is not a flag flip: AppKit rebuilds its whole accessibility
+        // hierarchy in response, and that rebuild drives a full layout
+        // pass. Re-announcing on every assertion therefore paid for
+        // seventeen rebuilds in a seventeen-step scene.
+        //
+        // Measured 2026-07-25 under the mac lane's 8-wide pool: legs
+        // hung past their 120s timeout with their windows registered,
+        // while the same binary passed in a second standalone. A sample
+        // of a stuck process put 100% of the main thread in
+        // CA::Transaction::commit -> NSDisplayCycleFlush ->
+        // -[NSView _layoutSubtreeWithOldSize:] — layout, not the AX
+        // transport, which is why bounding the messaging timeout alone
+        // did not fix it.
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(
+                app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(
+                app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
         if ProcessInfo.processInfo.environment["KAYA_AX_TRACE"] != nil {
             FileHandle.standardError.write(
                 Data("KAYA_AX_TRACE: trusted=\(AXIsProcessTrusted())\n".utf8))
@@ -1467,23 +1534,72 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         // A control's spoken name is its DESCRIPTION when one was
         // authored and its TITLE when the control derived it from its
         // own content — both are what the client reads, so take the
-        // authored one first and fall back to the derived one.
+        // authored one first and fall back to the derived one. STATIC
+        // TEXT derives from neither: a label publishes nil for both and
+        // carries its string in AXValue (measured 2026-07-25, which is
+        // why `label#0` read `label/` before this), and VoiceOver
+        // speaks that value. AXValue is a String only where it is text
+        // — a slider's is a number, and the cast simply misses.
         let label =
-            (kayaAxCopy(hit, kAXDescriptionAttribute) as? String).flatMap {
-                $0.isEmpty ? nil : $0
-            } ?? (kayaAxCopy(hit, kAXTitleAttribute) as? String) ?? ""
+            [kAXDescriptionAttribute, kAXTitleAttribute, kAXValueAttribute]
+            .lazy
+            .compactMap { kayaAxCopy(hit, $0 as String) as? String }
+            .first { !$0.isEmpty } ?? ""
         return role + "/" + label
     }
 
+    /// What [kayaAxRole] weighed, for a MISMATCH: `unknown/…` means the
+    /// platform published a role the closed set has no name for, and
+    /// the next question is always which one.
+    private func kayaAxWhy(_ identifier: String) -> String {
+        let app = AXUIElementCreateApplication(getpid())
+        guard let hit = kayaAxFind(app, identifier) else { return "" }
+        let role = kayaAxCopy(hit, kAXRoleAttribute as String) as? String ?? "nil"
+        let subrole = kayaAxCopy(hit, kAXSubroleAttribute as String) as? String ?? "nil"
+        return " (role=\(role) subrole=\(subrole))"
+    }
+
 #else
+    /// UIKit has NO role vocabulary — that is the platform difference
+    /// this arm exists for. macOS publishes AXRole, a first-class name
+    /// per control; iOS publishes a TRAIT BITMASK plus the element's
+    /// class, and the same trait rides several kinds (a toggle is a
+    /// button that toggles, a chooser is a button that owns a menu).
+    /// So the order below is not stylistic: the SPECIFIC signals must
+    /// be weighed before `.button`, or every one of them reads as a
+    /// plain button. All of it is measured — see the traits in each
+    /// case.
     private func kayaAxRole(_ element: NSObject) -> String {
         let traits = element.accessibilityTraits
-        if traits.contains(.button) { return "button" }
-        if traits.contains(.image) { return "image" }
+        // A Toggle publishes button|toggleButton (traits
+        // 9007199254740993 = 1 | 1<<53, measured 2026-07-25). The trait
+        // is iOS 17; below that the switch is only its class.
+        if #available(iOS 17.0, *), traits.contains(.toggleButton) { return "checkbox" }
+        if element is UISwitch { return "checkbox" }
         if traits.contains(.adjustable) { return "slider" }
-        if traits.contains(.staticText) { return "label" }
+        if traits.contains(.image) { return "image" }
+        // A ProgressView publishes `updatesFrequently` and nothing else
+        // (traits 512, measured): it is the only classification iOS
+        // gives a progress indicator, since the element is not a
+        // UIProgressView at all under SwiftUI.
+        if traits.contains(.updatesFrequently) { return "progress" }
+        // THE CHOOSER. iOS has no combo box: a menu-style picker is a
+        // UIButton that OWNS A MENU (traits 1 — a plain button — on
+        // class UIKitIconPreferringButton, measured). The menu is the
+        // platform's own evidence that this is a chooser rather than a
+        // button, so the question is asked of the control, not of
+        // kaya's model.
+        if let button = element as? UIButton, button.menu != nil { return "combobox" }
+        if traits.contains(.button) { return "button" }
         if element is UITextView || element is UITextField { return "field" }
-        if element is UIProgressView { return "progress" }
+        if traits.contains(.staticText) { return "label" }
+        // CONTAINERS. A scroll view is a container of content by class;
+        // anything else that publishes accessibility ELEMENTS rather
+        // than being one is a group — the same rule the Compose reader
+        // applies to a node with children and no role of its own.
+        if element is UIScrollView { return "group" }
+        let count = element.accessibilityElementCount()
+        if count != NSNotFound && count > 0 { return "group" }
         return "unknown"
     }
 
@@ -1494,13 +1610,33 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     /// read has to go through the AXUIElement CLIENT API — the two
     /// Apple platforms genuinely differ here, which is why this arm is
     /// not a copy of the macOS one.
+    /// The identifier as the ELEMENT publishes it. SwiftUI's own
+    /// accessibility elements are not UIViews and do not formally
+    /// conform to UIAccessibilityIdentification, so the typed cast
+    /// misses them and the ObjC selector is the way in — measured
+    /// 2026-07-25, when every node in a materialized tree reported a
+    /// nil identifier through the cast alone.
+    private func kayaAxIdentifier(_ node: NSObject) -> String? {
+        if let ident = (node as? UIAccessibilityIdentification)?.accessibilityIdentifier,
+            !ident.isEmpty
+        {
+            return ident
+        }
+        let selector = NSSelectorFromString("accessibilityIdentifier")
+        if node.responds(to: selector),
+            let ident = node.perform(selector)?.takeUnretainedValue() as? String,
+            !ident.isEmpty
+        {
+            return ident
+        }
+        return nil
+    }
+
     private func kayaAxFind(_ node: NSObject, _ identifier: String, _ depth: Int = 0)
         -> NSObject?
     {
         if depth > 64 { return nil }
-        if let ident = (node as? UIAccessibilityIdentification)?.accessibilityIdentifier,
-            ident == identifier
-        {
+        if kayaAxIdentifier(node) == identifier {
             return node
         }
         let count = node.accessibilityElementCount()
@@ -1521,8 +1657,79 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         return nil
     }
 
+    /// What the walk actually saw, printed ONCE on the first miss. A
+    /// silent "not in the accessibility tree" costs a whole simulator
+    /// round-trip per question, and every question here is about a tree
+    /// whose shape cannot be guessed from the source.
+    private func kayaAxDump(_ node: NSObject, _ depth: Int = 0) {
+        if depth > 12 { return }
+        let pad = String(repeating: "  ", count: depth)
+        let count = node.accessibilityElementCount()
+        let elements = count == NSNotFound ? 0 : count
+        FileHandle.standardError.write(
+            Data(
+                """
+                KAYA_AX_TRACE: \(pad)\(type(of: node)) \
+                id=\(kayaAxIdentifier(node) ?? "nil") \
+                label=\(node.accessibilityLabel ?? "nil") \
+                traits=\(node.accessibilityTraits.rawValue) \
+                isElement=\(node.isAccessibilityElement) elements=\(elements) \
+                subviews=\((node as? UIView)?.subviews.count ?? 0)
+
+                """.utf8))
+        for i in 0..<elements {
+            if let child = node.accessibilityElement(at: i) as? NSObject {
+                kayaAxDump(child, depth + 1)
+            }
+        }
+        if let view = node as? UIView {
+            for sub in view.subviews { kayaAxDump(sub, depth + 1) }
+        }
+    }
+
+    private var kayaAxDumped = false
+    private var kayaAxAutomationOn = false
+
+    /// iOS builds its accessibility tree LAZILY, exactly as macOS does:
+    /// until an assistive technology is running, SwiftUI's accessibility
+    /// elements do not exist. Measured 2026-07-25 — every view in the
+    /// hierarchy (UISwitch, UITextField, UISlider, the lot) reported
+    /// `isAccessibilityElement=false`, zero accessibility elements and a
+    /// nil identifier, so the walk below found nothing at all and every
+    /// assertion read `<not in the accessibility tree>`.
+    ///
+    /// VoiceOver cannot be started from inside the app, but the AX
+    /// runtime's AUTOMATION switch can be, and flipping it is what
+    /// materializes the tree. This is the iOS spelling of the
+    /// AXEnhancedUserInterface / AXManualAccessibility handshake the
+    /// macOS arm performs a few lines up — the harness IS an assistive
+    /// client, and saying so is what makes the read honest — and it is
+    /// the same switch XCUITest, KIF and EarlGrey flip for the same
+    /// reason.
+    ///
+    /// Resolved with dlsym rather than linked: nothing outside this
+    /// harness path can reach it, and no shipped binary carries a
+    /// reference to a private symbol.
+    private func kayaAxEnableAutomation() {
+        if kayaAxAutomationOn { return }
+        kayaAxAutomationOn = true
+        guard let handle = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW),
+            let symbol = dlsym(handle, "_AXSSetAutomationEnabled")
+        else {
+            FileHandle.standardError.write(
+                Data("KAYA_AX_TRACE: no _AXSSetAutomationEnabled; the tree stays empty\n".utf8))
+            return
+        }
+        typealias KayaSetAutomation = @convention(c) (Bool) -> Void
+        unsafeBitCast(symbol, to: KayaSetAutomation.self)(true)
+    }
+
     private func kayaAxRead(_ identifier: String) -> String? {
         guard !identifier.isEmpty else { return nil }
+        // The tree materializes asynchronously after the switch flips;
+        // the step's bounded retry is what waits for it (no sleep here —
+        // a fixed wait would be a guess, and the retry already exists).
+        kayaAxEnableAutomation()
         for scene in UIApplication.shared.connectedScenes.compactMap({
             $0 as? UIWindowScene
         }) {
@@ -1532,7 +1739,34 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
                 }
             }
         }
+        if !kayaAxDumped {
+            kayaAxDumped = true
+            for scene in UIApplication.shared.connectedScenes.compactMap({
+                $0 as? UIWindowScene
+            }) {
+                for window in scene.windows { kayaAxDump(window) }
+            }
+        }
         return nil
+    }
+
+    /// What [kayaAxRole] weighed, for a MISMATCH. UIKit has no role
+    /// vocabulary — the classification is a trait bitmask plus the
+    /// element's class — so `unknown/…` is never self-explaining, and
+    /// the next question is always which traits and which class. One
+    /// simulator round-trip per answer without this.
+    private func kayaAxWhy(_ identifier: String) -> String {
+        for scene in UIApplication.shared.connectedScenes.compactMap({
+            $0 as? UIWindowScene
+        }) {
+            for window in scene.windows {
+                guard let hit = kayaAxFind(window, identifier) else { continue }
+                let count = hit.accessibilityElementCount()
+                return " (class=\(type(of: hit)) traits=\(hit.accessibilityTraits.rawValue)"
+                    + " elements=\(count == NSNotFound ? 0 : count))"
+            }
+        }
+        return ""
     }
 #endif
 
@@ -1761,6 +1995,15 @@ private func kayaRunScript(_ script: String) {
             Thread.sleep(forTimeInterval: 0.05)
         }
     }
+    // THE TRACE MUST SURVIVE A KILL. stdout to a file is
+    // block-buffered, so a leg killed at its timeout takes every step
+    // it had logged down with it — the log then shows only the
+    // backend's stderr and the hang looks like "never started".
+    // Measured twice on 2026-07-25 before this line existed: two
+    // accessibility legs died at 120s with no trace at all, and the
+    // step they hung on was unknowable from the log. Line buffering
+    // costs nothing here and makes a killed leg say where it stopped.
+    setvbuf(stdout, nil, _IOLBF, 0)
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
     for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -2448,7 +2691,12 @@ private func kayaRunScript(_ script: String) {
                 if gotAx == wantAx {
                     observed.append("ax \(wantAx)")
                 } else {
-                    failures.append("ax \(gotAx), wanted \(wantAx)")
+                    // The platform's own classification rides the
+                    // failure: `unknown/…` is never self-explaining, and
+                    // the answer is one platform round-trip away
+                    // otherwise.
+                    let why = identifier.flatMap { $0.isEmpty ? nil : kayaAxWhy($0) } ?? ""
+                    failures.append("ax \(gotAx), wanted \(wantAx)\(why)")
                 }
             case "expect_menu_presentation":
                 // `<size class>/<presentation>`. macOS reads the REAL

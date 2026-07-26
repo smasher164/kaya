@@ -1470,6 +1470,107 @@ of being re-decided per binding.
   an artifact demands semantics that adaptive menu promotion cannot
   express.
 
+## Accessibility (the universal props, landed 2026-07-25)
+
+Native widgets ARE the accessibility tree (see the Accessibility case
+analysis under Case analyses) — but "for free" is a claim, and a claim
+needs a gate. Two props and one harness verb are what turn it into a
+matrix fact.
+
+**The props are universal.** Every widget kind carries both, and that is
+the whole design decision:
+
+- `a11y_id` — a stable authored key that assistive tooling and UI
+  automation address the widget by, NEVER spoken.
+- `a11y_label` — what an assistive client SPEAKS for it.
+
+They are deliberately separate: an automation key is not a spoken name.
+Leaving the label unset keeps whatever the platform DERIVES from the
+control's own content — a button's caption, a checkbox's caption, a
+label's text — and setting it overrides that, so a control that already
+reads well needs nothing. Empty means unset everywhere: writing `""`
+would SILENCE a control that had a perfectly good derived name, which is
+the opposite of what an app asking for accessibility wants.
+
+Containers take them too, and that is the point of "universal": a named
+container is a GROUP to an assistive client — a landmark in the tree —
+and its children stay individually reachable. Naming one is how an app
+declares it a group, and every backend needs a different step to make
+that true (SwiftUI needs the container made its own element with
+`children: .contain`; GTK must promote GtkBox from GENERIC to Group;
+WinUI gives an unnamed Grid no automation peer at all).
+
+**The verb reads the platform's own tree, never kaya's model.**
+`expect_ax <target> "<role>/<name>"` resolves a target to its authored
+identifier and then asks the PLATFORM what it publishes. Reading kaya's
+model would make the scene agree with itself and prove nothing. The
+`role` half is a closed set — `button`, `label`, `field`, `checkbox`,
+`slider`, `image`, `progress`, `combobox`, `group`, `unknown` — which
+NORMALIZES the platforms' own vocabularies so one shared scene reads the
+same everywhere. Two rules keep it honest:
+
+- A role only one platform can produce is normalized DOWN to the
+  coarsest one they all publish (macOS's AXRadioGroup and AXScrollArea
+  and UIA's List are all `group`), because a name only one backend can
+  say is a name no shared scene can assert.
+- `combobox` earns its place the other way: every platform HAS a chooser
+  role and only the spelling differs (AXPopUpButton, a UIButton owning a
+  menu, `Role.DropdownList`, AT-SPI and UIA ComboBox).
+- Anything kaya has no name for reports `unknown` rather than a guess.
+  An honest "the platform said something else" is a finding; a guess
+  hides one.
+
+**How each backend reads, and what correspondence it offers.** These
+differ for real reasons, and each cost a measured discovery:
+
+| backend | read | correspondence |
+| --- | --- | --- |
+| macOS | the AXUIElement CLIENT API against our own pid. The server-side NSAccessibility protocol is for SETTING accessibility; a server-side walk returns nil for every identifier. The tree is built LAZILY — the harness announces itself with AXEnhancedUserInterface/AXManualAccessibility, which is what an assistive client does. Every call is bounded with a messaging timeout: reading your own process is still serviced by the main runloop. | identity (`accessibilityIdentifier`) |
+| iOS | UIKit publishes in-process, but SwiftUI materializes NO accessibility elements until an assistive technology attaches — the same laziness as macOS, spelled differently. The harness flips the AX runtime's automation switch (what XCUITest, KIF and EarlGrey all flip) and the tree appears. Identifiers come off the ObjC selector: SwiftUI's elements are not UIViews and do not conform to UIAccessibilityIdentification. Roles come from a TRAIT BITMASK plus the element's class, so the specific signals must be weighed before `.button` — a toggle is a button that toggles, a chooser is a button that owns a menu. | identity (`accessibilityIdentifier`) |
+| Android (Compose) | the MERGED semantics tree. Compose hands a service the UNMERGED nodes plus merge instructions and the SERVICE merges, so `createAccessibilityNodeInfo` — the obvious call — returns a pre-merge node no client sees as such. Roles come from Compose's own `Role`, falling back to the class name for the controls it classifies without one. | identity (`TestTag`) |
+| GTK | AT-SPI, over the bus, as a real client. GTK exposes no getter for accessible properties — the accessible surface IS AT-SPI — so an in-process read would only return kaya's own writes. | ORDINAL: GTK publishes no settable accessible id below 4.22 (the widget name does not surface as one). kaya's `kind#index` resolves a widget, and the widget's rank among the widgets publishing the SAME bus role is the ordinal to ask for — the bus tree is not kaya's tree (every button contains a Label node; an entry's internal text widget is hidden; an unmapped popover publishes nothing). |
+| WinUI | the real UIA peer, created on demand exactly as a client walking the tree would. | per-kind registry index |
+
+**Where a platform fights an authored name.** GTK's name computation
+reads the LABELLED_BY relation before the label property, so a control
+that points a relation at its own content outranks the app: a named
+select read back as its selected option. The lowering drops that
+relation when it authors a name — the uniform semantics is that an
+authored label WINS, and the spelling of "wins" is per platform.
+
+**The carve-out worth stating plainly: this read is IN-PROCESS.** Every
+backend answers the verb from inside the app — through the client API
+on macOS, the materialized element tree on iOS, the merged semantics
+tree on Compose, the automation peer on WinUI. GTK is the exception
+that proves the rule: it has no in-process accessible surface at all,
+so its read goes out over the AT-SPI bus and is the only one that is
+literally a separate client.
+
+Android is where that costs the most fidelity. The highest-fidelity
+read there would be out-of-process — `adb shell uiautomator dump` from
+the runner — which is the exact analogue of AXUIElement, AT-SPI and
+automation peers, and it would need `testTagsAsResourceId` because
+UiAutomator cannot match on anything else (which is why Appium and
+Detox users all enable it; it is mainstream practice, not a hack). It
+is not what kaya does, and the reason is architectural rather than
+technical: scene steps are interpreted IN-PROCESS by each backend's
+interpreter, and moving one verb out to the runner would break that
+uniformity for one platform (scenes are shared verbatim). So the merged
+semantics tree is what Compose asserts against, and it is one step
+removed from what a service would compute for itself.
+
+Per-platform correspondence already varies this way by design —
+identity on macOS, iOS, Compose and WinUI, an ordinal over same-role
+nodes on GTK — and the table above says which each offers. The claim
+the scene proves is uniform; the distance from the assertion to a real
+assistive client is not, and that is the honest statement of it.
+
+**The conformance scene** (`tools/scenes/a11y.steps`, every guest
+language) asserts every widget kind, both halves — DERIVED names where a
+control has a caption, AUTHORED names where it draws nothing readable —
+and that a named group's children stay individually reachable. All five
+backends produce byte-identical strings.
+
 ## Brand identity and the styling ceiling
 
 The dressed control floor answers one question — what should a *button*
@@ -1860,7 +1961,9 @@ resize modal loops that stall single-threaded apps.
 
 **Accessibility.** Native widgets are the accessibility tree, and they
 answer VoiceOver, UIA, and AT-SPI from retained core state, so the app is
-not in the answer path at all. Custom-drawn frameworks pay a permanent tax
+not in the answer path at all. (The two universal props that let an app
+author identity and names, and the harness verb that reads each
+platform's real tree back, are their own section: Accessibility.) Custom-drawn frameworks pay a permanent tax
 building semantics trees by hand; wrapping native widgets gets this for
 free. Accessibility also stays fully live during app stalls, where a
 classic app's stalled main thread reads as "busy" to VoiceOver. The

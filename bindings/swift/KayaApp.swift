@@ -947,6 +947,23 @@ final class KayaAppTx {
         tx.setGrow(w.id, weight)
     }
 
+    /// A widget's accessibility IDENTIFIER: a stable authored key that
+    /// assistive tooling and UI automation address it by, and which is
+    /// NEVER spoken. Universal — every kind carries one.
+    func setA11yId(_ w: KayaWidget, _ id: String) {
+        tx.setA11yId(w.id, id)
+    }
+
+    /// What an assistive client SPEAKS for a widget. Universal, and
+    /// deliberately separate from the identifier — an automation key is
+    /// not a spoken name. Leave it unset to keep whatever the platform
+    /// derives from the control's own content; setting it OVERRIDES
+    /// that, so a button whose caption already reads well needs nothing
+    /// here.
+    func setA11yLabel(_ w: KayaWidget, _ label: String) {
+        tx.setA11yLabel(w.id, label)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }

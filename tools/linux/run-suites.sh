@@ -27,7 +27,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -115,11 +115,9 @@ status=0
 # environment of three hundred legs that never asked for it.
 #
 # The image carries at-spi2-core + dbus (see the Dockerfile), and
-# tools/linux/atspi_probe.py walks the tree. When the a11y scene gets
-# its Linux leg, launch the bus INSIDE that leg only:
-#   eval "$(dbus-launch --sh-syntax)"; export GTK_A11Y=atspi
-#   /usr/libexec/at-spi-bus-launcher --launch-immediately &
-# and tear both down with it.
+# tools/linux/atspi_probe.py walks the tree by hand. The a11y legs
+# below launch the bus INSIDE each leg through
+# tools/linux/a11y-leg.sh, which tears it down with the leg.
 
 # Headless Weston for the Wayland leg.
 export XDG_RUNTIME_DIR=/tmp/xdg
@@ -481,6 +479,28 @@ for proto in x11 wayland; do
     run "$proto" scroll-haskell env KAYA_SELFTEST=scroll "$(hs_bin scroll)"
     run "$proto" scroll-java env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The a11y scene: every widget kind's role and NAME read back off
+    # the AT-SPI bus, as a real assistive client reads them — the only
+    # honest route on GTK, which has no getter for accessible
+    # properties (an in-process read would return kaya's own writes).
+    # The bus is per-leg (tools/linux/a11y-leg.sh): exported lane-wide
+    # it timed out eleven legs that never asked for accessibility.
+    run "$proto" a11y-rust env KAYA_SELFTEST=a11y \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/a11y"
+    run "$proto" a11y-c env KAYA_SELFTEST=a11y \
+        tools/linux/a11y-leg.sh /tmp/c-guests/a11y
+    run "$proto" a11y-python env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/a11y.py
+    run "$proto" a11y-go env KAYA_SELFTEST=a11y \
+        tools/linux/a11y-leg.sh /tmp/go-guests/a11y
+    run "$proto" a11y-csharp env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" a11y-ocaml env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/a11y.exe
+    run "$proto" a11y-haskell env KAYA_SELFTEST=a11y \
+        tools/linux/a11y-leg.sh "$(hs_bin a11y)"
+    run "$proto" a11y-java env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The progress scene: fraction + activity mode read back from
     # GtkProgressBar (the pulse ticker IS the activity mode).
     run "$proto" progress-rust env KAYA_SELFTEST=progress "$CARGO_TARGET_DIR/debug/examples/progress"

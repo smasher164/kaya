@@ -843,6 +843,37 @@ public final class KayaApp {
             tx.setAlign(this, align);
             return this;
         }
+
+        /**
+         * This widget's accessibility identifier at construction — the
+         * declarative chain: tx.entry().a11yId("name"). Same
+         * transaction discipline as grow.
+         */
+        public Widget a11yId(String id) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yId on a widget outside its build transaction"
+                    + " — use Tx.setA11yId inside a live transaction");
+            }
+            tx.setA11yId(this, id);
+            return this;
+        }
+
+        /**
+         * This widget's spoken accessibility label at construction —
+         * the declarative chain:
+         * tx.entry().a11yId("name").a11yLabel("Full name"). Same
+         * transaction discipline as grow.
+         */
+        public Widget a11yLabel(String label) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yLabel on a widget outside its build transaction"
+                    + " — use Tx.setA11yLabel inside a live transaction");
+            }
+            tx.setA11yLabel(this, label);
+            return this;
+        }
     }
 
     /**
@@ -1267,6 +1298,29 @@ public final class KayaApp {
          */
         public void setAlign(Widget w, Align align) {
             records.add(KayaWire.txSetAlign(w.id, align.wire));
+        }
+
+        /**
+         * A widget's accessibility IDENTIFIER: a stable authored key
+         * that assistive tooling and UI automation address it by, and
+         * which is NEVER spoken. Universal — every kind carries one.
+         * The dynamic path; the declarative spelling is the a11yId
+         * chain at construction.
+         */
+        public void setA11yId(Widget w, String id) {
+            records.add(KayaWire.txSetA11yId(w.id, id));
+        }
+
+        /**
+         * What an assistive client SPEAKS for a widget. Universal, and
+         * deliberately separate from the identifier — an automation key
+         * is not a spoken name. Leave it unset to keep whatever the
+         * platform derives from the control's own content; setting it
+         * OVERRIDES that, so a button whose caption already reads well
+         * needs nothing here.
+         */
+        public void setA11yLabel(Widget w, String label) {
+            records.add(KayaWire.txSetA11yLabel(w.id, label));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {

@@ -346,6 +346,30 @@ let set_text (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
    argument every constructor takes. *)
 let set_grow (Widget id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
 
+(* A widget's accessibility IDENTIFIER: a stable authored key that
+   assistive tooling and UI automation address it by, and which is
+   NEVER spoken. Universal — every kind carries one. [set_a11y_id] is
+   the dynamic path; the declarative spelling is the [~a11y_id] labeled
+   argument every constructor takes, like [~grow]. *)
+let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
+
+(* What an assistive client SPEAKS for a widget. Universal, and
+   deliberately separate from the identifier — an automation key is not
+   a spoken name. Leave it unset to keep whatever the platform derives
+   from the control's own content; setting it OVERRIDES that, so a
+   button whose caption already reads well needs nothing here.
+   [set_a11y_label] is the dynamic path; [~a11y_label] is the
+   declarative spelling. *)
+let set_a11y_label (Widget id) value =
+  emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
+
+(* The two universal props as they ride every constructor: applied
+   together, in one place, so a new constructor cannot pick up [~grow]
+   and quietly miss these. *)
+let set_a11y ?a11y_id ?a11y_label w =
+  Option.iter (fun v -> set_a11y_id w v) a11y_id;
+  Option.iter (fun v -> set_a11y_label w v) a11y_label
+
 (* A container's inter-child gap (main axis, DIP; the normalized
    default is 8). Containers only — the scene rejects it anywhere
    else. [set_spacing] is the dynamic path; the declarative spelling
@@ -424,10 +448,11 @@ let add_child (Widget parent) (Widget child) =
    binding interprets later (the design's no-guest-AST rule); the
    explicit floor above stays for whoever wants one call ≈ one record. *)
 
-let button ?grow ?text ?on_click () =
+let button ?grow ?a11y_id ?a11y_label ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
   | Some handler ->
@@ -438,10 +463,11 @@ let button ?grow ?text ?on_click () =
 
 (* A multi-line text editor: the entry's uncontrolled contract over
    the platform's real multi-line editor. *)
-let textarea ?grow ?on_change () =
+let textarea ?grow ?a11y_id ?a11y_label ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -449,17 +475,19 @@ let textarea ?grow ?on_change () =
   | None -> ());
   w
 
-let label ?grow ?text ?bind () =
+let label ?grow ?a11y_id ?a11y_label ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun s -> bind_text w s) bind;
   w
 
-let entry ?grow ?on_change () =
+let entry ?grow ?a11y_id ?a11y_label ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   (match on_change with
   | Some handler ->
       let (Widget id) = w in
@@ -470,10 +498,11 @@ let entry ?grow ?on_change () =
 (* A progress bar: display-only, like label and image. [~value] is
    the determinate fraction (0..=1); [~indeterminate:true] switches
    to the platform's activity mode. *)
-let progress ?grow ?(value = 0.0) ?indeterminate () =
+let progress ?grow ?a11y_id ?a11y_label ?(value = 0.0) ?indeterminate () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_progress in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_value id value);
   Option.iter (fun i -> emit tx (Kaya_wire.tx_set_indeterminate id i)) indeterminate;
@@ -485,10 +514,12 @@ let progress ?grow ?(value = 0.0) ?indeterminate () =
    position instead of a constant — the programmatic write path
    ([write] fans out to the control; property writes never echo an
    occurrence, so a handler's own writes cannot loop back at it). *)
-let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind ?on_change () =
+let slider ?grow ?a11y_id ?a11y_label ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind
+    ?on_change () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_slider in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   let (Widget id) = w in
   emit tx (Kaya_wire.tx_set_min id min);
   emit tx (Kaya_wire.tx_set_max id max);
@@ -506,10 +537,11 @@ let slider ?grow ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind ?on_change () =
    option count). Uncontrolled, like the slider: [~on_select]
    receives each USER pick's new 0-based index (programmatic writes
    never echo). *)
-let select ?grow ?(selected = 0) ?on_select options () =
+let select ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_select in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   List.iter
     (fun option_text ->
       let o = widget Kaya_wire.kind_label in
@@ -528,10 +560,11 @@ let select ?grow ?(selected = 0) ?on_select options () =
 (* A radio group over fixed [options] — the choice contract
    ([select]) in its inline presentation: same option children, same
    0-based [~selected] index, same [~on_select] pick handler. *)
-let radio ?grow ?(selected = 0) ?on_select options () =
+let radio ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_radio in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   List.iter
     (fun option_text ->
       let o = widget Kaya_wire.kind_label in
@@ -547,10 +580,11 @@ let radio ?grow ?(selected = 0) ?on_select options () =
   | None -> ());
   w
 
-let checkbox ?grow ?text ?checked ?on_toggle () =
+let checkbox ?grow ?a11y_id ?a11y_label ?text ?checked ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_checkbox in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun c -> set_checked w c) checked;
   (match on_toggle with
@@ -566,9 +600,10 @@ let checkbox ?grow ?text ?checked ?on_toggle () =
    into core memory; the handle is consumed by the next submit, and
    the guest's bytes are free to drop the moment the call returns.
    [bind] takes a Blob signal instead. Display-only, like a label. *)
-let image ?grow ?source ?bind () =
+let image ?grow ?a11y_id ?a11y_label ?source ?bind () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
+  set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun data -> set_source w data) source;
   Option.iter (fun s -> bind_source w s) bind;
   w
@@ -585,9 +620,10 @@ let image ?grow ?source ?bind () =
    props are labeled optional arguments, the lablgtk idiom: [~grow]
    weights the container within ITS parent, [~spacing] sets its own
    inter-child gap. *)
-let container ?grow ?spacing ?align kind children () =
+let container ?grow ?a11y_id ?a11y_label ?spacing ?align kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
+  set_a11y ?a11y_id ?a11y_label parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
   Option.iter (fun a -> set_align parent a) align;
   List.iter (fun child -> add_child parent (child ())) children;
@@ -598,12 +634,13 @@ let container ?grow ?spacing ?align kind children () =
    (the thing nested rows cannot express). [~spacing] is the
    inter-cell gap on both axes. The columns record lands BEFORE the
    add_childs (backends re-flow either way). *)
-let grid ~columns ?grow ?spacing children () =
+let grid ~columns ?grow ?a11y_id ?a11y_label ?spacing children () =
   let tx = the_tx () in
   let parent = widget Kaya_wire.kind_grid in
   let (Widget id) = parent in
   emit tx (Kaya_wire.tx_set_columns id (float_of_int columns));
   Option.iter (fun g -> set_grow parent g) grow;
+  set_a11y ?a11y_id ?a11y_label parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
@@ -615,17 +652,18 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?spacing ?align children =
-  container ?grow ?spacing ?align Kaya_wire.kind_column children
+let column ?grow ?a11y_id ?a11y_label ?spacing ?align children =
+  container ?grow ?a11y_id ?a11y_label ?spacing ?align Kaya_wire.kind_column children
 
 (* A vertical scroll viewport over EXACTLY ONE child (the signature
    says so; the scene enforces it too). Pass [~grow] so the enclosing
    track CONSTRAINS it — an unconstrained viewport hugs its content
    and nothing overflows. *)
-let scroll ?grow children = container ?grow Kaya_wire.kind_scroll children
+let scroll ?grow ?a11y_id ?a11y_label children =
+  container ?grow ?a11y_id ?a11y_label Kaya_wire.kind_scroll children
 
-let row ?grow ?spacing ?align children =
-  container ?grow ?spacing ?align Kaya_wire.kind_row children
+let row ?grow ?a11y_id ?a11y_label ?spacing ?align children =
+  container ?grow ?a11y_id ?a11y_label ?spacing ?align Kaya_wire.kind_row children
 
 (* An existing widget as a child: [w field] wraps an already-realized
    handle in an inert thunk, so a widget created earlier (because

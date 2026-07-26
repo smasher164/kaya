@@ -78,7 +78,11 @@ in docs/deferred.md.
    milestones),
    `tools/check-targets.sh` (cross-compiles every cfg'd backend),
    `tools/check-sugar-surface.sh` (every widget kind has a live-zone
-   constructor in all 8 bindings), `tools/check-abort.sh` (uniform abort
+   constructor in all 8 bindings),
+   `tools/check-universal-props.sh` (the lowering-side sibling: every
+   backend applies the universal a11y props to every kind — Compose
+   per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
+   still keyed on the prop alone), `tools/check-abort.sh` (uniform abort
    semantics, all languages), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
@@ -87,6 +91,11 @@ in docs/deferred.md.
    `tools/check-compose.sh` (KayaCompose.kt actually compiles — the
    swift-typecheck sibling; the emulator must never be the first
    compiler to see the Kotlin layer),
+   `tools/check-detekt.sh` (dead code in the Kotlin sources; the
+   COMPILER cannot serve here — K2 moved the UNUSED_* diagnostics into
+   IDE inspections (KT-69698), so a computed-and-never-applied local
+   compiles clean, which is how a dead lowering once shipped a false
+   green),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which

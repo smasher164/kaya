@@ -295,6 +295,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity 1 \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
+    run_apk a11y-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity a11y \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11y)'"
     run_apk entry-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity entry \
@@ -403,6 +407,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity 1 \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
+    run_apk a11y-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity a11y \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11y)'"
     run_apk entry-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity entry \

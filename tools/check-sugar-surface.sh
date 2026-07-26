@@ -60,9 +60,13 @@ check_kind() {
 }
 
 # The built-in negative test: a kind that exists nowhere must fail in
-# every binding, or the patterns themselves have rotted.
+# every binding, or the patterns themselves have rotted. The fake runs
+# inside $( ), so its `status=1` dies with that subshell and the real
+# run's status is untouched — no reset here, deliberately: a reset is
+# how the menus self-test below used to erase every failure the clauses
+# above it had already found (caught 2026-07-25 by two real ocaml
+# failures printing under a PASS verdict).
 fake_failures=$(check_kind "kayafakewidget" 2>&1 | grep -c "no live-zone constructor")
-status=0 # the fake's failures are the point; reset before the real run
 if [ "$fake_failures" -ne 8 ]; then
     echo "check-sugar-surface: self-test failed ($fake_failures/8 patterns fired for a fake kind)"
     exit 1
@@ -95,7 +99,7 @@ check csharp  bindings/csharp/KayaApp.cs          spacing "public void SetSpacin
 check java    bindings/java/dev/kaya/KayaApp.java spacing "public Widget spacing\("
 check swift   bindings/swift/KayaApp.swift        spacing "func setSpacing\("
 check haskell bindings/haskell/KayaApp.hs         spacing "Spacing :: Double -> Attr"
-check ocaml   bindings/ocaml/kaya_app.ml          spacing "let row \?grow \?spacing "
+check ocaml   bindings/ocaml/kaya_app.ml          spacing "let row \?grow \?a11y_id \?a11y_label \?spacing "
 
 # The align prop's layer-3 spelling, same rule again.
 check rust    crates/kaya/src/app.rs              align "fn align\\(self"
@@ -105,7 +109,31 @@ check csharp  bindings/csharp/KayaApp.cs          align "public void SetAlign\\(
 check java    bindings/java/dev/kaya/KayaApp.java align "public Widget align\\("
 check swift   bindings/swift/KayaApp.swift        align "func setAlign\\("
 check haskell bindings/haskell/KayaApp.hs         align "Align :: Align -> Attr"
-check ocaml   bindings/ocaml/kaya_app.ml          align "let row \\?grow \\?spacing \\?align "
+check ocaml   bindings/ocaml/kaya_app.ml          align "let row \\?grow \\?a11y_id \\?a11y_label \\?spacing \\?align "
+
+# THE UNIVERSAL ACCESSIBILITY PROPS, same rule as grow/spacing/align.
+# These two are the only props every KIND carries, so a binding that
+# ships them wire-only leaves every widget in that language unnamed and
+# unaddressable to assistive tech — and nothing else would notice until
+# an app shipped. The C floor is exempt with the rest of C: the
+# generated kaya_tx_set_a11y_id/_label ARE its surface.
+check rust    crates/kaya/src/app.rs              a11y_id "fn a11y_id\\(self"
+check python  bindings/python/kaya/__init__.py    a11y_id "def a11y_id\\(self, ident\\)"
+check go      bindings/go/app.go                  a11y_id "func \\(w Widget\\) A11yID\\("
+check csharp  bindings/csharp/KayaApp.cs          a11y_id "public void SetA11yId\\("
+check java    bindings/java/dev/kaya/KayaApp.java a11y_id "public Widget a11yId\\("
+check swift   bindings/swift/KayaApp.swift        a11y_id "func setA11yId\\("
+check haskell bindings/haskell/KayaApp.hs         a11y_id "A11yId :: String -> Attr"
+check ocaml   bindings/ocaml/kaya_app.ml          a11y_id "let set_a11y_id \\(Widget id\\)"
+
+check rust    crates/kaya/src/app.rs              a11y_label "fn a11y_label\\(self"
+check python  bindings/python/kaya/__init__.py    a11y_label "def a11y_label\\(self, label\\)"
+check go      bindings/go/app.go                  a11y_label "func \\(w Widget\\) A11yLabel\\("
+check csharp  bindings/csharp/KayaApp.cs          a11y_label "public void SetA11yLabel\\("
+check java    bindings/java/dev/kaya/KayaApp.java a11y_label "public Widget a11yLabel\\("
+check swift   bindings/swift/KayaApp.swift        a11y_label "func setA11yLabel\\("
+check haskell bindings/haskell/KayaApp.hs         a11y_label "A11yLabel :: String -> Attr"
+check ocaml   bindings/ocaml/kaya_app.ml          a11y_label "let set_a11y_label \\(Widget id\\)"
 
 # The menu construction surface (DESIGN.md, Menus): menu items are not
 # widget kinds, so the constructor loop above cannot see them — every
@@ -139,7 +167,6 @@ fake_menu_failures=$(
         check_menus ocaml   bindings/ocaml/kaya_app.ml          "kayafakemenu=^let kayafakemenuitem "
     } 2>&1 | grep -c "no live-zone constructor"
 )
-status=0 # the fake's failures are the point; reset before the real run
 if [ "$fake_menu_failures" -ne 8 ]; then
     echo "check-sugar-surface: menus self-test failed ($fake_menu_failures/8 patterns fired for a fake item constructor)"
     exit 1

@@ -641,7 +641,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # measured 2026-07-22); legs queue only after every binary
     # exists. The list is explicit: window/panels are desktop-only
     # by design and must not ride $SCENES here.
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus commands"
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus commands a11y"
     swift_pids=()
     swift_names=()
     for guest in $IOS_SWIFT_SCENES; do
@@ -767,6 +767,16 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle scrollrs-swiftui dev.kaya.scrollswiftui "$TARGET_DIR/examples/scroll")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on scroll-swiftui "$APP" dev.kaya.scrollswiftui scroll-swiftui scroll scroll
+
+    # The a11y scene: every widget kind's role and name read back out of
+    # UIKit's OWN accessibility tree. iOS is the one platform where that
+    # read is in-process — UIKit publishes identifiers and elements to
+    # the app itself, unlike macOS, where the server side returns nil
+    # and only the AXUIElement client API sees the real thing.
+    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example a11y
+    APP=$(make_bundle a11yrs-swiftui dev.kaya.a11yswiftui "$TARGET_DIR/examples/a11y")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on a11y-swiftui "$APP" dev.kaya.a11yswiftui a11y-swiftui a11y a11y
 
     # The progress scene (see the swift leg).
     SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example progress

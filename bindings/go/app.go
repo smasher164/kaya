@@ -526,6 +526,47 @@ func (w Widget) Spacing(gap float64) Widget {
 	return w
 }
 
+// SetA11yID sets a widget's accessibility IDENTIFIER: a stable authored
+// key that assistive tooling and UI automation address it by, and which
+// is NEVER spoken. Universal — every kind carries one. The dynamic
+// path; the declarative spelling is the A11yID chain at construction.
+func (tx *Tx) SetA11yID(w Widget, id string) {
+	tx.records = append(tx.records, TxSetA11yId(w.id, id))
+}
+
+// A11yID sets this widget's accessibility identifier at construction —
+// the declarative chain: tx.Entry().A11yID("name"). Same transaction
+// discipline as Grow.
+func (w Widget) A11yID(id string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: A11yID on a widget outside its build transaction — use Tx.SetA11yID inside a live transaction")
+	}
+	w.tx.SetA11yID(w, id)
+	return w
+}
+
+// SetA11yLabel sets what an assistive client SPEAKS for a widget.
+// Universal, and deliberately separate from the identifier — an
+// automation key is not a spoken name. Leave it unset to keep whatever
+// the platform derives from the control's own content; setting it
+// OVERRIDES that, so a button whose caption already reads well needs
+// nothing here. The dynamic path; the declarative spelling is the
+// A11yLabel chain at construction.
+func (tx *Tx) SetA11yLabel(w Widget, label string) {
+	tx.records = append(tx.records, TxSetA11yLabel(w.id, label))
+}
+
+// A11yLabel sets this widget's spoken label at construction — the
+// declarative chain: tx.Entry().A11yID("name").A11yLabel("Full name").
+// Same transaction discipline as Grow.
+func (w Widget) A11yLabel(label string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: A11yLabel on a widget outside its build transaction — use Tx.SetA11yLabel inside a live transaction")
+	}
+	w.tx.SetA11yLabel(w, label)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }

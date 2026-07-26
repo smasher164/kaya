@@ -81,6 +81,8 @@ module KayaApp
     setGrow,
     setSpacing,
     setAlign,
+    setA11yId,
+    setA11yLabel,
     Align (..),
     Attr (..),
     WClass (..),
@@ -1108,6 +1110,21 @@ alignWire AlignBaseline = 4
 setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
+-- | A widget's accessibility IDENTIFIER: a stable authored key that
+-- assistive tooling and UI automation address it by, and which is
+-- NEVER spoken. Universal — every kind carries one. The dynamic path;
+-- the declarative spelling is the 'A11yId' attr.
+setA11yId :: Widget -> String -> Build ()
+setA11yId (Widget w) i = emitB (W.txSetA11yId w i)
+
+-- | What an assistive client SPEAKS for a widget. Universal, and
+-- deliberately separate from the identifier — an automation key is not
+-- a spoken name. Leave it unset to keep whatever the platform derives
+-- from the control's own content; setting it OVERRIDES that. The
+-- dynamic path; the declarative spelling is the 'A11yLabel' attr.
+setA11yLabel :: Widget -> String -> Build ()
+setA11yLabel (Widget w) l = emitB (W.txSetA11yLabel w l)
+
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
   Grow :: Double -> Attr c
@@ -1117,11 +1134,20 @@ data Attr (c :: WClass) where
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
+  -- | This widget's accessibility identifier — any widget class, like
+  -- 'Grow': the two accessibility props are universal, so the index
+  -- must not narrow them.
+  A11yId :: String -> Attr c
+  -- | What an assistive client speaks for this widget — any widget
+  -- class, for the same reason.
+  A11yLabel :: String -> Attr c
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Align a) w = setAlign w a
+applyAttr (A11yId i) w = setA11yId w i
+applyAttr (A11yLabel l) w = setA11yLabel w l
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do

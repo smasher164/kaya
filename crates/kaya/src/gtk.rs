@@ -2471,9 +2471,40 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         // automation peer) and what the ARIA guidance
                         // says: unnamed containers are flattened, named
                         // ones are groups.
-                        if matches!(w, NativeWidget::Column(_) | NativeWidget::Row(_)) {
+                        //
+                        // EVERY container kind, not just row and column:
+                        // measured 2026-07-25 over AT-SPI, a named grid
+                        // and a named radio group both stayed role
+                        // `panel` with an EMPTY name, and a named scroll
+                        // stayed `scroll pane`, also nameless. The radio
+                        // group is here because its accessibility shape
+                        // IS a container — a group of radio buttons,
+                        // which is what every other platform publishes
+                        // for it too.
+                        if matches!(
+                            w,
+                            NativeWidget::Column(_)
+                                | NativeWidget::Row(_)
+                                | NativeWidget::Grid(_)
+                                | NativeWidget::Scroll(_)
+                                | NativeWidget::Radio(_)
+                        ) {
                             widget.set_accessible_role(gtk4::AccessibleRole::Group);
                         }
+                        // AN AUTHORED NAME MUST WIN. GTK's name
+                        // computation reads the LABELLED_BY relation
+                        // FIRST and the label property second
+                        // (gtkatcontext.c), and a control that points a
+                        // relation at its own content therefore
+                        // outranks anything an app sets: a named select
+                        // read back as `combo box name='Red'`, its
+                        // selected option, with the authored "Color"
+                        // ignored (measured 2026-07-25 over AT-SPI,
+                        // through a re-apply on notify, on map and on a
+                        // later timeout — none of them could win a
+                        // precedence fight). Dropping the relation is
+                        // what makes the property the answer.
+                        widget.reset_relation(gtk4::AccessibleRelation::LabelledBy);
                         widget.update_property(&[gtk4::accessible::Property::Label(
                             label.as_str(),
                         )]);
@@ -3150,15 +3181,26 @@ impl crate::harness::Stage for GtkStage {
                 K::Label => atspi::Role::Label,
                 K::Slider => atspi::Role::Slider,
                 K::Image => atspi::Role::Image,
+                K::Progress => atspi::Role::ProgressBar,
+                K::Select => atspi::Role::ComboBox,
+                // A scroll viewport keeps GTK's own role: the Group
+                // promotion the other containers take does not apply to
+                // a GtkScrolledWindow (measured — it stays `scroll
+                // pane`, with the authored name attached), and the
+                // closed set normalizes it to `group` below, exactly as
+                // macOS normalizes AXScrollArea.
+                K::Scroll => atspi::Role::ScrollPane,
                 // A container kaya has NAMED carries role Grouping
                 // (the lowering promotes it); an unnamed one stays
                 // GENERIC/Panel and is not a semantic group at all.
                 // Matching Grouping also sidesteps the panel-ordinal
                 // problem: the tree is full of GTK-internal panels (a
                 // check box contains one), so "Nth panel" never lined
-                // up with "Nth container kaya created".
-                K::Row | K::Column => atspi::Role::Grouping,
-                _ => atspi::Role::Unknown,
+                // up with "Nth container kaya created". The radio group
+                // rides here too: its accessibility shape is a group of
+                // radio buttons, and the lowering promotes it with the
+                // rest.
+                K::Row | K::Column | K::Grid | K::Radio => atspi::Role::Grouping,
             };
             let role = match want {
                 atspi::Role::Button => "button",
@@ -3167,32 +3209,45 @@ impl crate::harness::Stage for GtkStage {
                 atspi::Role::Label => "label",
                 atspi::Role::Slider => "slider",
                 atspi::Role::Image => "image",
-                atspi::Role::Grouping => "group",
+                atspi::Role::ProgressBar => "progress",
+                atspi::Role::ComboBox => "combobox",
+                atspi::Role::Grouping | atspi::Role::ScrollPane => "group",
                 _ => "unknown",
             };
-            // CONTAINERS need their ordinal among ALL containers, not
-            // within their own registry. kaya keeps rows and columns in
-            // separate Vecs, but AT-SPI exposes both as role Panel — so
-            // `row#0` was resolving to the FIRST panel in the tree,
-            // which is the enclosing column, and read an empty name off
-            // the wrong element (measured 2026-07-25).
+            // THE ORDINAL IS NOT kaya's INDEX. `label#0` means the
+            // first label kaya created, but the bus's Nth Label counts
+            // the captions inside buttons and check boxes too — so
+            // `label#0` read `label/Save`, the caption inside the first
+            // button (measured 2026-07-25). The same collision hits
+            // every role the bus shares between kinds: an entry and a
+            // textarea are both `text`, so `textarea#0` read the
+            // entry's name; every named container is `grouping`, so
+            // `row#0` read the enclosing column's.
             //
-            // WidgetId is assigned in creation order and AT-SPI's tree
-            // is depth-first in the same order, so the target's position
-            // among all container widgets IS its panel ordinal. The ids
-            // must be sorted explicitly: core.widgets is a HashMap.
-            // No container special-case: only NAMED containers carry
-            // role Grouping (the lowering promotes them), so the tree's
-            // groupings are exactly kaya's semantic groups, in creation
-            // order. The earlier attempt counted kaya's containers and
-            // indexed panels, which never matched — the tree carries
-            // GTK-internal panels too.
+            // So kaya's index resolves a WIDGET (creation order, what
+            // `kind#index` means), and the widget's rank among the
+            // widgets publishing the SAME bus role — walked
+            // depth-first, the order the bus publishes — is the ordinal
+            // to ask for. Widget-tree order rather than creation order
+            // on purpose: creation is parent-first in statement-shaped
+            // languages and child-first in expression-shaped ones,
+            // while the tree is identical in both.
             //
-            // LIMIT worth knowing: the ordinal is over NAMED containers,
-            // so `row#1` means the second named row, not the second row.
-            // Exact identity is unavailable here (GTK publishes no
-            // settable accessible id below 4.22).
-            let index = target.index;
+            // Exact identity is still unavailable here (GTK publishes
+            // no settable accessible id below 4.22, and the AT-SPI
+            // probe confirms the widget name does not surface as one);
+            // this is the strongest correspondence the platform offers.
+            //
+            // The rank is read on the MAIN thread (the widget tree
+            // lives there), the bus walk on this one — the same split
+            // every other GTK verb makes.
+            let index = match Self::on_main(move |core| {
+                target_widget(core, target)
+                    .and_then(|widget| atspi_rank(&core.window, &widget))
+            }) {
+                Some(rank) => rank as isize,
+                None => return "<not in the accessibility tree>".to_owned(),
+            };
             return match atspi_collect(want, index as usize) {
                 Some(name) => format!("{role}/{name}"),
                 None => "<not in the accessibility tree>".to_owned(),
@@ -4057,6 +4112,153 @@ impl crate::harness::Stage for GtkStage {
     }
 }
 
+/// The widget a `kind#index` target names, from the per-kind registry
+/// every other verb resolves through — creation order, which is what
+/// `kind#index` means.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk4::Widget> {
+    use crate::harness::{try_resolve, TargetKind as K};
+    use gtk4::prelude::Cast;
+    macro_rules! nth {
+        ($reg:expr) => {
+            try_resolve(target.index, $reg.len()).map(|i| $reg[i].clone().upcast())
+        };
+    }
+    match target.kind {
+        K::Button => nth!(core.buttons),
+        K::Checkbox => nth!(core.checkboxes),
+        K::Label => nth!(core.labels),
+        K::Entry => nth!(core.entries),
+        K::Textarea => nth!(core.textareas),
+        K::Slider => nth!(core.sliders),
+        K::Image => nth!(core.images),
+        K::Progress => nth!(core.progresses),
+        K::Select => nth!(core.selects),
+        K::Radio => nth!(core.radios),
+        K::Grid => nth!(core.grids),
+        K::Scroll => nth!(core.scrolls),
+        K::Row => nth!(core.rows),
+        K::Column => nth!(core.columns),
+    }
+}
+
+/// The AT-SPI role GTK publishes for this widget — MEASURED off the bus
+/// (tools/linux/atspi_probe.py), not assumed, and deliberately narrow:
+/// it answers only for the roles a scene can assert.
+///
+/// It exists because the bus tree is NOT kaya's tree. GTK publishes
+/// widgets kaya never created (every button and check box contains a
+/// GtkLabel, and those labels are real Label nodes on the bus) and
+/// hides some it did (an entry's internal GtkText does not appear at
+/// all). Ranking a target among the widgets that publish the SAME role
+/// is what turns kaya's per-kind index into the bus's ordinal, and
+/// getting the set wrong is silent: it reads the wrong element's name.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
+    use gtk4::prelude::{AccessibleExt, Cast};
+    // A ScrolledWindow FIRST, before the promotion check below: the
+    // lowering names it like any other container, and GTK takes the
+    // name but NOT the role — the bus still publishes `scroll pane`
+    // (measured). Reading the promotion here instead would rank it
+    // among groupings and shift every named container after it.
+    if w.is::<gtk4::ScrolledWindow>() {
+        return Some(atspi::Role::ScrollPane);
+    }
+    // A container kaya NAMED was promoted to Group by the lowering, and
+    // Group is exactly what the bus then publishes for it.
+    if w.accessible_role() == gtk4::AccessibleRole::Group {
+        return Some(atspi::Role::Grouping);
+    }
+    if w.is::<gtk4::Label>() {
+        // Kaya's labels AND the captions inside buttons and check
+        // boxes: all of them are Label nodes on the bus.
+        return Some(atspi::Role::Label);
+    }
+    if w.is::<gtk4::CheckButton>() {
+        // A grouped check button IS a radio button, and GTK says so
+        // through the accessible role it assigns.
+        return Some(if w.accessible_role() == gtk4::AccessibleRole::Radio {
+            atspi::Role::RadioButton
+        } else {
+            atspi::Role::CheckBox
+        });
+    }
+    // ToggleButton is a Button subclass and must not count as one: the
+    // drop-down's internal button is a toggle, and the bus agrees.
+    if w.is::<gtk4::ToggleButton>() {
+        return Some(atspi::Role::ToggleButton);
+    }
+    if w.is::<gtk4::Button>() {
+        return Some(atspi::Role::Button);
+    }
+    // Both editable kinds are role Text on the bus — the very collision
+    // that made `textarea#0` read the entry's name.
+    if w.is::<gtk4::Entry>() || w.is::<gtk4::TextView>() {
+        return Some(atspi::Role::Text);
+    }
+    if w.is::<gtk4::Scale>() {
+        return Some(atspi::Role::Slider);
+    }
+    if w.is::<gtk4::Picture>() {
+        return Some(atspi::Role::Image);
+    }
+    if w.is::<gtk4::ProgressBar>() {
+        return Some(atspi::Role::ProgressBar);
+    }
+    if w.is::<gtk4::DropDown>() {
+        return Some(atspi::Role::ComboBox);
+    }
+    None
+}
+
+/// This widget's rank among the widgets of the SAME AT-SPI role in the
+/// window, walked depth-first — which is the order the bus publishes,
+/// so the rank IS the ordinal of its node there.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
+    use gtk4::prelude::Cast;
+    let want = atspi_role_of(target)?;
+    fn walk(
+        node: &gtk4::Widget,
+        target: &gtk4::Widget,
+        want: atspi::Role,
+        rank: &mut usize,
+    ) -> bool {
+        use gtk4::prelude::WidgetExt;
+        if node == target {
+            return true;
+        }
+        // THE BUS PUBLISHES WHAT IS ON SCREEN. An unmapped subtree has
+        // no accessible nodes, so counting it shifts every ordinal
+        // after it: a drop-down's popover carries its own
+        // GtkScrolledWindow, and counting that one made the scene's
+        // real scroll viewport ScrollPane#1 on a bus that published
+        // exactly one (measured 2026-07-25).
+        if !node.is_mapped() {
+            return false;
+        }
+        if atspi_role_of(node) == Some(want) {
+            *rank += 1;
+        }
+        let mut child = node.first_child();
+        while let Some(c) = child {
+            if walk(&c, target, want, rank) {
+                return true;
+            }
+            child = c.next_sibling();
+        }
+        false
+    }
+    let mut rank = 0;
+    let root: gtk4::Widget = window.clone().upcast();
+    // A target that is not in this window's tree has no ordinal at all,
+    // which is a finding rather than a zero.
+    if !walk(&root, target, want, &mut rank) {
+        return None;
+    }
+    Some(rank)
+}
+
 /// Read this app's accessibility tree over AT-SPI, as a real assistive
 /// client does.
 ///
@@ -4127,7 +4329,19 @@ fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
             let _ = me;
             Box::pin(walk(proxy, &mut found, 0)).await;
         }
-        let nth = found.into_iter().filter(|(r, _)| *r == want).nth(index)?;
-        Some(nth.1)
+        let nth = found.iter().filter(|(r, _)| *r == want).nth(index);
+        if nth.is_none() {
+            // A miss is never self-explaining: the question is always
+            // what the bus DID publish, and one container round-trip
+            // per answer is the expensive way to learn it.
+            eprintln!(
+                "KAYA_AX_TRACE: no {want:?}#{index} on the bus; it published {:?}",
+                found
+                    .iter()
+                    .map(|(r, n)| format!("{r:?}/{n}"))
+                    .collect::<Vec<_>>()
+            );
+        }
+        nth.map(|(_, name)| name.clone())
     })
 }

@@ -101,6 +101,11 @@
             ffmpeg
             # The tools/ scripts are load-bearing validation; lint them.
             shellcheck
+            # The Kotlin layer's dead-code gate (tools/check-detekt.sh).
+            # The compiler cannot serve here: K2 moved the UNUSED_*
+            # diagnostics into IDE inspections (KT-69698), so a dead
+            # local compiles clean.
+            detekt
             # Android: SDK/emulator/NDK from androidenv; Gradle builds the
             # app shells (fetches AGP/Compose from Google Maven at build time).
             androidSdk

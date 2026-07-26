@@ -25,6 +25,11 @@ executable milestone2
   main-is: milestone2.hs
   build-depends: kaya-guests
 
+executable a11y
+  import: shared
+  main-is: a11y.hs
+  build-depends: kaya-guests
+
 executable entry
   import: shared
   main-is: entry.hs

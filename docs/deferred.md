@@ -161,14 +161,16 @@ own the state (see the undo note in this file).
     - Typeface substitution must change the FAMILY only, never the
       scale (Dynamic Type / `sp` both break otherwise), which makes the
       role tier a precondition rather than an alternative.
-  - **Accessibility surfacing**: the architecture carries it for free
-    (native widgets ARE the accessibility tree, DESIGN's
-    Accessibility passage) but nothing PROVES it and apps cannot
-    author it: wants an accessibility label/hint prop (the sibling of
-    test_id, which is already framed as the accessibility
-    identifier) and a harness verb that reads the REAL platform
-    accessibility tree (VoiceOver/UIA/AT-SPI) — the gate the claim
-    deserves. Rides naturally with the test_id milestone.
+  - ~~**Accessibility surfacing**~~ — LANDED 2026-07-25. Two universal
+    props (`a11y_id`, `a11y_label`) in all 8 bindings plus the C
+    floor, and `expect_ax`, which reads each platform's REAL tree
+    (AXUIElement, UIKit's materialized elements, Compose's merged
+    semantics, AT-SPI, UIA) over every widget kind on all five
+    backends, byte-identical. See DESIGN's Accessibility section for
+    the per-backend read table. What is still owed off this milestone:
+    a HINT prop (only the label landed), and the iPad menu bar's
+    independent observation, which this verb now makes possible (see
+    the owed gate above).
   - **Video widget**: unexamined — DESIGN has the surface-handle
     transport (the Canvas zero-copy arm) but no media-playback
     story. The wrap-native bet suggests a Video widget over each

@@ -1,0 +1,40 @@
+# The detekt configuration for tools/check-detekt.sh.
+#
+# This file is the WHOLE config on purpose — it is passed without
+# --build-upon-default-config, so a rule not named here does not run.
+# The gate is about DEAD CODE, not about style: detekt's default config
+# would also report MagicNumber, LongMethod, FunctionNaming (every
+# @Composable is PascalCase) and friends on this repo, and a gate that
+# fires on things the house style does deliberately is a gate people
+# learn to skip.
+#
+# The one class it exists for: a value computed and then never used.
+# The Kotlin compiler will never report it — K2 moved the UNUSED_*
+# diagnostics out of the compiler into IDE inspections (KT-69698), so
+# allWarningsAsErrors is false comfort here. It shipped a false green
+# once already: the accessibility lowering was written as a dead
+# `val a11y`, applied to no widget, and compiled clean through
+# check-compose and check-verbs.
+build:
+  maxIssues: 0
+
+style:
+  active: true
+  # An import nothing uses: the cheapest member of the family.
+  UnusedImports:
+    active: true
+  # A parameter nothing reads — a lowering threaded a value in and
+  # then forgot to apply it.
+  UnusedParameter:
+    active: true
+  UnusedPrivateClass:
+    active: true
+  # A private function nothing calls: a helper written for a call site
+  # that never landed.
+  UnusedPrivateMember:
+    active: true
+  # THE rule this gate exists for: private properties AND local
+  # variables that are never read. `val a11y = …` with no use site is
+  # exactly this finding.
+  UnusedPrivateProperty:
+    active: true

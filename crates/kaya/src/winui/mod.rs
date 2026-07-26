@@ -4141,13 +4141,6 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn ax(&self, target: crate::harness::Target) -> String {
-        // UNPROVEN: compiles and cross-builds, but no scene exercises it
-        // yet — the a11y scene cannot join deploy-win's SCENES until its
-        // per-language guests exist (the runner globs for sources), so
-        // nothing has read a real UIA peer on Windows. Treat the role
-        // mapping below as a hypothesis until a leg runs; the GTK read
-        // needed two corrections that only a live run surfaced (an entry
-        // is AT-SPI role Text, not Entry).
         //
         // Read UIA's own peer, not kaya's model: FrameworkElementAutomationPeer
         // is what an assistive client (Narrator, an automation harness)
@@ -4193,6 +4186,30 @@ impl crate::harness::Stage for WinUiStage {
                 },
                 K::Column => match try_resolve(target.index, core.columns.len()) {
                     Some(i) => core.columns[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Image => match try_resolve(target.index, core.images.len()) {
+                    Some(i) => core.images[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Progress => match try_resolve(target.index, core.progresses.len()) {
+                    Some(i) => core.progresses[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Select => match try_resolve(target.index, core.selects.len()) {
+                    Some(i) => core.selects[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Radio => match try_resolve(target.index, core.radios.len()) {
+                    Some(i) => core.radios[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Grid => match try_resolve(target.index, core.grids.len()) {
+                    Some(i) => core.grids[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Scroll => match try_resolve(target.index, core.scrolls.len()) {
+                    Some(i) => core.scrolls[i].cast()?,
                     None => return Ok("<no such target>".to_owned()),
                 },
                 // Buttons live in the registry as CLICK TAGS, not
@@ -4253,11 +4270,29 @@ impl crate::harness::Stage for WinUiStage {
                 "image"
             } else if kind == AutomationControlType::ProgressBar {
                 "progress"
+            } else if kind == AutomationControlType::ComboBox {
+                // The chooser, spelled `combobox` in the closed set:
+                // AXPopUpButton on macOS, a UIButton owning a menu on
+                // iOS, Role.DropdownList on Compose, ComboBox here and
+                // on AT-SPI.
+                "combobox"
             } else if kind == AutomationControlType::Group
                 || kind == AutomationControlType::Pane
+                || kind == AutomationControlType::List
             {
+                // NORMALIZED to the coarsest container role every
+                // platform publishes. UIA distinguishes Group, Pane and
+                // List (a RadioButtons group is a List here); the
+                // closed set has one name for "a container an assistive
+                // client steps into", because that is all a shared
+                // scene can assert.
                 "group"
             } else {
+                // The role the platform published is one kaya has no
+                // name for — the finding this verb exists to surface,
+                // and the next question is always WHICH one, so it goes
+                // to the log rather than costing a VM round-trip.
+                eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} for {target:?}");
                 "unknown"
             };
             Ok(format!("{role}/{}", peer.GetName()?))

@@ -92,6 +92,37 @@ else:
     if not re.search(rf"SPEC_HASH: ULong = 0x{h}uL\b", kotlin):
         fail(f"spec hash 0x{h}: expected `SPEC_HASH: ULong = 0x{h}uL` in KayaCompose.kt")
 
+# --- Every expect arm must RECORD what it observed. ------------------
+# A verb that appends a failure on mismatch and nothing on a match
+# verifies nothing when it passes: the leg prints PASS with that
+# assertion silently absent from the observation list. Measured
+# 2026-07-25 — the Compose expect_ax arm did exactly this, and the only
+# reason it surfaced is that EVERY step in that scene was expect_ax, so
+# the whole-script "script has no expects" fallback fired. One
+# non-accessibility expect in the same scene and it would have shipped
+# a verb that never checked anything.
+#
+# The observation list is also the byte-compared verdict text, so
+# "recorded nothing" and "reported the wrong thing" are the same defect
+# class. String-matched per arm, the house style of this gate.
+def expect_arms(text, pattern, end_marker):
+    """(verb, body) for each expect_* arm of an interpreter's switch."""
+    heads = list(re.finditer(pattern, text))
+    for i, m in enumerate(heads):
+        stop = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        end = text.find(end_marker, m.start(), stop)
+        yield m.group(1), text[m.start() : end if end > 0 else stop]
+
+
+for verb, body in expect_arms(swift, r'case "(expect[a-z_]*)":', "\n            case "):
+    if "observed.append(" not in body:
+        fail(f'KayaSwiftUI.swift\'s "{verb}" arm never appends to `observed` — '
+             "an expect that records nothing passes without verifying anything")
+for verb, body in expect_arms(kotlin, r'"(expect[a-z_]*)" ->', "\n                    \""):
+    if "observed.add(" not in body:
+        fail(f'KayaCompose.kt\'s "{verb}" arm never adds to `observed` — '
+             "an expect that records nothing passes without verifying anything")
+
 # The vtable rule: the SwiftUI interpreter reaches the host ONLY
 # through KayaHost's function-pointer table. A direct C-symbol call
 # (kaya_emit_*, kaya_next_*, ...) typechecks and even links, then
