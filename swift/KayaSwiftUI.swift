@@ -2784,6 +2784,61 @@ private func kayaRunScript(_ script: String) {
                     let why = identifier.flatMap { $0.isEmpty ? nil : kayaAxWhy($0) } ?? ""
                     failures.append("ax \(gotAx), wanted \(wantAx)\(why)")
                 }
+            case "resize_window":
+                // The REAL resize, so the size class actually moves and
+                // the adaptive arms re-run. A model write would prove
+                // nothing: the whole point of the verb is to make the
+                // platform re-decide.
+                let spec = parts.count > 1 ? String(parts[1]) : ""
+                let dims = spec.split(separator: "x", maxSplits: 1)
+                guard dims.count == 2, let rw = Double(dims[0]), let rh = Double(dims[1]) else {
+                    failures.append("resize_window wants WxH: \(line)")
+                    break
+                }
+                #if os(macOS)
+                    DispatchQueue.main.sync {
+                        kayaNSWindows[0]?.setContentSize(NSSize(width: rw, height: rh))
+                    }
+                #else
+                    // Phone and tablet hosts do not command window size
+                    // — the system owns it (DESIGN.md, Windows). Loud,
+                    // not a silent no-op: a scene that resizes here is
+                    // asserting something this host cannot answer.
+                    failures.append(
+                        "resize_window: this host does not command window size")
+                #endif
+            case "expect_split":
+                // `<size class>/<presentation>`. BOTH halves off the
+                // window model, where the view layer stamped the
+                // platform's size-class reading and THE ARM THAT
+                // RENDERED — never derived from the prop or from each
+                // other, which would make the verb agree with the
+                // lowering by construction.
+                let wantSplit = parts.count > 1 ? kayaQuoted(Array(parts[1...])) : ""
+                let gotSplit = DispatchQueue.main.sync { () -> String in
+                    guard let window = kayaScene.windows[0] else { return "unknown/stacked" }
+                    return window.formFactor.rawValue + "/" + window.splitPresentation
+                }
+                if wantSplit.isEmpty {
+                    // The BARE form: the asymmetric invariant, reported
+                    // lane-INDEPENDENTLY so a shared scene can compare
+                    // it byte-for-byte everywhere.
+                    let halves = gotSplit.split(separator: "/", maxSplits: 1)
+                    let stack = kayaScene.windows[0]?.entries.count ?? 0
+                    if halves.count == 2, halves[0] == "regular", halves[1] == "stacked",
+                        stack >= 1
+                    {
+                        failures.append(
+                            "presentation \(gotSplit): a regular window must not show "
+                                + "one pane while its stack holds two")
+                    } else {
+                        observed.append("split fits")
+                    }
+                } else if gotSplit == wantSplit {
+                    observed.append("split \(wantSplit)")
+                } else {
+                    failures.append("split \(gotSplit), wanted \(wantSplit)")
+                }
             case "expect_menu_presentation":
                 // `<size class>/<presentation>`. macOS reads the REAL
                 // bar (there are no size classes there, and a desktop
@@ -2826,10 +2881,12 @@ private func kayaRunScript(_ script: String) {
                         // window selected, not a reading of the
                         // rendered bar. The bar itself was confirmed
                         // by eye on an iPad Pro (2026-07-25). The real
-                        // observation arrives with the accessibility
-                        // verb — a menu bar is an AX element, so
-                        // reading the platform tree restores an
-                        // independent check. Until then this cannot
+                        // observation does NOT arrive with the
+                        // accessibility verb — measured 2026-07-25, the
+                        // iPad's own tree carries no menu-bar element
+                        // at all, and iOS 26's UIMainMenuSystem build
+                        // handler never fires (2026-07-26). See
+                        // docs/deferred.md. So this cannot
                         // catch a regression in the BUILD; it can
                         // still catch one in the ARM CHOICE, which is
                         // what the original defect was.

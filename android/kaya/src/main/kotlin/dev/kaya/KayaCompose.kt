@@ -229,6 +229,15 @@ object KayaSceneModel {
     // failure being gated is exactly the two disagreeing.
     var formFactor = "unknown" // unknown | compact | regular
     var menuPresentation = "none" // none | bar | overflow
+    /// The list-detail presentation this backend ACTUALLY rendered.
+    /// "stacked" always, for now, because the Compose list-detail arm
+    /// (ListDetailPaneScaffold driven by WindowSizeClass) is not built
+    /// yet — and reporting the truth is right: the bare expect_split
+    /// invariant then FAILS on a regular window with entries, which is
+    /// exactly the state of this backend. A sentinel string would have
+    /// hidden that behind an error message instead of failing the
+    /// assertion the milestone exists to satisfy.
+    var splitPresentation = "stacked" // split | stacked
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
     // emit one attach per root), never replace. A template attachment
@@ -1970,6 +1979,48 @@ object KayaCompose {
                                     observed.add("ax hint \"$want\"")
                                 }
                             }
+                        }
+                    }
+                    "resize_window" -> {
+                        // Android does not command window size — the
+                        // system owns it (DESIGN.md, Windows). Loud
+                        // rather than a silent no-op: a scene that
+                        // resizes here is asking this host something it
+                        // cannot answer, and check-stubs keeps a runner
+                        // from wiring legs against that.
+                        failures.add("resize_window: this host does not command window size")
+                    }
+                    "expect_split" -> {
+                        // `<size class>/<presentation>`: the platform's
+                        // width reading, and the arm that rendered.
+                        val want = quotedHead(line.substring(parts[0].length))?.first ?: ""
+                        val got =
+                            onUi(activity) {
+                                KayaSceneModel.formFactor +
+                                    "/" +
+                                    KayaSceneModel.splitPresentation
+                            }
+                        if (want.isEmpty()) {
+                            val halves = got.split("/", limit = 2)
+                            // navEntries, NOT entries: `entries` is the
+                            // entry-WIDGET registry, and the wrong one
+                            // compiles clean because both are lists.
+                            val stack = onUi(activity) { KayaSceneModel.navEntries.size }
+                            if (halves.size == 2 &&
+                                halves[0] == "regular" &&
+                                halves[1] == "stacked" &&
+                                stack >= 1
+                            ) {
+                                failures.add(
+                                    "presentation $got: a regular window must not show " +
+                                        "one pane while its stack holds two")
+                            } else {
+                                observed.add("split fits")
+                            }
+                        } else if (got == want) {
+                            observed.add("split $want")
+                        } else {
+                            failures.add("split $got, wanted $want")
                         }
                     }
                     "expect_menu_presentation" -> {
