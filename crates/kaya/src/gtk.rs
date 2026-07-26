@@ -491,6 +491,16 @@ struct CoreState {
     /// back when its stack empties.
     nav_entries: HashMap<u64, GtkNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
+    /// list_detail per window (wprop 6; DESIGN.md, Adaptive
+    /// list-detail): does this window ASK for the adaptive
+    /// presentation of its stack. Whether it GETS one is the size
+    /// class's answer, resolved in refresh_nav.
+    list_detail: HashMap<u64, bool>,
+    /// The presentation refresh_nav ACTUALLY rendered, per window —
+    /// stamped by the arm that ran, never derived from `list_detail`
+    /// or the width, so expect_split cannot agree with the lowering by
+    /// construction.
+    split_presentation: HashMap<u64, &'static str>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, page
     /// containers by section id, the GtkStack that materializes the
     /// switcher, and the selection mirror. A section's page swaps
@@ -711,6 +721,64 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     }
     let target = gtk_window(core, window);
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
+
+    // ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves must hold: the app
+    // asked (wprop 6) and the window IS regular — the same 600
+    // boundary every other backend draws, read off the real window
+    // rather than derived from anything the app said.
+    //
+    // A plain horizontal Box, deliberately NOT GtkPaned: a paned is a
+    // DRAGGABLE splitter, which DESIGN separates from list-detail by
+    // name (2/4 native, not admitted). libadwaita's
+    // AdwNavigationSplitView is the idiomatic wrapper — animations and
+    // AdwBreakpoint for free — but this backend does not depend on
+    // libadwaita, and the semantic is expressible without it. That
+    // dependency is a ledger item, not a blocker.
+    let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
+    let regular = {
+        use gtk4::prelude::GtkWindowExt;
+        target.default_size().0 >= 600
+    };
+    if wants_split && regular && top.is_some() {
+        use gtk4::prelude::{BoxExt, WidgetExt};
+        let base = core.window_roots.get(&window).cloned();
+        let detail = top.and_then(|id| core.nav_entries.get(&id)).and_then(|e| e.root.clone());
+        if let (Some(base), Some(detail)) = (base, detail) {
+            let split = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            // Unparent first: a GTK widget has exactly one parent, and
+            // both of these were somebody's child a moment ago.
+            for child in [&base, &detail] {
+                if let Some(parent) = child.parent() {
+                    if let Some(bx) = parent.downcast_ref::<gtk4::Box>() {
+                        bx.remove(child);
+                    } else if let Some(win) = parent.downcast_ref::<gtk4::Window>() {
+                        win.set_child(None::<&gtk4::Widget>);
+                    }
+                }
+            }
+            base.set_hexpand(true);
+            base.set_vexpand(true);
+            detail.set_hexpand(true);
+            detail.set_vexpand(true);
+            split.append(&base);
+            split.append(&detail);
+            set_window_content(core, window, Some(split.upcast_ref::<gtk4::Widget>()));
+            let title = top
+                .and_then(|id| core.nav_entries.get(&id))
+                .map(|e| e.title.clone())
+                .unwrap_or_default();
+            target.set_title(Some(&title));
+            core.split_presentation.insert(window, "split");
+            if let Some(back) = core.back_buttons.get(&window) {
+                back.set_visible(true);
+            }
+            return;
+        }
+    }
+    // The serial arm stamps too: an observation only one arm writes is
+    // derived-by-default in the other (docs/traps.md).
+    core.split_presentation.insert(window, "stacked");
+
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
             if let Some(root) = entry.root.clone() {
@@ -1993,6 +2061,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.borrow_mut().insert(window.0, *on);
                 }
+                (WindowProp::ListDetail, Value::Bool(on)) => {
+                    core.list_detail.insert(window.0, *on);
+                    refresh_nav(core, window.0);
+                }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: bar/auto = the header StackSwitcher,
                     // sidebar = GtkStackSidebar; the chrome rebuilds
@@ -2962,6 +3034,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 aux_windows: HashMap::new(),
                 nav_entries: HashMap::new(),
                 nav_stacks: HashMap::new(),
+                list_detail: HashMap::new(),
+                split_presentation: HashMap::new(),
                 sections: HashMap::new(),
                 section_pages: HashMap::new(),
                 section_stacks: HashMap::new(),
@@ -3317,22 +3391,32 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn resize_window(&self, window: u64, width: f64, height: f64) {
-        Self::on_main(move |core| {
+        Self::on_main_mut(move |core| {
             use gtk4::prelude::GtkWindowExt;
             // The REAL resize path: the size a user's drag would set,
             // which is also what default_size reads back — so the size
             // class this backend derives moves with it.
             gtk_window(core, window).set_default_size(width as i32, height as i32);
+            // And RE-RUN the arm. Setting the size is not the point;
+            // making the platform re-decide is. Without this the
+            // window changes size and keeps rendering the presentation
+            // it chose at the old one, which is precisely the defect
+            // the verb exists to catch.
+            refresh_nav(core, window);
         });
     }
 
     fn split_presentation(&self) -> String {
-        // Not implemented yet: the GTK list-detail arm wants
-        // AdwNavigationSplitView, which this backend does not depend on.
-        // Loud rather than plausible — a sentinel cannot be mistaken for
-        // a reading, and check-stubs keeps a runner from wiring legs
-        // against it.
-        "<the GTK list-detail arm is not implemented yet>".to_owned()
+        Self::on_main(|core| {
+            use gtk4::prelude::GtkWindowExt;
+            // The class from the window's real width, the same 600
+            // boundary menu_presentation draws; the presentation from
+            // the arm that actually ran.
+            let width = gtk_window(core, 0).default_size().0;
+            let class = if width >= 600 { "regular" } else { "compact" };
+            let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
+            format!("{class}/{presentation}")
+        })
     }
 
     fn menu_presentation(&self) -> String {

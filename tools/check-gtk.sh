@@ -58,7 +58,14 @@ fi
 if docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     cd /work || exit 1
     export CARGO_TARGET_DIR=/work/target-linux
-    cargo check --locked --lib --quiet 2>&1
+    # BOTH feature configurations, the check-targets rule. Without
+    # --features harness the Stage impl is configured out entirely, so
+    # this gate reported OK on a gtk.rs whose harness half did not
+    # compile, and the Linux LANE was what found it — exactly the trip
+    # this gate exists to save. (No apostrophes in here: the block is
+    # inside a single-quoted bash -c string and one would close it.)
+    cargo check --locked --lib --quiet 2>&1 \
+        && cargo check --locked --lib --quiet --features harness 2>&1
 '; then
     echo "check-gtk: OK"
 else
