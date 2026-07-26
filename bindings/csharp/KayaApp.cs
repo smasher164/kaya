@@ -1355,7 +1355,8 @@ sealed class Tx
     /// sectionsPresentation: KayaWire.SectionsPresentationBar).
     public void Window(
         string? title = null, double? width = null, double? height = null,
-        bool? vetoClose = null, long? sectionsPresentation = null,
+        bool? vetoClose = null, bool? listDetail = null,
+        long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         MenuItem[]? menus = null, ulong id = 0)
     {
@@ -1363,6 +1364,7 @@ sealed class Tx
         if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
         if (height is { } h) Records.Add(KayaWire.TxSetWindowHeight(id, h));
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
+        if (listDetail is { } ld) Records.Add(KayaWire.TxSetWindowListDetail(id, ld));
         if (sectionsPresentation is { } sp)
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
@@ -1388,12 +1390,13 @@ sealed class Tx
     /// DestroyWindow reconciles) and retires with it.
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
-        bool? vetoClose = null, long? sectionsPresentation = null,
+        bool? vetoClose = null, bool? listDetail = null,
+        long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
-        Window(title, width, height, vetoClose, sectionsPresentation,
+        Window(title, width, height, vetoClose, listDetail, sectionsPresentation,
             onCloseRequested, onClosed, menus, id);
     }
 

@@ -231,6 +231,45 @@ check_menus ocaml bindings/ocaml/kaya_app.ml \
     "separator=^let separator " "context_menu=^let context_menu " \
     "context_catalog=^let context_catalog "
 
+# EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. The kinds sweep above
+# has held since the sugar tier landed; window props had no equivalent,
+# so an 8-way sweep of a new one was a matter of remembering. list_detail
+# was swept by hand and nothing would have caught a missed language.
+#
+# Props come from the GENERATED wire file, so this tracks the spec by
+# construction — a new WINDOW_PROPS entry lands here the moment the
+# generators run. C is exempt for the same reason it is above: the
+# floor spells every window prop with one generic
+# kaya_tx_set_window_prop call plus the constant, on purpose.
+wprops=$(grep -oE "^WPROP_[A-Z_]+" bindings/python/kaya/wire.py \
+    | cut -c7- | tr "[:upper:]" "[:lower:]")
+[ -n "$wprops" ] || { echo "check-sugar-surface: no window props in the generated wire file"; exit 1; }
+
+for wprop in $wprops; do
+    # snake_case for python/ocaml, camelCase for the rest, and
+    # Haskell's W-prefixed attribute constructor.
+    camel=$(python3 -c "
+import sys
+parts = sys.argv[1].split('_')
+print(parts[0] + ''.join(p.capitalize() for p in parts[1:]))" "$wprop")
+    pascal=$(python3 -c "
+import sys
+print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$wprop")
+    check python bindings/python/kaya/__init__.py "$wprop" "$wprop"
+    check go bindings/go/app.go "$wprop" "$pascal"
+    check csharp bindings/csharp/KayaApp.cs "$wprop" "$camel"
+    check java bindings/java/dev/kaya/KayaApp.java "$wprop" "$camel"
+    check swift bindings/swift/KayaApp.swift "$wprop" "$camel"
+    check ocaml bindings/ocaml/kaya_app.ml "$wprop" "$wprop"
+    # Haskell carries width and height as ONE WSize constructor — a
+    # language flavor, not a gap, exactly like the kind spellings above.
+    case "$wprop" in
+        width | height) hs="WSize" ;;
+        *) hs="W$pascal" ;;
+    esac
+    check haskell bindings/haskell/KayaApp.hs "$wprop" "$hs"
+done
+
 if [ "$status" -ne 0 ]; then
     echo "check-sugar-surface: FAIL"
     exit 1

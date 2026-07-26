@@ -947,13 +947,14 @@ let derive rc compute =
    the process owns it): [window ~title:"sections"
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
-let window ?title ?width ?height ?veto_close ?sections_presentation
+let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
     ?on_close_requested ?on_closed ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_list_detail id v)) list_detail;
   Option.iter
     (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
     sections_presentation;

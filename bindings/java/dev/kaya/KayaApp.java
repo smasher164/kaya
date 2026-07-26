@@ -326,6 +326,15 @@ public final class KayaApp {
             return this;
         }
 
+        /**
+         * Ask this window to present its ENTRY STACK as list-detail: on a REGULAR window the base root takes the leading pane and the top of the stack the trailing one; on a COMPACT one nothing changes.
+         * There is no argument for WHICH way it presents - that is the size class's answer, not the app's.
+         */
+        public WindowRef listDetail(boolean on) {
+            tx.records.add(KayaWire.txSetWindowListDetail(id, on));
+            return this;
+        }
+
         /** The window's ADVISORY sections hint
          * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
          * width/height precedent; phones ignore it by physics). */

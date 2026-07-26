@@ -1304,6 +1304,16 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 	return w
 }
 
+// ListDetail asks this window to present its entry stack as
+// list-detail: on a REGULAR window the base root takes the leading
+// pane and the top of the stack the trailing one; on a COMPACT one
+// nothing changes. There is no argument for WHICH way it presents —
+// that is the size class's answer, not the app's.
+func (w WindowRef) ListDetail(on bool) WindowRef {
+	w.tx.records = append(w.tx.records, TxSetWindowListDetail(w.id, on))
+	return w
+}
+
 // OnCloseRequested binds the close-veto handler to THIS window
 // (per-window — handlers scope to the thing that creates them):
 // fires per chrome close while VetoClose is armed; nothing has

@@ -636,6 +636,9 @@ data WindowAttr
   = WTitle String
   | WSize Double Double
   | WVetoClose Bool
+  | -- | Present this window's entry stack as list-detail where the
+    -- size class allows; the platform decides which way.
+    WListDetail Bool
   | WSectionsPresentation Int64
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
@@ -659,6 +662,7 @@ window n = mapM_ apply
       emitB (W.txSetWindowWidth n w)
       emitB (W.txSetWindowHeight n h)
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
+    apply (WListDetail v) = emitB (W.txSetWindowListDetail n v)
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)

@@ -1709,7 +1709,7 @@ def when(sig):
 
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
-                 window=0, create=False, veto_close=None,
+                 window=0, create=False, veto_close=None, list_detail=None,
                  sections_presentation=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None):
@@ -1721,6 +1721,7 @@ class _TxScope:
         self._window = int(window)
         self._create = create
         self._veto_close = veto_close
+        self._list_detail = list_detail
         self._sections_presentation = sections_presentation
         self._push = push
         self._intercept_back = intercept_back
@@ -1799,6 +1800,9 @@ class _TxScope:
         if self._veto_close is not None:
             _records().append(
                 wire.tx_set_window_veto_close(self._window, bool(self._veto_close)))
+        if self._list_detail is not None:
+            _records().append(
+                wire.tx_set_window_list_detail(self._window, bool(self._list_detail)))
         if self._sections_presentation is not None:
             _records().append(wire.tx_set_window_sections_presentation(
                 self._window, int(self._sections_presentation)))

@@ -124,6 +124,37 @@ own the state (see the undo note in this file).
   `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
   what proved the laziness and will be wanted again.
 
+- **The list-detail arms use PLAIN containers, not the platforms'
+  adaptive wrappers** (2026-07-26). Three of the four backends lower
+  list-detail to a plain two-child container — GTK a `Box` (not
+  `GtkPaned`: that is the DRAGGABLE splitter DESIGN excludes by name),
+  Compose a `Row`, WinUI a two-star-column `Grid`. Only SwiftUI uses
+  the idiomatic thing (`NavigationSplitView`), because it is already in
+  the framework. The others each want a NEW DEPENDENCY:
+  `AdwNavigationSplitView` (libadwaita), `ListDetailPaneScaffold`
+  (androidx.compose.material3.adaptive), `TwoPaneView` (WinUI).
+  THE ANSWER IS THE WRAPPER, AND IT IS NEVER APP-CONFIGURABLE. A knob
+  choosing the container would leak kaya's implementation into the app
+  surface and contradict the whole premise — the app declares
+  `list_detail`, the platform decides presentation, which is the same
+  reason there is no prop for WHICH way it presents.
+  WHAT THE PLAIN CONTAINER ACTUALLY COSTS, stated so nobody mistakes
+  the green gate for parity: the wrappers carry the collapse/expand
+  ANIMATION, the platform's own pane proportions and separators, and
+  the focus/back behavior on collapse. `expect_split` asserts STRUCTURE
+  — which arm rendered — and none of those. So the arms are correct
+  and under-dressed, exactly the gap the dressed-floor phase existed to
+  close for widgets.
+  THE INTEGRATION SUBTLETY, which is why this is not a pure
+  dependency-add: all three wrappers are NAVIGATION-AWARE and want to
+  own stack state (Adw's is literally a navigation view; the Compose
+  scaffold carries its own navigator). kaya's stack is CORE-OWNED by
+  ratified design — back-sovereignty forces it. So adopting them means
+  driving the wrapper FROM the core stack and refusing to let it hold
+  the truth, the same discipline every backend already applies to
+  NavigationStack/GtkStack. Do that wrong and the guest's pop and the
+  wrapper's pop disagree.
+
 - **Adaptive LAYOUT is the second form-factor surface, and it owns
   `resize_window`** (Akhil, 2026-07-25; deferred until after the
   accessibility milestone). The menus milestone re-keyed adaptivity

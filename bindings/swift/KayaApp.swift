@@ -1509,7 +1509,7 @@ final class KayaAppTx {
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil,
-        sectionsPresentation: Int64? = nil,
+        listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
@@ -1517,7 +1517,8 @@ final class KayaAppTx {
         tx.createWindow(id)
         window(
             id, title: title, width: width, height: height,
-            vetoClose: vetoClose, sectionsPresentation: sectionsPresentation,
+            vetoClose: vetoClose, listDetail: listDetail,
+            sectionsPresentation: sectionsPresentation,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             menus: menus)
     }
@@ -1531,7 +1532,7 @@ final class KayaAppTx {
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil,
-        sectionsPresentation: Int64? = nil,
+        listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
@@ -1540,6 +1541,7 @@ final class KayaAppTx {
         if let width { tx.setWindowWidth(id, width) }
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
+        if let listDetail { tx.setWindowListDetail(id, listDetail) }
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)
         }
