@@ -67,7 +67,12 @@ dotnet run --project tools/kaya-csgen -- guests/csharp || exit 1
 # Swift: the swift-syntax CLI over each guest file that declares sums.
 # SPM runs outside the nix DEVELOPER_DIR — the swift-typecheck escape
 # hatch: nix's apple-sdk has no SPM on darwin.
-env -u DEVELOPER_DIR -u SDKROOT swift run --package-path tools/kaya-swift-gen \
+# --disable-automatic-resolution is SwiftPM's --locked: Package.swift
+# asks for swift-syntax `from: "601.0.0"`, a RANGE, and only the
+# checked-in Package.resolved makes that a version. Without the flag a
+# resolve can quietly move the pin and rewrite the lockfile mid-run.
+env -u DEVELOPER_DIR -u SDKROOT swift run --disable-automatic-resolution \
+    --package-path tools/kaya-swift-gen \
     kaya-swift-gen guests/swift/feed.swift guests/swift/todos.swift \
     guests/swift/reorder.swift || exit 1
 

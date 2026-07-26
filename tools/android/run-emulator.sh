@@ -288,8 +288,11 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # code — the stale-artifact class (validation scripts build and
     # verify what they ship). Caught live 2026-07-22: a Kotlin
     # compile error produced a zero-verdict run instead of a failure.
-    cargo ndk -t arm64-v8a build --example milestone2_android || exit 1
+    cargo ndk -t arm64-v8a build --locked --example milestone2_android || exit 1
     cp "$ROOT/target/aarch64-linux-android/debug/examples/libmilestone2_android.so" "$JNILIBS/"
+    # Verify the COPY, not the source: gradle packages the apk from
+    # jniLibs, so this covers the build and the copy at once.
+    "$ROOT/tools/build-id.sh" --verify "$JNILIBS/libmilestone2_android.so" || exit 1
     (cd android && gradle --console=plain -q :milestone2:assembleDebug) || exit 1
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
@@ -399,8 +402,9 @@ fi
 if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2kt/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cargo ndk -t arm64-v8a build --lib || exit 1
+    cargo ndk -t arm64-v8a build --locked --lib || exit 1
     cp "$ROOT/target/aarch64-linux-android/debug/libkaya.so" "$JNILIBS/"
+    "$ROOT/tools/build-id.sh" --verify "$JNILIBS/libkaya.so" || exit 1
     (cd android && gradle --console=plain -q :milestone2kt:assembleDebug) || exit 1
     timing build-jvm
     run_apk jvm \

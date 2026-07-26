@@ -26,7 +26,10 @@ cd "$ROOT"
 # shellcheck source=tools/lib/swift-toolchain.sh
 source "$ROOT/tools/lib/swift-toolchain.sh"
 
-cargo build --lib
+cargo build --locked --lib
+# The Swift dylib below is compiled against this library's header
+# and loads it at run time; both must come from one tree.
+tools/build-id.sh --verify target/debug/libkaya.dylib
 tools/gen-header.sh --check
 
 mkdir -p target/swiftui

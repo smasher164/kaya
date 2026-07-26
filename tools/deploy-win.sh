@@ -193,9 +193,12 @@ for s in $DEPTH_SCENES; do
 done
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
-(cd "$ROOT" && cargo xwin build --features harness --release --target aarch64-pc-windows-msvc --lib \
-    && cargo xwin build --features harness --release --target aarch64-pc-windows-msvc \
+(cd "$ROOT" && cargo xwin build --locked --features harness --release --target aarch64-pc-windows-msvc --lib \
+    && cargo xwin build --locked --features harness --release --target aarch64-pc-windows-msvc \
         "${BUILD_EXAMPLES[@]}")
+# Verify BEFORE the deploy: a stale dll that reaches the VM is a
+# stale dll on another machine, where nothing local can see it.
+"$ROOT/tools/build-id.sh" --verify "$TARGET/kaya.dll" || exit 1
 "$ROOT/tools/gen-header.sh" --check
 "$ROOT/tools/gen-bindings.sh" --check
 

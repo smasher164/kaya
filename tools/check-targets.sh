@@ -51,8 +51,8 @@ check() {
     # the feature. Measured 2026-07-25: this gate reported "windows OK"
     # while the windows lane failed to build the WinUI accessibility
     # read, because that code only exists under --features harness.
-    if out="$(cargo check -p kaya --lib --quiet "$@" 2>&1 \
-        && cargo check -p kaya --lib --quiet --features harness "$@" 2>&1)"; then
+    if out="$(cargo check --locked -p kaya --lib --quiet "$@" 2>&1 \
+        && cargo check --locked -p kaya --lib --quiet --features harness "$@" 2>&1)"; then
         echo "check-targets: $name OK"
     else
         echo "$out"

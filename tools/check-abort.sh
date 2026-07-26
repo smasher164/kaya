@@ -25,7 +25,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 export KAYA_LIB="$ROOT/target/debug/libkaya.dylib"
-[ -f "$KAYA_LIB" ] || { echo "check-abort: build libkaya first (cargo build --lib)"; exit 1; }
+[ -f "$KAYA_LIB" ] || { echo "check-abort: build libkaya first (cargo build --locked --lib)"; exit 1; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

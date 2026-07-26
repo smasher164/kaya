@@ -96,7 +96,10 @@ run_build java build_java
 # dominated by debuginfo, and nothing in the container asserts on
 # symbols. This removes the pressure at its source instead of racing
 # the example count against the container's RAM.
-CARGO_PROFILE_DEV_DEBUG=0 cargo build --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
+CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
+# The library every non-Rust guest here dlopens must be the one
+# this build produced, not a survivor of a build that failed.
+tools/build-id.sh --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
 timing core-build
 
 # The Rust backends resolve a scene NAME to tools/scenes/<name>.steps.

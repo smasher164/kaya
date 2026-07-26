@@ -172,6 +172,33 @@ pub extern "C" fn kaya_spec_hash() -> u64 {
     crate::spec::hash()
 }
 
+/// The identity of the SOURCES this core was compiled from, carried in
+/// the binary where a runner can read it without loading or running
+/// anything: `tools/build-id.sh --verify libkaya.so`. The spec hash
+/// above answers "do the guest and the library agree on the protocol";
+/// this answers the question that costs whole debugging sessions — "is
+/// the file I am about to test built from the code I just edited". A
+/// build step whose failure went unnoticed leaves the PREVIOUS artifact
+/// sitting there, and every downstream verdict is then about code
+/// nobody wrote today.
+///
+/// Fixed-size and `no_mangle` on purpose: an exported static of known
+/// length survives linking into every artifact shape (cdylib, staticlib,
+/// dll) and lands in rodata as findable bytes, and a build.rs that
+/// emitted a differently-sized id would fail to compile here rather than
+/// bake a truncated one.
+#[unsafe(no_mangle)]
+pub static KAYA_BUILD_ID_MARKER: [u8; 30] = {
+    let src = concat!("kaya-build-id:", env!("KAYA_BUILD_ID")).as_bytes();
+    let mut marker = [0u8; 30];
+    let mut i = 0;
+    while i < 30 {
+        marker[i] = src[i];
+        i += 1;
+    }
+    marker
+};
+
 /// Host capability bits, queryable any time (like kaya_spec_hash).
 /// Platform-static per build: the phones' systems own surface
 /// geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window

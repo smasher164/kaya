@@ -1259,6 +1259,28 @@ script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
 
+## A gate that reads PHYSICAL lines cannot see a continued command
+
+check-pins grew a clause requiring `--disable-automatic-resolution` on
+SwiftPM invocations, self-tested by deleting the flag from
+gen-guests.sh — and the gate reported OK. The invocation is
+backslash-continued: `swift run \` on one line, `--package-path` on the
+next. The scanner matched both tokens on ONE physical line, found no
+line carrying both, and concluded there was no SwiftPM invocation to
+judge. A missing flag and an absent command are indistinguishable to a
+clause built that way, and the polarity is the bad one — silence reads
+as clean.
+
+Every line-based scanner over shell must join continuations first
+(check-shell and check-pins both do now, numbered by the first physical
+line so the finding still points somewhere useful). The general shape:
+when a gate looks for the ABSENCE of something, ask what makes the
+whole construct invisible — that path, not the one you tested, is where
+the false green lives. The sibling failure surfaced immediately after:
+the self-test fixture, a string literal holding a fake invocation,
+matched the scanner's own file. A gate that scans a directory scans
+itself.
+
 ## The aggregation outer MUST delegate QI (the NavigationView saga)
 
 NavigationView stow-crashed (c000027b, bare E_NOINTERFACE) in every

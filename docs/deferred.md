@@ -426,6 +426,54 @@ own the state (see the undo note in this file).
 
 ## Testing / infrastructure
 
+- Reproducibility, the remainder after 2026-07-26. What landed: the
+  container base pinned by digest, opam's rolling index pinned to a
+  commit (with the direct packages version-pinned on top), `--locked`
+  on every cargo invocation with a check-shell clause holding it,
+  check-pins over the ecosystems that have no lockfile at all, and the
+  build id — libkaya carries a marker naming the sources it was
+  compiled from, every lane `--verify`s what it runs or ships, and
+  check-build-id proves both halves live. What did NOT, each for a
+  stated reason rather than for lack of time:
+  - APT PACKAGE VERSIONS in the container. Freezing them means
+    snapshot.debian.org, which is slow and periodically unavailable —
+    that trades continuous small drift for an occasional inability to
+    rebuild the image at all. trixie is stable, so the drift is point
+    releases and security updates, and the security half is drift we
+    want. Revisit if a Debian update ever breaks a lane; the fix would
+    be to pin the snapshot only for the release that broke.
+  - GRADLE DEPENDENCY LOCKING and NUGET packages.lock.json. Both
+    ecosystems already name exact versions and resolve them from
+    immutable repositories, so a lockfile adds regeneration ceremony
+    without adding determinism. check-pins guards the property that
+    actually matters (no dynamic version ever enters). Revisit if a
+    transitive graph ever surprises us, or on the first supply-chain
+    requirement — that is when VERIFICATION metadata (checksums), a
+    different feature from locking, starts earning its cost.
+  - CABAL FREEZE. The Haskell guests depend only on boot libraries
+    (base, bytestring, containers), which ship with the compiler — and
+    the two lanes use DIFFERENT compilers (nix's ghc on mac, apt's in
+    the container), so a freeze file pinning boot-library versions
+    would be wrong on one of them by construction.
+  - The BUILD ID reaches libkaya only. The SwiftUI and Compose
+    interpreters are separately compiled artifacts that can go stale
+    the same way, and neither carries a marker; their guard today is
+    check-compose/check-detekt/swift-typecheck plus delete-before-move
+    in build-dylib.sh. Extending the marker wants a generated constant
+    per language, which is worth doing the first time one of them goes
+    stale unnoticed.
+  - BIT-IDENTICAL OUTPUT is not claimed anywhere and is not the goal
+    here. The id fingerprints INPUTS: a different id always means
+    different sources, but one id does not promise two byte-identical
+    binaries (build paths, timestamps, codegen nondeterminism). Real
+    output determinism wants -Zremap-path-prefix and friends, and its
+    payoff is a shared build cache, which is a packaging-milestone
+    concern.
+- deploy-win.sh uses `sed` and `awk` (the kaya.h export cross-check),
+  against repo policy — those are the BSD/GNU divergent tools every
+  other script avoids. It works today because that script only ever
+  runs on the mac host. Rewrite as python3 the next time that block is
+  touched, and consider a check-shell clause once it is clean.
 - Scene-run coverage, the remaining half: check-steps' wired() now
   demands per-runner LEG SIGNATURES (run $scene- / run "$proto"
   $scene- / run_suite ${scene}_), so a scene absent from a runner

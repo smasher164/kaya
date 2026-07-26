@@ -58,7 +58,7 @@ fi
 if docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     cd /work || exit 1
     export CARGO_TARGET_DIR=/work/target-linux
-    cargo check --lib --quiet 2>&1
+    cargo check --locked --lib --quiet 2>&1
 '; then
     echo "check-gtk: OK"
 else

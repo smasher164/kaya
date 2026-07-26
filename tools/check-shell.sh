@@ -59,6 +59,69 @@ if [ -n "$unpinned" ]; then
     status=1
 fi
 
+# Cargo.lock is the record of WHICH dependency graph a lane validated.
+# A bare `cargo build` is allowed to rewrite it — a drifted Cargo.toml,
+# a yanked crate, a `version = "0.62"` that now means something newer —
+# and the run goes green against a graph nobody chose, silently, with
+# the change landing in a file the run was not supposed to touch.
+# `--locked` turns that into a loud failure: resolve or refuse.
+#
+# The flag is per-invocation (cargo has no config key for it), so a new
+# callsite starts out unguarded. That is what this clause is for. The
+# scan is python3 rather than grep -E because the word-boundary syntax
+# differs between BSD and GNU grep — the same portability trap as sed.
+unlocked=$(python3 - <<'PY'
+import pathlib, re
+# cargo, an optional wrapper (ndk/xwin) with its own flags, then the
+# subcommand that can resolve dependencies.
+pat = re.compile(r'(?:^|[^-\w])cargo\s+(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?(?:build|check|test)(?!\S)')
+
+
+def logical_lines(text):
+    """Continuations joined, numbered by their first physical line: a
+    flag on the next line is still a flag on the same command."""
+    out, start, buf = [], None, []
+    for n, line in enumerate(text.splitlines(), 1):
+        if start is None:
+            start = n
+        if line.endswith("\\"):
+            buf.append(line[:-1])
+            continue
+        buf.append(line)
+        out.append((start, " ".join(p.strip() for p in buf)))
+        start, buf = None, []
+    if buf:
+        out.append((start, " ".join(p.strip() for p in buf)))
+    return out
+
+
+for f in sorted(pathlib.Path("tools").rglob("*")):
+    if f.suffix not in (".sh", ".cmd") or not f.is_file():
+        continue
+    for n, line in logical_lines(f.read_text()):
+        if line.lstrip().startswith("#") or "--locked" in line:
+            continue
+        if pat.search(line):
+            print(f"{f}:{n}:{line.strip()[:110]}")
+PY
+) || true
+# Self-test: the scan must see an unlocked invocation, or its silence
+# below means nothing.
+probe=$(printf 'cargo build --lib\ncargo ndk -t arm64-v8a build --locked --lib\n' \
+    | python3 -c '
+import re, sys
+pat = re.compile(r"(?:^|[^-\w])cargo\s+(?:(?:ndk|xwin)\s+(?:-\S+\s+\S+\s+)*)?(?:build|check|test)(?!\S)")
+print(sum(1 for l in sys.stdin if pat.search(l) and "--locked" not in l))')
+if [ "$probe" != 1 ]; then
+    echo "check-shell: self-test failed (--locked scan matched $probe of 1 planted defects)" >&2
+    status=1
+fi
+if [ -n "$unlocked" ]; then
+    echo "check-shell: cargo invocation without --locked (it may rewrite Cargo.lock mid-run):" >&2
+    echo "$unlocked" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

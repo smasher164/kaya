@@ -158,6 +158,30 @@ touching layout code:
   a throwaway env script (the interpreters read KAYA_SELFTEST_SCRIPT;
   Rust backends embed theirs at build time and need a rebuild).
 
+## "Is this artifact built from my tree?" (tools/build-id.sh)
+
+libkaya carries a marker naming the sources it was compiled from — a
+hash over crates/, Cargo.toml and Cargo.lock, baked in by build.rs and
+readable straight out of the file.
+
+    tools/build-id.sh core                      # what this tree hashes to
+    tools/build-id.sh --verify target/debug/libkaya.dylib
+
+A STALE verdict names both ids and means the build that should have
+refreshed that file did not run, or failed with its exit status masked.
+Every lane verifies what it runs or ships (android verifies the COPY in
+jniLibs, so the copy is covered too; deploy-win verifies before the scp,
+because a stale dll that reaches the VM is stale on a machine where
+nothing local can see it). Reach for it by hand the moment a result
+disagrees with the code in front of you — that is cheaper than the
+alternative, which historically was half a day.
+
+Two things it does NOT tell you. It fingerprints INPUTS, so a matching
+id does not promise two byte-identical binaries. And it covers libkaya
+only: the SwiftUI and Compose interpreters are separately compiled and
+carry no marker (docs/deferred.md has the reasoning and the trigger for
+extending it).
+
 ## Multi-agent work
 
 The breadth phases (same change across 8 bindings, or across the 4

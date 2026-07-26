@@ -20,6 +20,13 @@ in docs/deferred.md.
 - Never pipe a build through `tail`/`head` in a verify loop — the
   pipeline's exit status becomes tail's, and a failed build silently
   runs the test against a stale artifact. Check the build's exit first.
+- Every cargo invocation carries `--locked` (check-shell enforces it):
+  a bare build may rewrite Cargo.lock mid-run, and the lane then goes
+  green against a dependency graph nobody chose.
+- A built artifact carries the id of the sources it came from
+  (tools/build-id.sh). Anything a lane runs or ships gets
+  `--verify`'d first — that is the mechanical version of "check the
+  build's exit first", and it holds when nobody remembers to.
 - The maintainer approves every commit and its exact message. Do not
   commit or push on your own initiative.
 
@@ -60,7 +67,7 @@ in docs/deferred.md.
 
 ## The validation ladder (in order; "done" means the top rung)
 
-1. `cargo test -p kaya --features harness` — unit tests, wire
+1. `cargo test -p kaya --features harness --locked` — unit tests, wire
    round-trips, pin tables,
    compile_fail doc-tests. THE FEATURE IS REQUIRED: `harness` is off by
    default so shipped apps do not carry the scene interpreter, and
@@ -96,6 +103,13 @@ in docs/deferred.md.
    IDE inspections (KT-69698), so a computed-and-never-applied local
    compiles clean, which is how a dead lowering once shipped a false
    green),
+   `tools/check-build-id.sh` (the stale-artifact guard is live: a built
+   libkaya carries the id of the sources it came from, the verifier
+   rejects one carrying any other, and every lane verifies what it runs
+   or ships before it runs or ships it),
+   `tools/check-pins.sh` (every dependency resolved over the network
+   names an exact version — gradle, nuget, and the container's opam
+   index, none of which has a lockfile the way cargo and nix do),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which

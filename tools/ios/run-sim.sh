@@ -632,7 +632,11 @@ build_swiftui_dylib() {
 }
 
 if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --lib
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --lib
+    # Every app bundle below links this archive; verify it once,
+    # here, rather than trusting the copies downstream.
+    "$ROOT/tools/build-id.sh" --verify \
+        target/aarch64-apple-ios-sim/debug/libkaya.a || exit 1
     build_swiftui_dylib
     # With more than one input file, swiftc only allows top-level
     # code in a file named main.swift — each scene stages its own.
@@ -696,74 +700,74 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # Rust entrypoint + SwiftUI backend: the bundle executable is the Rust
     # example's main; kaya::run unconditionally dlopens the
     # SwiftUI dylib embedded in the bundle.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example milestone2
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example milestone2
     build_swiftui_dylib
     APP=$(make_bundle milestone2rs-swiftui dev.kaya.rustswiftui "$TARGET_DIR/examples/milestone2")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on rust-swiftui "$APP" dev.kaya.rustswiftui rust-swiftui 1 milestone2
 
     # The entry scene against the SwiftUI backend, same embedded dylib.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example entry
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example entry
     APP=$(make_bundle entryrs-swiftui dev.kaya.entryswiftui "$TARGET_DIR/examples/entry")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on entry-swiftui "$APP" dev.kaya.entryswiftui entry-swiftui entry entry
 
     # The todos scene against the SwiftUI backend, same embedded dylib.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example todos
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example todos
     APP=$(make_bundle todosrs-swiftui dev.kaya.todosswiftui "$TARGET_DIR/examples/todos")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on todos-swiftui "$APP" dev.kaya.todosswiftui todos-swiftui todos todos
 
     # The gallery scene against the SwiftUI backend, same embedded dylib.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example gallery
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example gallery
     APP=$(make_bundle galleryrs-swiftui dev.kaya.galleryswiftui "$TARGET_DIR/examples/gallery")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on gallery-swiftui "$APP" dev.kaya.galleryswiftui gallery-swiftui gallery gallery
 
     # The reorder scene against the SwiftUI backend, same embedded dylib.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example reorder
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example reorder
     APP=$(make_bundle reorderrs-swiftui dev.kaya.reorderswiftui "$TARGET_DIR/examples/reorder")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on reorder-swiftui "$APP" dev.kaya.reorderswiftui reorder-swiftui reorder reorder
 
     # The feed scene against the SwiftUI backend, same embedded dylib.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example feed
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example feed
     APP=$(make_bundle feedrs-swiftui dev.kaya.feedswiftui "$TARGET_DIR/examples/feed")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on feed-swiftui "$APP" dev.kaya.feedswiftui feed-swiftui feed feed
 
     # The layout contract on the SwiftUI interpreter, mirroring the
     # UIKit suite above: grow asserted as shares, layout observed.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example grow
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example grow
     APP=$(make_bundle growrs-swiftui dev.kaya.growswiftui "$TARGET_DIR/examples/grow")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on grow-swiftui "$APP" dev.kaya.growswiftui grow-swiftui grow grow
 
     # The align scene: the cross-axis contract (center + baseline).
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example align
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example align
     APP=$(make_bundle alignrs-swiftui dev.kaya.alignswiftui "$TARGET_DIR/examples/align")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on align-swiftui "$APP" dev.kaya.alignswiftui align-swiftui align align
 
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example layout
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example layout
     APP=$(make_bundle layoutrs-swiftui dev.kaya.layoutswiftui "$TARGET_DIR/examples/layout")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on layout-swiftui "$APP" dev.kaya.layoutswiftui layout-swiftui layout layout
 
     # The confirm scene: alerts are phone-native (see the swift leg).
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example confirm
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example confirm
     APP=$(make_bundle confirmrs-swiftui dev.kaya.confirmswiftui "$TARGET_DIR/examples/confirm")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on confirm-swiftui "$APP" dev.kaya.confirmswiftui confirm-swiftui confirm confirm
 
     # The nav scene (see the swift leg): the serial stack, phone-native.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example nav
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example nav
     APP=$(make_bundle navrs-swiftui dev.kaya.navswiftui "$TARGET_DIR/examples/nav")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on nav-swiftui "$APP" dev.kaya.navswiftui nav-swiftui nav nav
 
     # The scroll scene (see the swift leg).
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example scroll
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example scroll
     APP=$(make_bundle scrollrs-swiftui dev.kaya.scrollswiftui "$TARGET_DIR/examples/scroll")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on scroll-swiftui "$APP" dev.kaya.scrollswiftui scroll-swiftui scroll scroll
@@ -773,13 +777,13 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # read is in-process — UIKit publishes identifiers and elements to
     # the app itself, unlike macOS, where the server side returns nil
     # and only the AXUIElement client API sees the real thing.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example a11y
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example a11y
     APP=$(make_bundle a11yrs-swiftui dev.kaya.a11yswiftui "$TARGET_DIR/examples/a11y")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on a11y-swiftui "$APP" dev.kaya.a11yswiftui a11y-swiftui a11y a11y
 
     # The progress scene (see the swift leg).
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example progress
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example progress
     APP=$(make_bundle progressrs-swiftui dev.kaya.progressswiftui "$TARGET_DIR/examples/progress")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on progress-swiftui "$APP" dev.kaya.progressswiftui progress-swiftui progress progress
@@ -790,7 +794,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # interpreter's one dispatch table, long-press context menus with
     # stamped keys as the noun, and the late rebuild's promotion
     # recompute (Publish resolves with no More-open step).
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example menus
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example menus
     APP=$(make_bundle menusrs-swiftui dev.kaya.menusswiftui "$TARGET_DIR/examples/menus")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on menus-swiftui "$APP" dev.kaya.menusswiftui menus-swiftui menus menus
@@ -814,7 +818,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # the chords run through the interpreter's one dispatch table, and
     # the `settings` role is inert here — iOS has no application menu to
     # move it into, so the item stays where the app declared it.
-    SDKROOT="$SDKROOT_SIM" cargo build --target aarch64-apple-ios-sim --example commands
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example commands
     APP=$(make_bundle commandsrs-swiftui dev.kaya.commandsswiftui "$TARGET_DIR/examples/commands")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on commands-swiftui "$APP" dev.kaya.commandsswiftui commands-swiftui \

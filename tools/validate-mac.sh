@@ -58,7 +58,11 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
-cargo build --lib "${BUILD_EXAMPLES[@]}" || exit 1
+cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
+# The library the legs load must be the one this build produced —
+# a build whose failure went unnoticed leaves the previous one in
+# place and every verdict below is then about stale code.
+tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
 tools/gen-header.sh --check || exit 1
 tools/gen-bindings.sh --check || exit 1
 tools/gen-guests.sh --check || exit 1
@@ -75,6 +79,8 @@ tools/check-sugar-surface.sh || exit 1
 tools/check-universal-props.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
+tools/check-build-id.sh || exit 1
+tools/check-pins.sh || exit 1
 tools/check-verbs.sh || exit 1
 tools/check-stubs.sh || exit 1
 tools/check-compose.sh || exit 1

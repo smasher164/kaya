@@ -3,7 +3,24 @@
 # display. Built and run by tools/validate-linux.sh; the repo is mounted
 # at /work and built inside the container (no cross-compilation: the GTK
 # libraries live here).
-FROM debian:trixie
+# PINNED BY DIGEST, not by tag. `debian:trixie` is a moving target: the
+# same tag resolves to a different image whenever the base is rebuilt,
+# so the one lane whose entire toolchain world lives in this file could
+# change under a run nobody touched. A digest makes "it passed
+# yesterday" mean something, and makes a red lane attributable to a
+# change in the repo rather than to Debian.
+#
+# To move deliberately: docker pull debian:trixie && docker image
+# inspect debian:trixie --format '{{index .RepoDigests 0}}', paste it
+# here, and re-run the lane so the bump is a reviewed diff.
+#
+# NOT pinned, deliberately: the apt package versions below. trixie is
+# STABLE, so they move only on point releases and security updates —
+# slow, and the security half is drift we want. Freezing them would
+# mean snapshot.debian.org, which is slow and periodically unavailable,
+# and that turns "rebuild the image" into a coin flip. The rolling
+# indexes are the ones pinned here and below, because those move hourly.
+FROM debian@sha256:fac46bff2e02f51425b6e33b0e1169f55dfb053d83511ca28aa50c09fd5ed7a4
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,9 +35,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ctypes-foreign via opam on the system compiler: Debian's ctypes deb
 # omits the foreign (libffi) half entirely — its META even dangles.
-RUN opam init -a --bare --disable-sandboxing \
+#
+# The repository is pinned to a COMMIT, fetched as that commit's tarball
+# rather than as a git remote (opam-repository's history is enormous and
+# a clone would dominate the image build). opam-repository is a ROLLING
+# index — it moves hourly — so an unpinned `opam install` resolves to
+# whatever existed the day the image was rebuilt, transitive
+# dependencies included. Pinning the index pins the whole solution
+# space, which is the part naming versions below cannot reach.
+#
+# The explicit versions are the intent on record: pinning only the index
+# would let a deliberate index bump quietly change what gets installed.
+# With both, moving either one is a diff someone has to write.
+# The index goes in as a LOCAL directory: an http opam repository is a
+# directory containing index.tar.gz, and a git one would clone
+# opam-repository's whole history. Unpacking one commit and pointing
+# opam at it is both pinned and fast. The commit id is the content pin —
+# no sha256 on the tarball, because GitHub's generated archives are not
+# promised to be byte-stable and a hash that changes without the content
+# changing is an alarm nobody can act on.
+RUN curl -fsSL -o /tmp/opam-repo.tgz \
+        https://github.com/ocaml/opam-repository/archive/ae6f88cbf223d078928da4d89e303253ea5df2f0.tar.gz \
+    && mkdir -p /opt/opam-repository \
+    && tar -C /opt/opam-repository --strip-components=1 -xzf /tmp/opam-repo.tgz \
+    && rm /tmp/opam-repo.tgz
+RUN opam init -a --bare --disable-sandboxing default /opt/opam-repository \
     && opam switch create default ocaml-system \
-    && opam install -y ocamlfind ctypes ctypes-foreign dune ppxlib
+    && opam install -y ocamlfind.1.9.8 ctypes.0.24.0 ctypes-foreign.0.24.0 \
+        dune.3.24.0 ppxlib.0.38.0
 ENV PATH=/root/.opam/default/bin:$PATH
 
 # cabal needs a package index even for local-only builds; fetch it once
