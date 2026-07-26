@@ -84,17 +84,43 @@ own the state (see the undo note in this file).
   addresses a WIDGET target through its authored `a11y_id`, and the
   menu bar is not a widget in kaya's model, so even a tree containing
   it would want a different verb shape.
+  `UIMainMenuSystem` WAS TRIED AND DOES NOT DELIVER — MEASURED
+  2026-07-26, on an iPad Pro simulator, iOS 26.5 runtime and SDK. iOS
+  26 added `UIMainMenuSystem.shared.setBuildConfiguration(_:buildHandler:)`
+  specifically for this menu bar, and its header promises exactly what
+  this entry wants: the handler is used "instead of calling
+  `-buildMenuWithBuilder:`", and "setting this will invalidate and
+  rebuild the main menu system". That reads like an on-demand build,
+  which is the one thing the responder path cannot do. It is not what
+  happens. Registered from
+  `application(_:didFinishLaunchingWithOptions:)`, the trace from the
+  menus-swiftui-pad leg reads:
+
+      didFinishLaunching ran
+      setBuildConfiguration returned      (no assert, iOS 26 available)
+      buildMenu roots=0                   (the RESPONDER path, still)
+      rebuild requested  x10              (and no build follows any)
+
+  So the call succeeds, the handler is NEVER invoked — not on set, not
+  on ten setNeedsRebuild calls — and it does not replace
+  `buildMenu(with:)` as documented. DO NOT SWITCH THE LOWERING TO IT:
+  the responder path is the one that actually builds the bar today, and
+  adopting the documented-but-inert API would trade a working menu bar
+  for a silent one.
   WHAT IS ACTUALLY LEFT: nothing automated, in-process or out. An
   out-of-process client (XCUITest) sees only what is presented, and
   UIKit exposes no way to present the bar programmatically — a human
-  gesture is the only trigger. So on iOS-regular the presentation half
-  stays ARM-DERIVED, the bar's correctness rests on the visual
-  confirmation recorded above, and this entry is a RE-READ ITEM, not a
-  scheduled fix: check again when iPadOS exposes either programmatic
-  presentation or a menu-bar accessibility element. That is the same
-  lesson the entry above it teaches about triggers written against a
-  platform's current shape — this one now carries its own re-read date
-  rather than a fix that cannot fire.
+  gesture is the only trigger. Independent corroboration: an Apple
+  developer forum thread on UI-testing iPadOS 26 menu bar items reports
+  the same absence, that menu items do not appear in the
+  XCUIApplication element tree on iPadOS while the identical test works
+  on macOS. So on iOS-regular the presentation half stays ARM-DERIVED,
+  the bar's correctness rests on the visual confirmation recorded
+  above, and this entry is a RE-READ ITEM, not a scheduled fix. The
+  re-read trigger is now SHARPER than "when iPadOS exposes something":
+  re-check when `setBuildConfiguration`'s documented invalidate-and-
+  rebuild actually fires, since the API to make this work already
+  exists and only its behavior is missing.
   `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
   what proved the laziness and will be wanted again.
 
