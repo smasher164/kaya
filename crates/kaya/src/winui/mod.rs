@@ -209,6 +209,11 @@ struct CoreState {
     /// and title come back when its stack empties.
     nav_entries: HashMap<u64, WinNavEntry>,
     nav_stacks: HashMap<u64, Vec<u64>>,
+    /// list_detail per window (wprop 6) and the presentation
+    /// refresh_nav ACTUALLY rendered — stamped by the arm that ran,
+    /// never derived (docs/traps.md).
+    list_detail: HashMap<u64, bool>,
+    split_presentation: HashMap<u64, &'static str>,
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
@@ -1059,6 +1064,61 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     }
     let target = winui_window(core, window)?;
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
+
+    // ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves: the app asked
+    // (wprop 6) and the window IS regular — the same 600 boundary the
+    // other backends draw, read from XamlRoot's real size the way
+    // menu_presentation already does.
+    //
+    // A two-column Grid rather than TwoPaneView: the semantic is
+    // side-by-side panes, and WinUI's adaptive triggers ARE width
+    // thresholds anyway. Same call GTK and Compose made — the
+    // idiomatic wrapper is a ledger item, not a blocker.
+    let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
+    let regular = target
+        .Content()
+        .and_then(|c| c.XamlRoot())
+        .and_then(|r| r.Size())
+        .map(|s| s.Width >= 600.0)
+        .unwrap_or(false);
+    if wants_split && regular && top.is_some() {
+        let base = core.window_roots.get(&window).cloned();
+        let detail = top
+            .and_then(|id| core.nav_entries.get(&id))
+            .and_then(|e| e.wrapper.clone());
+        if let (Some(base), Some(detail)) = (base, detail) {
+            let grid = Grid::new()?;
+            for _ in 0..2 {
+                let col = ColumnDefinition::new()?;
+                col.SetWidth(GridLength {
+                    Value: 1.0,
+                    GridUnitType: GridUnitType::Star,
+                })?;
+                grid.ColumnDefinitions()?.Append(&col)?;
+            }
+            let detail: UIElement = windows_core::Interface::cast(&detail)?;
+            // SetColumn is a FrameworkElement attached property, not a
+            // UIElement one.
+            let base_fe: FrameworkElement = windows_core::Interface::cast(&base)?;
+            let detail_fe: FrameworkElement = windows_core::Interface::cast(&detail)?;
+            Grid::SetColumn(&base_fe, 0)?;
+            Grid::SetColumn(&detail_fe, 1)?;
+            grid.Children()?.Append(&base)?;
+            grid.Children()?.Append(&detail)?;
+            let grid: UIElement = windows_core::Interface::cast(&grid)?;
+            set_window_content(core, window, &grid)?;
+            let title = top
+                .and_then(|id| core.nav_entries.get(&id))
+                .map(|e| e.title.clone())
+                .unwrap_or_default();
+            target.SetTitle(&HSTRING::from(&*title))?;
+            core.split_presentation.insert(window, "split");
+            return Ok(());
+        }
+    }
+    // The serial arm stamps too.
+    core.split_presentation.insert(window, "stacked");
+
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
             if let Some(wrapper) = &entry.wrapper {
@@ -2606,6 +2666,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
+                (WindowProp::ListDetail, Value::Bool(on)) => {
+                    core.list_detail.insert(window.0, *on);
+                    refresh_nav(core, window.0)?;
+                }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: Left pane for auto/sidebar, Top for
                     // bar; rebuilt if the chrome already exists.
@@ -3906,6 +3970,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             selected_sections: HashMap::new(),
             sections_presentation: HashMap::new(),
             nav_stacks: HashMap::new(),
+            list_detail: HashMap::new(),
+            split_presentation: HashMap::new(),
             window_roots: HashMap::new(),
             window_titles: HashMap::new(),
             window_veto: HashMap::new(),
@@ -4364,17 +4430,33 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn resize_window(&self, window: u64, width: f64, height: f64) {
-        let _ = (window, width, height);
-        // Not implemented yet: WinUI's real resize is the DPI-aware
-        // SetWindowPos the window-size prop already drives; wiring it to
-        // this verb waits for the adaptive arm that would observe it.
-        unimplemented!("the WinUI resize_window verb is not implemented yet")
+        Self::on_ui_mut(move |core| {
+            // The REAL resize, through the same DPI-aware path the
+            // width/height props drive — and then RE-RUN the arm, which
+            // is the point: changing the size without letting the
+            // platform re-decide gates nothing.
+            let target = winui_window(core, window)?;
+            resize_request(&target, Some(width), Some(height))?;
+            refresh_nav(core, window)?;
+            Ok(())
+        })
     }
 
     fn split_presentation(&self) -> String {
-        // Not implemented yet: the WinUI list-detail arm wants
-        // TwoPaneView. Loud rather than plausible.
-        "<the WinUI list-detail arm is not implemented yet>".to_owned()
+        Self::on_ui(|core| {
+            // The class from XamlRoot's real size, the same 600
+            // boundary menu_presentation draws; the presentation from
+            // the arm that actually ran.
+            let width = winui_window(core, 0)
+                .and_then(|w| w.Content())
+                .and_then(|c| c.XamlRoot())
+                .and_then(|r| r.Size())
+                .map(|s| s.Width)
+                .unwrap_or(0.0);
+            let class = if width >= 600.0 { "regular" } else { "compact" };
+            let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
+            Ok(format!("{class}/{presentation}"))
+        })
     }
 
     fn menu_presentation(&self) -> String {

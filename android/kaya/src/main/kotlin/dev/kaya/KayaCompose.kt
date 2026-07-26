@@ -229,14 +229,13 @@ object KayaSceneModel {
     // failure being gated is exactly the two disagreeing.
     var formFactor = "unknown" // unknown | compact | regular
     var menuPresentation = "none" // none | bar | overflow
-    /// The list-detail presentation this backend ACTUALLY rendered.
-    /// "stacked" always, for now, because the Compose list-detail arm
-    /// (ListDetailPaneScaffold driven by WindowSizeClass) is not built
-    /// yet — and reporting the truth is right: the bare expect_split
-    /// invariant then FAILS on a regular window with entries, which is
-    /// exactly the state of this backend. A sentinel string would have
-    /// hidden that behind an error message instead of failing the
-    /// assertion the milestone exists to satisfy.
+    /// Does this window ASK for list-detail (wprop 6). Whether it GETS
+    /// it is the size class's answer, resolved in the render arm.
+    var listDetail by mutableStateOf(false)
+    /// The list-detail presentation the render arm ACTUALLY took —
+    /// stamped by the arm that ran, never derived from `listDetail` or
+    /// the width, so expect_split cannot agree with the lowering by
+    /// construction (docs/traps.md).
     var splitPresentation = "stacked" // split | stacked
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
@@ -393,6 +392,7 @@ object KayaCompose {
     private const val WPROP_HEIGHT = 3
     private const val WPROP_VETO_CLOSE = 4
     private const val WPROP_SECTIONS_PRESENTATION = 5
+    private const val WPROP_LIST_DETAIL = 6
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     // Navigation-entry properties: their own typed table;
@@ -714,6 +714,7 @@ object KayaCompose {
                         WPROP_VETO_CLOSE -> readBool(b)
                         WPROP_SECTIONS_PRESENTATION ->
                             KayaSceneModel.sectionsPresentation = readI64(b)
+                        WPROP_LIST_DETAIL -> KayaSceneModel.listDetail = readBool(b)
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
@@ -2819,11 +2820,39 @@ private fun KayaSurface() {
             KayaSectionsScaffold(activeSection)
         } else {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
-        if (topEntry != null) {
+        // ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves: the app asked,
+        // and the window IS regular — the same 600dp boundary the other
+        // backends draw, read from the real configuration.
+        //
+        // A plain Row rather than material3-adaptive's
+        // ListDetailPaneScaffold: that artifact is the idiomatic
+        // wrapper and would be the better dressing, but it is a new
+        // androidx dependency and the semantic is expressible without
+        // one. Same call GTK made with Box over AdwNavigationSplitView;
+        // both are ledger items, neither is a blocker.
+        val splitHere =
+            KayaSceneModel.listDetail &&
+                LocalConfiguration.current.screenWidthDp >= 600 &&
+                topEntry != null
+        if (splitHere) {
+            KayaSceneModel.splitPresentation = "split"
+            Row {
+                Box(Modifier.weight(1f)) {
+                    KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
+                }
+                Box(Modifier.weight(1f)) {
+                    topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                }
+            }
+        } else if (topEntry != null) {
+            // The serial arm stamps too: an observation only one arm
+            // writes is derived-by-default in the other.
+            KayaSceneModel.splitPresentation = "stacked"
             // The stack's top is the one visible screen; the covered
             // root below stays alive (retained-until-popped).
             topEntry.root?.let { KayaRender(it, isRoot = true) }
         } else {
+            KayaSceneModel.splitPresentation = "stacked"
             KayaSceneModel.root?.let { root ->
                 // The wrapper hugs the mounted container, so its size IS
                 // the root's — what expect_root_fills compares against the
