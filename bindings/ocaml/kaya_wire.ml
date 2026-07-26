@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xe60f059824708e29L
+let spec_hash = 0xc1ceb0f03be1e512L
 
 let value_bool = 1
 let value_i64 = 2
@@ -55,6 +55,7 @@ let wprop_width = 2
 let wprop_height = 3
 let wprop_veto_close = 4
 let wprop_sections_presentation = 5
+let wprop_list_detail = 6
 let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
@@ -875,6 +876,22 @@ let tx_bind_window_sections_presentation window signal_id =
   finish tx_kind_set_window_prop (fun b ->
       Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_sections_presentation);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant list_detail value (window 0, the primary surface). *)
+let tx_set_window_list_detail window list_detail =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_list_detail);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool list_detail))
+
+(* set_window_prop with a signal-bound list_detail value (window 0, the primary surface). *)
+let tx_bind_window_list_detail window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_list_detail);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 

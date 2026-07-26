@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xe60f059824708e29
+SPEC_HASH = 0xc1ceb0f03be1e512
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -50,6 +50,7 @@ WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
 WPROP_VETO_CLOSE = 4
 WPROP_SECTIONS_PRESENTATION = 5
+WPROP_LIST_DETAIL = 6
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
@@ -599,6 +600,16 @@ def tx_set_window_sections_presentation(window, sections_presentation):
 def tx_bind_window_sections_presentation(window, signal_id):
     """set_window_prop with a signal-bound sections_presentation value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_SECTIONS_PRESENTATION, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_list_detail(window, list_detail):
+    """set_window_prop with a constant list_detail value (bool); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_LIST_DETAIL, SOURCE_CONST) + _enc.value(list_detail))
+
+
+def tx_bind_window_list_detail(window, signal_id):
+    """set_window_prop with a signal-bound list_detail value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_LIST_DETAIL, SOURCE_SIGNAL, signal_id))
 
 
 def tx_set_entry_title(entry, title):

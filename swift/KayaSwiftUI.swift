@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xe60f059824708e29
+let kayaSpecHash: UInt64 = 0xc1ceb0f03be1e512
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2

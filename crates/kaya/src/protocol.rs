@@ -620,6 +620,15 @@ pub enum WindowProp {
     /// is the unit — no platform mixes per-section presentations
     /// (DESIGN.md, Sections).
     SectionsPresentation,
+    /// Whether this window presents its ENTRY STACK as list-detail
+    /// (Bool-valued; DESIGN.md, Adaptive list-detail). False (the
+    /// default) is the serial stack navigation has always had. True
+    /// asks for the adaptive presentation: on a REGULAR window the
+    /// base root takes the leading pane and the top of the stack the
+    /// trailing one; on a COMPACT window nothing changes, because the
+    /// compact case IS the default. There is deliberately no prop for
+    /// WHICH way it presents — that is the size class's answer.
+    ListDetail,
 }
 
 /// The presentation hint's closed set (spec enum

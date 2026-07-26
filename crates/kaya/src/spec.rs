@@ -183,6 +183,18 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // mixes per-section presentations. `auto` (the default) resolves
     // to each platform's dominant sections idiom.
     ("sections_presentation", 5, PropKind::Enum("sections_presentation")),
+    // How this window presents its ENTRY STACK (DESIGN.md, Adaptive
+    // list-detail). False (the default): the stack is serial — one
+    // entry visible, which is what navigation has always done. True:
+    // on a REGULAR window the base root takes the leading pane and the
+    // top of the stack the trailing one; on a COMPACT one the
+    // behavior is unchanged, because the compact case IS the default.
+    // A window prop, not an entry prop: the stack is per-window, and
+    // "how does this surface present its stack" is the window's
+    // question. Adaptive by construction — there is no prop for WHICH
+    // way it presents, since that is the size class's answer, not the
+    // app's.
+    ("list_detail", 6, PropKind::Bool),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -1189,6 +1201,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("height", 3),
                 ("veto_close", 4),
                 ("sections_presentation", 5),
+                ("list_detail", 6),
             ],
         },
         EnumSpec {
@@ -1572,6 +1585,7 @@ mod tests {
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
+                    ("wprop", "list_detail") => wire::WPROP_LIST_DETAIL,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,

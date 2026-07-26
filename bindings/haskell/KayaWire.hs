@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xe60f059824708e29
+specHash = 0xc1ceb0f03be1e512
 
 valueBool :: Word32
 valueBool = 1
@@ -102,6 +102,8 @@ wpropVetoClose :: Word32
 wpropVetoClose = 4
 wpropSectionsPresentation :: Word32
 wpropSectionsPresentation = 5
+wpropListDetail :: Word32
+wpropListDetail = 6
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
@@ -806,6 +808,18 @@ txSetWindowSectionsPresentation window sectionsPresentation = wireRecord txKindS
 txBindWindowSectionsPresentation :: Word64 -> Word64 -> Builder
 txBindWindowSectionsPresentation window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropSectionsPresentation <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant list_detail value (window 0, the primary surface).
+txSetWindowListDetail :: Word64 -> Bool -> Builder
+txSetWindowListDetail window listDetail = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropListDetail <> word32LE sourceConst
+    <> encodeValue (VBool listDetail))
+
+-- set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
+txBindWindowListDetail :: Word64 -> Word64 -> Builder
+txBindWindowListDetail window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropListDetail <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_entry_prop with a constant title value.

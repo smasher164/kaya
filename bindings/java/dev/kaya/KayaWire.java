@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xe60f059824708e29L;
+    public static final long SPEC_HASH = 0xc1ceb0f03be1e512L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -53,6 +53,7 @@ public final class KayaWire {
     public static final int WPROP_HEIGHT = 3;
     public static final int WPROP_VETO_CLOSE = 4;
     public static final int WPROP_SECTIONS_PRESENTATION = 5;
+    public static final int WPROP_LIST_DETAIL = 6;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
@@ -893,6 +894,21 @@ public final class KayaWire {
     public static byte[] txBindWindowSectionsPresentation(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_SECTIONS_PRESENTATION).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant list_detail value (window 0, the primary surface). */
+    public static byte[] txSetWindowListDetail(long window, boolean listDetail) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_LIST_DETAIL).putInt(SOURCE_CONST);
+        encodeValue(b, listDetail);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound list_detail value (window 0, the primary surface). */
+    public static byte[] txBindWindowListDetail(long window, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_LIST_DETAIL).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

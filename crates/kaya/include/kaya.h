@@ -233,6 +233,8 @@
 
 #define WPROP_SECTIONS_PRESENTATION 5
 
+#define WPROP_LIST_DETAIL 6
+
 /**
  * Section property ids (spec::SECTION_PROPS) — the third typed
  * surface table (see DESIGN.md, Sections).
@@ -693,6 +695,12 @@
 #define KAYA_WPROP_HEIGHT 3
 
 #define KAYA_WPROP_VETO_CLOSE 4
+
+/**
+ * The window prop asking for the adaptive list-detail presentation of
+ * this window's entry stack (DESIGN.md, Adaptive list-detail).
+ */
+#define KAYA_WPROP_LIST_DETAIL 6
 
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed

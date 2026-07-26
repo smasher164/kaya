@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xe60f059824708e29;
+    public const ulong SpecHash = 0xc1ceb0f03be1e512;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -52,6 +52,7 @@ static class KayaWire
     public const uint WpropHeight = 3;
     public const uint WpropVetoClose = 4;
     public const uint WpropSectionsPresentation = 5;
+    public const uint WpropListDetail = 6;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
     public const uint SpropTitle = 1;
@@ -981,6 +982,23 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(window); w.Write(WpropSectionsPresentation); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant list_detail value (window 0, the primary surface).
+    public static byte[] TxSetWindowListDetail(ulong window, bool listDetail)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropListDetail); w.Write(SourceConst);
+        EncodeValue(w, listDetail);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
+    public static byte[] TxBindWindowListDetail(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropListDetail); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 

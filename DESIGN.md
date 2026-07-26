@@ -1095,6 +1095,71 @@ affordance per platform, and entry-targeted expect_title — all four
 layers in both interpreters from the start, per the
 interpreter-backend doctrine.
 
+### Adaptive list-detail — ratified 2026-07-26
+
+The size-class axis is in place but only menus obey it. The surface
+that makes the axis pay is list-detail: a regular window showing a list
+and its detail side by side where a compact one shows one at a time.
+
+**It is a PRESENTATION of the entry stack, not a new container.** A
+window is marked list-detail; on a regular window its base root renders
+in the leading pane and the top of its entry stack in the trailing one,
+and on a compact window only the top renders — which is exactly what
+navigation already does today. `push_entry`, `pop_entry`,
+`entry_popped` and `intercept_back` are unchanged, and the compact
+collapse costs no new machinery because the compact case IS the
+existing behavior.
+
+The alternative — a `split` widget kind holding two children — was
+rejected on the grammar rule this document already states: the three
+lifecycle grammars are never mixed. A layout container that collapses
+on compact must either PUSH its detail, which is a widget performing
+navigation, or swap in place and grow its own back affordance,
+duplicating push/pop/intercept_back one layer down. Both spend new
+vocabulary to re-describe a stack kaya already owns.
+
+The platforms agree, and three of the four say so in their names.
+libadwaita's is `AdwNavigationSplitView` — one object that shows
+sidebar and content side by side when wide and stacks them when narrow.
+Apple unifies `NavigationSplitView` with `NavigationStack` and lets the
+size class choose. Compose's `ListDetailPaneScaffold` carries a
+navigator. Only WinUI's `TwoPaneView` is framed as pure layout, and its
+NavigationView display modes are the size-class-driven sibling. This is
+the 4/4 native intersection the admission policy asks for — and worth
+distinguishing from the DRAGGABLE splitter it is easily confused with,
+which is 2/4 and does not qualify.
+
+The vocabulary:
+
+- **`list_detail`** (Bool, default false) joins the WINDOW prop table.
+  A window, not an entry, because the stack is per-window and the
+  question "how does this surface present its stack" is the window's.
+- **Deeper entries replace the trailing pane.** With a stack of three
+  on a regular window, the base root holds the leading pane and the top
+  entry the trailing one; the middle stays retained and covered, the
+  same rule navigation already has. No three-pane form in v1 — Apple
+  has one, nobody else does, and it is not the intersection.
+- **An empty stack on a regular window** shows the leading pane and the
+  platform's own empty trailing state. Nothing to invent: every one of
+  the four has one.
+
+The gate, and the reason `resize_window` belongs to this milestone
+rather than preceding it: a verb that drives a transition no code
+specializes gates nothing.
+
+- **`resize_window`** drives the window's REAL resize — the path a user
+  drag takes, not a model write — so the size class actually changes.
+  Capability-rejected on phone hosts, the `create_window` precedent: a
+  phone window has no size to command.
+- **`expect_split`** reads THE ARM THAT ACTUALLY RENDERED, never the
+  size class. Deriving it would make the assertion agree with the
+  lowering by construction and it could never catch the defect — the
+  lesson `expect_menu_presentation` paid for. Its bare form asserts the
+  ASYMMETRIC invariant a shared scene can carry: a regular window must
+  not be showing one pane while its stack holds two. The other
+  direction is legitimate — what counts as wide enough is the
+  platform's call, and a compact window is never asked to show two.
+
 ### Sections (tabs) — ratified 2026-07-22
 
 Tabs are a presentation context, not a widget: a fixed-ish,

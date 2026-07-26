@@ -456,6 +456,10 @@ pub const KAYA_WPROP_WIDTH: u32 = 2;
 pub const KAYA_WPROP_HEIGHT: u32 = 3;
 pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 
+/// The window prop asking for the adaptive list-detail presentation of
+/// this window's entry stack (DESIGN.md, Adaptive list-detail).
+pub const KAYA_WPROP_LIST_DETAIL: u32 = 6;
+
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
 /// class transplanted to POP.
@@ -595,6 +599,7 @@ const _: () = assert!(
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
         && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
+        && KAYA_WPROP_LIST_DETAIL == wire::WPROP_LIST_DETAIL
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -622,7 +627,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 5,
+    crate::spec::WINDOW_PROPS.len() == 6,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
