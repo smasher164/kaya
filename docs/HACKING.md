@@ -158,6 +158,43 @@ touching layout code:
   a throwaway env script (the interpreters read KAYA_SELFTEST_SCRIPT;
   Rust backends embed theirs at build time and need a rebuild).
 
+## The fast inner loop (KAYA_FAST=1)
+
+    KAYA_FAST=1 tools/validate-mac.sh      # skip gates whose inputs did not move
+    tools/validate-mac.sh                  # everything, always — the ladder's rung 3
+
+Sixteen gates are keyed on a declared input set (tools/build-id.sh's
+GATES table). Under KAYA_FAST=1 a gate whose inputs are unchanged since
+it last PASSED prints `CACHED (<key>)` and is skipped. Measured on a
+warm tree: the gate phase goes 55s to 17s, and what remains is the
+cargo build plus the three gates that are deliberately never keyed.
+
+What the keys actually buy is not the all-cached case — it is that
+different work re-runs different gates:
+
+| edit | gates that re-run |
+|---|---|
+| a Kotlin file | 6 of 16 (not the cross-compile, not either typechecker) |
+| a Rust backend file | 8 of 16 (not the gradle gates, not swift-typecheck) |
+| a Python binding file | 5 of 16 |
+
+`swift-typecheck` surviving a `gtk.rs` edit is the point: it is keyed on
+`crates/kaya/include/` — the INTERFACE — not on `crates/`. That is sound
+only because the header is a checked-in artifact whose freshness is
+itself gated by `gen-header`, which IS keyed on all of crates/. Key a
+downstream gate on an interface, and something must be guarding that
+interface; here it is.
+
+THREE GATES ARE NEVER KEYED and must stay that way: check-abort,
+check-wheel and check-build-id each load or inspect something under
+target/, so an unchanged source tree does not imply an unchanged
+answer. tools/check-keyed.sh fails if any of them is ever wrapped.
+
+Adding a gate to the cache means adding its input set to GATES. Name
+DIRECTORIES, not files. The asymmetry is the whole safety argument:
+naming too much costs a re-run nobody notices, naming too little hands
+back a PASS about code that changed.
+
 ## "Is this artifact built from my tree?" (tools/build-id.sh)
 
 libkaya carries a marker naming the sources it was compiled from — a

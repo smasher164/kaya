@@ -122,6 +122,152 @@ if [ -n "$unlocked" ]; then
     status=1
 fi
 
+# `$?` is readable exactly once, on the line right after the command,
+# into a named variable. Everything downstream tests the VARIABLE.
+#
+# It is not a value you can come back for. Three ways that bites, all
+# silent, none of them caught by shellcheck 0.11 at any severity:
+#
+#   if cmd; then …; fi      an `if` whose condition was false and which
+#   status=$?               has no else branch exits 0 ITSELF, so this
+#                           reads the `if`, not cmd. Shipped in
+#                           tools/keyed.sh; every failing gate passed.
+#
+#   cmd                     SC2181 knows this one, but only at STYLE
+#   if [ $? -ne 0 ]         severity, which -S warning above never sees.
+#
+#   cmd                     `local` is itself a command and RESETS $?.
+#   local status=$?         status is whatever `local` returned: 0.
+#
+# So the rule is spelled here rather than delegated. Allowed: a bare
+# `name=$?` on the line after a command, or `cmd || name=$?` on one
+# line. Anything else is a finding — including a read that follows the
+# end of a compound (fi/done/esac/}), which is the first case above.
+badstatus=$(python3 - <<'PY'
+import pathlib, re
+
+CAPTURE = re.compile(r'^[A-Za-z_]\w*=\$\?$')             # name=$? , alone
+SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')   # cmd || name=$?
+DECL = re.compile(r'\b(?:local|declare|typeset|export|readonly)\s+[A-Za-z_]\w*=\$\?')
+# A BACKSLASH-escaped $? in a double-quoted string is literal text: the
+# message this gate PRINTS about $? is not itself a read of one.
+READ = re.compile(r'(?<!\\)\$\?')
+ENDS_COMPOUND = {"fi", "done", "esac", "}", ";;", "else", "then", "do"}
+
+
+def logical_lines(text):
+    out, start, buf = [], None, []
+    for n, line in enumerate(text.splitlines(), 1):
+        if start is None:
+            start = n
+        if line.endswith("\\"):
+            buf.append(line[:-1])
+            continue
+        buf.append(line)
+        out.append((start, " ".join(p.strip() for p in buf)))
+        start, buf = None, []
+    if buf:
+        out.append((start, " ".join(p.strip() for p in buf)))
+    return out
+
+
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
+def without_heredocs(text):
+    """Heredoc bodies blanked out, line numbering preserved. The rule
+    below is about SHELL semantics, and a heredoc body is data — the
+    python this file embeds is full of `$?` in regexes and messages, and
+    scanning it flagged this very clause thirteen times. Any scanner
+    that reads tools/*.sh has to know where the shell stops."""
+    out, delim = [], None
+    for line in text.splitlines():
+        if delim is not None:
+            out.append("")
+            if line.strip() == delim:
+                delim = None
+            continue
+        out.append(line)
+        if not line.lstrip().startswith("#"):
+            m = HEREDOC.search(line)
+            if m:
+                delim = m.group(1)
+    return "\n".join(out)
+
+
+def scan(name, text):
+    findings, prev = [], None
+    for n, line in logical_lines(without_heredocs(text)):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if READ.search(stripped):
+            if DECL.search(stripped):
+                findings.append(f"{name}:{n}: local/declare is a command and resets $? "
+                                f"before this reads it: {stripped}")
+            elif SAMELINE.search(stripped):
+                pass
+            elif CAPTURE.match(stripped):
+                last = prev.split()[-1].rstrip(";") if prev else ""
+                if last in ENDS_COMPOUND:
+                    findings.append(f"{name}:{n}: $? here reads the compound ending in "
+                                    f"'{last}', not a command: {stripped}")
+            else:
+                findings.append(f"{name}:{n}: $? read somewhere other than an immediate "
+                                f"capture: {stripped}")
+        prev = stripped
+    return findings
+
+
+out = []
+for f in sorted(pathlib.Path("tools").rglob("*.sh")):
+    out += scan(str(f), f.read_text())
+print("\n".join(out))
+PY
+) || true
+# Self-test: all three shapes above must be seen, and the correct one
+# must not be. A clause about a silent failure mode is worth exactly
+# what its negative test proves.
+probe=$(python3 - <<'PY'
+import re
+CAPTURE = re.compile(r'^[A-Za-z_]\w*=\$\?$')
+SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')
+DECL = re.compile(r'\b(?:local|declare|typeset|export|readonly)\s+[A-Za-z_]\w*=\$\?')
+# A BACKSLASH-escaped $? in a double-quoted string is literal text: the
+# message this gate PRINTS about $? is not itself a read of one.
+READ = re.compile(r'(?<!\\)\$\?')
+ENDS_COMPOUND = {"fi", "done", "esac", "}", ";;", "else", "then", "do"}
+
+
+def flagged(prev, line):
+    if DECL.search(line):
+        return True
+    if SAMELINE.search(line):
+        return False
+    if CAPTURE.match(line):
+        return (prev.split()[-1].rstrip(";") if prev else "") in ENDS_COMPOUND
+    return bool(READ.search(line))
+
+
+bad = [flagged("fi", "status=$?"),                      # after a compound
+       flagged("cmd", "if [ $? -ne 0 ]; then :; fi"),   # read in a test
+       flagged("cmd", "local status=$?")]               # local resets it
+good = [flagged('"$@"', "status=$?"),                   # the one right way
+        flagged("cmd", "docker run x || rc=$?"),        # captured same line
+        flagged("cmd", r'echo "scored \$? here"')]      # escaped: literal
+print(f"{sum(bad)}/{sum(good)}")
+PY
+)
+if [ "$probe" != "3/0" ]; then
+    echo "check-shell: self-test failed (\$? scan scored $probe, want 3/0)" >&2
+    status=1
+fi
+if [ -n "$badstatus" ]; then
+    echo "check-shell: \$? read where it no longer holds the command's status:" >&2
+    echo "$badstatus" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

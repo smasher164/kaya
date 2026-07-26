@@ -63,30 +63,39 @@ cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
 # a build whose failure went unnoticed leaves the previous one in
 # place and every verdict below is then about stale code.
 tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
-tools/gen-header.sh --check || exit 1
-tools/gen-bindings.sh --check || exit 1
-tools/gen-guests.sh --check || exit 1
-tools/check-steps.sh || exit 1
+tools/keyed.sh gen-header -- tools/gen-header.sh --check || exit 1
+tools/keyed.sh gen-bindings -- tools/gen-bindings.sh --check || exit 1
+tools/keyed.sh gen-guests -- tools/gen-guests.sh --check || exit 1
+tools/keyed.sh check-steps -- tools/check-steps.sh || exit 1
 # The Python surface's guard and mirror semantics, checked headlessly
 # (records queue; the core is never entered).
 python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks: FAIL"; exit 1; }
 # Fast cross-language/-platform gates: catch cfg'd-backend and guest
 # breakage here, in seconds, not on an emulator or VM.
-tools/check-targets.sh || exit 1
-tools/check-shell.sh || exit 1
-tools/check-mirror.sh || exit 1
-tools/check-sugar-surface.sh || exit 1
-tools/check-universal-props.sh || exit 1
+#
+# The pure ones run through tools/keyed.sh, which under KAYA_FAST=1
+# skips a gate whose declared inputs have not moved since it last
+# passed. Unset — which is how the matrix runs — the wrapper is
+# transparent and every gate runs. check-wheel, check-abort and
+# check-build-id are NOT wrapped and must not be: each loads or
+# inspects a built artifact, so an unchanged source tree is not an
+# unchanged answer.
+tools/keyed.sh check-targets -- tools/check-targets.sh || exit 1
+tools/keyed.sh check-shell -- tools/check-shell.sh || exit 1
+tools/keyed.sh check-mirror -- tools/check-mirror.sh || exit 1
+tools/keyed.sh check-sugar-surface -- tools/check-sugar-surface.sh || exit 1
+tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
 tools/check-build-id.sh || exit 1
-tools/check-pins.sh || exit 1
-tools/check-verbs.sh || exit 1
-tools/check-stubs.sh || exit 1
-tools/check-compose.sh || exit 1
-tools/check-detekt.sh || exit 1
-tools/swift-typecheck.sh || exit 1
-tools/java-typecheck.sh || exit 1
+tools/check-keyed.sh || exit 1
+tools/keyed.sh check-pins -- tools/check-pins.sh || exit 1
+tools/keyed.sh check-verbs -- tools/check-verbs.sh || exit 1
+tools/keyed.sh check-stubs -- tools/check-stubs.sh || exit 1
+tools/keyed.sh check-compose -- tools/check-compose.sh || exit 1
+tools/keyed.sh check-detekt -- tools/check-detekt.sh || exit 1
+tools/keyed.sh swift-typecheck -- tools/swift-typecheck.sh || exit 1
+tools/keyed.sh java-typecheck -- tools/java-typecheck.sh || exit 1
 timing core-build+gates
 
 status=0

@@ -20,6 +20,11 @@ in docs/deferred.md.
 - Never pipe a build through `tail`/`head` in a verify loop — the
   pipeline's exit status becomes tail's, and a failed build silently
   runs the test against a stale artifact. Check the build's exit first.
+- `$?` is read exactly once, on the line right after the command, into
+  a named variable; everything downstream tests the VARIABLE. It is not
+  a value you can come back for — an `if` that took no branch, a `[`, or
+  `local` all overwrite it, and shellcheck sees none of those three at
+  warning level. check-shell enforces the shape.
 - Every cargo invocation carries `--locked` (check-shell enforces it):
   a bare build may rewrite Cargo.lock mid-run, and the lane then goes
   green against a dependency graph nobody chose.
@@ -27,6 +32,11 @@ in docs/deferred.md.
   (tools/build-id.sh). Anything a lane runs or ships gets
   `--verify`'d first — that is the mechanical version of "check the
   build's exit first", and it holds when nobody remembers to.
+- `KAYA_FAST=1` skips any gate whose declared inputs have not moved
+  since it last passed (tools/keyed.sh; input sets and the reasoning
+  live in tools/build-id.sh's GATES). For the INNER LOOP only — the
+  matrix never sets it, so the run that goes on the record consults no
+  cache and cannot be wrong because of one.
 - The maintainer approves every commit and its exact message. Do not
   commit or push on your own initiative.
 
@@ -110,6 +120,10 @@ in docs/deferred.md.
    `tools/check-pins.sh` (every dependency resolved over the network
    names an exact version — gradle, nuget, and the container's opam
    index, none of which has a lockfile the way cargo and nix do),
+   `tools/check-keyed.sh` (the gate cache is honest: a change inside a
+   gate's input set re-runs it, a change outside does NOT, a FAILED gate
+   is never cached, KAYA_FAST unset consults nothing, and the three
+   gates that read a built artifact are never keyed),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which

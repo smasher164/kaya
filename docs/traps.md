@@ -1259,6 +1259,54 @@ script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
 
+## Editing a script a lane is CURRENTLY EXECUTING corrupts that run
+
+A negative test doctored tools/validate-mac.sh and restored it seconds
+later, while a matrix run was executing that same file. The mac lane
+died with `line 96: ls/check-compose.sh: No such file or directory` —
+"tools/" with three bytes missing. bash does not read a script into
+memory; it reads it incrementally by BYTE OFFSET, so rewriting the file
+under a running interpreter makes it resume mid-token at a position
+that no longer means what it meant. Four lanes passed, one failed, and
+nothing was wrong with the tree: `bash -n` was clean and line 96 was
+correct by the time anyone looked.
+
+Two habits fall out. Do not modify tools/ while any lane is live —
+doctor a COPY, or wait. And when a lane fails with a syntax or
+not-found error naming a file that is demonstrably fine, suspect
+concurrent modification before suspecting the change under test; the
+evidence is gone by the time you read the log, which is exactly what
+makes it worth writing down.
+
+## `$?` after an `if` that took no branch is 0, not the command's status
+
+tools/keyed.sh wrapped each gate as `if "$@"; then store; fi; status=$?`
+— and a FAILING gate came back as a pass. An `if` compound whose
+condition is false and which has no `else` exits 0 itself, so `$?`
+reads the `if`, not the command inside it. Under KAYA_FAST=1 every
+wrapped gate would have reported success no matter what it found.
+Spell it `"$@"; status=$?` and branch on the variable.
+
+The general rule, now enforced by check-shell: `$?` is read ONCE, on the
+line right after the command, into a named variable, and everything
+downstream tests the variable. Two more ways it slips, both silent and
+both invisible to shellcheck 0.11 at warning level — `if [ $? -ne 0 ]`
+(SC2181 knows it, but only at STYLE severity, which the gate does not
+run) and `local status=$?`, where `local` is itself a command and
+resets $? to its own 0.
+
+Two things about how it was caught, both worth copying. The wrapper's
+own gate found it on its first run, because that gate asserts a FAILING
+task is never cached — an assertion about the failure path, which is
+the path nobody exercises by accident. And the same gate then failed a
+SECOND way: its "KAYA_FAST unset consults no cache" clause ran inside a
+lane launched with `KAYA_FAST=1 tools/validate-mac.sh`, inherited the
+exported variable, and was quietly testing the opposite of what it
+claimed. A self-test has to CONSTRUCT its environment (`env -u`), never
+inherit one — an inherited variable turns an assertion into a
+tautology, silently, and only under the conditions you were trying to
+check.
+
 ## A gate that reads PHYSICAL lines cannot see a continued command
 
 check-pins grew a clause requiring `--disable-automatic-resolution` on
