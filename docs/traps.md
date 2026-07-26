@@ -1289,11 +1289,22 @@ Spell it `"$@"; status=$?` and branch on the variable.
 
 The general rule, now enforced by check-shell: `$?` is read ONCE, on the
 line right after the command, into a named variable, and everything
-downstream tests the variable. Two more ways it slips, both silent and
-both invisible to shellcheck 0.11 at warning level — `if [ $? -ne 0 ]`
-(SC2181 knows it, but only at STYLE severity, which the gate does not
-run) and `local status=$?`, where `local` is itself a command and
-resets $? to its own 0.
+downstream tests the variable. Two more ways it slips, measured in bash
+5.3 rather than assumed — the assumption was wrong the first time:
+
+    cmd; local rc=$?        rc=1. FINE. $? expands before `local` runs.
+    cmd; local rc; rc=$?    rc=0. BROKEN — the bare `local rc` is the
+                            last command, and the capture reads IT.
+                            shellcheck says nothing at any severity.
+    local rc=$(cmd)         $? masked. SC2155, warning, already caught.
+    cmd; if [ $? -ne 0 ]    SC2181, but STYLE only, which the gate does
+                            not run.
+
+Note the shape everyone repeats as the safe one — declare first, assign
+second — is precisely the broken one here. "Declare and assign
+separately" is right for `$(cmd)` substitution (SC2155) and wrong for
+`$?`, because the two are masked at different moments: a substitution
+runs during the assignment, and `$?` is already gone by then.
 
 Two things about how it was caught, both worth copying. The wrapper's
 own gate found it on its first run, because that gate asserts a FAILING

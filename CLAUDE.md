@@ -22,9 +22,11 @@ in docs/deferred.md.
   runs the test against a stale artifact. Check the build's exit first.
 - `$?` is read exactly once, on the line right after the command, into
   a named variable; everything downstream tests the VARIABLE. It is not
-  a value you can come back for — an `if` that took no branch, a `[`, or
-  `local` all overwrite it, and shellcheck sees none of those three at
-  warning level. check-shell enforces the shape.
+  a value you can come back for: an `if` that took no branch exits 0
+  ITSELF, a bare `local rc` on the line between is a command and resets
+  it, and a `[` overwrites it. shellcheck reports none of those three
+  at warning level; check-shell enforces the shape. (`local rc=$?` on
+  one line is fine — the expansion beats the command.)
 - Every cargo invocation carries `--locked` (check-shell enforces it):
   a bare build may rewrite Cargo.lock mid-run, and the lane then goes
   green against a dependency graph nobody chose.

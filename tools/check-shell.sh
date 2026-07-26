@@ -136,8 +136,13 @@ fi
 #   cmd                     SC2181 knows this one, but only at STYLE
 #   if [ $? -ne 0 ]         severity, which -S warning above never sees.
 #
-#   cmd                     `local` is itself a command and RESETS $?.
-#   local status=$?         status is whatever `local` returned: 0.
+#   cmd                     `local rc` is a COMMAND and resets $?, so
+#   local rc                the capture reads the declaration. Measured:
+#   rc=$?                   rc=0. Note `local rc=$?` on ONE line is
+#                           FINE — $? expands before local runs — and
+#                           `local rc=$(cmd)` is SC2155 at warning,
+#                           already caught above. Only the separated
+#                           form is both broken and unreported.
 #
 # So the rule is spelled here rather than delegated. Allowed: a bare
 # `name=$?` on the line after a command, or `cmd || name=$?` on one
@@ -146,9 +151,13 @@ fi
 badstatus=$(python3 - <<'PY'
 import pathlib, re
 
-CAPTURE = re.compile(r'^[A-Za-z_]\w*=\$\?$')             # name=$? , alone
+# `name=$?`, optionally with a declaration prefix — `local rc=$?` is a
+# capture too: the expansion happens before `local` runs (measured).
+CAPTURE = re.compile(r'^(?:(?:local|declare|typeset|export|readonly)\s+)?[A-Za-z_]\w*=\$\?$')             # name=$? , alone
 SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')   # cmd || name=$?
-DECL = re.compile(r'\b(?:local|declare|typeset|export|readonly)\s+[A-Za-z_]\w*=\$\?')
+# A BARE declaration — `local rc` with no `=` — is the last command
+# before a capture on the next line, so the capture reads IT.
+BARE_DECL = re.compile(r'^(?:local|declare|typeset)\s+[A-Za-z_]\w*$')
 # A BACKSLASH-escaped $? in a double-quoted string is literal text: the
 # message this gate PRINTS about $? is not itself a read of one.
 READ = re.compile(r'(?<!\\)\$\?')
@@ -202,14 +211,14 @@ def scan(name, text):
         if not stripped or stripped.startswith("#"):
             continue
         if READ.search(stripped):
-            if DECL.search(stripped):
-                findings.append(f"{name}:{n}: local/declare is a command and resets $? "
-                                f"before this reads it: {stripped}")
-            elif SAMELINE.search(stripped):
+            if SAMELINE.search(stripped):
                 pass
             elif CAPTURE.match(stripped):
                 last = prev.split()[-1].rstrip(";") if prev else ""
-                if last in ENDS_COMPOUND:
+                if prev and BARE_DECL.match(prev):
+                    findings.append(f"{name}:{n}: the line above is a bare declaration, "
+                                    f"which is a command and resets $?: {stripped}")
+                elif last in ENDS_COMPOUND:
                     findings.append(f"{name}:{n}: $? here reads the compound ending in "
                                     f"'{last}', not a command: {stripped}")
             else:
@@ -230,9 +239,13 @@ PY
 # what its negative test proves.
 probe=$(python3 - <<'PY'
 import re
-CAPTURE = re.compile(r'^[A-Za-z_]\w*=\$\?$')
+# `name=$?`, optionally with a declaration prefix — `local rc=$?` is a
+# capture too: the expansion happens before `local` runs (measured).
+CAPTURE = re.compile(r'^(?:(?:local|declare|typeset|export|readonly)\s+)?[A-Za-z_]\w*=\$\?$')
 SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')
-DECL = re.compile(r'\b(?:local|declare|typeset|export|readonly)\s+[A-Za-z_]\w*=\$\?')
+# A BARE declaration — `local rc` with no `=` — is the last command
+# before a capture on the next line, so the capture reads IT.
+BARE_DECL = re.compile(r'^(?:local|declare|typeset)\s+[A-Za-z_]\w*$')
 # A BACKSLASH-escaped $? in a double-quoted string is literal text: the
 # message this gate PRINTS about $? is not itself a read of one.
 READ = re.compile(r'(?<!\\)\$\?')
@@ -240,20 +253,22 @@ ENDS_COMPOUND = {"fi", "done", "esac", "}", ";;", "else", "then", "do"}
 
 
 def flagged(prev, line):
-    if DECL.search(line):
-        return True
     if SAMELINE.search(line):
         return False
     if CAPTURE.match(line):
+        if prev and BARE_DECL.match(prev):
+            return True
         return (prev.split()[-1].rstrip(";") if prev else "") in ENDS_COMPOUND
     return bool(READ.search(line))
 
 
 bad = [flagged("fi", "status=$?"),                      # after a compound
        flagged("cmd", "if [ $? -ne 0 ]; then :; fi"),   # read in a test
-       flagged("cmd", "local status=$?")]               # local resets it
+       flagged("local rc", "rc=$?")]                    # bare decl above
 good = [flagged('"$@"', "status=$?"),                   # the one right way
         flagged("cmd", "docker run x || rc=$?"),        # captured same line
+        flagged("cmd", "local rc=$?"),                  # MEASURED fine: $?
+                                                        # expands before local runs
         flagged("cmd", r'echo "scored \$? here"')]      # escaped: literal
 print(f"{sum(bad)}/{sum(good)}")
 PY

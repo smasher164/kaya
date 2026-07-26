@@ -437,11 +437,33 @@ build_csharp() {
 build_go() {
     # encodebench is guest-only (no rust example), so it rides beside
     # the scene list rather than in it.
+    #
+    # POOLED, like build_swift. These 24 links are independent and were
+    # sequential, which made go the whole guest phase's critical path at
+    # 13s against 4s for every other language; pooled it is 1s. Unlike a
+    # cache this helps the matrix too, since the clean path pays the
+    # same 13s. go's own build cache was never the problem — the compile
+    # was already cached and the LINK is what repeats.
     mkdir -p target/go-guests
-    local guest
+    local guest pids=() names=() logs
+    logs="$(mktemp -d)"
     for guest in $SCENES encodebench; do
-        go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
+        go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" \
+            >"$logs/$guest.log" 2>&1 &
+        pids+=($!)
+        names+=("$guest")
     done
+    local i=0 status=0
+    for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then
+            echo "go guest ${names[$i]} FAILED:"
+            cat "$logs/${names[$i]}.log"
+            status=1
+        fi
+        i=$((i + 1))
+    done
+    rm -rf "$logs"
+    return "$status"
 }
 
 build_swift() {
