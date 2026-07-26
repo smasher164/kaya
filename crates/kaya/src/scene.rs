@@ -410,6 +410,7 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
     match (prop, value) {
         (WindowProp::Title, Value::Str(_)) => {}
         (WindowProp::VetoClose, Value::Bool(_)) => {}
+        (WindowProp::ListDetail, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,
@@ -3281,6 +3282,31 @@ mod tests {
             TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
             TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
         ]);
+    }
+
+    #[test]
+    fn list_detail_takes_a_bool() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::ListDetail,
+            value: PropValue::Const(Value::Bool(true)),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn list_detail_rejects_a_non_bool() {
+        // The prop asks a yes/no question — "present this stack as
+        // list-detail" — and WHICH way it presents is the size class's
+        // answer, never a value the app supplies. An enum here would be
+        // an app overriding the platform's own breakpoint.
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::ListDetail,
+            value: PropValue::Const(Value::from("regular")),
+        }]);
     }
 
     #[test]

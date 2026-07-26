@@ -380,6 +380,24 @@ pub enum Step {
     /// item's direct activation would (one dispatch path). An action,
     /// silent like click.
     Shortcut(String),
+    /// Drive the window's REAL resize — the path a user's drag takes,
+    /// not a model write — so the SIZE CLASS actually changes and the
+    /// adaptive arms re-run. `None` targets the implicit primary.
+    /// Capability-rejected on the phone hosts, the create_window
+    /// precedent: a phone window has no size to command. An action,
+    /// silent like click and close_window.
+    ResizeWindow(Option<u64>, f64, f64),
+    /// The window's live list-detail presentation,
+    /// `<size class>/<presentation>` with presentations `split` and
+    /// `stacked`. `Some(spelling)` asserts an exact reading; `None` —
+    /// the BARE form — asserts only the invariant a SHARED scene can
+    /// carry, because the exact literal differs per lane while the
+    /// invariant holds everywhere. Deliberately ASYMMETRIC, the
+    /// expect_menu_presentation precedent: a regular window must not be
+    /// showing one pane while its stack holds two, but what counts as
+    /// wide enough is the platform's call and a compact window is never
+    /// asked to show two.
+    ExpectSplit(Option<String>),
 }
 
 impl Step {
@@ -431,6 +449,8 @@ impl Step {
             Step::ExpectMenus { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
             Step::Shortcut { .. } => false,
+            Step::ResizeWindow { .. } => false,
+            Step::ExpectSplit { .. } => true,
         }
     }
 }
@@ -638,6 +658,22 @@ pub trait Stage: Send + 'static {
     /// the window it is in, and a model-sourced answer cannot see that.
     /// No default.
     fn menu_presentation(&self) -> String;
+    /// Resize `window` to WxH in DIP through the platform's real
+    /// window-resize path, blocking until the new size is applied so
+    /// the size-class-driven arms have re-run by the time this
+    /// returns. Hosts without commandable window size reject the
+    /// scene loudly rather than silently no-op.
+    /// No default.
+    fn resize_window(&self, window: u64, width: f64, height: f64);
+    /// The window's live list-detail presentation,
+    /// `<size class>/<presentation>` — see Step::ExpectSplit.
+    ///
+    /// The presentation half must name THE ARM THAT RENDERED, read
+    /// from the view layer's own stamp, never derived from the prop or
+    /// the size class. A derived answer agrees with the lowering by
+    /// construction and cannot see the defect being gated.
+    /// No default.
+    fn split_presentation(&self) -> String;
     /// The menu item's state along one axis, read from the platform's
     /// real menu chrome and spelled in the steps grammar's own words
     /// ("enabled"/"disabled", "checked"/"unchecked", "value N") —
@@ -894,6 +930,31 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 check_ax(&want).map_err(|e| format!("{e}: {line:?}"))?;
                 Step::ExpectAx(parse_target(target)?, want)
             }
+            "resize_window" => {
+                let (window, rest) = parse_window_target(rest);
+                let (w, h) = rest
+                    .trim()
+                    .split_once('x')
+                    .ok_or_else(|| format!("resize_window wants WxH: {line:?}"))?;
+                let w: f64 = w
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("resize_window wants numeric WxH: {line:?}"))?;
+                let h: f64 = h
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("resize_window wants numeric WxH: {line:?}"))?;
+                Step::ResizeWindow(window, w, h)
+            }
+            "expect_split" => {
+                if rest.trim().is_empty() {
+                    Step::ExpectSplit(None)
+                } else {
+                    let want = parse_string(rest)?;
+                    check_split_presentation(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                    Step::ExpectSplit(Some(want))
+                }
+            }
             "expect_menu_presentation" => {
                 if rest.trim().is_empty() {
                     Step::ExpectMenuPresentation(None)
@@ -1096,6 +1157,43 @@ fn check_ax(spec: &str) -> Result<(), String> {
 fn menu_presentation_fits(spelling: &str) -> bool {
     let (class, presentation) = spelling.split_once('/').unwrap_or(("unknown", "none"));
     !(class == "regular" && presentation == "overflow")
+}
+
+/// The invariant the BARE expect_split step asserts: a regular window
+/// must not be showing ONE pane while its stack holds two. Asymmetric
+/// for the same reason menus is — what counts as wide enough is the
+/// platform's call, and a compact window is never asked to show two.
+/// Extracted from the step so it is directly testable.
+fn split_presentation_fits(spelling: &str, entries: usize) -> bool {
+    let (class, presentation) = spelling.split_once('/').unwrap_or(("unknown", "stacked"));
+    !(class == "regular" && presentation == "stacked" && entries >= 1)
+}
+
+/// The presentation spelling of an expect_split step:
+/// `<size class>/<presentation>`, both halves from closed sets — the
+/// expect_menu_presentation precedent, and for the same reason: a typo
+/// would otherwise read as a backend disagreeing with the scene.
+fn check_split_presentation(spec: &str) -> Result<(), String> {
+    const CLASSES: [&str; 3] = ["unknown", "compact", "regular"];
+    const PRESENTATIONS: [&str; 2] = ["split", "stacked"];
+    let Some((class, presentation)) = spec.split_once('/') else {
+        return Err(format!(
+            "split presentation {spec:?} wants <size class>/<presentation>"
+        ));
+    };
+    if !CLASSES.contains(&class) {
+        return Err(format!(
+            "split presentation {spec:?} has an unknown size class {class:?}; \
+             wanted one of {CLASSES:?}"
+        ));
+    }
+    if !PRESENTATIONS.contains(&presentation) {
+        return Err(format!(
+            "split presentation {spec:?} has an unknown presentation \
+             {presentation:?}; wanted one of {PRESENTATIONS:?}"
+        ));
+    }
+    Ok(())
 }
 
 /// The presentation spelling of an expect_menu_presentation step:
@@ -1682,6 +1780,32 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Err(format!("{got} menus, wanted {n}"))
                 }
             })),
+            Step::ResizeWindow(window, w, h) => {
+                stage.resize_window(window.unwrap_or(0), *w, *h);
+                None
+            }
+            Step::ExpectSplit(want) => Some(poll(|| {
+                let got = stage.split_presentation();
+                let Some(want) = want else {
+                    // The bare form. Lane-INDEPENDENT by construction:
+                    // a shared scene compares this byte-for-byte on
+                    // every platform, so it cannot echo a reading that
+                    // legitimately differs.
+                    return if split_presentation_fits(&got, stage.entry_count(0)) {
+                        Ok("split fits".to_owned())
+                    } else {
+                        Err(format!(
+                            "presentation {got}: a regular window must not show \
+                             one pane while its stack holds two"
+                        ))
+                    };
+                };
+                if got == *want {
+                    Ok(format!("split {got}"))
+                } else {
+                    Err(format!("split {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectMenuPresentation(want) => Some(poll(|| {
                 let got = stage.menu_presentation();
                 let Some(want) = want else {
@@ -2020,6 +2144,10 @@ mod tests {
         fn menu_presentation(&self) -> String {
             "regular/bar".to_owned()
         }
+        fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn split_presentation(&self) -> String {
+            "unknown/stacked".to_owned()
+        }
         fn ax(&self, _: Target) -> String {
             "button/Save".to_owned()
         }
@@ -2209,6 +2337,10 @@ mod tests {
         fn menu_presentation(&self) -> String {
             "regular/none".to_owned()
         }
+        fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn split_presentation(&self) -> String {
+            "unknown/stacked".to_owned()
+        }
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()
         }
@@ -2349,6 +2481,10 @@ mod tests {
         }
         fn menu_presentation(&self) -> String {
             "regular/none".to_owned()
+        }
+        fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn split_presentation(&self) -> String {
+            "unknown/stacked".to_owned()
         }
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()

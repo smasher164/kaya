@@ -4363,6 +4363,20 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
+    fn resize_window(&self, window: u64, width: f64, height: f64) {
+        let _ = (window, width, height);
+        // Not implemented yet: WinUI's real resize is the DPI-aware
+        // SetWindowPos the window-size prop already drives; wiring it to
+        // this verb waits for the adaptive arm that would observe it.
+        unimplemented!("the WinUI resize_window verb is not implemented yet")
+    }
+
+    fn split_presentation(&self) -> String {
+        // Not implemented yet: the WinUI list-detail arm wants
+        // TwoPaneView. Loud rather than plausible.
+        "<the WinUI list-detail arm is not implemented yet>".to_owned()
+    }
+
     fn menu_presentation(&self) -> String {
         // XAML has no size-class type; its own adaptive triggers are
         // width thresholds (`MinWindowWidth`), so a width rule IS the

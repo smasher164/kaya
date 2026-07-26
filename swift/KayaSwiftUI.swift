@@ -58,6 +58,7 @@ private let wpropWidth: UInt32 = 2
 private let wpropHeight: UInt32 = 3
 private let wpropVetoClose: UInt32 = 4
 private let wpropSectionsPresentation: UInt32 = 5
+private let wpropListDetail: UInt32 = 6
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let sectionsPresentationAuto: Int64 = 0
@@ -213,6 +214,18 @@ final class KayaWindowModel: Identifiable {
     /// (TabView here) instead of the bare root.
     var sections: [KayaSectionModel] = []
     var selectedSection: UInt64?
+    /// Whether this window presents its entry stack as list-detail
+    /// (wprop 6; DESIGN.md, Adaptive list-detail). Adaptive by
+    /// construction: this asks for the presentation, the SIZE CLASS
+    /// decides which one materializes.
+    var listDetail = false
+    /// The presentation the view layer ACTUALLY rendered — "split" or
+    /// "stacked" — stamped by the arm that ran, never derived from
+    /// `listDetail` or `formFactor`. Deriving it would make the
+    /// assertion agree with the lowering by construction and it could
+    /// never catch the defect; that is the lesson menuPresentation
+    /// already paid for.
+    var splitPresentation = "stacked"
     /// The ADVISORY presentation hint (wprop 5): auto | bar | sidebar.
     var sectionsPresentation: Int64 = 0
     /// The window's command catalog (DESIGN.md, Menus): top-level
@@ -867,6 +880,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaApplyWindowSize(wid)
                 case (wpropVetoClose, valueBool):
                     model?.vetoClose = raw[body + 24] != 0
+                case (wpropListDetail, valueBool):
+                    model?.listDetail = raw[body + 24] != 0
                 case (wpropSectionsPresentation, valueI64):
                     // ADVISORY (the width/height precedent): honored
                     // where this platform has the idiom.
@@ -4856,6 +4871,52 @@ struct KayaAuxRoot: View {
     }
 }
 
+/// Does `windowId` take the list-detail arm right now? Both halves
+/// must hold: the app ASKED (wprop 6) and the window IS regular. The
+/// size class is the platform's answer, never the app's — that is what
+/// makes this adaptive rather than a manual switch.
+func kayaSplitArm(_ windowId: UInt64) -> Bool {
+    guard let w = kayaScene.windows[windowId] else { return false }
+    return w.listDetail && w.formFactor == .regular
+}
+
+/// The list-detail presentation of a window's entry stack. Two panes,
+/// never three: Apple has a three-column form and nobody else does, so
+/// it is not the intersection.
+struct KayaSplitRoot: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        NavigationSplitView {
+            Group {
+                if let root = scene.windows[windowId]?.root {
+                    KayaRender(node: root, isRoot: true)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .navigationTitle(scene.windows[windowId]?.title ?? "")
+        } detail: {
+            // The TOP of the stack is the detail. An empty stack gets
+            // the platform's own empty state — every one of the four
+            // has one, so there is nothing to invent.
+            if let top = scene.windows[windowId]?.entries.last {
+                KayaEntryRoot(entryId: top.id)
+            }
+        }
+        .onAppear { record() }
+        .onChange(of: scene.windows[windowId]?.entries.count ?? 0) { record() }
+    }
+
+    /// Stamp the arm THIS BODY TOOK. Never derived from listDetail or
+    /// formFactor: a derived answer agrees with the lowering by
+    /// construction and could never catch the defect.
+    private func record() {
+        kayaScene.windows[windowId]?.splitPresentation = "split"
+    }
+}
+
 struct KayaEntry: View {
     let node: KayaNode
     @FocusState private var focused: Bool
@@ -5030,10 +5091,21 @@ struct KayaRoot: View {
             // Sections present: the switcher IS the window content
             // (each pane carries its own stack).
             KayaSectionsView(windowId: 0)
+        } else if kayaSplitArm(0) {
+            // ADAPTIVE LIST-DETAIL (DESIGN.md): the base root takes the
+            // leading pane and the TOP of the stack the trailing one.
+            // The entries between stay retained and covered — the same
+            // rule navigation already has, which is why this needed no
+            // new lifecycle vocabulary.
+            KayaSplitRoot(windowId: 0)
         } else {
         // The primary surface's stack: pushed entries cover this root
         // serially; the root is the stack's base and stays alive
-        // (retained-until-popped) underneath.
+        // (retained-until-popped) underneath. This arm stamps
+        // "stacked" for the same reason the split arm stamps "split":
+        // an observation that is only WRITTEN by one arm is derived by
+        // default in the other, which is the shape that cannot catch a
+        // defect.
         NavigationStack(path: kayaNavPath(0)) {
         // The outer GeometryReader IS the offer: it fills whatever the
         // window proposes inside the padding, and expect_root_fills
@@ -5074,6 +5146,10 @@ struct KayaRoot: View {
         // iOS this is the trailing More menu + promoted bar actions
         // (a no-op on macOS, where the NSMenu segment owns the bar).
         .modifier(KayaMenuChrome(windowId: 0))
+        .onAppear { kayaScene.windows[0]?.splitPresentation = "stacked" }
+        .onChange(of: kayaSplitArm(0)) {
+            if !kayaSplitArm(0) { kayaScene.windows[0]?.splitPresentation = "stacked" }
+        }
         .navigationDestination(for: UInt64.self) { eid in
             KayaEntryRoot(entryId: eid)
         }

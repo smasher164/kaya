@@ -3316,6 +3316,25 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
+    fn resize_window(&self, window: u64, width: f64, height: f64) {
+        Self::on_main(move |core| {
+            use gtk4::prelude::GtkWindowExt;
+            // The REAL resize path: the size a user's drag would set,
+            // which is also what default_size reads back — so the size
+            // class this backend derives moves with it.
+            gtk_window(core, window).set_default_size(width as i32, height as i32);
+        });
+    }
+
+    fn split_presentation(&self) -> String {
+        // Not implemented yet: the GTK list-detail arm wants
+        // AdwNavigationSplitView, which this backend does not depend on.
+        // Loud rather than plausible — a sentinel cannot be mistaken for
+        // a reading, and check-stubs keeps a runner from wiring legs
+        // against it.
+        "<the GTK list-detail arm is not implemented yet>".to_owned()
+    }
+
     fn menu_presentation(&self) -> String {
         Self::on_main(|core| {
             use gtk4::prelude::GtkWindowExt;
