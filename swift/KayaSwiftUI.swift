@@ -391,7 +391,13 @@ final class KayaSceneModel {
     var buttons: [KayaNode] = []
     var checkboxes: [KayaNode] = []
     var labels: [KayaNode] = []
-    var entries: [KayaNode] = []
+    /// NAMED entryWidgets, not `entries`: a window's `entries` is its
+    /// NAVIGATION STACK, and while this registry shared the name the
+    /// wrong one compiled clean — both are arrays, so a verb that meant
+    /// "how deep is the nav stack" could silently count text-entry
+    /// WIDGETS. The fix is the name; no gate can see a type-correct
+    /// wrong field.
+    var entryWidgets: [KayaNode] = []
     var sliders: [KayaNode] = []
     var images: [KayaNode] = []
     var columns: [KayaNode] = []
@@ -833,7 +839,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindButton: kayaScene.buttons.append(node)
                 case kindLabel: kayaScene.labels.append(node)
                 case kindSlider: kayaScene.sliders.append(node)
-                case kindEntry: kayaScene.entries.append(node)
+                case kindEntry: kayaScene.entryWidgets.append(node)
                 case kindCheckbox: kayaScene.checkboxes.append(node)
                 case kindImage: kayaScene.images.append(node)
                 case kindColumn: kayaScene.columns.append(node)
@@ -2040,7 +2046,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     // rejects that attach — their native edit menu is dress), but every
     // kind is addressable for accessibility, which is the point of a
     // universal prop.
-    case "entry": return kayaTarget(spec, "entry", kayaScene.entries)
+    case "entry": return kayaTarget(spec, "entry", kayaScene.entryWidgets)
     case "textarea": return kayaTarget(spec, "textarea", kayaScene.textareas)
     default: return nil
     }
@@ -2146,7 +2152,7 @@ private func kayaRunScript(_ script: String) {
                     let node =
                         parts[1].hasPrefix("textarea")
                         ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
-                        : kayaTarget(parts[1], "entry", kayaScene.entries)
+                        : kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
                     guard let node else {
                         return false
                     }
@@ -2165,7 +2171,7 @@ private func kayaRunScript(_ script: String) {
                     parts[1].hasPrefix("textarea")
                         ? kayaTarget(parts[1], "textarea", kayaScene.textareas)?.text
                         : parts[1].hasPrefix("entry")
-                        ? kayaTarget(parts[1], "entry", kayaScene.entries)?.text
+                        ? kayaTarget(parts[1], "entry", kayaScene.entryWidgets)?.text
                         : parts[1].hasPrefix("image")
                             ? kayaTarget(parts[1], "image", kayaScene.images)?.imageSize
                             : parts[1].hasPrefix("progress")
@@ -2205,7 +2211,7 @@ private func kayaRunScript(_ script: String) {
                     let node =
                         parts[1].hasPrefix("textarea")
                         ? kayaTarget(parts[1], "textarea", kayaScene.textareas)
-                        : kayaTarget(parts[1], "entry", kayaScene.entries)
+                        : kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
                     guard let node else {
                         return nil
                     }

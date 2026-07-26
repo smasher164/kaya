@@ -256,7 +256,13 @@ object KayaSceneModel {
     val buttons = ArrayList<KayaNode>()
     val checkboxes = ArrayList<KayaNode>()
     val labels = ArrayList<KayaNode>()
-    val entries = ArrayList<KayaNode>()
+    // NAMED entryWidgets, not `entries`: the navigation stack is
+    // `navEntries`, and while this registry was also called `entries` the
+    // wrong one compiled clean — both are lists, so a harness verb that
+    // meant "how deep is the nav stack" silently counted text-entry
+    // WIDGETS instead. Caught in review, not by any compiler. The fix is
+    // the name, because no gate can see a type-correct wrong field.
+    val entryWidgets = ArrayList<KayaNode>()
     val sliders = ArrayList<KayaNode>()
     val images = ArrayList<KayaNode>()
     val columns = ArrayList<KayaNode>()
@@ -623,7 +629,7 @@ object KayaCompose {
                         KIND_BUTTON -> KayaSceneModel.buttons.add(node)
                         KIND_LABEL -> KayaSceneModel.labels.add(node)
                         KIND_SLIDER -> KayaSceneModel.sliders.add(node)
-                        KIND_ENTRY -> KayaSceneModel.entries.add(node)
+                        KIND_ENTRY -> KayaSceneModel.entryWidgets.add(node)
                         KIND_CHECKBOX -> KayaSceneModel.checkboxes.add(node)
                         KIND_IMAGE -> KayaSceneModel.images.add(node)
                         KIND_COLUMN -> KayaSceneModel.columns.add(node)
@@ -1122,7 +1128,7 @@ object KayaCompose {
             "button" -> KayaSceneModel.buttons
             "checkbox" -> KayaSceneModel.checkboxes
             "slider" -> KayaSceneModel.sliders
-            "entry" -> KayaSceneModel.entries
+            "entry" -> KayaSceneModel.entryWidgets
             "label" -> KayaSceneModel.labels
             "column" -> KayaSceneModel.columns
             "row" -> KayaSceneModel.rows
@@ -1462,7 +1468,7 @@ object KayaCompose {
                             val node =
                                 if (parts[1].startsWith("textarea"))
                                     target(parts[1], "textarea", KayaSceneModel.textareas)
-                                else target(parts[1], "entry", KayaSceneModel.entries)
+                                else target(parts[1], "entry", KayaSceneModel.entryWidgets)
                             node?.also {
                                 it.text = kayaLf(quoted(parts.drop(2)))
                                 KayaPresent.emitTextChanged(it.tag, it.text)
@@ -1481,7 +1487,7 @@ object KayaCompose {
                             if (parts[1].startsWith("textarea"))
                                 target(parts[1], "textarea", KayaSceneModel.textareas)?.text
                             else if (parts[1].startsWith("entry"))
-                                target(parts[1], "entry", KayaSceneModel.entries)?.text
+                                target(parts[1], "entry", KayaSceneModel.entryWidgets)?.text
                             else if (parts[1].startsWith("image"))
                                 target(parts[1], "image", KayaSceneModel.images)?.imageSize
                             else if (parts[1].startsWith("progress"))
@@ -1515,7 +1521,7 @@ object KayaCompose {
                         val focused = onUi(activity) {
                             (if (parts[1].startsWith("textarea"))
                                 target(parts[1], "textarea", KayaSceneModel.textareas)
-                            else target(parts[1], "entry", KayaSceneModel.entries))
+                            else target(parts[1], "entry", KayaSceneModel.entryWidgets))
                                 ?.let { KayaSceneModel.focusedId == it.id }
                         }
                         when (focused) {

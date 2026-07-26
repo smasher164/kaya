@@ -1259,6 +1259,56 @@ script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
 
+## A field only ONE lowering writes reads as an answer to the next one
+
+`formFactor` was recorded by the menu chrome and nowhere else. That
+chrome lives inside `#if !os(macOS)` and derives the class from
+`horizontalSizeClass`, which macOS does not have — so every desktop
+window carried `unknown` from the day form factor landed. Nothing
+noticed for two milestones, because the only consumer was the menu
+verb and macOS answers that off the REAL NSApp.mainMenu instead of the
+model. The bug was invisible precisely because the one platform that
+could see it had a better source.
+
+The second adaptive lowering asked the model, got `unknown`, and took
+the wrong arm. The fix was structural: the reading moved out of the
+menu chrome into a recorder applied to every window on every platform,
+width-derived where there is no size class.
+
+The general shape, now enforced by check-verbs' stamped-observation
+rule: a field the harness READS must have at least one write outside
+every platform conditional. A conditional-only write leaves the other
+platform reading an initial value that is indistinguishable from an
+observation. Two related habits: an observation must be stamped by
+EVERY arm that can render (an arm that never writes is derived-by-
+default in the others), and the field's initial value should be the
+one that is honestly wrong, never a plausible reading.
+
+## Two collections named `entries`, and the wrong one compiles
+
+Both interpreters had a navigation stack and an entry-WIDGET registry
+sharing the name `entries`. A harness verb that meant "how deep is the
+nav stack" referenced the registry instead and counted text-entry
+widgets. It type-checked, compiled, and would have reported a number.
+No gate could see it: the field exists, the type is right, and the
+value is a plausible integer.
+
+Renamed to `entryWidgets` in both interpreters, because this is a class
+no checker catches — the fix has to be the name. When two collections
+in one file can both satisfy a reference, the one that is easier to
+reach by accident is the one to rename.
+
+## A green `cargo build` proves less than it looks like it does
+
+Adding two methods to the `Stage` trait with no defaults, then running
+`cargo build --lib --features harness`: clean. The real `Stage` impls
+are cfg'd per platform (gtk.rs on Linux, winui on Windows) and the
+mock ones are `#[cfg(test)]`, so a host build compiles NONE of them.
+`cargo test` found three unimplemented impls and one non-exhaustive
+match; `check-targets` found the cross-compiled backends. Neither was
+optional. When a trait grows on this codebase, the build is the weakest
+of the three signals.
+
 ## Editing a script a lane is CURRENTLY EXECUTING corrupts that run
 
 A negative test doctored tools/validate-mac.sh and restored it seconds

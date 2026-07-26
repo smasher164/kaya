@@ -135,6 +135,44 @@ for m in re.finditer(r"\bkaya_[a-z_]+\s*\(", swift):
          "route it through KayaHost's api table (the vtable pins the one "
          "live kaya instance; direct symbols die on static/RTLD_LOCAL hosts)")
 
+# THE STAMPED-OBSERVATION RULE. A field the harness READS must be
+# written on every platform the interpreter serves, and the way that
+# breaks is silent: the write sits inside a platform conditional, the
+# other platform leaves the field at its initial value, and the verb
+# reads a default that looks like an answer.
+#
+# It happened. `formFactor` was written only by the menu chrome, which
+# lives inside `#if !os(macOS)` and reads `horizontalSizeClass` — a
+# thing macOS does not have. Every desktop window carried `unknown`
+# from the day form factor landed, and nothing noticed for two
+# milestones because macOS answers the MENU verb off the real NSMenu
+# instead of the model. The second lowering to ask the model got
+# `unknown` and took the wrong arm.
+#
+# So: each of these fields must have at least one write OUTSIDE every
+# platform conditional. Nesting is tracked rather than grepped,
+# because a write is "conditional" whenever ANY enclosing #if is.
+STAMPED = ["formFactor", "splitPresentation"]
+lines = swift.splitlines()
+depths, depth = [], 0
+for line in lines:
+    t = line.strip()
+    if t.startswith("#endif"):
+        depth = max(0, depth - 1)
+    depths.append(depth)
+    if t.startswith("#if"):
+        depth += 1
+for field in STAMPED:
+    writes = [(n, d) for n, (line, d) in enumerate(zip(lines, depths), 1)
+              if re.search(rf"\.{field}\s*=[^=]", line)]
+    if not writes:
+        fail(f"KayaSwiftUI.swift never writes `{field}`, which the harness reads")
+    elif all(d > 0 for _, d in writes):
+        where = ", ".join(str(n) for n, _ in writes)
+        fail(f"every write to `{field}` in KayaSwiftUI.swift sits inside a platform "
+             f"conditional (lines {where}) — the platforms it excludes read the "
+             "field's initial value as if it were an observation")
+
 if failures:
     for f in failures:
         print(f"check-verbs: {f}", file=sys.stderr)
