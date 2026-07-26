@@ -1259,6 +1259,56 @@ script runs must fail the run when IT fails — a build whose output
 path already holds yesterday's artifact fails SILENT by default,
 because the legs it feeds still find something to load.
 
+## Measuring the thing you are about to replace is circular
+
+The WinUI list-detail arm decides which presentation to render by
+reading the window's width — and it read it the way `menu_presentation`
+does, off `Content().XamlRoot().Size()`. That is safe for menus, which
+never replace the window's content. The list-detail arm's whole job IS
+to replace it, so the reading and the thing being read were the same
+object at different moments. `KAYA_SPLIT_TRACE` showed the measurement
+alternating between `Some(900.0)` and `None` across consecutive
+reconciles as the tree was swapped underneath it, and the leg failed
+with the ARM saying `stacked` while the ASSERTION said `regular` about
+the same instant.
+
+The mechanism is DOCUMENTED rather than a quirk, and looking it up
+would have produced it directly: a UIElement's `XamlRoot` is null until
+the element is parented into a live tree, and returns its parent's once
+it is. An element mid-reparent therefore has no XamlRoot at all, so
+anything measuring through it reads null exactly when the arm needs an
+answer.
+
+Two lessons. A size class is a property of the WINDOW, so read it from
+the window (`GetClientRect` + the DPI scale) — available before XAML
+has laid anything out, and unaffected by what currently occupies it.
+And the arm and the assertion must read from ONE source: when they
+measure differently they can disagree about a single instant, which
+looks like a lowering bug and is not one.
+
+A CORRECTION WORTH KEEPING, because it shows how a guess calcifies: the
+first fix cast the content to `FrameworkElement` "because XamlRoot
+lives there, not on UIElement", and that reason was FALSE — XamlRoot is
+declared on UIElement, in Microsoft's docs and in this repo's own
+generated bindings. The cast fixed nothing; it rode along with other
+changes and its wrong rationale went into a code comment, where it
+would have been read as established fact by the next person. Verify a
+platform claim before writing it down as one.
+
+The wider process note, because this cost several round trips: four
+consecutive fixes were guesses (cast, short-circuit, layout pass,
+optional read), each plausible, each moving the failure rather than
+ending it. At least two were DOCUMENTED — "Element is already the child
+of another element" is a well-known WinUI error, and XamlRoot's
+availability is written down — so a search would have ended them
+without a lane round trip each.
+
+THE TRIGGER IS THE SECOND FAILED FIX. One guess is a hypothesis; two in
+a row means the model of the platform is wrong, and no further guess
+repairs a wrong model. At that point do both: SEARCH (the platform's
+error strings are the query) and INSTRUMENT (an env-gated trace, the
+KAYA_MENU_TRACE precedent). The trace ended this in one run.
+
 ## A field only ONE lowering writes reads as an answer to the next one
 
 `formFactor` was recorded by the menu chrome and nowhere else. That

@@ -81,6 +81,7 @@ for arg in "$@"; do
         panels_rust|panels_python|panels_go|panels_csharp|panels_java) SUITE="$arg" ;;
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
+        split_rust) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
         a11y_rust|a11y_python|a11y_go|a11y_csharp|a11y_java) SUITE="$arg" ;;
@@ -174,7 +175,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-split}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -854,6 +855,10 @@ case "$SUITE" in
         run_suite nav_go
         run_suite nav_csharp
         run_suite nav_java
+        # The split scene: adaptive list-detail. Rust-only (a depth
+        # scene); the two panes are a two-star-column Grid and
+        # resize_window drives the real size-class transition.
+        run_suite split_rust
         # The scroll scene: the viewport's contract through
         # ScrollViewer — ChangeView is the real scrolling API.
         run_suite scroll_rust

@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES=""
+DEPTH_SCENES="split"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -460,6 +460,10 @@ for proto in x11 wayland; do
     # back button is GTK's back affordance, driven for real; the
     # intercept_back veto class answers with pop_entry.
     run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
+    # The split scene: adaptive list-detail. Rust-only (a depth
+    # scene); GTK renders the two panes in a Box and resize_window
+    # drives the real size-class transition.
+    run "$proto" split-rust env KAYA_SELFTEST=split "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
     run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav

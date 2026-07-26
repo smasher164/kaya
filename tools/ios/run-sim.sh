@@ -4,6 +4,13 @@
 # half of the command vocabulary is the interesting part — promoted
 # primaries in the bar, everything else behind More.
 
+# The split scene is desktop-only BY DESIGN and deliberately not a leg
+# here: it drives resize_window, and a phone or tablet host does not
+# command its own window size (the system owns surfaces; DESIGN.md,
+# Windows). The list-detail ARM itself is live on this backend — an
+# iPad is a regular window and renders the split — so what is missing
+# is a phone-safe scene that asserts the bare invariant without
+# resizing, not the lowering. See docs/deferred.md.
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
 # KAYA_CAP_AUX_WINDOWS — the system owns surfaces; DESIGN.md,

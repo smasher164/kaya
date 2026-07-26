@@ -739,29 +739,27 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
         use gtk4::prelude::GtkWindowExt;
         target.default_size().0 >= 600
     };
-    if wants_split && regular && top.is_some() {
+    // No `top.is_some()` requirement: an empty stack on a regular
+    // window shows the leading pane and an EMPTY trailing one
+    // (DESIGN.md). Requiring an entry here made GTK report `stacked`
+    // where mac reported `split` for the same scene — a semantics
+    // divergence, which is never a backend's call to make.
+    if wants_split && regular {
         use gtk4::prelude::{BoxExt, WidgetExt};
         let base = core.window_roots.get(&window).cloned();
         let detail = top.and_then(|id| core.nav_entries.get(&id)).and_then(|e| e.root.clone());
-        if let (Some(base), Some(detail)) = (base, detail) {
+        if let Some(base) = base {
             let split = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-            // Unparent first: a GTK widget has exactly one parent, and
-            // both of these were somebody's child a moment ago.
-            for child in [&base, &detail] {
-                if let Some(parent) = child.parent() {
-                    if let Some(bx) = parent.downcast_ref::<gtk4::Box>() {
-                        bx.remove(child);
-                    } else if let Some(win) = parent.downcast_ref::<gtk4::Window>() {
-                        win.set_child(None::<&gtk4::Widget>);
-                    }
-                }
-            }
+            unparent(&base);
             base.set_hexpand(true);
             base.set_vexpand(true);
-            detail.set_hexpand(true);
-            detail.set_vexpand(true);
             split.append(&base);
-            split.append(&detail);
+            if let Some(detail) = &detail {
+                unparent(detail);
+                detail.set_hexpand(true);
+                detail.set_vexpand(true);
+                split.append(detail);
+            }
             set_window_content(core, window, Some(split.upcast_ref::<gtk4::Widget>()));
             let title = top
                 .and_then(|id| core.nav_entries.get(&id))
@@ -1591,12 +1589,31 @@ fn ensure_menu_strip(core: &mut CoreState, window: u64) {
 /// sections chrome — fills the strip's content slot instead. No strip
 /// means no menus were declared, and the window keeps GTK's own child
 /// slot.
+/// Detach a widget from whatever currently holds it. GTK gives a
+/// widget EXACTLY ONE parent and asserts loudly on a second
+/// (`gtk_window_set_child: assertion ... failed`), and these roots move
+/// between the window, the menu-strip content box, and the list-detail
+/// split box as the size class changes. Every reparenting path goes
+/// through here.
+fn unparent(child: &gtk4::Widget) {
+    use gtk4::prelude::{BoxExt, Cast, GtkWindowExt, WidgetExt};
+    let Some(parent) = child.parent() else { return };
+    if let Some(bx) = parent.downcast_ref::<gtk4::Box>() {
+        bx.remove(child);
+    } else if let Some(win) = parent.downcast_ref::<gtk4::Window>() {
+        win.set_child(None::<&gtk4::Widget>);
+    } else {
+        child.unparent();
+    }
+}
+
 fn set_window_content(core: &CoreState, window: u64, child: Option<&gtk4::Widget>) {
     if let Some((_, content)) = core.menu_strips.get(&window) {
         while let Some(old) = content.first_child() {
             content.remove(&old);
         }
         if let Some(widget) = child {
+            unparent(widget);
             // Expansion is opt-in inside a Box (a bare window child
             // fills by construction): without it the mounted root
             // hugs and every grow weight divides nothing.
@@ -1605,6 +1622,9 @@ fn set_window_content(core: &CoreState, window: u64, child: Option<&gtk4::Widget
             content.append(widget);
         }
     } else {
+        if let Some(widget) = child {
+            unparent(widget);
+        }
         gtk_window(core, window).set_child(child);
     }
 }

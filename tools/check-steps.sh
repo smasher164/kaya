@@ -236,6 +236,49 @@ wired() {
 }
 wired || status=1
 
+# SCENES MEANS "THE LANGUAGE SWEEP LANDED". Each desktop runner derives
+# every mechanical per-scene surface from its SCENES variable — the go
+# guest build, the source scp, the taskkill list — so a rust-only scene
+# added there sends the runner looking for guests that do not exist.
+# DEPTH_SCENES is the variable for that case, in all three runners.
+#
+# Not hypothetical: `split` went into SCENES on two runners and the
+# matrix came back with `no required module provides package
+# dev.kaya/guests/go/split` on linux and a failed scp on windows. Loud,
+# but a whole matrix run to learn it. This makes it a two-second answer.
+sweep_guests() {
+    python3 - <<'PY'
+import pathlib, re, sys
+
+LANGS = [
+    ("go", "guests/go/{s}/main.go"),
+    ("python", "guests/python/{s}.py"),
+    ("csharp", "guests/csharp/{S}Scene.cs"),
+    ("swift", "guests/swift/{s}.swift"),
+    ("ocaml", "guests/ocaml/{s}.ml"),
+    ("haskell", "guests/haskell/{s}.hs"),
+]
+bad = []
+for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh", "tools/deploy-win.sh"):
+    text = pathlib.Path(runner).read_text()
+    m = re.search(r'^SCENES="([^"]+)"', text, re.M)
+    if not m:
+        bad.append(f"{runner}: no SCENES variable")
+        continue
+    for scene in m.group(1).split():
+        for lang, pat in LANGS:
+            if not pathlib.Path(pat.format(s=scene, S=scene.capitalize())).exists():
+                bad.append(
+                    f"{runner}: scene \"{scene}\" is in SCENES but has no {lang} guest "
+                    f"({pat.format(s=scene, S=scene.capitalize())}) — a rust-only scene "
+                    "belongs in DEPTH_SCENES")
+for b in bad:
+    print(f"check-steps: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+sweep_guests || status=1
+
 # EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win runs a leg by
 # scheduling C:\kaya\run_<scene>_<lang>.cmd on the VM, and those .cmd
 # files are CHECKED IN under tools/guest. A leg whose launcher does not

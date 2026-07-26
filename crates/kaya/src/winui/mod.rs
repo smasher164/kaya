@@ -214,6 +214,9 @@ struct CoreState {
     /// never derived (docs/traps.md).
     list_detail: HashMap<u64, bool>,
     split_presentation: HashMap<u64, &'static str>,
+    /// The live list-detail Grid per window, kept so the next render
+    /// can release the roots it holds (see release_split).
+    split_grids: HashMap<u64, Grid>,
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
@@ -1074,19 +1077,34 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     // side-by-side panes, and WinUI's adaptive triggers ARE width
     // thresholds anyway. Same call GTK and Compose made — the
     // idiomatic wrapper is a ledger item, not a blocker.
+    // Whichever arm is about to run, the previous split render must let
+    // go of the roots first.
+    release_split(core, window)?;
     let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
-    let regular = target
-        .Content()
-        .and_then(|c| c.XamlRoot())
-        .and_then(|r| r.Size())
-        .map(|s| s.Width >= 600.0)
-        .unwrap_or(false);
-    if wants_split && regular && top.is_some() {
+    //
+    // SHORT-CIRCUITED on wants_split, and that matters: propagating the
+    // read unconditionally made every nav scene fail, because a window
+    // reconciling before its first mount legitimately has no content to
+    // measure. The one remaining fallback is that case and says so —
+    // no content is not a failed reading, it is nothing to lay out.
+    let measured = window_client_width(core, window);
+    if std::env::var("KAYA_SPLIT_TRACE").is_ok() {
+        eprintln!(
+            "KAYA_SPLIT_TRACE: window={window} wants_split={wants_split} \
+             measured={measured:?} entries={}",
+            core.nav_stacks.get(&window).map(|s| s.len()).unwrap_or(0)
+        );
+    }
+    let regular = wants_split && measured.is_some_and(|w| w >= 600.0);
+    // No `top.is_some()`: an empty stack on a regular window shows the
+    // leading pane and an EMPTY trailing one, the same as every other
+    // backend. Semantics are never a backend's call.
+    if wants_split && regular {
         let base = core.window_roots.get(&window).cloned();
         let detail = top
             .and_then(|id| core.nav_entries.get(&id))
             .and_then(|e| e.wrapper.clone());
-        if let (Some(base), Some(detail)) = (base, detail) {
+        if let Some(base) = base {
             let grid = Grid::new()?;
             for _ in 0..2 {
                 let col = ColumnDefinition::new()?;
@@ -1096,15 +1114,21 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
                 })?;
                 grid.ColumnDefinitions()?.Append(&col)?;
             }
-            let detail: UIElement = windows_core::Interface::cast(&detail)?;
+            let detail: UIElement = match &detail {
+                Some(d) => windows_core::Interface::cast(d)?,
+                None => windows_core::Interface::cast(&Grid::new()?)?,
+            };
             // SetColumn is a FrameworkElement attached property, not a
             // UIElement one.
             let base_fe: FrameworkElement = windows_core::Interface::cast(&base)?;
             let detail_fe: FrameworkElement = windows_core::Interface::cast(&detail)?;
             Grid::SetColumn(&base_fe, 0)?;
             Grid::SetColumn(&detail_fe, 1)?;
+            // The window is still holding the base root at this point.
+            detach_window_content(core, window)?;
             grid.Children()?.Append(&base)?;
             grid.Children()?.Append(&detail)?;
+            core.split_grids.insert(window, grid.clone());
             let grid: UIElement = windows_core::Interface::cast(&grid)?;
             set_window_content(core, window, &grid)?;
             let title = top
@@ -1534,6 +1558,68 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 /// Every content swap for a window goes through here: into the menu
 /// shell's slot when the window carries a bar, straight onto the
 /// Window otherwise. Keeps the mount/nav/sections paths one mechanism.
+/// The window's client width in DIP, read from the WINDOW rather than
+/// from whatever element currently occupies it.
+///
+/// This started out reading `Content().XamlRoot().Size()`, which is
+/// what menu_presentation does — and that is safe there because the
+/// menu arm never REPLACES the content. The list-detail arm does
+/// exactly that, so measuring the content to decide what the content
+/// should be is circular: the trace showed `measured` alternating
+/// between Some(900.0) and None as the tree was swapped underneath the
+/// reading.
+///
+/// The mechanism is DOCUMENTED, not a quirk: a UIElement's XamlRoot is
+/// null until it is parented into a live tree, and returns its
+/// parent's once it is. So an element mid-reparent legitimately has no
+/// XamlRoot, and anything measuring through it reads null exactly when
+/// the arm needs an answer. GetClientRect answers about the WINDOW —
+/// what a size class is a property of — and is available before XAML
+/// has laid anything out.
+fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
+    let target = winui_window(core, window).ok()?;
+    let native: IWindowNative = windows_core::Interface::cast(&target).ok()?;
+    let hwnd = native.window_handle().ok()?;
+    let mut client = Rect::default();
+    let scale;
+    unsafe {
+        if GetClientRect(hwnd, &mut client) == 0 {
+            return None;
+        }
+        // DIP, not physical pixels — the same conversion resize_request
+        // uses, so the 600 boundary means what it means elsewhere.
+        scale = f64::from(GetDpiForWindow(hwnd)) / 96.0;
+    }
+    Some(f64::from(client.right - client.left) / scale)
+}
+
+/// Release the roots a previous list-detail render is still holding.
+/// A UIElement lives in exactly ONE Children collection, and appending
+/// a parented one does not warn the way GTK does — it takes a
+/// non-unwinding panic through the XAML layer and ABORTS the process.
+/// The split Grid is the only container that keeps a root outside the
+/// window's own content path, so emptying it is the whole job.
+fn release_split(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    if let Some(grid) = core.split_grids.remove(&window) {
+        grid.Children()?.Clear()?;
+    }
+    Ok(())
+}
+
+/// Let go of whatever the WINDOW itself is currently showing. The
+/// split Grid is not the only holder: on the FIRST split render the
+/// base root is still the window's own content, and appending it to
+/// the Grid then fails with "Element is already the child of another
+/// element" — which arrives as a non-unwinding panic and takes the
+/// process with it.
+fn detach_window_content(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    if let Some(slot) = core.menu_slots.get(&window) {
+        slot.Children()?.Clear()
+    } else {
+        winui_window(core, window)?.SetContent(None)
+    }
+}
+
 fn set_window_content(
     core: &CoreState,
     window: u64,
@@ -3972,6 +4058,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             nav_stacks: HashMap::new(),
             list_detail: HashMap::new(),
             split_presentation: HashMap::new(),
+            split_grids: HashMap::new(),
             window_roots: HashMap::new(),
             window_titles: HashMap::new(),
             window_veto: HashMap::new(),
@@ -4437,26 +4524,53 @@ impl crate::harness::Stage for WinUiStage {
             // platform re-decide gates nothing.
             let target = winui_window(core, window)?;
             resize_request(&target, Some(width), Some(height))?;
+            // FORCE A LAYOUT PASS before re-running the arm. SetWindowPos
+            // returns before XAML has re-measured, so the arm asked for
+            // a width that was still the OLD one — it stamped `stacked`
+            // while the read, running a beat later, said `regular`. The
+            // two disagreeing about the same instant is the signature of
+            // reading a tree mid-update.
+            if let Ok(content) = target.Content() {
+                if let Ok(root) = content.cast::<FrameworkElement>() {
+                    let _ = root.UpdateLayout();
+                }
+            }
             refresh_nav(core, window)?;
             Ok(())
         })
     }
 
     fn split_presentation(&self) -> String {
-        Self::on_ui(|core| {
-            // The class from XamlRoot's real size, the same 600
+        // on_ui_read, like menu_presentation: a pure read of the UI
+        // thread's own state, with no mutation to sequence.
+        Self::on_ui_read(|core| {
+            // The class comes from XamlRoot's real size, the same 600
             // boundary menu_presentation draws; the presentation from
             // the arm that actually ran.
-            let width = winui_window(core, 0)
-                .and_then(|w| w.Content())
-                .and_then(|c| c.XamlRoot())
-                .and_then(|r| r.Size())
-                .map(|s| s.Width)
-                .unwrap_or(0.0);
-            let class = if width >= 600.0 { "regular" } else { "compact" };
+            //
+            // UNREADABLE until the element is in a live visual tree,
+            // and this verb is asked within milliseconds of launch.
+            // `unknown` is a legal class in the grammar for exactly
+            // that state, and the harness POLLS — reporting it lets the
+            // bounded retry pick up the real reading a frame later.
+            // Propagating the error instead killed the leg, which is
+            // not what "not yet" deserves.
+            // The SAME source the arm used: an assertion measuring
+            // differently from the lowering can disagree with it about
+            // one instant, which is how this leg failed with the arm
+            // saying stacked and the read saying regular.
+            let class = match window_client_width(core, 0) {
+                Some(w) if w >= 600.0 => "regular",
+                Some(_) => "compact",
+                None => "unknown",
+            };
             let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
             Ok(format!("{class}/{presentation}"))
         })
+        // The same fallback menu_presentation uses: a read that cannot
+        // reach the UI thread reports `unknown`, and the harness's
+        // bounded retry asks again.
+        .unwrap_or_else(|_| "unknown/stacked".to_owned())
     }
 
     fn menu_presentation(&self) -> String {

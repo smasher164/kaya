@@ -124,6 +124,18 @@ own the state (see the undo note in this file).
   `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
   what proved the laziness and will be wanted again.
 
+- **The phone lanes have no list-detail coverage** (2026-07-26). The
+  `split` scene is desktop-only because it drives `resize_window`, and
+  a phone or tablet host does not command its own window size. But the
+  ARM is live on both phone backends — an iPad is a regular window and
+  renders the split; a Compose regular window does too — so what is
+  missing is a scene, not a lowering. A phone-safe sibling asserting
+  the BARE `expect_split` invariant (a regular window must not show one
+  pane while its stack holds two) would run everywhere and cover them,
+  because that spelling is lane-independent by construction; it just
+  cannot gate the TRANSITION, which is what resize_window is for. Worth
+  doing when the language sweep moves `split` out of the depth tier.
+
 - **The list-detail arms use PLAIN containers, not the platforms'
   adaptive wrappers** (2026-07-26). Three of the four backends lower
   list-detail to a plain two-child container — GTK a `Box` (not

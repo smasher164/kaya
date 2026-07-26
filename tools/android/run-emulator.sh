@@ -46,6 +46,12 @@ ROOT_FOR_CHECK="$(cd "$(dirname "$0")/../.." && pwd)"
 "$ROOT_FOR_CHECK/tools/check-targets.sh" android || exit 1
 
 SUITE="${1:-all}"
+# The split scene is desktop-only BY DESIGN and deliberately not a leg
+# here: it drives resize_window, and Android does not command its own
+# window size (the system owns it; DESIGN.md, Windows). The Compose
+# list-detail arm itself is live and renders on a regular window; what
+# is missing is a phone-safe scene asserting the bare invariant without
+# resizing. See docs/deferred.md.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 

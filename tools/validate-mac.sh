@@ -55,7 +55,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES=""
+DEPTH_SCENES="split"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -63,6 +63,21 @@ cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
 # a build whose failure went unnoticed leaves the previous one in
 # place and every verdict below is then about stale code.
 tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
+# The SwiftUI interpreter is BUILT HERE, before the gates, not beside
+# the legs. check-build-id verifies it as one of the three compiled
+# artifacts, and a gate cannot verify something the lane has not built
+# yet — it read the PREVIOUS run's dylib and reported it stale, which
+# was true and useless. Build every artifact, then verify all of them.
+#
+# The build's exit status is load-bearing: unchecked, a swiftc failure
+# left the PREVIOUS dylib in place and 152 legs false-PASSed against
+# stale code (2026-07-22; iOS caught the same source because its lane
+# checks its compile). A failed build must kill the lane, not degrade
+# it to yesterday's interpreter.
+tools/swiftui/build-dylib.sh >/dev/null || {
+    echo "validate-mac: SwiftUI interpreter dylib build FAILED" >&2
+    exit 1
+}
 tools/keyed.sh gen-header -- tools/gen-header.sh --check || exit 1
 tools/keyed.sh gen-bindings -- tools/gen-bindings.sh --check || exit 1
 tools/keyed.sh gen-guests -- tools/gen-guests.sh --check || exit 1
@@ -551,10 +566,6 @@ timing guest-builds+bench
 # stale code (2026-07-22; iOS caught the same source because its lane
 # checks its compile). A failed build must kill the lane, not degrade
 # it to yesterday's interpreter.
-tools/swiftui/build-dylib.sh >/dev/null || {
-    echo "validate-mac: SwiftUI interpreter dylib build FAILED" >&2
-    exit 1
-}
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 # The Swift interpreter reads the scene script from the environment
 # (the Rust backends embed theirs at build time). Comments stripped:
@@ -718,6 +729,14 @@ run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.
 # scroll_end through the REAL scrolling API, at-end read back, and a
 # live click on the scrolled-to button. All eight languages,
 # byte-identical.
+KAYA_SELFTEST_SCRIPT="$(scene_script split)"
+# The split scene: adaptive list-detail (DESIGN.md). Rust-only for
+# now — a DEPTH scene: the backend arms all exist, the language sweep
+# does not. The window asks for list_detail once and the SIZE CLASS
+# decides; resize_window drives the transition for real so the far side
+# is re-asserted.
+run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split
+
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT
 run scroll-rust-swiftui env KAYA_SELFTEST=scroll target/debug/examples/scroll
