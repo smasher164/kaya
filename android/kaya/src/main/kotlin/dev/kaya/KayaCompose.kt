@@ -56,9 +56,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
@@ -92,6 +94,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     // platform keeps whatever it derives from the control's own content.
     var a11yId by mutableStateOf("")
     var a11yLabel by mutableStateOf("")
+    var a11yHint by mutableStateOf("")
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -337,7 +340,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x55065c142eebf54buL
+    private const val SPEC_HASH: ULong = 0xe60f059824708e29uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -438,6 +441,7 @@ object KayaCompose {
     // Universal: every widget kind carries both.
     private const val PROP_A11Y_ID = 12
     private const val PROP_A11Y_LABEL = 13
+    private const val PROP_A11Y_HINT = 14
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -646,6 +650,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.a11yId = readString(b)
                         PROP_A11Y_LABEL ->
                             KayaSceneModel.nodes[id]!!.a11yLabel = readString(b)
+                        PROP_A11Y_HINT ->
+                            KayaSceneModel.nodes[id]!!.a11yHint = readString(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -1292,6 +1298,19 @@ object KayaCompose {
     }
 
     /**
+     * MAIN THREAD ONLY (callers go through [onUi]). The HINT as a
+     * service would hear it: the click action's label, which is where
+     * the lowering puts it and what TalkBack speaks after "double tap
+     * to".
+     */
+    private fun kayaAxHint(activity: ComponentActivity, tag: String): String? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val owner = (view as RootForTest).semanticsOwner
+        val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
+        return node.config.getOrNull(SemanticsActions.OnClick)?.label ?: ""
+    }
+
+    /**
      * The two inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…`
      * says the platform classified the control as something the closed
      * set has no name for, and the next question is always which
@@ -1928,6 +1947,31 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_ax_hint" -> {
+                        val want = quoted(parts.drop(2))
+                        val node = kayaWidgetTarget(parts[1])
+                        when {
+                            node == null ->
+                                failures.add("no such target ${parts[1]}")
+                            node.a11yId.isEmpty() ->
+                                failures.add(
+                                    "ax hint ${parts[1]}: no a11y_id to find it by"
+                                )
+                            else -> {
+                                val got = onUi(activity) { kayaAxHint(activity, node.a11yId) }
+                                if (got == null) {
+                                    failures.add(
+                                        "ax hint ${parts[1]}: nothing carries " +
+                                            "test tag \"${node.a11yId}\""
+                                    )
+                                } else if (got != want) {
+                                    failures.add("ax hint \"$got\", wanted \"$want\"")
+                                } else {
+                                    observed.add("ax hint \"$want\"")
+                                }
+                            }
+                        }
+                    }
                     "expect_menu_presentation" -> {
                         // `<size class>/<presentation>`: the platform's
                         // width reading, and the lowering that actually
@@ -2277,7 +2321,26 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
         } else {
             Modifier
         }
-    val a11y = a11yTag.then(a11yName)
+    // THE HINT rides the CLICK ACTION'S LABEL, which is Android's
+    // author-supplied hint: TalkBack speaks it as "double tap to
+    // <label>". Measured 2026-07-25 on a Material3 Button — layering a
+    // label-only semantics node relabels the action and KEEPS it
+    // (clickLabel=ours, clickAction=true, role and name untouched),
+    // because the OnClick key's merge policy takes the parent's label
+    // and the child's action. `action = null` is what says "I am only
+    // naming what the control already does".
+    //
+    // Nothing else on Android carries a hint: there is no hint
+    // SemanticsProperty, and AccessibilityNodeInfo.hintText is the
+    // editable-field placeholder, not a description. That is why the
+    // root scopes this prop to activation kinds.
+    val a11yHint =
+        if (node.a11yHint.isNotEmpty()) {
+            Modifier.semantics { onClick(label = node.a11yHint, action = null) }
+        } else {
+            Modifier
+        }
+    val a11y = a11yTag.then(a11yName).then(a11yHint)
     when (node.kind) {
         KayaCompose.KIND_SELECT -> {
             // The dressed floor: M3's exposed dropdown menu — the

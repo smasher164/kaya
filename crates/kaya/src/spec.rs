@@ -133,6 +133,24 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // Maps to accessibilityLabel, contentDescription,
     // AutomationProperties.Name, and GTK's LABEL accessible property.
     ("a11y_label", 13, PropKind::Str),
+    // The accessibility HINT: what happens when the user activates this
+    // control, which is what every platform's hint actually means —
+    // Apple defines accessibilityHint as describing the RESULT OF
+    // PERFORMING AN ACTION, and Android's author-supplied hint IS the
+    // action's label (TalkBack speaks it as "double tap to <label>").
+    // Maps to .accessibilityHint (AXHelp on macOS), the click action's
+    // label on Compose, GTK's DESCRIPTION accessible property, and
+    // AutomationProperties.HelpText.
+    //
+    // ACTIVATION KINDS ONLY (button, checkbox, select, radio; the root
+    // rejects it elsewhere). A hint answers "what does activating this
+    // do", so it needs something to activate: on Android it rides an
+    // ACTION and has no target without one, and Apple's own guidance
+    // scopes it to actions too. Authored text should be a VERB PHRASE
+    // ("save the draft"): Apple speaks it as written and forbids naming
+    // the gesture, while TalkBack prefixes "double tap to", so only the
+    // verb phrase reads correctly on both.
+    ("a11y_hint", 14, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -1160,6 +1178,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("columns", 11),
                 ("a11y_id", 12),
                 ("a11y_label", 13),
+                ("a11y_hint", 14),
             ],
         },
         EnumSpec {
@@ -1548,6 +1567,7 @@ mod tests {
                     ("prop", "columns") => wire::PROP_COLUMNS,
                     ("prop", "a11y_id") => wire::PROP_A11Y_ID,
                     ("prop", "a11y_label") => wire::PROP_A11Y_LABEL,
+                    ("prop", "a11y_hint") => wire::PROP_A11Y_HINT,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

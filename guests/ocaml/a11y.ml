@@ -32,8 +32,9 @@ let () =
          [
            (* Caption-bearing controls: identified, but deliberately
               NOT labelled. The platform must speak the caption. *)
-           button ~a11y_id:"save" ~text:"Save";
-           checkbox ~a11y_id:"details" ~text:"Details";
+           button ~a11y_id:"save" ~a11y_hint:"save the draft" ~text:"Save";
+           checkbox ~a11y_id:"details" ~a11y_hint:"show more detail"
+             ~text:"Details";
            button ~a11y_id:"reset" ~text:"Reset";
            label ~a11y_id:"status" ~text:"Ready";
            (* Caption-less controls: an app MUST name these, and the

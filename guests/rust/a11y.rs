@@ -44,8 +44,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let root = tx.column(|tx| {
             // Caption-bearing controls: identified, but deliberately
             // NOT labelled. The platform must speak the caption.
-            tx.button("Save").a11y_id("save");
-            tx.checkbox("Details").a11y_id("details");
+            // The HINT rides the activation kinds: what happens when
+            // you activate this control, as a verb phrase (VoiceOver
+            // speaks it as written; TalkBack prefixes "double tap to").
+            tx.button("Save").a11y_id("save").a11y_hint("save the draft");
+            tx.checkbox("Details").a11y_id("details").a11y_hint("show more detail");
             tx.button("Reset").a11y_id("reset");
             // A label's caption IS its content, so it derives too.
             tx.label(status).a11y_id("status");

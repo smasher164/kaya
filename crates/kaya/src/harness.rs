@@ -346,6 +346,10 @@ pub enum Step {
     /// that the PLATFORM classified the control, not that kaya
     /// remembered what it built.
     ExpectAx(Target, String),
+    /// The control's HINT — what activating it does. Its own verb
+    /// because expect_ax's `<role>/<label>` spelling is byte-frozen in
+    /// every scene; see the parse arm.
+    ExpectAxHint(Target, String),
     ExpectMenus(usize),
     /// How the window catalog is CURRENTLY presented, spelled
     /// `<size class>/<presentation>`: `regular/bar`,
@@ -423,6 +427,7 @@ impl Step {
             Step::ContextOpen { .. } => false,
             Step::ExpectMenu { .. } => true,
             Step::ExpectAx { .. } => true,
+            Step::ExpectAxHint { .. } => true,
             Step::ExpectMenus { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
             Step::Shortcut { .. } => false,
@@ -619,6 +624,11 @@ pub trait Stage: Send + 'static {
     /// that classifies something kaya has no name for must say so
     /// rather than guess. No default.
     fn ax(&self, target: Target) -> String;
+
+    /// The control's HINT as the platform publishes it — what
+    /// activating it does. Read from the same tree as `ax`, never from
+    /// kaya's model, for the same reason.
+    fn ax_hint(&self, target: Target) -> String;
     /// The window catalog's live presentation, `<size class>/<presentation>`
     /// — see Step::ExpectMenuPresentation for the vocabulary.
     ///
@@ -866,6 +876,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_menus wants a count: {line:?}"))?,
             ),
+            // The hint is its own verb rather than a third field on
+            // expect_ax: the `<role>/<label>` spelling is byte-frozen
+            // in every scene, and widening it would rewrite assertions
+            // that have nothing to do with hints.
+            "expect_ax_hint" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_ax_hint wants a target and a hint string: {line:?}")
+                })?;
+                Step::ExpectAxHint(parse_target(target)?, parse_string(text)?)
+            }
             "expect_ax" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_ax wants a target and a \"role/label\" string: {line:?}")
@@ -1646,6 +1666,14 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Err(format!("ax {got:?}, wanted {want:?}"))
                 }
             })),
+            Step::ExpectAxHint(target, want) => Some(poll(|| {
+                let got = stage.ax_hint(*target);
+                if got == *want {
+                    Ok(format!("ax hint {want:?}"))
+                } else {
+                    Err(format!("ax hint {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectMenus(n) => Some(poll(|| {
                 let got = stage.menu_count();
                 if got == *n {
@@ -1995,6 +2023,9 @@ mod tests {
         fn ax(&self, _: Target) -> String {
             "button/Save".to_owned()
         }
+        fn ax_hint(&self, _: Target) -> String {
+            "save the draft".to_owned()
+        }
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -2181,6 +2212,9 @@ mod tests {
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()
         }
+        fn ax_hint(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -2318,6 +2352,9 @@ mod tests {
         }
         fn ax(&self, _: Target) -> String {
             "unknown/".to_owned()
+        }
+        fn ax_hint(&self, _: Target) -> String {
+            String::new()
         }
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
@@ -2512,6 +2549,31 @@ mod tests {
             "unknown/none",
         ] {
             assert!(menu_presentation_fits(good), "{good} should fit");
+        }
+    }
+
+    /// The hint verb's own spelling. It is deliberately NOT the
+    /// `<role>/<label>` shape — a hint is one free-text phrase — so the
+    /// only grammar to hold is target-then-quoted-string.
+    #[test]
+    fn ax_hint_spellings() {
+        for good in [
+            "expect_ax_hint button#0 \"save the draft\"",
+            "expect_ax_hint checkbox#0 \"show more detail\"",
+            // Empty is a real assertion: the platform speaks no hint.
+            "expect_ax_hint button#last \"\"",
+        ] {
+            assert!(parse(good).is_ok(), "{good} should parse");
+        }
+        for bad in [
+            // No hint, no target, and an unquoted phrase (which would
+            // otherwise silently assert only its first word).
+            "expect_ax_hint button#0",
+            "expect_ax_hint \"save the draft\"",
+            "expect_ax_hint button#0 save the draft",
+            "expect_ax_hint",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
         }
     }
 

@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x55065c142eebf54bL
+let spec_hash = 0xe60f059824708e29L
 
 let value_bool = 1
 let value_i64 = 2
@@ -49,6 +49,7 @@ let prop_indeterminate = 10
 let prop_columns = 11
 let prop_a11y_id = 12
 let prop_a11y_label = 13
+let prop_a11y_hint = 14
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -767,6 +768,32 @@ let tx_bind_a11y_label_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_a11y_label);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant a11y_hint value. *)
+let tx_set_a11y_hint widget_id a11y_hint =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_a11y_hint);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str a11y_hint))
+
+(* set_property with a signal-bound a11y_hint value. *)
+let tx_bind_a11y_hint widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_a11y_hint);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_a11y_hint_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_a11y_hint);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

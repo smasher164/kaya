@@ -339,6 +339,25 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // column is a labelled group to an assistive client, and a
         // harness must be able to address one.
         Prop::A11yId | Prop::A11yLabel => true,
+        // The hint is the ONE accessibility prop that is not universal,
+        // and the reason is the platforms' own definition rather than a
+        // lowering gap: a hint says what ACTIVATING the control does,
+        // so it needs an activation to describe. Android carries it as
+        // the click ACTION's label and has nowhere to put one without
+        // an action; Apple's guidance scopes hints to actions too. So
+        // the root admits it exactly where "activate" means something,
+        // and a hint on a label, an image or a container dies here
+        // rather than silently reaching four backends and not the
+        // fifth. Adjustable and editable kinds (slider, entry,
+        // textarea) are a deliberate cut: their Android route is a
+        // different action's label, and they wait for an artifact.
+        Prop::A11yHint => matches!(
+            kind,
+            WidgetKind::Button
+                | WidgetKind::Checkbox
+                | WidgetKind::Select
+                | WidgetKind::Radio
+        ),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -377,7 +396,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
-        Prop::A11yId | Prop::A11yLabel => ValueType::Str,
+        Prop::A11yId | Prop::A11yLabel | Prop::A11yHint => ValueType::Str,
     }
 }
 
@@ -3766,6 +3785,50 @@ mod tests {
                 value: PropValue::Const(Value::F64(0.0)),
             },
         ]);
+    }
+
+    /// The hint is the one accessibility prop with a domain, and the
+    /// domain is the platforms' own: a hint describes what ACTIVATING
+    /// the control does, and Android has nowhere to put one without an
+    /// action to hang it on. So a hint on a label dies here rather than
+    /// reaching four backends and silently missing the fifth.
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn hint_on_a_non_activation_kind_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget {
+                id: WidgetId(1),
+                kind: WidgetKind::Label,
+            },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::A11yHint,
+                value: PropValue::Const(v("does something")),
+            },
+        ]);
+    }
+
+    /// ...and the activation kinds take it, so the check is a domain
+    /// and not a blanket refusal.
+    #[test]
+    fn hint_on_the_activation_kinds() {
+        for kind in [
+            WidgetKind::Button,
+            WidgetKind::Checkbox,
+            WidgetKind::Select,
+            WidgetKind::Radio,
+        ] {
+            let mut scene = Scene::new();
+            scene.apply(vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind },
+                TxOp::SetProperty {
+                    widget: WidgetId(1),
+                    prop: Prop::A11yHint,
+                    value: PropValue::Const(v("do the thing")),
+                },
+            ]);
+        }
     }
 
     #[test]

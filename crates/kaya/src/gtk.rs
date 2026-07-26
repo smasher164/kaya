@@ -2516,6 +2516,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // The widget NAME is what GTK's AT-SPI backend publishes
                 // for a widget's identity, so that is where it goes —
                 // and it is what the AT-SPI reader will match on.
+                // The HINT: GTK's DESCRIPTION property, which AT-SPI
+                // publishes as the description — the slot for what
+                // acting on the control does. Same empty-means-unset
+                // rule as the label.
+                (w, Prop::A11yHint, Value::Str(hint)) => {
+                    use gtk4::prelude::AccessibleExtManual;
+                    if !hint.is_empty() {
+                        w.widget().update_property(&[
+                            gtk4::accessible::Property::Description(hint.as_str()),
+                        ]);
+                    }
+                }
                 (w, Prop::A11yId, Value::Str(id)) => {
                     use gtk4::prelude::WidgetExt;
                     w.widget().set_widget_name(id.as_str());
@@ -3248,7 +3260,7 @@ impl crate::harness::Stage for GtkStage {
                 Some(rank) => rank as isize,
                 None => return "<not in the accessibility tree>".to_owned(),
             };
-            return match atspi_collect(want, index as usize) {
+            return match atspi_collect(want, index as usize, false) {
                 Some(name) => format!("{role}/{name}"),
                 None => "<not in the accessibility tree>".to_owned(),
             };
@@ -3261,6 +3273,45 @@ impl crate::harness::Stage for GtkStage {
         // VISIBLE — a sentinel that can never equal a valid
         // `<role>/<label>` spelling, so any scene asserting on this
         // backend fails loudly instead of quietly passing. Reads GtkAccessible / AT-SPI when it lands.
+            "<the GTK accessibility read is not implemented yet>".to_owned()
+        }
+    }
+
+    fn ax_hint(&self, target: crate::harness::Target) -> String {
+        // The HINT rides AT-SPI's DESCRIPTION — GTK's
+        // `Property::Description`, which is the accessible surface's
+        // slot for "what does acting on this do", and the same node
+        // `ax` resolves. Same correspondence rules apply (see `ax`):
+        // kaya's index picks a widget, the widget's rank among
+        // same-role nodes picks the bus ordinal.
+        #[cfg(feature = "harness")]
+        {
+            use crate::harness::TargetKind as K;
+            let want = match target.kind {
+                K::Button => atspi::Role::Button,
+                K::Checkbox => atspi::Role::CheckBox,
+                K::Select => atspi::Role::ComboBox,
+                K::Radio => atspi::Role::Grouping,
+                // The root admits a11y_hint on activation kinds only
+                // (scene.rs), so anything else asking for one is a
+                // scene bug, said out loud rather than answered.
+                _ => return "<the hint prop applies to activation kinds only>".to_owned(),
+            };
+            let index = match Self::on_main(move |core| {
+                target_widget(core, target)
+                    .and_then(|widget| atspi_rank(&core.window, &widget))
+            }) {
+                Some(rank) => rank,
+                None => return "<not in the accessibility tree>".to_owned(),
+            };
+            return match atspi_collect(want, index, true) {
+                Some(description) => description,
+                None => "<not in the accessibility tree>".to_owned(),
+            };
+        }
+        #[allow(unreachable_code)]
+        {
+            let _ = target;
             "<the GTK accessibility read is not implemented yet>".to_owned()
         }
     }
@@ -4268,7 +4319,7 @@ fn atspi_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
 /// why the harness (and this dependency) is feature-gated: a shipped
 /// app must never link a dbus client to serve a test verb.
 #[cfg(all(feature = "harness", target_os = "linux"))]
-fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
+fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Option<String> {
     use atspi::proxy::accessible::AccessibleProxy;
     atspi::zbus::block_on(async move {
         let conn = atspi::connection::AccessibilityConnection::new()
@@ -4283,19 +4334,21 @@ fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
             .await
             .ok()?;
         let me = std::process::id();
-        let mut found: Vec<(atspi::Role, String)> = Vec::new();
+        let mut found: Vec<(atspi::Role, String, String)> = Vec::new();
         // Depth-first over OUR application only. Roles are matched on
         // the enum, not a localized name string.
         async fn walk(
             node: AccessibleProxy<'_>,
-            out: &mut Vec<(atspi::Role, String)>,
+            out: &mut Vec<(atspi::Role, String, String)>,
             depth: usize,
         ) {
             if depth > 24 {
                 return;
             }
-            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
-                out.push((role, name));
+            if let (Ok(role), Ok(name), Ok(description)) =
+                (node.get_role().await, node.name().await, node.description().await)
+            {
+                out.push((role, name, description));
             }
             let Ok(children) = node.get_children().await else {
                 return;
@@ -4329,7 +4382,7 @@ fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
             let _ = me;
             Box::pin(walk(proxy, &mut found, 0)).await;
         }
-        let nth = found.iter().filter(|(r, _)| *r == want).nth(index);
+        let nth = found.iter().filter(|(r, _, _)| *r == want).nth(index);
         if nth.is_none() {
             // A miss is never self-explaining: the question is always
             // what the bus DID publish, and one container round-trip
@@ -4338,10 +4391,12 @@ fn atspi_collect(want: atspi::Role, index: usize) -> Option<String> {
                 "KAYA_AX_TRACE: no {want:?}#{index} on the bus; it published {:?}",
                 found
                     .iter()
-                    .map(|(r, n)| format!("{r:?}/{n}"))
+                    .map(|(r, n, _)| format!("{r:?}/{n}"))
                     .collect::<Vec<_>>()
             );
         }
-        nth.map(|(_, name)| name.clone())
+        nth.map(|(_, name, description)| {
+            if want_description { description.clone() } else { name.clone() }
+        })
     })
 }

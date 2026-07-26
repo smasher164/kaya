@@ -363,6 +363,14 @@ let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id i
 let set_a11y_label (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
 
+(* What ACTIVATING this widget does — the platforms' hint (Apple
+   defines it as the result of performing an action; Android carries it
+   as the click action's label). Write a VERB PHRASE. Activation kinds
+   only; the root rejects it elsewhere, which is why [~a11y_hint] rides
+   button, checkbox, select and radio and not [set_a11y] below. *)
+let set_a11y_hint (Widget id) value =
+  emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
+
 (* The two universal props as they ride every constructor: applied
    together, in one place, so a new constructor cannot pick up [~grow]
    and quietly miss these. *)
@@ -448,11 +456,12 @@ let add_child (Widget parent) (Widget child) =
    binding interprets later (the design's no-guest-AST rule); the
    explicit floor above stays for whoever wants one call ≈ one record. *)
 
-let button ?grow ?a11y_id ?a11y_label ?text ?on_click () =
+let button ?grow ?a11y_id ?a11y_label ?a11y_hint ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
   | Some handler ->
@@ -537,11 +546,12 @@ let slider ?grow ?a11y_id ?a11y_label ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?
    option count). Uncontrolled, like the slider: [~on_select]
    receives each USER pick's new 0-based index (programmatic writes
    never echo). *)
-let select ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
+let select ?grow ?a11y_id ?a11y_label ?a11y_hint ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_select in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   List.iter
     (fun option_text ->
       let o = widget Kaya_wire.kind_label in
@@ -560,11 +570,12 @@ let select ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
 (* A radio group over fixed [options] — the choice contract
    ([select]) in its inline presentation: same option children, same
    0-based [~selected] index, same [~on_select] pick handler. *)
-let radio ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
+let radio ?grow ?a11y_id ?a11y_label ?a11y_hint ?(selected = 0) ?on_select options () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_radio in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   List.iter
     (fun option_text ->
       let o = widget Kaya_wire.kind_label in
@@ -580,11 +591,12 @@ let radio ?grow ?a11y_id ?a11y_label ?(selected = 0) ?on_select options () =
   | None -> ());
   w
 
-let checkbox ?grow ?a11y_id ?a11y_label ?text ?checked ?on_toggle () =
+let checkbox ?grow ?a11y_id ?a11y_label ?a11y_hint ?text ?checked ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_checkbox in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun c -> set_checked w c) checked;
   (match on_toggle with

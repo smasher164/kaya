@@ -591,6 +591,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// What activating this widget does — the chained spelling of
+    /// [`Tx::a11y_hint`], which remains the dynamic path.
+    pub fn a11y_hint(self, hint: &str) -> Self {
+        self.tx.a11y_hint(self.id, hint);
+        self
+    }
+
     /// End the chain: the durable id, releasing the transaction
     /// borrow.
     pub fn id(self) -> WidgetId {
@@ -1086,6 +1093,19 @@ impl<'a> Tx<'a> {
     /// [`Prop::A11yLabel`].
     pub fn a11y_label(&mut self, widget: WidgetId, label: &str) {
         self.set(widget, Prop::A11yLabel, label);
+    }
+
+    /// This widget's accessibility HINT: what ACTIVATING it does, which
+    /// is what every platform's hint means (Apple defines it as the
+    /// result of performing an action; Android carries it as the click
+    /// action's label). Write it as a VERB PHRASE — "save the draft" —
+    /// because VoiceOver speaks it as written while TalkBack prefixes
+    /// "double tap to". Activation kinds only (button, checkbox,
+    /// select, radio); the root rejects it elsewhere, since a hint with
+    /// nothing to activate has no target on Android. See
+    /// [`Prop::A11yHint`].
+    pub fn a11y_hint(&mut self, widget: WidgetId, hint: &str) {
+        self.set(widget, Prop::A11yHint, hint);
     }
 
     /// One-shot commands: momentary verbs into widget-owned state,

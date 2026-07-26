@@ -583,6 +583,9 @@ pub enum Prop {
     /// contentDescription, AutomationProperties.Name, and GTK's LABEL
     /// accessible property.
     A11yLabel,
+    /// What activating this control does — the platforms' hint, which
+    /// every one of them defines as the result of an ACTION.
+    A11yHint,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],

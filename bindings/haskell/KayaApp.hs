@@ -83,6 +83,7 @@ module KayaApp
     setAlign,
     setA11yId,
     setA11yLabel,
+    setA11yHint,
     Align (..),
     Attr (..),
     WClass (..),
@@ -1125,6 +1126,14 @@ setA11yId (Widget w) i = emitB (W.txSetA11yId w i)
 setA11yLabel :: Widget -> String -> Build ()
 setA11yLabel (Widget w) l = emitB (W.txSetA11yLabel w l)
 
+-- | What ACTIVATING this widget does — the platforms' hint (Apple
+-- defines it as the result of performing an action; Android carries it
+-- as the click action's label). Write a VERB PHRASE. Activation kinds
+-- only; the root rejects it elsewhere. The dynamic path; the
+-- declarative spelling is the 'A11yHint' attr.
+setA11yHint :: Widget -> String -> Build ()
+setA11yHint (Widget w) h = emitB (W.txSetA11yHint w h)
+
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
   Grow :: Double -> Attr c
@@ -1141,6 +1150,10 @@ data Attr (c :: WClass) where
   -- | What an assistive client speaks for this widget — any widget
   -- class, for the same reason.
   A11yLabel :: String -> Attr c
+  -- | What ACTIVATING this widget does. Leaf-class only, unlike the
+  -- other two: a hint needs an activation to describe, and the root
+  -- admits it on button, checkbox, select and radio alone.
+  A11yHint :: String -> Attr 'LeafW
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
@@ -1148,6 +1161,7 @@ applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Align a) w = setAlign w a
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l
+applyAttr (A11yHint h) w = setA11yHint w h
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do

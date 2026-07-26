@@ -21,8 +21,12 @@ static class A11yScene
                 // Caption-bearing controls: identified, but
                 // deliberately NOT labelled. The platform must speak
                 // the caption.
-                tx.SetA11yId(tx.Button("Save"), "save");
-                tx.SetA11yId(tx.Checkbox("Details"), "details");
+                var save = tx.Button("Save");
+                tx.SetA11yId(save, "save");
+                tx.SetA11yHint(save, "save the draft");
+                var details = tx.Checkbox("Details");
+                tx.SetA11yId(details, "details");
+                tx.SetA11yHint(details, "show more detail");
                 tx.SetA11yId(tx.Button("Reset"), "reset");
                 tx.SetA11yId(tx.Label("Ready"), "status");
                 // Caption-less controls: an app MUST name these, and

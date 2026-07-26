@@ -38,8 +38,9 @@ main = kayaMain $ \app -> do
         [A11yId "form", A11yLabel "Form"]
         [ -- Caption-bearing controls: identified, but deliberately NOT
           -- labelled. The platform must speak the caption.
-          buttonOn "Save" (return ()) [A11yId "save"],
-          checkboxOn "Details" (const (return ())) [A11yId "details"],
+          buttonOn "Save" (return ()) [A11yId "save", A11yHint "save the draft"],
+          checkboxOn "Details" (const (return ()))
+            [A11yId "details", A11yHint "show more detail"],
           buttonOn "Reset" (return ()) [A11yId "reset"],
           labelText "Ready" [A11yId "status"],
           -- Caption-less controls: an app MUST name these, and the tree

@@ -22,8 +22,9 @@ final class A11y {
                 // Caption-bearing controls: identified, but
                 // deliberately NOT labelled. The platform must speak
                 // the caption.
-                tx.button("Save").a11yId("save");
-                tx.checkbox("Details", null).a11yId("details");
+                tx.button("Save").a11yId("save").a11yHint("save the draft");
+                tx.checkbox("Details", null).a11yId("details")
+                        .a11yHint("show more detail");
                 tx.button("Reset").a11yId("reset");
                 tx.label("Ready").a11yId("status");
                 // Caption-less controls: an app MUST name these, and

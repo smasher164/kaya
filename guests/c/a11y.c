@@ -72,9 +72,11 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_SAVE, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_SAVE, "Save");
     kaya_tx_set_a11y_id(&tx, W_SAVE, "save");
+    kaya_tx_set_a11y_hint(&tx, W_SAVE, "save the draft");
     kaya_tx_create_widget(&tx, W_DETAILS, KAYA_KIND_CHECKBOX);
     kaya_tx_set_text(&tx, W_DETAILS, "Details");
     kaya_tx_set_a11y_id(&tx, W_DETAILS, "details");
+    kaya_tx_set_a11y_hint(&tx, W_DETAILS, "show more detail");
     kaya_tx_create_widget(&tx, W_RESET, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_RESET, "Reset");
     kaya_tx_set_a11y_id(&tx, W_RESET, "reset");

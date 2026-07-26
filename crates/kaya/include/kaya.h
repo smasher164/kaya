@@ -217,6 +217,8 @@
 
 #define PROP_A11Y_LABEL 13
 
+#define PROP_A11Y_HINT 14
+
 /**
  * Window property ids (spec::WINDOW_PROPS) — their own namespace;
  * windows are not widgets.
@@ -677,6 +679,8 @@
 #define KAYA_PROP_A11Y_ID 12
 
 #define KAYA_PROP_A11Y_LABEL 13
+
+#define KAYA_PROP_A11Y_HINT 14
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

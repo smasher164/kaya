@@ -1484,6 +1484,22 @@ the whole design decision:
   automation address the widget by, NEVER spoken.
 - `a11y_label` — what an assistive client SPEAKS for it.
 
+A third prop, `a11y_hint`, says what ACTIVATING the control does. It is
+the one accessibility prop that is NOT universal, and the reason is the
+platforms' own definition rather than a gap in the lowering: Apple
+defines `accessibilityHint` as describing the result of performing an
+action, and Android's author-supplied hint IS an action's label (the
+click action's, which TalkBack speaks as "double tap to <label>"). A
+hint therefore needs an activation to describe, so the root admits it on
+the ACTIVATION KINDS ONLY — button, checkbox, select, radio — and
+rejects it elsewhere rather than letting it reach four backends and
+silently miss the fifth. Authored text is a VERB PHRASE ("save the
+draft"): VoiceOver speaks it as written and Apple forbids naming the
+gesture, while TalkBack prefixes its own, so only that form reads
+correctly on both. Adjustable and editable kinds are a deliberate cut —
+their Android route is a different action's label — and wait for an
+artifact.
+
 They are deliberately separate: an automation key is not a spoken name.
 Leaving the label unset keeps whatever the platform DERIVES from the
 control's own content — a button's caption, a checkbox's caption, a
@@ -1521,7 +1537,12 @@ same everywhere. Two rules keep it honest:
   hides one.
 
 **How each backend reads, and what correspondence it offers.** These
-differ for real reasons, and each cost a measured discovery:
+differ for real reasons, and each cost a measured discovery. The hint
+rides each platform's own slot for it — `.accessibilityHint()` (AXHelp
+on macOS), the click action's LABEL on Compose, GTK's `Description`
+property, `AutomationProperties.HelpText` on WinUI — read back through
+`expect_ax_hint`, its own verb because `expect_ax`'s `<role>/<label>`
+spelling is byte-frozen in every scene:
 
 | backend | read | correspondence |
 | --- | --- | --- |

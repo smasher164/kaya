@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x55065c142eebf54b
+SPEC_HASH = 0xe60f059824708e29
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -44,6 +44,7 @@ PROP_INDETERMINATE = 10
 PROP_COLUMNS = 11
 PROP_A11Y_ID = 12
 PROP_A11Y_LABEL = 13
+PROP_A11Y_HINT = 14
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -533,6 +534,21 @@ def tx_bind_a11y_label(widget_id, signal_id):
 def tx_bind_a11y_label_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_LABEL, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_a11y_hint(widget_id, a11y_hint):
+    """set_property with a constant a11y_hint value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_A11Y_HINT, SOURCE_CONST) + _enc.value(a11y_hint))
+
+
+def tx_bind_a11y_hint(widget_id, signal_id):
+    """set_property with a signal-bound a11y_hint value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_A11Y_HINT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_a11y_hint_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_HINT, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

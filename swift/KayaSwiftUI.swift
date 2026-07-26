@@ -23,7 +23,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x55065c142eebf54b
+let kayaSpecHash: UInt64 = 0xe60f059824708e29
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -108,6 +108,7 @@ private let propColumns: UInt32 = 11
 /// Universal: every widget kind carries both.
 private let propA11yId: UInt32 = 12
 private let propA11yLabel: UInt32 = 13
+private let propA11yHint: UInt32 = 14
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -147,6 +148,7 @@ final class KayaNode: Identifiable {
     /// whatever it derives from the control's own content.
     var a11yId = ""
     var a11yLabel = ""
+    var a11yHint = ""
     var checked = false
     var value = 0.0
     var minValue = 0.0
@@ -1008,6 +1010,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propA11yLabel, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.a11yLabel = String(decoding: bytes, as: UTF8.self)
+                case (propA11yHint, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.a11yHint = String(decoding: bytes, as: UTF8.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -1350,10 +1355,17 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
     let identified =
         node.a11yId.isEmpty
         ? addressed : AnyView(addressed.accessibilityIdentifier(node.a11yId))
-    if node.a11yLabel.isEmpty {
-        identified
+    let labelled =
+        node.a11yLabel.isEmpty
+        ? identified : AnyView(identified.accessibilityLabel(node.a11yLabel))
+    // The HINT: what activating this control does. Apple speaks it
+    // after the label and forbids naming the gesture, which is why the
+    // authored text is a verb phrase — the same string TalkBack reads
+    // after its own "double tap to".
+    if node.a11yHint.isEmpty {
+        labelled
     } else {
-        identified.accessibilityLabel(node.a11yLabel)
+        labelled.accessibilityHint(node.a11yHint)
     }
 }
 
@@ -1546,6 +1558,26 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
             .compactMap { kayaAxCopy(hit, $0 as String) as? String }
             .first { !$0.isEmpty } ?? ""
         return role + "/" + label
+    }
+
+    /// The HINT as the platform publishes it: AXHelp is where
+    /// `.accessibilityHint()` lands on macOS.
+    private func kayaAxHintRead(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String? in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            guard let hit = kayaAxFind(app, identifier) else { return nil }
+            return kayaAxCopy(hit, kAXHelpAttribute as String) as? String ?? ""
+        }
     }
 
     /// What [kayaAxRole] weighed, for a MISMATCH: `unknown/…` means the
@@ -1745,6 +1777,23 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
                 $0 as? UIWindowScene
             }) {
                 for window in scene.windows { kayaAxDump(window) }
+            }
+        }
+        return nil
+    }
+
+    /// The HINT as UIKit publishes it — `.accessibilityHint()` lands
+    /// straight on the element.
+    private func kayaAxHintRead(_ identifier: String) -> String? {
+        guard !identifier.isEmpty else { return nil }
+        kayaAxEnableAutomation()
+        for scene in UIApplication.shared.connectedScenes.compactMap({
+            $0 as? UIWindowScene
+        }) {
+            for window in scene.windows {
+                if let hit = kayaAxFind(window, identifier) {
+                    return hit.accessibilityHint ?? ""
+                }
             }
         }
         return nil
@@ -2659,6 +2708,28 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(want) menus")
                 } else {
                     failures.append("\(got) menus, wanted \(want)")
+                }
+            case "expect_ax_hint":
+                // The hint's own verb (harness.rs is the norm): what
+                // activating this control does, read from the platform,
+                // never from the model.
+                let wantHint = kayaQuoted(Array(parts[2...]))
+                let hintIdentifier = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return node.a11yId
+                }
+                let gotHint: String
+                switch hintIdentifier {
+                case .none: gotHint = "<no such target>"
+                case .some(let ident) where ident.isEmpty:
+                    gotHint = "<no a11y_id authored on this widget>"
+                case .some(let ident):
+                    gotHint = kayaAxHintRead(ident) ?? "<not in the accessibility tree>"
+                }
+                if gotHint == wantHint {
+                    observed.append("ax hint \(wantHint)")
+                } else {
+                    failures.append("ax hint \(gotHint), wanted \(wantHint)")
                 }
             case "expect_ax":
                 // target -> node -> its authored identifier -> the REAL

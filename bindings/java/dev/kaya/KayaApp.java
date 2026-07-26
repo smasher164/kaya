@@ -865,6 +865,16 @@ public final class KayaApp {
          * tx.entry().a11yId("name").a11yLabel("Full name"). Same
          * transaction discipline as grow.
          */
+        public Widget a11yHint(String hint) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: a11yHint on a widget outside its build transaction"
+                    + " — use Tx.setA11yHint inside a live transaction");
+            }
+            tx.setA11yHint(this, hint);
+            return this;
+        }
+
         public Widget a11yLabel(String label) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -1321,6 +1331,16 @@ public final class KayaApp {
          */
         public void setA11yLabel(Widget w, String label) {
             records.add(KayaWire.txSetA11yLabel(w.id, label));
+        }
+
+        /**
+         * What ACTIVATING this widget does — the platforms' hint (Apple
+         * defines it as the result of performing an action; Android
+         * carries it as the click action's label). Write a VERB PHRASE.
+         * Activation kinds only; the root rejects it elsewhere.
+         */
+        public void setA11yHint(Widget w, String hint) {
+            records.add(KayaWire.txSetA11yHint(w.id, hint));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {

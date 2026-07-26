@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x55065c142eebf54bL;
+    public static final long SPEC_HASH = 0xe60f059824708e29L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -47,6 +47,7 @@ public final class KayaWire {
     public static final int PROP_COLUMNS = 11;
     public static final int PROP_A11Y_ID = 12;
     public static final int PROP_A11Y_LABEL = 13;
+    public static final int PROP_A11Y_HINT = 14;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -793,6 +794,29 @@ public final class KayaWire {
     public static byte[] txBindA11yLabelElement(long widgetId, int level, int field) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_A11Y_LABEL).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant a11y_hint value. */
+    public static byte[] txSetA11yHint(long widgetId, String a11yHint) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_CONST);
+        encodeValue(b, a11yHint);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound a11y_hint value. */
+    public static byte[] txBindA11yHint(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindA11yHintElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_A11Y_HINT).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

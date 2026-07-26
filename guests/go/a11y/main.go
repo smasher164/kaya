@@ -39,8 +39,8 @@ func main() {
 		tx.Mount(tx.Column(func() {
 			// Caption-bearing controls: identified, but deliberately
 			// NOT labelled. The platform must speak the caption.
-			tx.Button("Save", nil).A11yID("save")
-			tx.Checkbox("Details", nil).A11yID("details")
+			tx.Button("Save", nil).A11yID("save").A11yHint("save the draft")
+			tx.Checkbox("Details", nil).A11yID("details").A11yHint("show more detail")
 			tx.Button("Reset", nil).A11yID("reset")
 			tx.LabelText("Ready").A11yID("status")
 			// Caption-less controls: an app MUST name these, and the

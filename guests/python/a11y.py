@@ -31,8 +31,8 @@ with app.window():
     with kaya.column() as form:
         # Caption-bearing controls: identified, but deliberately NOT
         # labelled. The platform must speak the caption.
-        kaya.button("Save").a11y_id("save")
-        kaya.checkbox("Details").a11y_id("details")
+        kaya.button("Save").a11y_id("save").a11y_hint("save the draft")
+        kaya.checkbox("Details").a11y_id("details").a11y_hint("show more detail")
         kaya.button("Reset").a11y_id("reset")
         kaya.label(text="Ready").a11y_id("status")
         # Caption-less controls: an app MUST name these, and the tree

@@ -3064,6 +3064,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         &windows_core::HSTRING::from(label.as_str()),
                     )?;
                 }
+                // The HINT: UIA's HelpText, the slot for what acting on
+                // the control does. Empty means unset, like the name.
+                (w, Prop::A11yHint, Value::Str(hint)) if !hint.is_empty() => {
+                    let element = w.element()?;
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHelpText(
+                        &element,
+                        &windows_core::HSTRING::from(hint.as_str()),
+                    )?;
+                }
                 (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
                     reflow_grid(core, id.0)?;
@@ -4296,6 +4305,60 @@ impl crate::harness::Stage for WinUiStage {
                 "unknown"
             };
             Ok(format!("{role}/{}", peer.GetName()?))
+        })
+        .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
+    }
+
+    fn ax_hint(&self, target: crate::harness::Target) -> String {
+        // UIA's HelpText is the hint slot: "a brief description of the
+        // control's purpose", read off the same peer `ax` reads.
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use crate::harness::{try_resolve, TargetKind as K};
+            let element: bindings::Microsoft::UI::Xaml::UIElement = match target.kind {
+                K::Checkbox => match try_resolve(target.index, core.checkboxes.len()) {
+                    Some(i) => core.checkboxes[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Select => match try_resolve(target.index, core.selects.len()) {
+                    Some(i) => core.selects[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Radio => match try_resolve(target.index, core.radios.len()) {
+                    Some(i) => core.radios[i].cast()?,
+                    None => return Ok("<no such target>".to_owned()),
+                },
+                K::Button => {
+                    if try_resolve(target.index, core.buttons.len()).is_none() {
+                        return Ok("<no such target>".to_owned());
+                    }
+                    let i = crate::harness::resolve(target.index, core.buttons.len());
+                    let mut ids: Vec<_> = core
+                        .widgets
+                        .iter()
+                        .filter(|(_, w)| matches!(w, NativeWidget::Button { .. }))
+                        .map(|(id, _)| *id)
+                        .collect();
+                    ids.sort_by_key(|id| id.0);
+                    match ids.get(i).and_then(|id| core.widgets.get(id)) {
+                        Some(NativeWidget::Button { button, .. }) => button.cast()?,
+                        _ => return Ok("<no such target>".to_owned()),
+                    }
+                }
+                // The root admits a11y_hint on activation kinds only.
+                _ => {
+                    return Ok("<the hint prop applies to activation kinds only>".to_owned())
+                }
+            };
+            let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
+            let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(&fe) {
+                Ok(p) => p,
+                Err(_) => match FrameworkElementAutomationPeer::FromElement(&fe) {
+                    Ok(p) => p,
+                    Err(_) => return Ok("<not in the accessibility tree>".to_owned()),
+                },
+            };
+            Ok(peer.GetHelpText()?.to_string())
         })
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }

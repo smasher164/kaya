@@ -420,6 +420,7 @@ pub const KAYA_PROP_COLUMNS: u32 = 11;
 /// is what an assistive client says. Separate on purpose.
 pub const KAYA_PROP_A11Y_ID: u32 = 12;
 pub const KAYA_PROP_A11Y_LABEL: u32 = 13;
+pub const KAYA_PROP_A11Y_HINT: u32 = 14;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -562,6 +563,7 @@ const _: () = assert!(
         && KAYA_PROP_COLUMNS == wire::PROP_COLUMNS
         && KAYA_PROP_A11Y_ID == wire::PROP_A11Y_ID
         && KAYA_PROP_A11Y_LABEL == wire::PROP_A11Y_LABEL
+        && KAYA_PROP_A11Y_HINT == wire::PROP_A11Y_HINT
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -589,7 +591,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 13,
+    crate::spec::PROPS.len() == 14,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

@@ -26,8 +26,12 @@ app.build { tx in
     let form = tx.column {
         // Caption-bearing controls: identified, but deliberately NOT
         // labelled. The platform must speak the caption.
-        tx.setA11yId(tx.button("Save"), "save")
-        tx.setA11yId(tx.checkbox("Details"), "details")
+        let save = tx.button("Save")
+        tx.setA11yId(save, "save")
+        tx.setA11yHint(save, "save the draft")
+        let details = tx.checkbox("Details")
+        tx.setA11yId(details, "details")
+        tx.setA11yHint(details, "show more detail")
         tx.setA11yId(tx.button("Reset"), "reset")
         tx.setA11yId(tx.label("Ready"), "status")
         // Caption-less controls: an app MUST name these, and the tree

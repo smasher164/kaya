@@ -567,6 +567,26 @@ func (w Widget) A11yLabel(label string) Widget {
 	return w
 }
 
+// SetA11yHint sets what ACTIVATING a widget does — the platforms'
+// hint (Apple defines it as the result of performing an action;
+// Android carries it as the click action's label). Write a VERB
+// PHRASE: VoiceOver speaks it as written, TalkBack prefixes "double
+// tap to". Activation kinds only; the root rejects it elsewhere.
+func (tx *Tx) SetA11yHint(w Widget, hint string) {
+	tx.records = append(tx.records, TxSetA11yHint(w.id, hint))
+}
+
+// A11yHint sets this widget's hint at construction — the declarative
+// chain: tx.Button("Save", nil).A11yHint("save the draft"). Same
+// transaction discipline as Grow.
+func (w Widget) A11yHint(hint string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: A11yHint on a widget outside its build transaction — use Tx.SetA11yHint inside a live transaction")
+	}
+	w.tx.SetA11yHint(w, hint)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
 }

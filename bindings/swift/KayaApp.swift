@@ -964,6 +964,14 @@ final class KayaAppTx {
         tx.setA11yLabel(w.id, label)
     }
 
+    /// What ACTIVATING this widget does — the platforms' hint (Apple
+    /// defines it as the result of performing an action; Android
+    /// carries it as the click action's label). Write a VERB PHRASE.
+    /// Activation kinds only; the root rejects it elsewhere.
+    func setA11yHint(_ w: KayaWidget, _ hint: String) {
+        tx.setA11yHint(w.id, hint)
+    }
+
     func bindChecked(_ w: KayaWidget, _ s: KayaSignal) {
         tx.bindChecked(w.id, s.id)
     }

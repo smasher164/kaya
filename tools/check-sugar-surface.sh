@@ -135,6 +135,20 @@ check swift   bindings/swift/KayaApp.swift        a11y_label "func setA11yLabel\
 check haskell bindings/haskell/KayaApp.hs         a11y_label "A11yLabel :: String -> Attr"
 check ocaml   bindings/ocaml/kaya_app.ml          a11y_label "let set_a11y_label \\(Widget id\\)"
 
+# The HINT prop, same rule as the two universal ones — but note it is
+# ACTIVATION-KINDS-ONLY by the root's own check (a hint needs something
+# to activate; Android carries it as an action's label). The gate still
+# demands a spelling per binding: a language that ships it wire-only
+# leaves apps unable to author hints at all.
+check rust    crates/kaya/src/app.rs              a11y_hint "fn a11y_hint\(self"
+check python  bindings/python/kaya/__init__.py    a11y_hint "def a11y_hint\(self, hint\)"
+check go      bindings/go/app.go                  a11y_hint "func \(w Widget\) A11yHint\("
+check csharp  bindings/csharp/KayaApp.cs          a11y_hint "public void SetA11yHint\("
+check java    bindings/java/dev/kaya/KayaApp.java a11y_hint "public Widget a11yHint\("
+check swift   bindings/swift/KayaApp.swift        a11y_hint "func setA11yHint\("
+check haskell bindings/haskell/KayaApp.hs         a11y_hint "A11yHint :: String -> Attr"
+check ocaml   bindings/ocaml/kaya_app.ml          a11y_hint "let set_a11y_hint \(Widget id\)"
+
 # The menu construction surface (DESIGN.md, Menus): menu items are not
 # widget kinds, so the constructor loop above cannot see them — every
 # binding must spell the whole item vocabulary (menu, item/action,

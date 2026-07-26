@@ -122,6 +122,7 @@ pub const PROP_COLUMNS: u32 = 11;
 /// The accessibility identifier (never spoken) and label (spoken).
 pub const PROP_A11Y_ID: u32 = 12;
 pub const PROP_A11Y_LABEL: u32 = 13;
+pub const PROP_A11Y_HINT: u32 = 14;
 
 /// Window property ids (spec::WINDOW_PROPS) — their own namespace;
 /// windows are not widgets.
@@ -359,6 +360,7 @@ fn prop(raw: u32) -> Prop {
         PROP_COLUMNS => Prop::Columns,
         PROP_A11Y_ID => Prop::A11yId,
         PROP_A11Y_LABEL => Prop::A11yLabel,
+        PROP_A11Y_HINT => Prop::A11yHint,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1487,6 +1489,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Columns => PROP_COLUMNS,
         Prop::A11yId => PROP_A11Y_ID,
         Prop::A11yLabel => PROP_A11Y_LABEL,
+        Prop::A11yHint => PROP_A11Y_HINT,
     }
 }
 

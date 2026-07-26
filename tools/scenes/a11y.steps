@@ -32,6 +32,15 @@ expect_ax slider#0 "slider/Volume"
 expect_ax progress#0 "progress/Loading"
 expect_ax image#0 "image/Logo"
 
+# HINTS: what ACTIVATING a control does — the one accessibility prop
+# that is not universal, because it needs an activation to describe.
+# Apple speaks it as written and Android prefixes "double tap to", so
+# the authored text is a verb phrase that reads correctly after both.
+# The root admits it on activation kinds only; a hint on a label or an
+# image dies there rather than reaching four backends and not the fifth.
+expect_ax_hint button#0 "save the draft"
+expect_ax_hint checkbox#0 "show more detail"
+
 # The CHOICE kinds. A chooser is a chooser on every platform and spelled
 # differently on each (AXPopUpButton, a dropdown role on Compose,
 # ComboBox on AT-SPI and UIA) — `combobox` is the closed set's one name

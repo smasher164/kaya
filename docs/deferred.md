@@ -69,11 +69,34 @@ own the state (see the undo note in this file).
   chrome. Every other backend still reads its real chrome. So the verb
   can catch a regression in the ARM CHOICE (which is what the original
   defect was) but NOT one in the build.
-  THE FIX, already scheduled: a menu bar is an accessibility element,
-  so the AX-tree verb in the accessibility milestone restores an
-  independent read. Wire it there rather than inventing bespoke
-  machinery. `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated
-  — it is what proved the laziness and will be wanted again.
+  THE SCHEDULED FIX DOES NOT WORK — MEASURED 2026-07-25, after the
+  accessibility milestone landed. This entry used to say "a menu bar is
+  an accessibility element, so the AX-tree verb restores an independent
+  read". It does not. Dumping the iPad's own accessibility tree from
+  inside a running menus scene (61 nodes, on an iPad Pro simulator)
+  finds the scene's widgets and a `UIKitNavigationBar` and NO menu-bar
+  element of any kind. That is consistent with the laziness measured
+  above rather than a separate surprise: `buildMenu` ran once at launch
+  with an empty catalog, so there is nothing built for the tree to
+  carry. The read machinery itself is fine — the same dump resolved a
+  widget by its authored id in the same run.
+  There is also a structural mismatch worth stating: `expect_ax`
+  addresses a WIDGET target through its authored `a11y_id`, and the
+  menu bar is not a widget in kaya's model, so even a tree containing
+  it would want a different verb shape.
+  WHAT IS ACTUALLY LEFT: nothing automated, in-process or out. An
+  out-of-process client (XCUITest) sees only what is presented, and
+  UIKit exposes no way to present the bar programmatically — a human
+  gesture is the only trigger. So on iOS-regular the presentation half
+  stays ARM-DERIVED, the bar's correctness rests on the visual
+  confirmation recorded above, and this entry is a RE-READ ITEM, not a
+  scheduled fix: check again when iPadOS exposes either programmatic
+  presentation or a menu-bar accessibility element. That is the same
+  lesson the entry above it teaches about triggers written against a
+  platform's current shape — this one now carries its own re-read date
+  rather than a fix that cannot fire.
+  `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
+  what proved the laziness and will be wanted again.
 
 - **Adaptive LAYOUT is the second form-factor surface, and it owns
   `resize_window`** (Akhil, 2026-07-25; deferred until after the
@@ -93,13 +116,15 @@ own the state (see the undo note in this file).
   `AdwNavigationSplitView`, and WinUI's `TwoPaneView` / NavigationView
   display modes and adaptive triggers. Every one is size-class-driven
   by design, which is exactly the axis now in place.
-  Also still open from the menus milestone: `menus.steps` carries no
-  presentation assertion, because the right literal differs per lane
-  (`regular/bar` desktop, `compact/overflow` phones). The shared-scene
-  form wants the ASYMMETRIC INVARIANT — regular implies not overflow —
-  which is true on every platform and is exactly the original defect. A
-  compact window showing a bar is legitimate (a narrow desktop window),
-  so the symmetric form would false-alarm on GTK/WinUI.
+  (The presentation assertion this entry used to call open LANDED:
+  `menus.steps:85` carries the bare `expect_menu_presentation`, the
+  ASYMMETRIC INVARIANT — regular implies not overflow, true on every
+  platform and exactly the original defect — with the reasoning in a
+  comment beside it, and the iPad leg appends the exact
+  `"regular/bar"` literal. What is still owed there is narrower and
+  lives in the iPad entry above: on iOS-regular that assertion is
+  ARM-DERIVED, so it catches an arm-choice regression and not a build
+  one.)
 
 - **Form factor as the adaptivity axis** (DESIGN's "Form factor and
   adaptivity", 2026-07-24). kaya keys adaptivity on PLATFORM —
@@ -167,10 +192,21 @@ own the state (see the undo note in this file).
     (AXUIElement, UIKit's materialized elements, Compose's merged
     semantics, AT-SPI, UIA) over every widget kind on all five
     backends, byte-identical. See DESIGN's Accessibility section for
-    the per-backend read table. What is still owed off this milestone:
-    a HINT prop (only the label landed), and the iPad menu bar's
-    independent observation, which this verb now makes possible (see
-    the owed gate above).
+    the per-backend read table. The iPad menu bar's independent
+    observation was expected to ride this verb and MEASURED NOT TO —
+    see that entry, which is now a re-read item.
+    THE HINT PROP LANDED 2026-07-25 (`a11y_hint`, spec prop 14): the
+    activation kinds carry it — `.accessibilityHint()` on Apple, the
+    click action's LABEL on Compose (measured: a label-only semantics
+    node relabels a Material3 Button's action and KEEPS it), GTK's
+    `Property::Description`, `AutomationProperties.HelpText` on WinUI —
+    read back by its own verb `expect_ax_hint` and green on all five
+    lanes. The root scopes it to button/checkbox/select/radio because a
+    hint describes what ACTIVATING a control does and Android has
+    nowhere to put one without an action; that domain is unit-tested
+    both ways. Still open, trigger-gated: hints on the adjustable and
+    editable kinds (slider, entry, textarea), whose Android route is a
+    different action's label.
   - **Video widget**: unexamined — DESIGN has the surface-handle
     transport (the Canvas zero-copy arm) but no media-playback
     story. The wrap-native bet suggests a Video widget over each

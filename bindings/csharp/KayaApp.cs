@@ -839,6 +839,13 @@ sealed class Tx
     public void SetA11yLabel(Widget w, string label) =>
         Records.Add(KayaWire.TxSetA11yLabel(w.Id, label));
 
+    /// What ACTIVATING this widget does — the platforms' hint (Apple
+    /// defines it as the result of performing an action; Android
+    /// carries it as the click action's label). Write a VERB PHRASE.
+    /// Activation kinds only; the root rejects it elsewhere.
+    public void SetA11yHint(Widget w, string hint) =>
+        Records.Add(KayaWire.TxSetA11yHint(w.Id, hint));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 

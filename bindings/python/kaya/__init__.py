@@ -340,6 +340,17 @@ class Widget:
         _records().append(wire.tx_set_a11y_id(self.id, str(ident)))
         return self
 
+    def a11y_hint(self, hint):
+        """Set what ACTIVATING this widget does — the platforms' hint
+        (Apple defines it as the result of performing an action;
+        Android carries it as the click action's label). Write a VERB
+        PHRASE: VoiceOver speaks it as written, TalkBack prefixes
+        "double tap to". Activation kinds only (button, checkbox,
+        select, radio); the root rejects it elsewhere. Returns the
+        widget, so it chains."""
+        _records().append(wire.tx_set_a11y_hint(self.id, str(hint)))
+        return self
+
     def a11y_label(self, label):
         """Set this widget's accessibility LABEL: what an assistive
         client speaks for it. Universal, and deliberately separate from
