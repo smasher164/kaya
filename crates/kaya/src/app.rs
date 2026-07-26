@@ -2506,6 +2506,20 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// Ask this window to present its ENTRY STACK as list-detail
+    /// (DESIGN.md, Adaptive list-detail): on a REGULAR window the base
+    /// root takes the leading pane and the top of the stack the
+    /// trailing one; on a COMPACT one nothing changes, because the
+    /// compact case is what navigation already does.
+    ///
+    /// There is deliberately no argument for WHICH way it presents —
+    /// that is the size class's answer, not the app's.
+    pub fn list_detail(self, on: bool) -> Self {
+        self.tx
+            .set_window_prop(self.window, WindowProp::ListDetail, on);
+        self
+    }
+
     /// How this window presents its sections — ADVISORY, the
     /// width/height precedent: honored where the platform has the
     /// idiom, nearest thing otherwise, ignored on the phones.

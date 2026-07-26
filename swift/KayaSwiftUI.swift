@@ -4602,6 +4602,60 @@ struct KayaContextMenuItems: View {
 /// real system menu bar reachable without a keyboard — so a full
 /// command catalog sat behind a phone affordance on a device that had
 /// the desktop one.
+/// Stamps the window's live FORM FACTOR on the model, on every
+/// platform. It used to be recorded only by the menu chrome, and only
+/// off `horizontalSizeClass` — which macOS does not have, so a desktop
+/// window carried `unknown` forever. That was invisible while menus
+/// were the only adaptive lowering, because macOS answers the menu
+/// verb by counting the REAL NSApp.mainMenu instead of asking the
+/// model. The second lowering asked the model and got `unknown`.
+///
+/// So the reading lives here now, once, for everyone: the platform's
+/// own size class where there is one, and the window's OWN WIDTH
+/// against the same 600 boundary GTK, WinUI and Compose draw where
+/// there is not. "A small window on a desktop is compact" is the
+/// ratified rule (DESIGN.md, Form factor and adaptivity), not a mac
+/// carve-out — and a width reading is a real observation, not a
+/// derivation from the prop being gated.
+struct KayaFormFactorRecorder: ViewModifier {
+    let windowId: UInt64
+    #if !os(macOS)
+        @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+    @State private var width: Double = 0
+
+    private var factor: KayaFormFactor {
+        #if os(macOS)
+            return width >= 600 ? .regular : .compact
+        #else
+            return horizontalSizeClass == .regular ? .regular : .compact
+        #endif
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { width = geo.size.width }
+                        .onChange(of: geo.size.width) { _, w in width = w }
+                }
+            )
+            // Recorded in onAppear/onChange, never in body: a write
+            // during body evaluation is a mutation inside the render
+            // pass.
+            .onAppear { record() }
+            .onChange(of: width) { record() }
+        #if !os(macOS)
+            .onChange(of: horizontalSizeClass) { record() }
+        #endif
+    }
+
+    private func record() {
+        kayaScene.windows[windowId]?.formFactor = factor
+    }
+}
+
 struct KayaMenuChrome: ViewModifier {
     let windowId: UInt64
 
@@ -5213,6 +5267,10 @@ struct KayaRoot: View {
         }
         }
         }
+        // The form factor is measured on the WHOLE window, outside the
+        // arm chain, so the reading does not depend on which arm
+        // rendered — the arm depends on the reading, never the reverse.
+        .modifier(KayaFormFactorRecorder(windowId: 0))
         // The accessor rides OUTSIDE the stack so its view never
         // detaches under a push.
         #if os(macOS)

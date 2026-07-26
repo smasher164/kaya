@@ -1,0 +1,46 @@
+# The split scene: adaptive list-detail as assertions (DESIGN.md,
+# Adaptive list-detail). The window asks for list_detail once; WHICH
+# presentation materializes is the size class's answer, and this scene
+# drives the size class with real resizes and re-asserts on the far
+# side. That round trip is the whole point — a transition no code
+# specializes gates nothing, which is why resize_window belongs to this
+# milestone rather than preceding it.
+#
+# PARKED as .pending, not in tools/scenes/: check-steps requires every
+# scene there to have live legs in all five runners, and only the mac
+# backend has the arm so far. It moves with the fan-out (the a11y
+# precedent).
+#
+# The exact spellings here are mac-lane literals. The SHARED scene this
+# becomes will carry the bare `expect_split` — the asymmetric invariant
+# that holds on every platform — because the exact class differs per
+# lane while "a regular window must not show one pane while its stack
+# holds two" does not.
+expect_entries 0
+expect_title "split"
+# Wide: regular, and with nothing pushed the stack cannot be showing
+# the wrong thing yet. The split arm is what renders.
+resize_window 900x600
+expect_split "regular/split"
+# Push the detail. On a regular window it lands in the TRAILING pane,
+# so the base root is still visible — that is what distinguishes this
+# from the serial stack, where the push would cover it.
+click button#0
+expect_entries 1
+expect label#0 "list pane"
+expect label#last "detail pane"
+expect_split "regular/split"
+# Narrow: the SAME scene, the same stack, one pane. Nothing in the
+# guest re-declared anything — the platform re-decided.
+resize_window 420x600
+expect_split "compact/stacked"
+expect_entries 1
+# And back, because a transition that only works in one direction is
+# half a feature.
+resize_window 900x600
+expect_split "regular/split"
+# The stack still pops the way it always did: list-detail is a
+# PRESENTATION of the stack, not a second lifecycle.
+back
+expect_entries 0
+expect label#0 "popped detail"
