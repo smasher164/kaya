@@ -37,6 +37,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 exec python3 - "$ROOT" "$@" <<'PY'
 import hashlib
 import pathlib
+import zipfile
 import subprocess
 import sys
 
@@ -48,6 +49,18 @@ args = sys.argv[2:]
 # a lockfile change is a source change.
 COMPONENTS = {
     "core": ["crates", "Cargo.toml", "Cargo.lock"],
+    # The SwiftUI interpreter: a SEPARATELY COMPILED artifact that both
+    # Apple lanes load, and one that goes stale on its own — swiftc
+    # failing leaves the previous dylib exactly where the previous
+    # cargo failure left the previous libkaya. Its inputs are its own
+    # sources plus the INTERFACE it compiles against (kaya.h), not the
+    # core's implementation: a gtk.rs edit does not change this dylib.
+    "swiftui": ["swift", "crates/kaya/include"],
+    # The Compose interpreter, the Android sibling of the above.
+    # android/kaya/src holds only sources — gradle's outputs are in
+    # android/*/build, a SIBLING of src — so the generated marker file
+    # this id feeds cannot end up inside its own inputs.
+    "compose": ["android/kaya/src", "bindings/java"],
 }
 
 # What each GATE reads BEYOND the implicit set every one of them gets:
@@ -193,7 +206,8 @@ def gate_key(name):
 PREFIX = b"kaya-build-id:"
 
 if not args:
-    sys.exit("usage: build-id.sh <component> | --gate NAME | --verify FILE...")
+    sys.exit("usage: build-id.sh <component> | --gate NAME "
+             "| --verify [--component NAME] FILE...")
 
 if args[0] == "--gate":
     if len(args) != 2 or args[1] not in GATES:
@@ -207,11 +221,24 @@ if args[0] != "--verify":
     print(build_id(args[0]))
     sys.exit(0)
 
-# --verify: the artifact must carry the marker crates/kaya/build.rs
-# baked in. Absent means the file predates the marker or was never
-# linked against the core; wrong means it is a leftover from an earlier
-# tree, which is the whole point of looking.
-want = build_id("core").encode()
+# --verify: the artifact must carry the marker its builder baked in —
+# crates/kaya/build.rs for the core, tools/swiftui/build-dylib.sh for
+# the interpreter. Absent means the file predates the marker or was
+# never built from this component at all; wrong means it is a leftover
+# from an earlier tree, which is the whole point of looking.
+#
+# One PREFIX for every component, and --component says which hash to
+# expect. Per-component prefixes would let a file carrying the wrong
+# component's marker read as "no build id" rather than as the mismatch
+# it is.
+component = "core"
+if len(args) > 2 and args[1] == "--component":
+    component = args[2]
+    if component not in COMPONENTS:
+        sys.exit(f"build-id: unknown component {component!r} "
+                 f"(have: {', '.join(COMPONENTS)})")
+    args = args[:1] + args[3:]
+want = build_id(component).encode()
 status = 0
 for name in args[1:]:
     p = pathlib.Path(name)
@@ -219,7 +246,15 @@ for name in args[1:]:
         print(f"build-id: {name}: MISSING — the build that produces it did not run", file=sys.stderr)
         status = 1
         continue
-    blob = p.read_bytes()
+    # An apk is a zip, and its dex members are compressed — the marker
+    # is not visible in the raw file. Which classes*.dex a string lands
+    # in is not stable either (this apk is multidex and dev.kaya's
+    # strings are in classes3.dex), so read them all.
+    if zipfile.is_zipfile(p):
+        with zipfile.ZipFile(p) as z:
+            blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".dex"))
+    else:
+        blob = p.read_bytes()
     found, at = set(), 0
     while (at := blob.find(PREFIX, at)) != -1:
         found.add(blob[at + len(PREFIX) : at + len(PREFIX) + 16])
@@ -228,11 +263,13 @@ for name in args[1:]:
         continue
     status = 1
     if not found:
-        print(f"build-id: {name}: NO build id — not linked against the kaya core", file=sys.stderr)
+        print(f"build-id: {name}: NO build id — nothing here was built "
+              f"from {component}", file=sys.stderr)
     else:
         carried = ", ".join(sorted(f.decode("ascii", "replace") for f in found))
         print(
-            f"build-id: {name}: STALE — built from {carried}, this tree is {want.decode()}",
+            f"build-id: {name}: STALE — carries {carried}, but {component} "
+            f"in this tree is {want.decode()}",
             file=sys.stderr,
         )
         print(

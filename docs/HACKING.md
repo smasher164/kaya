@@ -213,11 +213,23 @@ nothing local can see it). Reach for it by hand the moment a result
 disagrees with the code in front of you — that is cheaper than the
 alternative, which historically was half a day.
 
-Two things it does NOT tell you. It fingerprints INPUTS, so a matching
-id does not promise two byte-identical binaries. And it covers libkaya
-only: the SwiftUI and Compose interpreters are separately compiled and
-carry no marker (docs/deferred.md has the reasoning and the trigger for
-extending it).
+THREE COMPONENTS carry a marker, each keyed on its own sources plus the
+interface it compiles against:
+
+    tools/build-id.sh core                       # libkaya
+    tools/build-id.sh swiftui                    # swift/ + kaya.h
+    tools/build-id.sh compose                    # android/kaya/src + bindings/java
+    tools/build-id.sh --verify --component swiftui target/swiftui/libkaya_swiftui.dylib
+    tools/build-id.sh --verify --component compose  …/milestone2-debug.apk
+
+`--component` defaults to `core`. The prefix is the same for all three
+on purpose: a file carrying the WRONG component's marker then reads as
+the mismatch it is, rather than as "no build id". An apk is a zip, so
+the verifier reads its dex members — the string is not visible in the
+raw file, and which classes*.dex it lands in is not stable.
+
+The one thing it does NOT tell you: it fingerprints INPUTS, so a
+matching id does not promise two byte-identical binaries.
 
 ## Multi-agent work
 

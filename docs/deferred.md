@@ -455,13 +455,14 @@ own the state (see the undo note in this file).
     the two lanes use DIFFERENT compilers (nix's ghc on mac, apt's in
     the container), so a freeze file pinning boot-library versions
     would be wrong on one of them by construction.
-  - The BUILD ID reaches libkaya only. The SwiftUI and Compose
-    interpreters are separately compiled artifacts that can go stale
-    the same way, and neither carries a marker; their guard today is
-    check-compose/check-detekt/swift-typecheck plus delete-before-move
-    in build-dylib.sh. Extending the marker wants a generated constant
-    per language, which is worth doing the first time one of them goes
-    stale unnoticed.
+  - (CLOSED 2026-07-26.) The build id now reaches all three compiled
+    artifacts: libkaya (`core`), the SwiftUI interpreter (`swiftui`,
+    both the mac dylib and the iOS one), and the Compose interpreter
+    (`compose`, verified inside the apk — an apk is a zip, so the
+    verifier reads its dex members, and which classes*.dex a string
+    lands in is not stable). Each is keyed on its own sources plus the
+    INTERFACE it compiles against, not on the core's implementation, so
+    a backend edit does not invalidate an interpreter.
   - BIT-IDENTICAL OUTPUT is not claimed anywhere and is not the goal
     here. The id fingerprints INPUTS: a different id always means
     different sources, but one id does not promise two byte-identical

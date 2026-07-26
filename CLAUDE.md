@@ -115,10 +115,11 @@ in docs/deferred.md.
    IDE inspections (KT-69698), so a computed-and-never-applied local
    compiles clean, which is how a dead lowering once shipped a false
    green),
-   `tools/check-build-id.sh` (the stale-artifact guard is live: a built
-   libkaya carries the id of the sources it came from, the verifier
-   rejects one carrying any other, and every lane verifies what it runs
-   or ships before it runs or ships it),
+   `tools/check-build-id.sh` (the stale-artifact guard is live: each of
+   the three compiled artifacts — libkaya, the SwiftUI interpreter, the
+   Compose interpreter — carries the id of the sources it came from,
+   the verifier rejects one carrying any other, and every lane verifies
+   what it runs or ships before it runs or ships it),
    `tools/check-pins.sh` (every dependency resolved over the network
    names an exact version — gradle, nuget, and the container's opam
    index, none of which has a lockfile the way cargo and nix do),

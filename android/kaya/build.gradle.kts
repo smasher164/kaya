@@ -27,7 +27,12 @@ android {
         getByName("main") {
             // The generated wire vocabulary (dev.kaya.KayaWire), shared
             // with the desktop bindings tree; kaya-bindgen writes it.
-            java.srcDirs("../../bindings/java")
+            // "generated" holds dev.kaya.KayaBuildId, written by
+            // tools/android/run-emulator.sh so the apk can be asked
+            // which interpreter sources it was built from
+            // (tools/build-id.sh). Absent outside that lane, which
+            // gradle treats as an empty source dir.
+            java.srcDirs("../../bindings/java", "generated")
         }
     }
 

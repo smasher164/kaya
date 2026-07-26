@@ -36,3 +36,6 @@ guests/haskell/dist-newstyle/
 /reorder
 /feed
 /kaya-gen
+# Written per-run by tools/android/run-emulator.sh (the interpreter's
+# build-id marker); never committed.
+/android/kaya/generated

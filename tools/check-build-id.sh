@@ -95,6 +95,54 @@ for lane in \
     fi
 done
 
+# 2b. The SwiftUI interpreter is a SECOND artifact with its own id, and
+# both places that compile one must bake it in and check it. It is the
+# artifact the two Apple lanes actually execute — 222 of the matrix's
+# legs — and swiftc failing leaves the previous dylib exactly where a
+# cargo failure leaves the previous libkaya.
+for site in tools/swiftui/build-dylib.sh tools/ios/run-sim.sh; do
+    if ! grep -q "component swiftui" "$site"; then
+        fail "$site compiles the SwiftUI interpreter but never verifies it (--component swiftui)"
+    fi
+    if ! grep -q "kaya-build-id:" "$site"; then
+        fail "$site does not bake a build id into the interpreter it compiles"
+    fi
+done
+
+# 2b-android. The Compose interpreter, same contract. The apk is built
+# from android/kaya/generated, so the lane must WRITE the marker before
+# gradle and ASK the apk afterwards — one without the other is either a
+# marker nobody checks or a check with nothing to find.
+if ! grep -q "kaya_write_compose_marker" tools/android/run-emulator.sh; then
+    fail "run-emulator.sh does not bake a build id into the Compose interpreter"
+fi
+if ! grep -q "component compose" tools/android/run-emulator.sh; then
+    fail "run-emulator.sh never verifies the apk it installs (--component compose)"
+fi
+
+# 2c. The built interpreter itself, when one is present: same two
+# questions the core gets.
+DYLIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
+if [ -f "$DYLIB" ]; then
+    if ! tools/build-id.sh --verify --component swiftui "$DYLIB" >/dev/null 2>"$TMP/sw"; then
+        fail "the built SwiftUI interpreter does not carry this tree's id"
+        cat "$TMP/sw" >&2
+    fi
+    python3 - "$DYLIB" "$TMP/stale.dylib" <<'PY'
+import pathlib, sys
+blob = bytearray(pathlib.Path(sys.argv[1]).read_bytes())
+at = blob.find(b"kaya-build-id:")
+if at == -1:
+    sys.exit("check-build-id: no marker in the interpreter to doctor")
+digit = at + len(b"kaya-build-id:")
+blob[digit] = ord("f") if blob[digit] != ord("f") else ord("0")
+pathlib.Path(sys.argv[2]).write_bytes(blob)
+PY
+    if tools/build-id.sh --verify --component swiftui "$TMP/stale.dylib" >/dev/null 2>&1; then
+        fail "self-test failed: an interpreter carrying a DIFFERENT id verified clean"
+    fi
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-build-id: OK"
 else
