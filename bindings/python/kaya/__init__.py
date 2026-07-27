@@ -1923,7 +1923,8 @@ class App:
             self._widget_handlers[(kind, handle.id)] = fn
 
     def create_window(self, window_id, title=None, width=None, height=None,
-                      veto_close=None, sections_presentation=None,
+                      veto_close=None, list_detail=None,
+                      sections_presentation=None,
                       on_close_requested=None, on_closed=None):
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO
@@ -1944,10 +1945,11 @@ class App:
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
+            list_detail=list_detail,
             sections_presentation=sections_presentation)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
-               sections_presentation=None,
+               list_detail=None, sections_presentation=None,
                on_close_requested=None, on_closed=None):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
@@ -1956,7 +1958,10 @@ class App:
         only in having no creation moment (the process owns it).
         `title` names the surface; `width`/`height` request content
         size in DIP (advisory); `veto_close` arms the close-veto
-        class; `sections_presentation` is the ADVISORY sections hint
+        class; `list_detail` asks this surface to present its entry
+        stack as list-detail, and WHICH way it presents is the
+        platform's answer (DESIGN.md, Adaptive list-detail);
+        `sections_presentation` is the ADVISORY sections hint
         (kaya.SECTIONS_AUTO/BAR/SIDEBAR)."""
         if on_close_requested is not None:
             self._close_requested[0] = on_close_requested
@@ -1964,7 +1969,8 @@ class App:
             self._window_closed[0] = on_closed
         return _TxScope(
             self, mount_on_exit=True, title=title, width=width, height=height,
-            veto_close=veto_close, sections_presentation=sections_presentation)
+            veto_close=veto_close, list_detail=list_detail,
+            sections_presentation=sections_presentation)
 
     def build(self):
         """An ambient transaction without the mount — for mutations

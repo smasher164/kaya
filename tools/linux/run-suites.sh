@@ -38,10 +38,10 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES="split listdetail"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -480,22 +480,48 @@ for proto in x11 wayland; do
     # back button is GTK's back affordance, driven for real; the
     # intercept_back veto class answers with pop_entry.
     run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
-    # The split scene: adaptive list-detail. Rust-only (a depth
-    # scene); GTK renders the two panes in a Box and resize_window
-    # drives the real size-class transition.
-    # Through a11y-leg.sh, like the a11y legs: the scene asserts the
-    # REAL accessibility tree (that both panes are present AT ONCE,
-    # which the stamped presentation cannot prove), and on GTK that
-    # read is AT-SPI — which needs the per-leg dbus + at-spi bus this
-    # wrapper stands up.
+    # The split scene: adaptive list-detail through
+    # AdwNavigationSplitView, with resize_window driving the real
+    # size-class transition. All eight languages.
+    #
+    # Every leg goes through a11y-leg.sh, like the a11y legs: the scene
+    # asserts the REAL accessibility tree (that both panes are present
+    # AT ONCE, which the stamped presentation cannot prove), and on GTK
+    # that read is AT-SPI — which needs the per-leg dbus + at-spi bus
+    # this wrapper stands up.
     run "$proto" split-rust env KAYA_SELFTEST=split \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
-    # The listdetail scene: the same guest, asserting the bare
-    # invariant at whatever width this lane's window manager hands it.
-    # Through a11y-leg.sh for the same reason the leg above is: its one
-    # real-tree assertion is an AT-SPI read.
+    run "$proto" split-python env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/split.py
+    run "$proto" split-go env KAYA_SELFTEST=split \
+        tools/linux/a11y-leg.sh /tmp/go-guests/split
+    run "$proto" split-csharp env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" split-ocaml env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/split.exe
+    run "$proto" split-haskell env KAYA_SELFTEST=split \
+        tools/linux/a11y-leg.sh "$(hs_bin split)"
+    run "$proto" split-java env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The listdetail scene: THE SAME GUESTS, asserting the bare
+    # invariant at whatever width this lane's window manager hands
+    # them. One app, two scripts — a scene selects a SCRIPT, never an
+    # app. Through a11y-leg.sh for the same reason: its one real-tree
+    # assertion is an AT-SPI read.
     run "$proto" listdetail-rust env KAYA_SELFTEST=listdetail \
-        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/listdetail"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
+    run "$proto" listdetail-python env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/split.py
+    run "$proto" listdetail-go env KAYA_SELFTEST=listdetail \
+        tools/linux/a11y-leg.sh /tmp/go-guests/split
+    run "$proto" listdetail-csharp env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" listdetail-ocaml env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/split.exe
+    run "$proto" listdetail-haskell env KAYA_SELFTEST=listdetail \
+        tools/linux/a11y-leg.sh "$(hs_bin split)"
+    run "$proto" listdetail-java env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
     run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav

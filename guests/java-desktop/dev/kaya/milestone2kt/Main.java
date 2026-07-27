@@ -68,6 +68,13 @@ public final class Main {
             case "nav":
                 app = Nav::app;
                 break;
+            // One app behind both list-detail scripts: split resizes,
+            // listdetail asserts the bare invariant where the host
+            // picks the width.
+            case "split":
+            case "listdetail":
+                app = Split::app;
+                break;
             case "scroll":
                 app = Scroll::app;
                 break;

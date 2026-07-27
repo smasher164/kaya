@@ -48,6 +48,11 @@ class MainActivity : ComponentActivity() {
             // Navigation is phone-native too: predictive back IS the
             // affordance; nav runs here for real.
             "nav" -> Nav::app
+            // One app behind both list-detail scripts. `split` itself
+            // is desktop-only (it drives resize_window, which this host
+            // rejects), so only `listdetail` is wired — the bare
+            // invariant, at the width the device picked.
+            "listdetail" -> Split::app
             "scroll" -> Scroll::app
             "progress" -> Progress::app
             "select" -> Select::app

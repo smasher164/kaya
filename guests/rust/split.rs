@@ -16,21 +16,19 @@
 //! lifecycle grammar — and this guest is the demonstration, because
 //! nothing here is split-specific except one prop.
 
-pub(crate) fn app(ctx: kaya::AppCtx) {
-    app_titled(ctx, "split")
-}
-
-/// The same scene under a caller-chosen title. TWO scripts drive this
-/// ONE app: `split` drives the size class with real resizes and names
-/// the presentation on each side, and `listdetail` asserts the bare
-/// invariant at whatever width its host gives — the only spelling a
-/// phone or tablet lane can run.
+/// TWO scripts drive this ONE app. `split` drives the size class with
+/// real resizes and names the presentation on each side; `listdetail`
+/// asserts the bare invariant at whatever width its host gives, which
+/// is the only spelling a phone or tablet lane can run. Nothing here
+/// distinguishes them, and that is the claim both make: the guest does
+/// not change with the form factor.
 ///
-/// Sharing the app is the point, not an economy. What both scenes
-/// claim is that NOTHING in the guest differs across form factors, and
-/// a second copy of this file would be free to quietly stop being the
-/// same app while both legs stayed green.
-pub(crate) fn app_titled(ctx: kaya::AppCtx, title: &str) {
+/// Which is also why there is no second binary. A scene selects a
+/// SCRIPT, never an app — so a runner points both scenes at this one
+/// example and the harness reads the .steps file it was named. The one
+/// assertion that could not be shared is the window title, and
+/// listdetail deliberately does not make it.
+pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
 
     #[derive(Clone, Copy)]
@@ -44,7 +42,7 @@ pub(crate) fn app_titled(ctx: kaya::AppCtx, title: &str) {
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
-            .title(title)
+            .title("split")
             // The one adaptive declaration in the whole guest.
             .list_detail(true);
         let status = tx.signal("list pane");

@@ -48,14 +48,14 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. (Empty since the menus sweep
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES="split listdetail"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -731,24 +731,43 @@ run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.
 # scroll_end through the REAL scrolling API, at-end read back, and a
 # live click on the scrolled-to button. All eight languages,
 # byte-identical.
+# The split scene: adaptive list-detail (DESIGN.md). The window asks
+# for list_detail once and the PLATFORM decides; resize_window drives
+# the transition for real so the far side is re-asserted. All eight
+# languages, byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script split)"
-# The split scene: adaptive list-detail (DESIGN.md). Rust-only for
-# now — a DEPTH scene: the backend arms all exist, the language sweep
-# does not. The window asks for list_detail once and the SIZE CLASS
-# decides; resize_window drives the transition for real so the far side
-# is re-asserted.
+export KAYA_SELFTEST_SCRIPT
 run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split
+run split-python-swiftui env KAYA_SELFTEST=split python3 guests/python/split.py
+run split-go-swiftui env KAYA_SELFTEST=split target/go-guests/split
+run split-csharp-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run split-ocaml-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/split.exe
+run split-haskell-swiftui env KAYA_SELFTEST=split "$(hs_bin split)"
+run split-swift-swiftui env KAYA_SELFTEST=split target/swift-guests/split
+run split-java-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The listdetail scene: the SAME guest, asserting list-detail's bare
-# invariant at whatever width the host gives. Desktop-redundant on this
-# lane — the scene above already drives both arms here — and carried
-# anyway because the file is shared verbatim with the phone lanes,
-# where it is the only list-detail coverage there is. A scene that runs
-# in four lanes and not the fifth is how the shared-script contract
-# rots.
+# The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
+# invariant at whatever width the host gives. One app, two scripts — a
+# scene selects a SCRIPT, never an app, so every leg here runs the
+# binary the block above just ran. Desktop-redundant on this lane and
+# carried anyway, because the file is shared verbatim with the phone
+# lanes where it is the only list-detail coverage there is.
 KAYA_SELFTEST_SCRIPT="$(scene_script listdetail)"
-run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail \
-    target/debug/examples/listdetail
+export KAYA_SELFTEST_SCRIPT
+run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail target/debug/examples/split
+run listdetail-python-swiftui env KAYA_SELFTEST=listdetail python3 guests/python/split.py
+run listdetail-go-swiftui env KAYA_SELFTEST=listdetail target/go-guests/split
+run listdetail-csharp-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run listdetail-ocaml-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/split.exe
+run listdetail-haskell-swiftui env KAYA_SELFTEST=listdetail "$(hs_bin split)"
+run listdetail-swift-swiftui env KAYA_SELFTEST=listdetail target/swift-guests/split
+run listdetail-java-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

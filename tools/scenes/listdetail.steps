@@ -26,8 +26,16 @@
 # the platform's own component. Picking a device outside the 400..840
 # band is the LANE's job, the same rule check-steps enforces on a
 # resize (a portrait medium_tablet is 800dp, squarely inside it).
+#
+# NO expect_title HERE, deliberately. This scene and `split` are the
+# SAME app — one window, one button, one push — and differ only in what
+# they may assert. A title assertion is the one claim that cannot be
+# shared, because one app has one title, and asserting a different one
+# would force a second binary per language for no coverage: `split`
+# already checks the title lowering against this very app. Keeping this
+# file title-free is what lets every language serve both scenes with
+# ONE guest.
 expect_entries 0
-expect_title "listdetail"
 expect_split
 # Push the detail. WHERE it lands is the platform's answer — beside the
 # list on a regular window, covering it on a compact one — and neither

@@ -706,17 +706,25 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # measured 2026-07-22); legs queue only after every binary
     # exists. The list is explicit: window/panels are desktop-only
     # by design and must not ride $SCENES here.
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav scroll progress select radio grid textarea sections menus commands a11y"
+    # Entries are `scene` or `scene:guest` — the guest defaults to the
+    # scene's own name, and names a different one where two scenes
+    # share an app. `listdetail:split` is the only such pair today: a
+    # scene selects a SCRIPT, never an app, and the split guest is the
+    # app both list-detail scenes drive. (`split` itself stays out —
+    # it drives resize_window, which this host rejects by design.)
+    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y"
     swift_pids=()
     swift_names=()
-    for guest in $IOS_SWIFT_SCENES; do
+    for entry in $IOS_SWIFT_SCENES; do
         (
+            guest="${entry%%:*}"
+            src="${entry##*:}"
             stage="$BUNDLES/.stage-$guest"
             mkdir -p "$stage"
-            cp "guests/swift/$guest.swift" "$stage/main.swift"
+            cp "guests/swift/$src.swift" "$stage/main.swift"
             companions=()
-            if [ -f "guests/swift/$guest+Kaya.swift" ]; then
-                companions=("guests/swift/$guest+Kaya.swift")
+            if [ -f "guests/swift/$src+Kaya.swift" ]; then
+                companions=("guests/swift/$src+Kaya.swift")
             fi
             xcrun -sdk iphonesimulator swiftc \
                 -target "arm64-apple-ios$IOS_MIN-simulator" \
@@ -730,7 +738,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
                 -o "$BUNDLES/${guest}swift-bin" >"$stage/build.log" 2>&1
         ) &
         swift_pids+=($!)
-        swift_names+=("$guest")
+        swift_names+=("${entry%%:*}")
     done
     swift_status=0
     i=0
@@ -744,7 +752,8 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     done
     rm -rf "$BUNDLES"/.stage-*
     [ "$swift_status" = 0 ] || exit 1
-    for guest in $IOS_SWIFT_SCENES; do
+    for entry in $IOS_SWIFT_SCENES; do
+        guest="${entry%%:*}"
         APP=$(make_bundle "${guest}swift" "dev.kaya.${guest}swift" "$BUNDLES/${guest}swift-bin")
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
@@ -880,8 +889,8 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # `split` scene drives resize_window, and a phone or tablet does
     # not command its own window size (DESIGN.md, Windows). Until this
     # leg the SwiftUI list-detail arm was exercised on macOS only.
-    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example listdetail
-    APP=$(make_bundle listdetailrs-swiftui dev.kaya.listdetailswiftui "$TARGET_DIR/examples/listdetail")
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example split
+    APP=$(make_bundle listdetailrs-swiftui dev.kaya.listdetailswiftui "$TARGET_DIR/examples/split")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on listdetail-swiftui "$APP" dev.kaya.listdetailswiftui \
         listdetail-swiftui listdetail listdetail

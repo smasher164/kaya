@@ -852,10 +852,19 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
             });
 
             set_window_content(core, window, Some(bin.upcast_ref::<gtk4::Widget>()));
+            // WITH AN EMPTY STACK THE WINDOW KEEPS ITS OWN TITLE. This
+            // used to fall back to the empty string, which is a window
+            // with no title at all — the serial arm's None branch below
+            // has always used window_titles for exactly this case, and
+            // the split arm simply did not. Caught on macOS, where the
+            // title bar is read for real and AppKit substitutes the
+            // PROCESS NAME for an empty one (2026-07-27).
             let title = top
                 .and_then(|id| core.nav_entries.get(&id))
                 .map(|e| e.title.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| {
+                    core.window_titles.get(&window).cloned().unwrap_or_default()
+                });
             target.set_title(Some(&title));
             let collapsed = split.is_collapsed();
             core.split_views.insert(window, split);

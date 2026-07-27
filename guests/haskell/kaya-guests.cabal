@@ -85,6 +85,11 @@ executable nav
   main-is: nav.hs
   build-depends: kaya-guests
 
+executable split
+  import: shared
+  main-is: split.hs
+  build-depends: kaya-guests
+
 executable scroll
   import: shared
   main-is: scroll.hs

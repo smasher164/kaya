@@ -81,7 +81,8 @@ for arg in "$@"; do
         panels_rust|panels_python|panels_go|panels_csharp|panels_java) SUITE="$arg" ;;
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
-        split_rust|listdetail_rust) SUITE="$arg" ;;
+        split_rust|split_python|split_go|split_csharp|split_java) SUITE="$arg" ;;
+        listdetail_rust|listdetail_python|listdetail_go|listdetail_csharp|listdetail_java) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
         a11y_rust|a11y_python|a11y_go|a11y_csharp|a11y_java) SUITE="$arg" ;;
@@ -167,7 +168,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -175,7 +176,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-split listdetail}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -979,16 +980,38 @@ case "$SUITE" in
         # the loop ran each of them a SECOND time — split_rust ran twice
         # per full matrix from the day it was wired until now.
         drain_suites
-        # The split scene: adaptive list-detail. Rust-only; the two
-        # panes are a TwoPaneView and resize_window drives the real
-        # size-class transition.
+        # The split scene: adaptive list-detail through TwoPaneView,
+        # with resize_window driving the real size-class transition.
+        # Every language this lane runs.
+        #
+        # TwoPaneView is a pri-adjacency control, like ProgressBar
+        # below: its template needs the XamlControlsResources merge,
+        # and ms-appx resolves against the PROCESS exe's directory. So
+        # the go and csharp launchers here take the progress shape (go
+        # builds into C:\kaya, csharp runs the cs-out apphost) rather
+        # than the plain one. Measured 2026-07-27: with the plain
+        # launchers both crashed at the first expect_split with
+        # 0xc000027b, a stowed XAML exception, while rust/python/java —
+        # which already have the pri beside their hosts — passed.
+        # Both blocks build the same split_go.exe, which is safe
+        # because drain_suites separates them.
         run_suite split_rust
+        run_suite split_python
+        run_suite split_go
+        run_suite split_csharp
+        run_suite split_java
         drain_suites
-        # The listdetail scene: the same guest, asserting list-detail's
+        # The listdetail scene: THE SAME GUESTS, asserting list-detail's
         # bare invariant at whatever width this VM's window manager
-        # gives. Shared verbatim with the phone lanes, where it is the
-        # only list-detail coverage there is.
+        # gives. One app, two scripts — a scene selects a SCRIPT, never
+        # an app, so each launcher here runs the split guest under the
+        # other name. Shared verbatim with the phone lanes, where it is
+        # the only list-detail coverage there is.
         run_suite listdetail_rust
+        run_suite listdetail_python
+        run_suite listdetail_go
+        run_suite listdetail_csharp
+        run_suite listdetail_java
         drain_suites
         # The menus scene — every language, each leg ALONE between
         # drains, never in the pool above. WinUI shortcut injection is

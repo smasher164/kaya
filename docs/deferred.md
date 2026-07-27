@@ -619,22 +619,46 @@ own the state (see the undo note in this file).
   scores a real invocation against the word inside another word — the
   first draft flagged "used" in a comment. Heredoc bodies are dropped
   from the scan, because the scanner itself lives in one.
-- **`split` and `listdetail` are rust-only, and the per-language
-  verdict is still owed** (2026-07-27). Nothing is BLOCKED at the WIRE
-  level: `list_detail` is generated from spec.rs, so every language's
-  `wire` layer has carried it since it landed. What is missing is a
-  scene PROVING each language's SUGAR drives it, and an example in each
-  language's folder — and the sugar is hand-written per language, which
-  is exactly where a gap could hide.
-  THE COST IS SEVEN FILES, NOT FOURTEEN, and the reason is worth
-  keeping: a scene selects a SCRIPT, never an app. `KAYA_SELFTEST` only
-  tells the harness which `.steps` file to read, so one guest per
-  language serves BOTH scenes — the runners already do exactly that for
-  Rust, where both legs run `examples/split`. The one assertion that
-  cannot be shared is the window title (one app has one title), which
-  is why `listdetail.steps` deliberately does not make it.
-  Invariant 2 wants an explicit do/can't/defer verdict per language;
-  there is no recorded verdict yet, and that absence is the actual gap.
+- ~~**`split` and `listdetail` are rust-only, and the per-language
+  verdict is still owed**~~ — SWEPT 2026-07-27. Seven new guests
+  (python, go, csharp, swift, ocaml, haskell, java), and the verdict
+  is DO for all seven: `split` joined SCENES on the three desktop
+  runners, `listdetail` rides the same guests on all five lanes, and
+  DEPTH_SCENES is empty everywhere.
+  SEVEN FILES, NOT FOURTEEN, because a scene selects a SCRIPT, never
+  an app: `KAYA_SELFTEST` only names the `.steps` file the harness
+  reads, so one guest per language serves both scenes. The one
+  assertion that could not be shared is the window title (one app has
+  one title), which is why `listdetail.steps` does not make it. Two
+  places assumed scene-name == guest-name and had to be taught
+  otherwise: the iOS swift loop now takes `scene:guest` entries
+  (`listdetail:split`), and the Windows launchers name the guest
+  explicitly.
+  THE SWEEP PAID FOR ITSELF TWICE, which is the argument this entry
+  previously got wrong — it reasoned these guests would "mostly
+  re-test the generator". They did not, because the SUGAR is not
+  generated:
+  - **Python could not declare list-detail at all.** `wire.py` is
+    generated from spec.rs and had `tx_set_window_list_detail`, but
+    `__init__.py` — the hand-written sugar every Python app uses —
+    never threaded the prop through `App.window()` or
+    `create_window()`. Fixed. Nothing in eight languages of Rust-only
+    scene coverage could have found this.
+  - **A list-detail window with an EMPTY stack had no title**, on all
+    three backends that build the pane pair themselves (SwiftUI, GTK,
+    WinUI): the split arm titled the window from the top entry and
+    fell back to the empty string. It read as correct for one reason —
+    the only guest running the scene was an example binary named
+    `split`, and the scene asserts the title `"split"`, so AppKit's
+    process-name fallback matched by coincidence. The Python port
+    reported `python3.14`. A NAMING COINCIDENCE HAD BEEN STANDING IN
+    FOR THE FEATURE.
+  Also learned: `TwoPaneView` is a pri-adjacency control like
+  `ProgressBar` (its template needs the XamlControlsResources merge),
+  so the Windows go/csharp launchers take the progress shape. With the
+  plain shape both crashed at the first `expect_split` with
+  0xc000027b, a stowed XAML exception.
+
 - Scene-run coverage, the remaining half: check-steps' wired() now
   demands per-runner LEG SIGNATURES (run $scene- / run "$proto"
   $scene- / run_suite ${scene}_), so a scene absent from a runner

@@ -5028,6 +5028,22 @@ struct KayaSplitRoot: View {
             // has one, so there is nothing to invent.
             if let top = scene.windows[windowId]?.entries.last {
                 KayaEntryRoot(entryId: top.id)
+            } else {
+                // THE WINDOW'S TITLE HANGS OFF THE DETAIL COLUMN. On
+                // macOS a NavigationSplitView titles its window from
+                // the DETAIL side; the sidebar's navigationTitle above
+                // names the sidebar column and nothing else. So with an
+                // empty stack there was no title at all, and AppKit
+                // substitutes the PROCESS NAME.
+                //
+                // That read as correct for one reason: the only guest
+                // running this scene was an example binary named
+                // `split`, and the scene asserts the title "split". The
+                // Python port of the same scene reported
+                // "python3.14" — a naming coincidence had been
+                // standing in for the feature (2026-07-27).
+                Color.clear
+                    .navigationTitle(scene.windows[windowId]?.title ?? "")
             }
         }
         .onAppear { record() }

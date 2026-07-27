@@ -676,6 +676,13 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         dev.kaya.milestone2kt/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
     # The commands scene through the JVM binding (see the compose leg).
+    # The listdetail scene through the JVM binding: the same
+    # guests/java/Split.java the desktop lanes run, on the tier that
+    # shares its sources.
+    run_apk listdetail-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity listdetail \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script listdetail)'"
     run_apk commands-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity commands \
