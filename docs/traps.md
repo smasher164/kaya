@@ -1514,3 +1514,35 @@ expectation-independent spellings that survive refactors, and an
 add_child for a For/When must land AFTER its
 template_end (inside the scope it reads as blueprint content and the
 scene rejects it).
+
+## ffmpeg in a `while read` loop eats the loop's input
+
+`grep … | while IFS= read -r line; do … ffmpeg …; done` — ffmpeg reads
+stdin when it has one, and the stdin it inherits inside that loop IS
+the pipe the loop is reading. It consumed whole transcript lines and
+the leading bytes of the next, so a step arrived as
+`AYA_HARNESS: +107ms expect_ax …` with the `K` gone.
+
+What made it survive for milestones is that a corrupted line still
+produces A still. The step-name parse fails to match, the offset falls
+back to 0, and the frame gets cut from the wrong moment in the film —
+but the file exists, and the gate counted FILES. The two eras failed
+differently and neither looked like corruption: the sed-era parse
+didn't match, stripped nothing, and sanitized the whole broken line
+into the filename (`step-12-AYA_HARNESS___107ms_expect_ax_radio…`,
+which reads as an odd name, not a bug); the python-era regex correctly
+refuses to match and yields an empty name (`step-07-.png`). Measured on
+one 185-leg recording run: 908 of 1790 stills affected, and the sed era
+also lost 38 steps outright.
+
+It is LOAD-DEPENDENT — zero occurrences with the extraction fan-out
+capped at 8, hundreds unbounded — so it hides completely when you
+reproduce a single leg by hand, which is exactly what you do when
+chasing it.
+
+Fixed two ways, deliberately. `-nostdin` is what ffmpeg ships for this
+and `tools/check-shell.sh` now requires it on every invocation. But
+the loop ALSO reads from fd 3 (`done 3< <(grep …)`), because -nostdin
+only fixes the command someone already thought about — the fd makes
+the loop immune to the next stdin-reader added inside it. Same shape
+to watch for with `ssh`, `adb`, `dotnet` and `java` in a read loop.

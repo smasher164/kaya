@@ -351,6 +351,88 @@ if [ -n "$badtool" ]; then
     status=1
 fi
 
+# ffmpeg READS STDIN when it has one, and it does not ask whose it is.
+# Inside `grep … | while read line; do … ffmpeg …; done` the stdin it
+# inherits IS the loop's input, so it ate transcript lines and the
+# leading bytes of the next one: a step arrived as "AYA_HARNESS: +107ms"
+# instead of "KAYA_HARNESS: …", its offset parsed as 0, and the still
+# was cut from the wrong moment in the film. Load-dependent — 908 of
+# 1790 stills in one 185-leg recording run, none at low concurrency —
+# and it survived because a corrupt line still yields A still: the
+# gate counted files, and the files were there.
+#
+# -nostdin is the fix ffmpeg ships for exactly this. The recording path
+# also reads its loop from fd 3 so the next stdin-reader is harmless,
+# but that is one loop remembering; this is the rule.
+badffmpeg=$(python3 - <<'PY'
+import pathlib
+import re
+
+CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*ffmpeg\b")
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
+def commands(text):
+    """Shell lines with continuations joined: -nostdin on the second
+    line of a wrapped invocation is still on the same command."""
+    delim, start, buf = None, None, []
+    for n, line in enumerate(text.splitlines(), 1):
+        if delim is not None:
+            if line.strip() == delim:
+                delim = None
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        if (m := HEREDOC.search(line)):
+            delim = m.group(1)
+        if start is None:
+            start = n
+        if line.endswith("\\"):
+            buf.append(line[:-1])
+            continue
+        buf.append(line)
+        yield start, " ".join(p.strip() for p in buf)
+        start, buf = None, []
+    if buf:
+        yield start, " ".join(p.strip() for p in buf)
+
+
+for f in sorted(pathlib.Path("tools").rglob("*.sh")):
+    for n, line in commands(f.read_text()):
+        if CMD.search(line) and "-nostdin" not in line:
+            print(f"{f}:{n}: ffmpeg without -nostdin — it will eat a read loop's input")
+PY
+) || true
+# Self-test: a bare invocation must be seen; -nostdin, a mention inside
+# a `command -v` probe, and the word in a list must not be.
+probe=$(python3 - <<'PY'
+import re
+CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*ffmpeg\b")
+
+
+def flagged(line):
+    return bool(CMD.search(line)) and "-nostdin" not in line
+
+
+bad = [flagged("ffmpeg -loglevel error -i in.mp4 out.png"),
+       flagged("cat x | ffmpeg -i - out.png"),
+       flagged("v=$(ffmpeg -i in.mp4 2>&1)")]
+good = [flagged("ffmpeg -nostdin -loglevel error -i in.mp4 out.png"),
+        flagged("command -v ffmpeg >/dev/null || exit 1"),
+        flagged("for tool in cargo ffmpeg python3; do :; done")]
+print(f"{sum(bad)}/{sum(good)}")
+PY
+)
+if [ "$probe" != "3/0" ]; then
+    echo "check-shell: self-test failed — ffmpeg scan scored $probe, want 3/0" >&2
+    status=1
+fi
+if [ -n "$badffmpeg" ]; then
+    echo "check-shell: ffmpeg without -nostdin (it steals a read loop's stdin):" >&2
+    echo "$badffmpeg" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

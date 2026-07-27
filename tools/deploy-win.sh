@@ -625,7 +625,7 @@ if stamps:
     out.append("duration 0.2")
 print("\n".join(out))' "$dir/frames.txt" >"$dir/concat.txt"
             # Tiled windows have odd content sizes; h264 wants even.
-            ffmpeg -loglevel error -f concat -safe 0 -i "$dir/concat.txt" \
+            ffmpeg -nostdin -loglevel error -f concat -safe 0 -i "$dir/concat.txt" \
                 -fps_mode vfr -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \
                 -pix_fmt yuv420p -c:v libx264 -preset ultrafast \
                 -y "$dir/video.mkv"

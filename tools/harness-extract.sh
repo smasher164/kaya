@@ -64,7 +64,7 @@ set -uo pipefail
 if [ "${1:-}" = --selftest ]; then
     T=$(mktemp -d)
     trap 'rm -rf "$T"' EXIT
-    ffmpeg -loglevel error \
+    ffmpeg -nostdin -loglevel error \
         -f lavfi -i "color=red:s=64x64:r=1:d=2" \
         -f lavfi -i "color=lime:s=64x64:r=1:d=2" \
         -f lavfi -i "color=blue:s=64x64:r=1:d=2" \
@@ -79,7 +79,7 @@ if [ "${1:-}" = --selftest ]; then
     "$0" "$T/v.mp4" "$T/leg.log" 1000 "$T/steps" >/dev/null \
         || { echo "harness-extract selftest: extraction failed"; exit 1; }
     dominant() { # r|g|b of a png's average pixel
-        ffmpeg -loglevel error -i "$1" -vf scale=1:1 -f rawvideo -pix_fmt rgb24 - 2>/dev/null \
+        ffmpeg -nostdin -loglevel error -i "$1" -vf scale=1:1 -f rawvideo -pix_fmt rgb24 - 2>/dev/null \
             | od -An -tu1 | python3 -c '
 import sys
 r, g, b = (int(v) for v in sys.stdin.read().split()[:3])
@@ -162,8 +162,15 @@ if [ "$LEAD_MS" -gt $((LAST_MS + 5000)) ] \
     exit 1
 fi
 
+# The transcript arrives on fd 3, NOT stdin. ffmpeg reads stdin when it
+# has one, and inside a `grep | while read` loop the stdin it inherits IS
+# the loop's input: it swallowed whole lines and the leading bytes of the
+# next one, so a step arrived as "AYA_HARNESS: +107ms ..." and its offset
+# parsed as 0 — the still was then cut from the wrong moment in the film.
+# -nostdin below fixes ffmpeg specifically; reading from fd 3 is what
+# makes the loop immune to the NEXT stdin-reading command someone adds.
 n=0
-grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT" | while IFS= read -r line; do
+while IFS= read -r line <&3; do
     n=$((n + 1))
     read -r offset step <<<"$(KAYA_LINE="$line" python3 -c '
 import os, re
@@ -192,13 +199,13 @@ earlier = [p for p in pts if p <= t]
 print("%.3f" % (earlier[-1] if earlier else (pts[0] if pts else 0.0)))' "$PTS")
     # Seek a hair early: -ss outputs the first frame at/after the
     # target, and float printing must not round past the frame.
-    ffmpeg -loglevel error \
+    ffmpeg -nostdin -loglevel error \
         -ss "$(python3 -c '
 import sys
 print("%.3f" % max(0.0, float(sys.argv[1]) - 0.005))' "$covering")" \
         -i "$VIDEO" -frames:v 1 ${CROP:+-vf "$CROP"} -y \
         "$OUT/$(printf 'step-%02d' "$n")-$step.png" 2>/dev/null || true
-done
+done 3< <(grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT")
 [ "$PTS" = "${KAYA_PTS_INDEX:-}" ] || rm -f "$PTS"
 
 count=$(find "$OUT" -name 'step-*.png' | wc -l | tr -d ' ')
