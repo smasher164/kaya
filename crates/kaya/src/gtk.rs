@@ -822,19 +822,67 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
                 });
             });
 
+            // THE BACK AFFORDANCE FOLLOWS THE COLLAPSE, and it has to be
+            // driven from here rather than set once below: `collapsed`
+            // is the BREAKPOINT's answer, and a breakpoint applies
+            // during allocation — at the moment this arm builds the
+            // view, nothing has been measured and `is_collapsed` is
+            // still false. This is the same shape WinUI needed for
+            // ModeChanged, for the same reason.
+            //
+            // Only the button's visibility, never the whole arm: this
+            // fires from inside layout, and re-running the arm here
+            // would build a fresh view whose own breakpoint applies and
+            // fires it again.
+            split.connect_collapsed_notify(move |view| {
+                let collapsed = view.is_collapsed();
+                // Deferred, like the handler above: this runs from
+                // GTK's layout, and CORE may be borrowed by the apply
+                // that caused it.
+                glib::idle_add_local_once(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return };
+                        let covers =
+                            core.nav_stacks.get(&window).is_some_and(|s| !s.is_empty());
+                        if let Some(back) = core.back_buttons.get(&window) {
+                            back.set_visible(collapsed && covers);
+                        }
+                    });
+                });
+            });
+
             set_window_content(core, window, Some(bin.upcast_ref::<gtk4::Widget>()));
             let title = top
                 .and_then(|id| core.nav_entries.get(&id))
                 .map(|e| e.title.clone())
                 .unwrap_or_default();
             target.set_title(Some(&title));
+            let collapsed = split.is_collapsed();
             core.split_views.insert(window, split);
-            // kaya's own header back button stays hidden for the whole
-            // list-detail presentation: collapsed, libadwaita draws its
-            // own inside the navigation view, and two back buttons in
-            // one header is not a thing any GNOME app ships.
+            // THE SAME RULE THE SERIAL ARM FOLLOWS: a back button
+            // exactly where back reveals something. Two panes reveal
+            // nothing, so it is absent there — that IS the two-pane
+            // rule, and the harness's `back` refuses a hidden button
+            // like any other.
+            //
+            // This used to hide the button for the whole presentation,
+            // on the belief that libadwaita draws its own once
+            // collapsed. IT DOES NOT: libadwaita draws that button
+            // inside a header bar IT owns (an AdwHeaderBar in the page,
+            // normally via AdwToolbarView), and these pages carry the
+            // raw scene root. So a collapsed window had no back
+            // affordance at all while `back` popped anyway — the
+            // harness driving something the screen did not have, which
+            // is exactly what the two-pane rule forbids in the other
+            // direction. Caught by screenshotting the collapsed window;
+            // no lane could see it, because no assertion reads whether
+            // an affordance is THERE (docs/deferred.md).
+            //
+            // Best-effort here and authoritative in the notify handler
+            // above: nothing is measured yet at build time, so this is
+            // false on a first build and the breakpoint corrects it.
             if let Some(back) = core.back_buttons.get(&window) {
-                back.set_visible(false);
+                back.set_visible(collapsed && top.is_some());
             }
             return;
         }
@@ -4123,25 +4171,18 @@ impl crate::harness::Stage for GtkStage {
             // a pointer press does. Deferred one idle tick: the
             // handler re-borrows CORE, which this closure holds.
             //
-            // A list-detail window's back affordance belongs to
-            // libadwaita, not to kaya's header. Collapsed, its
-            // navigation view draws the button and `navigation.pop` is
-            // exactly what pressing it does; expanded, it draws none, so
-            // there is nothing to drive and back does nothing. That is
-            // the two-pane rule, expressed as the widget's own state
-            // rather than a flag kaya keeps beside it.
-            if let Some(split) = core.split_views.get(&window).cloned() {
-                if split.is_collapsed() {
-                    glib::idle_add_local_once(move || {
-                        let _ = gtk4::prelude::WidgetExt::activate_action(
-                            &split,
-                            "navigation.pop",
-                            None,
-                        );
-                    });
-                }
-                return;
-            }
+            // ONE PATH, list-detail included. This used to special-case
+            // a split window by activating `navigation.pop` on the view
+            // directly, on the belief that libadwaita's own back button
+            // was the affordance being driven. There was no such button
+            // (see refresh_nav), so the harness popped a collapsed
+            // window that showed nothing to press — the verb inventing
+            // an affordance, which is the failure the check below
+            // exists to prevent. The split arm now shows kaya's button
+            // when collapsed, so this path covers both arms and the
+            // two-pane rule falls out of the SAME visibility test:
+            // two panes, no button, nothing to drive.
+            //
             // A HIDDEN button is not an affordance. emit_clicked runs
             // the handler regardless of visibility, so without this the
             // harness could pop where a user has no button to press,

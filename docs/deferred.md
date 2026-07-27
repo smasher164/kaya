@@ -124,33 +124,38 @@ own the state (see the undo note in this file).
   `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
   what proved the laziness and will be wanted again.
 
-- **GTK's collapsed list-detail pane has NO back affordance, and back
-  pops anyway** (2026-07-27, found by screenshotting the collapsed
-  window; the lane is green and cannot see it). `refresh_nav`'s split
-  arm hides kaya's own header back button for the WHOLE list-detail
-  presentation, on the stated belief that "collapsed, libadwaita draws
-  its own inside the navigation view". It does not. libadwaita draws
-  that button only inside a header bar IT owns — an `AdwHeaderBar` in
-  the page, normally via `AdwToolbarView` — and kaya's
-  `AdwNavigationPage`s wrap the raw scene root, so nothing draws one.
-  The harness's `back` then activates `navigation.pop` on the split
-  view directly, without consulting any affordance, so it pops where
-  the user has no button to press.
-  THIS IS THE COMPOSE DIVERGENCE, MIRRORED. That one popped past a
-  DISABLED BackHandler; this one pops past an ABSENT button. Decision 2
-  of the milestone covers both: the rule must be real behaviour, and
-  the verb must refuse to drive an affordance that is not there. macOS
-  draws a chevron collapsed and Windows restores its back bar
-  collapsed — GTK is the only one of the three that draws nothing,
-  which is what makes it a bug rather than a platform difference.
-  THE REPAIR, and why it is not a one-liner: the split arm must set the
-  back button visible IFF collapsed and the stack is non-empty, and
-  `back` must go back to requiring a visible button (deleting the
-  split-view special case). Visibility then has to be re-driven when
-  the breakpoint flips, which needs a `notify::collapsed` handler —
-  the exact shape WinUI already needed for `ModeChanged`, and for the
-  same reason: the collapse settles during layout, not at the write
-  that caused it.
+- ~~**GTK's collapsed list-detail pane has NO back affordance, and back
+  pops anyway**~~ — FOUND AND FIXED 2026-07-27, by screenshotting the
+  collapsed window. The split arm hid kaya's own header back button for
+  the WHOLE presentation, on the stated belief that "collapsed,
+  libadwaita draws its own inside the navigation view". It does not:
+  libadwaita draws that button only inside a header bar IT owns (an
+  `AdwHeaderBar` in the page, normally via `AdwToolbarView`), and
+  kaya's `AdwNavigationPage`s wrap the raw scene root. `back` then
+  activated `navigation.pop` on the split view directly, consulting no
+  affordance, so it popped where the user had no button to press —
+  the Compose divergence mirrored (that one popped past a DISABLED
+  BackHandler, this one past an ABSENT button), and the same decision
+  covers both.
+  THE FIX: the split arm shows the button exactly when collapsed and
+  the stack is non-empty, `back`'s split-view special case is gone so
+  ONE path serves both arms, and a `notify::collapsed` handler
+  re-drives visibility when the breakpoint flips — the shape WinUI
+  needed for `ModeChanged`, for the same reason (the collapse settles
+  during layout, not at the write that caused it). The two-pane rule
+  now falls out of the same visibility test as everything else: two
+  panes, no button, nothing to drive.
+  WHAT MADE IT INVISIBLE, and the guard still owed: no verb asserts
+  that an affordance is THERE. `split.steps` drove `back` at 360 and
+  passed the whole time, because the verb was reaching past the screen
+  to the widget. It now depends on the real button, so that assertion
+  gates the affordance's presence — negative-tested: hide the button
+  and the scene fails with `entries 1, wanted 0`. But that is a
+  coincidence of this scene, not a rule. FOUR backends now implement
+  "refuse where the affordance is absent" four times; an
+  affordance-presence assertion (the `expect_ax` precedent — read the
+  real tree, not a flag) would make it one. That is a protocol change,
+  so it is filed rather than done.
 
 - ~~**The phone lanes have no list-detail coverage**~~ — LANDED
   2026-07-27. The `listdetail` scene is the `split` scene's phone-safe
