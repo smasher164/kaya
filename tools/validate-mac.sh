@@ -55,7 +55,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES="split"
+DEPTH_SCENES="split listdetail"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -738,6 +738,17 @@ KAYA_SELFTEST_SCRIPT="$(scene_script split)"
 # decides; resize_window drives the transition for real so the far side
 # is re-asserted.
 run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split
+
+# The listdetail scene: the SAME guest, asserting list-detail's bare
+# invariant at whatever width the host gives. Desktop-redundant on this
+# lane — the scene above already drives both arms here — and carried
+# anyway because the file is shared verbatim with the phone lanes,
+# where it is the only list-detail coverage there is. A scene that runs
+# in four lanes and not the fifth is how the shared-script contract
+# rots.
+KAYA_SELFTEST_SCRIPT="$(scene_script listdetail)"
+run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail \
+    target/debug/examples/listdetail
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

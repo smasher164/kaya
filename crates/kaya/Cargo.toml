@@ -160,6 +160,10 @@ name = "split"
 path = "../../guests/rust/split.rs"
 
 [[example]]
+name = "listdetail"
+path = "../../guests/rust/listdetail.rs"
+
+[[example]]
 name = "scroll"
 path = "../../guests/rust/scroll.rs"
 

@@ -6,6 +6,17 @@
 # they never collide with the host's target directory.
 set -uo pipefail
 
+# INSIDE THE CONTAINER ONLY. Run on the host this used to die on a bare
+# `cd: /work: No such file or directory`, which names neither the cause
+# nor the fix — and this is the one lane whose entry point is not the
+# script that does the work, so reaching for it directly is the easy
+# mistake to make. Every other runner is its own entry point.
+if [ ! -d /work ]; then
+    echo "$0: this runs INSIDE the linux container, where the repo is" \
+        "mounted at /work. From the host use: nix develop -c" \
+        "tools/validate-linux.sh (it builds the image and runs this)." >&2
+    exit 1
+fi
 cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
 # harness-extract.sh (recording mode) refuses to run outside the dev
@@ -30,7 +41,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES="split"
+DEPTH_SCENES="split listdetail"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -479,6 +490,12 @@ for proto in x11 wayland; do
     # wrapper stands up.
     run "$proto" split-rust env KAYA_SELFTEST=split \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
+    # The listdetail scene: the same guest, asserting the bare
+    # invariant at whatever width this lane's window manager hands it.
+    # Through a11y-leg.sh for the same reason the leg above is: its one
+    # real-tree assertion is an AT-SPI read.
+    run "$proto" listdetail-rust env KAYA_SELFTEST=listdetail \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/listdetail"
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
     run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav

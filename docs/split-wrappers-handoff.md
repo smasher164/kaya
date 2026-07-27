@@ -4,6 +4,14 @@ Written 2026-07-27, at the end of a long session. Two of the three
 wrapper swaps are done, matrix-verified, and COMMITTED; the tree is
 clean. The Android half is not done, and is what this document is for.
 
+> **CLOSED 2026-07-27, later the same day.** Everything under "What
+> remains" is done and matrix-verified; see the What landed section at
+> the bottom. This file is kept only for the two reference sections —
+> the measured libadwaita facts and the traps — and ONE of those traps
+> (the container linker OOM) is in docs/traps.md. The rest still want
+> folding in there, which is where traps live; this file can go once
+> they are.
+
 ## The one-line task
 
 Finish Android: replace the Compose split arm's hand-built `Row` with
@@ -61,7 +69,7 @@ verifiable. Do the coverage first.
   deciding semantics alone), the dependency, and the threshold change.
 - Scene rewritten, band guard added, both negative-tested.
 
-## What remains
+## What remained (both done — see What landed)
 
 1. **Phone-lane split coverage. Do this first.** The `split` scene is
    desktop-only because it drives `resize_window`, which a phone cannot
@@ -150,33 +158,58 @@ nix develop -c tools/check-gtk.sh          # needs docker; check-targets cannot 
 nix develop -c tools/validate-all.sh       # all five lanes, ~170s warm
 ```
 
-Last known good: 724 legs (mac 185, linux 342, windows 117, ios 38,
-android 42), plus the android lane green again after the threshold
-change.
+Last known good: 731 legs (mac 186, linux 344, windows 117, ios 40,
+android 44). (It was 724 when this was written; the seven new legs are
+listdetail on five lanes plus a second device on each phone lane, and
+Windows is unchanged because a duplicate depth leg went away as one
+arrived.)
 
-## Prompt for a fresh session
+## What landed (2026-07-27)
 
-> Read docs/split-wrappers-handoff.md first; it has the ratified
-> decisions and the traps. What it describes as done is already
-> committed and the tree is clean, so you are starting fresh work rather
-> than picking up a half-applied change.
->
-> Finish the Android half of the adaptive list-detail milestone, in two
-> steps and in this order.
->
-> First, add phone-lane coverage for list-detail. The existing
-> `split` scene is desktop-only because it drives `resize_window`, so
-> the Compose arm is currently untested on any lane. Add a phone-safe
-> sibling scene that asserts the bare `expect_split` invariant (no
-> literal, no resize) and register it in all five runners, since
-> check-steps requires every scene in tools/scenes/ to have live legs
-> everywhere. Get the matrix green.
->
-> Then replace the Compose split arm's hand-built `Row` with
-> `ListDetailPaneScaffold`, supplying the scaffold state yourself rather
-> than using the navigator, and make the split observation read the
-> scaffold's own arrangement instead of a value the arm stamped about
-> itself. The API details you will need are in the handoff; they cost
-> three compile rounds to find.
->
-> Do not commit or push without my explicit approval of the message.
+Both items above, in that order.
+
+- **The `listdetail` scene**, the phone-safe sibling: no resize, no
+  literal, the bare `expect_split` plus one `expect_ax` on the detail
+  pane (the read that proves something rendered on every lane). It runs
+  the SAME guest as `split` — split.rs grew `app_titled`, and
+  listdetail.rs is a five-line example over it — because the claim both
+  scenes make is that nothing in the guest changes with the form factor.
+- **A device per size class on both phone lanes.** iOS already had the
+  iPad; Android now has a 1280dp `medium_tablet` beside its 320dp pool.
+  Those legs are the ONLY ones in any lane that reach the SwiftUI and
+  Compose split arms — on a compact host the invariant is vacuous. Each
+  appends the literal the shared file may not carry, and the Android one
+  also appends the back rule.
+- **The band rule now distinguishes the two forms.** A literal still
+  needs a preceding `resize_window` outside 400..840; the bare form may
+  run at a width the file never names, which is what makes it runnable
+  on a host that cannot resize. A named width still has to clear the
+  band either way. Four self-tests, both directions.
+  The device side of that rule is enforced in run-emulator: each
+  device's dp is asserted outside the band before any leg runs. The
+  same tablet rotated to portrait is 800dp — measured, not assumed —
+  and would fail the invariant for a reason that is not a bug.
+- **`ListDetailPaneScaffold`**, entered on the app's declaration alone:
+  the ARM is no longer gated on a width kaya picked, because the
+  scaffold is what collapses. It is handed a `ThreePaneScaffoldValue`
+  computed from Material's directive and ONE stack fact (is a detail
+  open), which is how it is driven without adaptive-navigation.
+  `expect_split` reads that value's per-role adapted values.
+  `expandedCount` would say it in one word but is internal in 1.0.0, so
+  the two roles are named.
+- **A back-rule divergence the tablet leg immediately exposed.** The
+  Compose `back` verb called `kayaUserBack()` unconditionally, so it
+  popped on a two-pane window where the real gesture — a disabled
+  BackHandler — would not. Decision 2 says the verb must refuse; it
+  now does. Nothing had run Compose's split arm, so nothing had seen it.
+- **A duplicate Windows leg, removed.** deploy-win ran each depth scene
+  twice: once from a literal `run_suite` (which check-steps requires)
+  and again from a loop that generated the same launcher on the fly.
+  Two gates make that generator unreachable, so it is gone and the
+  depth legs are named one by one.
+
+Matrix after: 731 legs (mac 186, linux 344, windows 117, ios 40,
+android 44). Both new gates negative-tested: forcing the directive to
+one partition fails the tablet leg on all four of its claims, and
+restoring the unconditional `back` fails it on the back claim alone
+while nav-compose stays green.

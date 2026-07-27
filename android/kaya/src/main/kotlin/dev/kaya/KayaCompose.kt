@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,6 +33,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
+// Material 3 adaptive: Android's OWN list-detail container and the
+// arrangement it lays out from. Imported rather than written out
+// inline because the swap touches a dozen of these names, and two of
+// them do not live where they read like they should:
+// calculatePaneScaffoldDirective is in `.layout`, not in `.adaptive`
+// beside currentWindowAdaptiveInfo.
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldDefaults
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
+import androidx.compose.material3.adaptive.layout.PaneAdaptedValue
+import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldDestinationItem
+import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
+import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
+import androidx.compose.material3.adaptive.layout.calculateThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1683,7 +1700,32 @@ object KayaCompose {
                         // BackHandler's body), so interception and the
                         // post-fact reconcile fire exactly as a real
                         // gesture. Silent, like click.
-                        onUi(activity) { kayaUserBack() }
+                        //
+                        // AND ONLY WHERE IT WOULD RUN. With both panes
+                        // on screen the BackHandler is DISABLED and the
+                        // gesture goes to the system, so nothing in
+                        // kaya pops; calling kayaUserBack regardless
+                        // pops a detail that covers nothing and blanks
+                        // the trailing pane. Until this leg reached a
+                        // 1280dp device, no lane ran Compose's split
+                        // arm, so the verb and the real gesture had
+                        // been disagreeing unobserved.
+                        //
+                        // Keyed on the SCAFFOLD ARRANGEMENT rather than
+                        // on the handler's `enabled` expression, which
+                        // would be the more literal mirror: `enabled`
+                        // is computed during composition, this verb
+                        // posts straight to the UI thread, and a read
+                        // taken between a push and its recomposition
+                        // would see the pre-push value and refuse a pop
+                        // it owed. This spelling has the same truth
+                        // value — the arrangement IS the disabling
+                        // condition, and the empty-stack half is
+                        // kayaUserBack's own early return — and its
+                        // stale value is the harmless one.
+                        onUi(activity) {
+                            if (KayaSceneModel.splitPresentation != "split") kayaUserBack()
+                        }
                     }
                     "expect_grid_columns" -> {
                         val want = parts[2].toInt()
@@ -2801,25 +2843,83 @@ fun KayaRoot() {
     }
 }
 
+/** How many panes this window may show side by side, and how wide they
+ * may be: MATERIAL'S answer, from the real window.
+ *
+ * kaya does not draw the one-pane/two-pane line and no prop moves it —
+ * the app declares list_detail and the platform decides presentation.
+ * The standard directive grants a second horizontal partition at
+ * 840dp, so 840dp is Android's threshold, chosen by Android. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+internal fun kayaPaneDirective(): PaneScaffoldDirective =
+    calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+
+/** The pane arrangement [ListDetailPaneScaffold] lays out from: which
+ * roles are expanded and which are hidden.
+ *
+ * SUPPLIED, NOT OWNED, which is why adaptive-navigation is deliberately
+ * not a dependency: its navigator would hold a destination history, and
+ * kaya's core owns the stack (DESIGN.md, Navigation). The wrapper is
+ * told the ONE fact it needs — is a detail open — and nothing else, so
+ * the guest's pop and the widget's pop cannot become two truths.
+ *
+ * Everything past that fact is Material's: the directive is Material's
+ * reading of the window, the adapt strategies are the list-detail
+ * defaults, and which panes survive is `calculateThreePaneScaffoldValue`'s
+ * call. That is what makes reading this back an observation rather than
+ * an echo. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaScaffoldValue(directive: PaneScaffoldDirective): ThreePaneScaffoldValue =
+    calculateThreePaneScaffoldValue(
+        directive.maxHorizontalPartitions,
+        ListDetailPaneScaffoldDefaults.adaptStrategies(),
+        ThreePaneScaffoldDestinationItem<Nothing>(
+            if (KayaSceneModel.navEntries.isEmpty()) {
+                ListDetailPaneScaffoldRole.List
+            } else {
+                ListDetailPaneScaffoldRole.Detail
+            }
+        ),
+    )
+
+/** Is the scaffold showing BOTH list-detail panes: the arrangement
+ * question, asked of the arrangement.
+ *
+ * Named role by role rather than counted, because "both panes are on
+ * screen" is exactly what the two roles say — and `expandedCount`,
+ * which would say it in one word, is internal to the library in
+ * 1.0.0. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaBothPanesExpanded(value: ThreePaneScaffoldValue): Boolean =
+    value[ListDetailPaneScaffoldRole.List] == PaneAdaptedValue.Expanded &&
+        value[ListDetailPaneScaffoldRole.Detail] == PaneAdaptedValue.Expanded
+
 /** Whether this window is presenting its entry stack as list-detail
  * right now, meaning both panes are on screen.
  *
  * ONE source, read by the arm that renders and by the back rule that
  * depends on it. Two copies of this condition drift, and the drift is
  * invisible: the arm would show two panes while back still popped, or
- * the reverse, and each half would look correct on its own. */
-@OptIn(androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi::class)
+ * the reverse, and each half would look correct on its own.
+ *
+ * Compose's own `canNavigateBack` is false in exactly this state —
+ * back reveals what the top entry covers, and here it covers nothing —
+ * and disabling the BackHandler is how that rule is spelled here. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun kayaSplitArm(value: ThreePaneScaffoldValue): Boolean =
+    KayaSceneModel.listDetail && kayaBothPanesExpanded(value)
+
+/** The same question asked where only the window is in hand. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
-internal fun kayaSplitArm(): Boolean =
-    KayaSceneModel.listDetail &&
-        androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective(
-            androidx.compose.material3.adaptive.currentWindowAdaptiveInfo()
-        ).maxHorizontalPartitions > 1
+internal fun kayaSplitArm(): Boolean = kayaSplitArm(kayaScaffoldValue(kayaPaneDirective()))
 
 /** The one scene surface (sections scaffold | nav top | mounted root),
  * exactly the pre-menus KayaRoot body: the menus top bar stacks ABOVE
  * this so a catalog never disturbs the measured offer the layout
  * observations read. */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 private fun KayaSurface() {
     // Normalized default: the root is pinned to the top-leading corner,
@@ -2844,41 +2944,56 @@ private fun KayaSurface() {
             KayaSectionsScaffold(activeSection)
         } else {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
-        // ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves: the app asked,
-        // and the window IS regular — the same 600dp boundary the other
-        // backends draw, read from the real configuration.
+        // ADAPTIVE LIST-DETAIL (DESIGN.md): Android's OWN container,
+        // ListDetailPaneScaffold, entered on the app's declaration
+        // alone. WHETHER it shows one pane or two is the scaffold's
+        // call, not a branch here — that is what "each platform decides
+        // where one pane becomes two" means, and it is why the arm is
+        // no longer gated on a width kaya picked.
         //
-        // A plain Row rather than material3-adaptive's
-        // ListDetailPaneScaffold: that artifact is the idiomatic
-        // wrapper and would be the better dressing, but it is a new
-        // androidx dependency and the semantic is expressible without
-        // one. Same call GTK made with Box over AdwNavigationSplitView;
-        // both are ledger items, neither is a blocker.
+        // It also buys what the hand-built Row could not: the platform's
+        // own pane proportions and spacing, and the collapse/expand
+        // ANIMATION between them. The 25%-clamped-to-180..280dp leading
+        // width this arm used to compute is gone with it — that number
+        // was libadwaita's default, borrowed because nothing here knew
+        // Material's.
+        //
         // No `topEntry != null` requirement: an empty stack on a regular
         // window shows the leading pane and an EMPTY trailing one, the
         // same rule GTK and mac follow. Requiring an entry here reported
         // `stacked` where they report `split` for one scene, which is a
-        // semantics divergence rather than a backend's call. It went
-        // unseen because no phone lane runs the split scene yet.
-        val splitHere = kayaSplitArm()
-        if (splitHere) {
-            KayaSceneModel.splitPresentation = "split"
-            // The leading pane is SIZED and the detail takes the rest;
-            // two equal weights would split the window down the middle,
-            // which no platform does. Same rule and same numbers as the
-            // other backends (protocol::leading_pane_width): 25% of the
-            // width, clamped to 180..280dp, adopted from libadwaita's
-            // stated defaults rather than invented here.
-            val totalDp = LocalConfiguration.current.screenWidthDp
-            val leadDp = (totalDp * 0.25f).coerceIn(180f, 280f).coerceAtMost(totalDp.toFloat())
-            Row {
-                Box(Modifier.width(leadDp.dp)) {
-                    KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
-                }
-                Box(Modifier.weight(1f)) {
-                    topEntry?.root?.let { KayaRender(it, isRoot = true) }
-                }
-            }
+        // semantics divergence rather than a backend's call.
+        if (KayaSceneModel.listDetail) {
+            val directive = kayaPaneDirective()
+            val scaffoldValue = kayaScaffoldValue(directive)
+            // THE SCAFFOLD'S OWN ARRANGEMENT, not a value the arm
+            // stamped about itself. The old spelling wrote "split"
+            // inside the branch that had just tested for it, so the
+            // observation restated the condition and agreed with the
+            // lowering by construction; this reports how many panes
+            // Material resolved, for BOTH outcomes, from the one value
+            // the scaffold below is laid out from. GTK reads
+            // is_collapsed and Windows reads TwoPaneView's Mode for
+            // exactly this reason.
+            KayaSceneModel.splitPresentation =
+                if (kayaBothPanesExpanded(scaffoldValue)) "split" else "stacked"
+            ListDetailPaneScaffold(
+                directive = directive,
+                value = scaffoldValue,
+                // AnimatedPane is what carries the motion; the panes
+                // are otherwise the same two roots as before — the
+                // mounted root leads, the stack's top is the detail.
+                listPane = {
+                    AnimatedPane {
+                        KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
+                    }
+                },
+                detailPane = {
+                    AnimatedPane {
+                        topEntry?.root?.let { KayaRender(it, isRoot = true) }
+                    }
+                },
+            )
         } else if (topEntry != null) {
             // The serial arm stamps too: an observation only one arm
             // writes is derived-by-default in the other.

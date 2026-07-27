@@ -7,10 +7,9 @@
 # The split scene is desktop-only BY DESIGN and deliberately not a leg
 # here: it drives resize_window, and a phone or tablet host does not
 # command its own window size (the system owns surfaces; DESIGN.md,
-# Windows). The list-detail ARM itself is live on this backend — an
-# iPad is a regular window and renders the split — so what is missing
-# is a phone-safe scene that asserts the bare invariant without
-# resizing, not the lowering. See docs/deferred.md.
+# Windows). Its phone-safe sibling `listdetail` covers this backend
+# instead — the bare invariant, on a phone AND on the iPad, which is
+# where the split arm is observable at all.
 # The panels scene is desktop-only BY DESIGN and deliberately not a
 # leg here: create_window is capability-rejected on this host (no
 # KAYA_CAP_AUX_WINDOWS — the system owns surfaces; DESIGN.md,
@@ -866,6 +865,26 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # regular/overflow. Either way this fails loudly.
     queue_pad_leg run_swiftui_on menus-swiftui-pad "$APP" dev.kaya.menusswiftui \
         menus-swiftui-pad menus menus 'expect_menu_presentation "regular/bar"'
+
+    # The listdetail scene, the DEPTH slice: list-detail's bare
+    # invariant, which is the only form of it this host can run — the
+    # `split` scene drives resize_window, and a phone or tablet does
+    # not command its own window size (DESIGN.md, Windows). Until this
+    # leg the SwiftUI list-detail arm was exercised on macOS only.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example listdetail
+    APP=$(make_bundle listdetailrs-swiftui dev.kaya.listdetailswiftui "$TARGET_DIR/examples/listdetail")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on listdetail-swiftui "$APP" dev.kaya.listdetailswiftui \
+        listdetail-swiftui listdetail listdetail
+    # The same bundle and the same scene on the iPad, and the reason
+    # this scene exists. The phone above is ALWAYS compact, so its
+    # invariant is vacuous there — it can only report that the stacked
+    # arm ran. This device is regular, so the invariant bites: with the
+    # detail pushed, one pane on screen is a failure. The extra step
+    # appends the literal the shared file may not carry, which is what
+    # turns "did not violate the invariant" into "the split arm ran".
+    queue_pad_leg run_swiftui_on listdetail-swiftui-pad "$APP" dev.kaya.listdetailswiftui \
+        listdetail-swiftui-pad listdetail listdetail 'expect_split "regular/split"'
 
     # The commands scene, the DEPTH slice (rust only until the sweep):
     # the chords run through the interpreter's one dispatch table, and

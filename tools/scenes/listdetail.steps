@@ -1,0 +1,48 @@
+# The listdetail scene: adaptive list-detail's INVARIANT, asserted at
+# whatever width the host hands it (DESIGN.md, Adaptive list-detail).
+#
+# The sibling of `split`, and its opposite in exactly one respect.
+# `split` drives the size class with real resizes and names the
+# presentation on each side; a phone or tablet cannot do that at all,
+# because the system owns those surfaces (DESIGN.md, Windows). So the
+# one scene that gates list-detail was desktop-only, and the two phone
+# backends' list-detail arms ran in no lane at all — a wrong Compose or
+# SwiftUI arrangement compiled and passed everything.
+#
+# This file therefore never resizes and never names a presentation. It
+# carries the BARE `expect_split`, which asserts the asymmetric
+# invariant — a regular window must not show ONE pane while its stack
+# holds two — rather than comparing a literal. That claim is true at
+# every width a lane can hand it, so the same bytes run on a 320dp
+# phone, a 1280dp tablet, and a desktop window nobody sized. It is also
+# the reason there is no `back` here: whether back pops is the arm's
+# answer, so it differs by width, and this file may only say things
+# that are true at all of them.
+#
+# WHAT EACH LANE GETS. On a compact host the invariant is vacuous and
+# the leg rests on the model reads and the real-tree read at the end.
+# On a regular host — the iPad, the tablet emulator, a desktop window —
+# it bites: the split arm has to have run AND to have said so through
+# the platform's own component. Picking a device outside the 400..840
+# band is the LANE's job, the same rule check-steps enforces on a
+# resize (a portrait medium_tablet is 800dp, squarely inside it).
+expect_entries 0
+expect_title "listdetail"
+expect_split
+# Push the detail. WHERE it lands is the platform's answer — beside the
+# list on a regular window, covering it on a compact one — and neither
+# is asserted. Both must satisfy the invariant.
+click button#0
+expect_entries 1
+expect label#0 "list pane"
+expect label#last "detail pane"
+# THE CLAIM THAT MATTERS, and the one the line above cannot make: with
+# an entry on the stack, a regular window owes two panes.
+expect_split
+# The detail pane is on screen in BOTH arms — the trailing pane on a
+# regular window, the covering one on a compact window — so this is the
+# one assertion here that reads a REAL tree on every lane. `expect
+# label#last` above reads kaya's own model and passes for an arm that
+# ran and drew nothing, which is the exact gap that let a
+# non-rendering split arm look green.
+expect_ax label#last "label/detail pane"

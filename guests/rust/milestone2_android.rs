@@ -85,6 +85,11 @@ fn app(ctx: kaya::AppCtx) {
         // affordance; nav runs here for real.
         Ok("nav") => nav::app(ctx),
         Ok("split") => split::app(ctx),
+        // The same app under the other list-detail script. `split`
+        // drives resizes this host cannot perform; `listdetail` asserts
+        // the bare invariant at the width the DEVICE picked, which is
+        // how the emulator legs reach this arm at all.
+        Ok("listdetail") => split::app_titled(ctx, "listdetail"),
         Ok("scroll") => scroll::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),

@@ -124,48 +124,72 @@ own the state (see the undo note in this file).
   `KAYA_MENU_TRACE=1` is left in the interpreter, env-gated — it is
   what proved the laziness and will be wanted again.
 
-- **The phone lanes have no list-detail coverage** (2026-07-26). The
-  `split` scene is desktop-only because it drives `resize_window`, and
-  a phone or tablet host does not command its own window size. But the
-  ARM is live on both phone backends — an iPad is a regular window and
-  renders the split; a Compose regular window does too — so what is
-  missing is a scene, not a lowering. A phone-safe sibling asserting
-  the BARE `expect_split` invariant (a regular window must not show one
-  pane while its stack holds two) would run everywhere and cover them,
-  because that spelling is lane-independent by construction; it just
-  cannot gate the TRANSITION, which is what resize_window is for. Worth
-  doing when the language sweep moves `split` out of the depth tier.
+- **GTK's collapsed list-detail pane has NO back affordance, and back
+  pops anyway** (2026-07-27, found by screenshotting the collapsed
+  window; the lane is green and cannot see it). `refresh_nav`'s split
+  arm hides kaya's own header back button for the WHOLE list-detail
+  presentation, on the stated belief that "collapsed, libadwaita draws
+  its own inside the navigation view". It does not. libadwaita draws
+  that button only inside a header bar IT owns — an `AdwHeaderBar` in
+  the page, normally via `AdwToolbarView` — and kaya's
+  `AdwNavigationPage`s wrap the raw scene root, so nothing draws one.
+  The harness's `back` then activates `navigation.pop` on the split
+  view directly, without consulting any affordance, so it pops where
+  the user has no button to press.
+  THIS IS THE COMPOSE DIVERGENCE, MIRRORED. That one popped past a
+  DISABLED BackHandler; this one pops past an ABSENT button. Decision 2
+  of the milestone covers both: the rule must be real behaviour, and
+  the verb must refuse to drive an affordance that is not there. macOS
+  draws a chevron collapsed and Windows restores its back bar
+  collapsed — GTK is the only one of the three that draws nothing,
+  which is what makes it a bug rather than a platform difference.
+  THE REPAIR, and why it is not a one-liner: the split arm must set the
+  back button visible IFF collapsed and the stack is non-empty, and
+  `back` must go back to requiring a visible button (deleting the
+  split-view special case). Visibility then has to be re-driven when
+  the breakpoint flips, which needs a `notify::collapsed` handler —
+  the exact shape WinUI already needed for `ModeChanged`, and for the
+  same reason: the collapse settles during layout, not at the write
+  that caused it.
 
-- **The list-detail arms use PLAIN containers, not the platforms'
-  adaptive wrappers** (2026-07-26). Three of the four backends lower
-  list-detail to a plain two-child container — GTK a `Box` (not
-  `GtkPaned`: that is the DRAGGABLE splitter DESIGN excludes by name),
-  Compose a `Row`, WinUI a two-star-column `Grid`. Only SwiftUI uses
-  the idiomatic thing (`NavigationSplitView`), because it is already in
-  the framework. The others each want a NEW DEPENDENCY:
-  `AdwNavigationSplitView` (libadwaita), `ListDetailPaneScaffold`
-  (androidx.compose.material3.adaptive), `TwoPaneView` (WinUI).
-  THE ANSWER IS THE WRAPPER, AND IT IS NEVER APP-CONFIGURABLE. A knob
-  choosing the container would leak kaya's implementation into the app
-  surface and contradict the whole premise — the app declares
-  `list_detail`, the platform decides presentation, which is the same
-  reason there is no prop for WHICH way it presents.
-  WHAT THE PLAIN CONTAINER ACTUALLY COSTS, stated so nobody mistakes
-  the green gate for parity: the wrappers carry the collapse/expand
-  ANIMATION, the platform's own pane proportions and separators, and
-  the focus/back behavior on collapse. `expect_split` asserts STRUCTURE
-  — which arm rendered — and none of those. So the arms are correct
-  and under-dressed, exactly the gap the dressed-floor phase existed to
-  close for widgets.
-  THE INTEGRATION SUBTLETY, which is why this is not a pure
-  dependency-add: all three wrappers are NAVIGATION-AWARE and want to
-  own stack state (Adw's is literally a navigation view; the Compose
-  scaffold carries its own navigator). kaya's stack is CORE-OWNED by
-  ratified design — back-sovereignty forces it. So adopting them means
-  driving the wrapper FROM the core stack and refusing to let it hold
-  the truth, the same discipline every backend already applies to
-  NavigationStack/GtkStack. Do that wrong and the guest's pop and the
-  wrapper's pop disagree.
+- ~~**The phone lanes have no list-detail coverage**~~ — LANDED
+  2026-07-27. The `listdetail` scene is the `split` scene's phone-safe
+  sibling: no resize, no literal, just the BARE `expect_split`
+  invariant, which is true at every width a lane can hand it. It runs
+  on all five, and on two devices per phone lane, because a compact
+  host satisfies the invariant vacuously and could only report that the
+  stacked arm ran. The iPad leg it already had, and the Android lane
+  now has a 1280dp `medium_tablet` beside its 320dp pool for the same
+  reason and with the same scope: one device, one scene. Those two legs
+  are the first and only ones in any lane to reach the SwiftUI and
+  Compose split arms — the Compose one had never rendered under a test.
+  THE DEVICE IS THE WIDTH, so it owes the rule a resize owes:
+  run-emulator asserts each device's dp is outside the 400..840 band
+  before running (the same tablet rotated to portrait is 800dp, and
+  would fail the invariant for a reason that is not a bug).
+
+- ~~**The list-detail arms use PLAIN containers, not the platforms'
+  adaptive wrappers**~~ — LANDED 2026-07-27, all four. GTK's `Box`
+  became `AdwNavigationSplitView`, WinUI's two-star-column `Grid`
+  became `TwoPaneView`, Compose's `Row` became
+  `ListDetailPaneScaffold`; SwiftUI already had `NavigationSplitView`.
+  What that bought, itemized against what this entry said the plain
+  containers cost: the collapse/expand ANIMATION, and each platform's
+  own pane proportions and separators — `protocol::leading_pane_width`
+  now has a single caller (WinUI, whose control defaults to the
+  down-the-middle split no platform ships) instead of a Rust copy and a
+  Kotlin one.
+  THE INTEGRATION SUBTLETY resolved the way this entry predicted it
+  had to: every wrapper is driven FROM the core stack and told the ONE
+  fact it needs — is a detail open. `androidx...adaptive-navigation` is
+  deliberately NOT a dependency, because its navigator would hold a
+  destination history; `ListDetailPaneScaffold` takes a caller-supplied
+  `ThreePaneScaffoldValue`, which is the whole reason it can be used
+  without one.
+  AND THE OBSERVATION MOVED WITH THE CONTAINER: `expect_split` now
+  reads the wrapper's own arrangement on all three — `is_collapsed`,
+  `TwoPaneView.Mode`, the scaffold's per-role adapted values — instead
+  of a value the arm stamped about itself.
 
 - **Adaptive LAYOUT is the second form-factor surface, and it owns
   `resize_window`** (Akhil, 2026-07-25; deferred until after the

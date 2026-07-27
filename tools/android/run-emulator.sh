@@ -48,10 +48,10 @@ ROOT_FOR_CHECK="$(cd "$(dirname "$0")/../.." && pwd)"
 SUITE="${1:-all}"
 # The split scene is desktop-only BY DESIGN and deliberately not a leg
 # here: it drives resize_window, and Android does not command its own
-# window size (the system owns it; DESIGN.md, Windows). The Compose
-# list-detail arm itself is live and renders on a regular window; what
-# is missing is a phone-safe scene asserting the bare invariant without
-# resizing. See docs/deferred.md.
+# window size (the system owns it; DESIGN.md, Windows). Its phone-safe
+# sibling `listdetail` covers this backend instead — the bare
+# invariant, on the pool AND on the tablet, which is where the split
+# arm is observable at all.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
@@ -65,9 +65,32 @@ export ANDROID_AVD_HOME="$ROOT/target/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 AVD=kaya
 IMAGE="system-images;android-35;google_apis;arm64-v8a"
+# One tablet alongside the phone pool. It exists for exactly one
+# reason: every pool device is 320dp wide, an unambiguously COMPACT
+# window, and Material's standard directive shows two panes only at
+# 840dp — so nothing in this lane could observe the list-detail SPLIT
+# arm, and a wrong one compiled and passed everything. This is the iOS
+# lane's iPad, for the same defect class and with the same scope: one
+# device carrying one scene, form-factor coverage rather than
+# device-matrix breadth.
+TABLET_AVD=kaya-tablet
 
 if ! avdmanager list avd -c 2>/dev/null | grep -qx "$AVD"; then
     echo "no" | avdmanager create avd -n "$AVD" -k "$IMAGE" >/dev/null
+fi
+if ! avdmanager list avd -c 2>/dev/null | grep -qx "$TABLET_AVD"; then
+    # medium_tablet: a 2560x1600 panel at density 320, whose NATURAL
+    # orientation is landscape — so a headless instance comes up at
+    # 1280dp, past Material's 840. Measured on this AVD, both ways:
+    # rotated to portrait the same device reports 800dp, which is
+    # INSIDE the 400..840 band where the platforms legitimately
+    # disagree about pane count (check-steps' band rule), and the
+    # listdetail leg would fail there for a reason that is not a bug.
+    # config.ini's hw.initialOrientation does NOT decide this (it is
+    # `portrait` on a device that boots landscape), which is exactly
+    # why the width is ASSERTED at boot below rather than assumed from
+    # the AVD definition.
+    echo "no" | avdmanager create avd -n "$TABLET_AVD" -k "$IMAGE" -d medium_tablet >/dev/null
 fi
 
 # A pool of emulators (KAYA_ANDROID_EMUS wide) runs the legs in
@@ -90,14 +113,17 @@ boot_wait() { # serial
         sleep 1
     done
 }
-if [ ! -d "$ANDROID_AVD_HOME/$AVD.avd/snapshots/default_boot" ]; then
-    echo "== creating quickboot snapshot (one-time) =="
-    emulator -avd "$AVD" -no-window -no-audio -no-boot-anim \
-        -gpu swiftshader_indirect -port 5554 >"$ROOT/target/emu-5554.log" 2>&1 &
-    boot_wait emulator-5554
-    adb -s emulator-5554 emu kill >/dev/null 2>&1 || true
+make_snapshot() { # avd port
+    local avd="$1" port="$2"
+    [ -d "$ANDROID_AVD_HOME/$avd.avd/snapshots/default_boot" ] && return 0
+    echo "== creating quickboot snapshot for $avd (one-time) =="
+    emulator -avd "$avd" -no-window -no-audio -no-boot-anim \
+        -gpu swiftshader_indirect -port "$port" >"$ROOT/target/emu-$port.log" 2>&1 &
+    boot_wait "emulator-$port"
+    adb -s "emulator-$port" emu kill >/dev/null 2>&1 || true
     sleep 5
-fi
+}
+make_snapshot "$AVD" 5554
 SERIALS=()
 i=0
 while [ "$i" -lt "$POOL" ]; do
@@ -110,9 +136,56 @@ while [ "$i" -lt "$POOL" ]; do
     fi
     i=$((i + 1))
 done
-for serial in "${SERIALS[@]}"; do
+# The tablet takes the port after the pool's, and is NOT a pool member:
+# it carries one leg, and a leg that claimed it from the pool would
+# leave the other legs' size class up to a race.
+TABLET_PORT=$((5554 + 2 * POOL))
+TABLET_SERIAL="emulator-$TABLET_PORT"
+make_snapshot "$TABLET_AVD" "$TABLET_PORT"
+if ! adb -s "$TABLET_SERIAL" get-state 2>/dev/null | grep -q device; then
+    emulator -avd "$TABLET_AVD" -read-only -no-window -no-audio -no-boot-anim \
+        -gpu swiftshader_indirect -port "$TABLET_PORT" \
+        >"$ROOT/target/emu-$TABLET_PORT.log" 2>&1 &
+fi
+for serial in "${SERIALS[@]}" "$TABLET_SERIAL"; do
     boot_wait "$serial"
 done
+
+# THE DEVICE IS THIS LANE'S WIDTH, so it owes the rule a resize owes.
+# check-steps forbids an expect_split between 400 and 840dp, the band
+# where GNOME, Material and TwoPaneView legitimately disagree about
+# pane count; a lane that picks a DEVICE rather than resizing is making
+# the same choice with none of that gate's visibility. Read the dp the
+# apps actually see (`am get-config`'s w<N>dp — the device's own
+# answer, not width/density arithmetic that a skin or an override could
+# make a lie) and refuse to run against a device inside the band. What
+# this catches: a tablet that came up portrait at 800dp, and a pool AVD
+# that grows into the band during some future retune.
+width_dp() { # serial -> the width in dp its apps see
+    adb -s "$1" shell am get-config 2>/dev/null | python3 -c '
+import re
+import sys
+
+m = re.search(r"-w([0-9]+)dp-", sys.stdin.read())
+print(m.group(1) if m else "")'
+}
+assert_outside_band() { # serial label
+    local dp
+    dp="$(width_dp "$1")"
+    if [ -z "$dp" ]; then
+        echo "$2 ($1): could not read the display width in dp" >&2
+        exit 1
+    fi
+    if [ "$dp" -ge 400 ] && [ "$dp" -lt 840 ]; then
+        echo "$2 ($1) is ${dp}dp wide, inside the 400..840 band where the" \
+            "platforms disagree about pane count — the listdetail leg would" \
+            "fail there for a reason that is not a bug" >&2
+        exit 1
+    fi
+    echo "$2: ${dp}dp"
+}
+assert_outside_band "${SERIALS[0]}" "phone pool"
+assert_outside_band "$TABLET_SERIAL" "tablet"
 
 status=0
 KAYA_T0=$SECONDS
@@ -137,12 +210,19 @@ LEGS_DIR="$(mktemp -d)"
 trap 'rm -rf "$LEGS_DIR"' EXIT
 leg_names=()
 leg_pids=()
+# The tablet's leg is tracked apart from the pool's. If it rode
+# leg_pids, a running tablet leg would count against the phone pool's
+# saturation gate below, throttling a pool it does not use and
+# eventually tripping its wedge watchdog (the iOS lane's pad_pids, the
+# same reason).
+tablet_pids=()
 
 drain() {
-    if [ ${#leg_pids[@]} -gt 0 ]; then
-        wait "${leg_pids[@]}" 2>/dev/null || true
+    if [ ${#leg_pids[@]} -gt 0 ] || [ ${#tablet_pids[@]} -gt 0 ]; then
+        wait "${leg_pids[@]}" "${tablet_pids[@]}" 2>/dev/null || true
     fi
     leg_pids=()
+    tablet_pids=()
     local name verdict
     for name in "${leg_names[@]}"; do
         verdict=$(cat "$LEGS_DIR/$name.verdict" 2>/dev/null || echo FAIL)
@@ -207,6 +287,24 @@ run_apk() {
         fi
         sleep 0.2
     done
+}
+
+# The tablet's leg: the same verdict/timing protocol as run_apk, bound
+# to the one tablet instead of claiming a pool slot. No saturation gate
+# and no slot lock — there is one device and one leg on it.
+run_apk_tablet() {
+    local name="$1"
+    leg_names+=("$name")
+    (
+        local t0=$SECONDS
+        local verdict=FAIL
+        if run_apk_on "$TABLET_SERIAL" "$@"; then
+            verdict=PASS
+        fi
+        echo $((SECONDS - t0)) >"$LEGS_DIR/$name.secs"
+        echo "$verdict" >"$LEGS_DIR/$name.verdict"
+    ) >"$LEGS_DIR/$name.log" 2>&1 &
+    tablet_pids+=($!)
 }
 
 run_apk_on() {
@@ -419,6 +517,34 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The listdetail scene: list-detail's bare invariant, which is the
+    # only form of it this host can run — the `split` scene drives
+    # resize_window, and Android does not command its own window size
+    # (the system owns it; DESIGN.md, Windows).
+    run_apk listdetail-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity listdetail \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script listdetail)'"
+    # The same APK and the same scene on the tablet, and the reason
+    # that scene exists. The pool above is ALWAYS compact, so the
+    # invariant is vacuous there — the leg can only report that the
+    # stacked arm ran. This device is 1280dp, past Material's 840, so
+    # the invariant bites: with the detail pushed, one pane on screen
+    # is a failure.
+    #
+    # The appended steps are the two claims the shared file may not
+    # carry, because both are only true at a regular width. First the
+    # literal, which turns "did not violate the invariant" into "the
+    # split arm ran". Then THE BACK RULE: with both panes on screen
+    # back reveals nothing, so it must not pop — Compose's own rule
+    # (canNavigateBack is false in this state), spelled here as a
+    # disabled BackHandler. This is the only leg in any lane that
+    # reaches Compose's split arm, so it is the only place that rule
+    # can be asserted at all.
+    run_apk_tablet listdetail-compose-tablet \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity listdetail \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script listdetail);expect_split \"regular/split\";back;expect_entries 1;expect_split \"regular/split\"'"
     # The commands scene, the DEPTH slice (rust only until the sweep).
     run_apk commands-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \

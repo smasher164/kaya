@@ -125,6 +125,19 @@ done
 # this worth a gate rather than a comment is how the failure READS: one
 # platform disagreeing about pane count looks exactly like a broken
 # lowering, and the width that caused it is three lines up the file.
+#
+# THE TWO FORMS ARE POLICED DIFFERENTLY, and the split is exactly the
+# claim each makes. A LITERAL (`expect_split "regular/split"`) names
+# WHICH arm ran, which is a statement about the width — so it needs a
+# width the file itself set, outside the band. The BARE form asserts
+# the invariant (a regular window must not show one pane while its
+# stack holds two) and is therefore legal at a width the file never
+# names: it is the only spelling a phone or tablet lane can run, since
+# those hosts do not command their own window size. A width the file
+# DOES name still has to clear the band in either form — the invariant
+# is not vacuous in there, it is WRONG in there (kaya calls a window
+# regular at 600 while Material waits for 840, so an 800dp Compose
+# window honestly reports regular/stacked).
 split_width_lint() {
     python3 -c '
 import re
@@ -146,9 +159,14 @@ for n, line in enumerate(text.splitlines(), 1):
         m = re.match(r"([0-9]+)x([0-9]+)$", parts[1])
         width = int(m.group(1)) if m else None
     elif parts[0] == "expect_split":
+        bare = len(parts) == 1
         if width is None:
-            bad.append(f"{path}:{n}: expect_split with no preceding resize_window; "
-                       "a default window width is host-dependent")
+            if not bare:
+                bad.append(f"{path}:{n}: expect_split names a presentation with no "
+                           "preceding resize_window; a literal is a claim about the "
+                           "width, and a default window width is host-dependent. "
+                           "The bare form asserts the invariant instead and may run "
+                           "at a width the file never names.")
         elif LOW <= width < HIGH:
             bad.append(f"{path}:{n}: expect_split at width {width}, inside the "
                        f"{LOW}..{HIGH} band where platforms disagree "
@@ -160,16 +178,34 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# The guard guards itself, both directions: a width in the band must be
-# caught, and the widths the split scene actually uses must not be.
+# The guard guards itself, all four directions: a width in the band
+# must be caught in either form, a LITERAL at an unnamed width must be
+# caught, the widths the split scene actually uses must not be, and the
+# bare form at an unnamed width — the whole listdetail scene — must not
+# be.
 if printf 'expect_entries 0\nresize_window 500x600\nexpect_split "regular/split"\n' \
     | split_width_lint - >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (expect_split inside the band passed)" >&2
     exit 1
 fi
+if printf 'expect_entries 0\nresize_window 500x600\nexpect_split\n' \
+    | split_width_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (bare expect_split inside the band passed)" >&2
+    exit 1
+fi
+if printf 'expect_entries 0\nexpect_split "regular/split"\n' \
+    | split_width_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (literal expect_split at an unnamed width passed)" >&2
+    exit 1
+fi
 if ! printf 'expect_entries 0\nresize_window 900x600\nexpect_split "regular/split"\nresize_window 360x600\nexpect_split "compact/stacked"\n' \
     | split_width_lint - >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (agreed widths rejected)" >&2
+    exit 1
+fi
+if ! printf 'expect_entries 0\nexpect_split\nclick button#0\nexpect_split\n' \
+    | split_width_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (bare expect_split at an unnamed width rejected)" >&2
     exit 1
 fi
 
@@ -356,6 +392,56 @@ sweep_guests || status=1
 # hang. Measured 2026-07-25: a scene joined SCENES with four of its five
 # launchers missing and cost four silent 300s timeouts, diagnosed as
 # load because the lane's duration anomaly fired first.
+# NO LEG RUNS TWICE. deploy-win submits by name, and a name submitted
+# twice runs the scene twice against the same output file — the second
+# run's verdict silently replaces the first's, so a whole extra leg of
+# the slowest lane's wall time buys nothing and reads as normal.
+# Measured 2026-07-27: `run_suite split_rust` sat in the pooled block
+# AND in the depth block's generated-launcher loop, and had run twice
+# per full matrix since the day it was wired. Nothing noticed, because
+# a duplicate looks exactly like a leg.
+duplicate_legs() {
+    python3 -c '
+import collections
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+legs = []
+for line in text.splitlines():
+    s = line.strip()
+    if s.startswith("#"):
+        continue
+    m = re.match(r"run_suite\s+([a-z0-9_]+)\s*$", s)
+    if m:
+        legs.append(m.group(1))
+bad = [f"{path}: leg \"{n}\" is submitted {c} times"
+       for n, c in collections.Counter(legs).items() if c > 1]
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself, both directions.
+if printf 'run_suite nav_rust\ndrain_suites\nrun_suite nav_rust\n' \
+    | duplicate_legs - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (duplicate leg passed)" >&2
+    exit 1
+fi
+if ! printf 'run_suite nav_rust\nrun_suite nav_python\n' \
+    | duplicate_legs - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (distinct legs rejected)" >&2
+    exit 1
+fi
+
+out="$(duplicate_legs tools/deploy-win.sh)" || {
+    echo "check-steps: deploy-win.sh submits the same leg more than once — the" \
+        "second run overwrites the first's output file and buys nothing:" >&2
+    echo "$out" >&2
+    status=1
+}
+
 launchers() {
     local status=0 leg scene lang
     for leg in $(grep -oE 'run_suite [a-z0-9_]+' tools/deploy-win.sh \

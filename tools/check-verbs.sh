@@ -174,24 +174,17 @@ for field in STAMPED:
              f"conditional (lines {where}) — the platforms it excludes read the "
              "field's initial value as if it were an observation")
 
-# THE PANE PROPORTION IS ONE NUMBER IN TWO LANGUAGES. Rust's
-# protocol::leading_pane_width serves the GTK and WinUI arms; the
-# Compose arm restates the same rule in Kotlin because it cannot call
-# it. Two copies of a constant drift, and the symptom would be one
-# platform laying out differently from the others for no stated reason
-# — the exact class the wire-constant pins above exist to prevent.
-rust_rule = pathlib.Path("crates/kaya/src/protocol.rs").read_text()
-for literal, what in (("0.25", "the 25% fraction"),
-                      ("180.0", "the 180 minimum"),
-                      ("280.0", "the 280 maximum")):
-    if literal not in rust_rule:
-        fail(f"protocol.rs no longer states {what} for leading_pane_width")
-for literal, what in (("0.25f", "the 25% fraction"),
-                      ("180f", "the 180 minimum"),
-                      ("280f", "the 280 maximum")):
-    if literal not in kotlin:
-        fail(f"KayaCompose.kt no longer states {what} for the leading pane — "
-             "it must match protocol::leading_pane_width")
+# (THE PANE PROPORTION pin lived here: protocol::leading_pane_width's
+# 25%/180..280 served the GTK and WinUI arms, and the Compose arm
+# restated the same numbers in Kotlin because it cannot call Rust, so
+# this pinned the two copies together. There is one copy again. Each
+# backend that adopted its platform's list-detail wrapper adopted that
+# wrapper's proportions with it — libadwaita's sidebar-width-fraction,
+# which is where the 25%/180..280 came from in the first place, and
+# Material's own pane sizing — leaving WinUI the only caller, because
+# TwoPaneView's default is the down-the-middle split no platform
+# ships. A single Rust function needs no cross-language pin, and
+# scene.rs unit-tests its rule directly.)
 
 if failures:
     for f in failures:

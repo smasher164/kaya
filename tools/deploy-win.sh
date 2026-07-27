@@ -81,7 +81,7 @@ for arg in "$@"; do
         panels_rust|panels_python|panels_go|panels_csharp|panels_java) SUITE="$arg" ;;
         confirm_rust|confirm_python|confirm_go|confirm_csharp|confirm_java) SUITE="$arg" ;;
         nav_rust|nav_python|nav_go|nav_csharp|nav_java) SUITE="$arg" ;;
-        split_rust) SUITE="$arg" ;;
+        split_rust|listdetail_rust) SUITE="$arg" ;;
         scroll_rust|scroll_python|scroll_go|scroll_csharp|scroll_java) SUITE="$arg" ;;
         progress_rust|progress_python|progress_go|progress_csharp|progress_java) SUITE="$arg" ;;
         a11y_rust|a11y_python|a11y_go|a11y_csharp|a11y_java) SUITE="$arg" ;;
@@ -175,7 +175,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-split}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-split listdetail}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -891,10 +891,8 @@ case "$SUITE" in
         run_suite nav_go
         run_suite nav_csharp
         run_suite nav_java
-        # The split scene: adaptive list-detail. Rust-only (a depth
-        # scene); the two panes are a two-star-column Grid and
-        # resize_window drives the real size-class transition.
-        run_suite split_rust
+        # (The depth scenes' legs are not here: they run drained, in
+        # their own block below.)
         # The scroll scene: the viewport's contract through
         # ScrollViewer — ChangeView is the real scrolling API.
         run_suite scroll_rust
@@ -966,30 +964,38 @@ case "$SUITE" in
         run_suite layout_go
         run_suite layout_csharp
         run_suite layout_java
+        # Depth scenes: rust-only, one leg each, from their CHECKED-IN
+        # launchers (tools/guest/run_<scene>_rust.cmd, shipped by the
+        # deploy glob). Run BEFORE the menu block's foreground-sensitive
+        # legs, and drained around, since an accessibility read
+        # foregrounds nothing but a scene may.
+        #
+        # NAMED ONE BY ONE rather than looped over $DEPTH_SCENES, which
+        # is what this block used to do while generating each .cmd on
+        # the fly. Two gates make the generator unreachable: check-steps
+        # requires a LITERAL `run_suite <scene>_` here (a loop over a
+        # variable is invisible to it) and then requires that leg's
+        # launcher to be checked in. So every depth scene had both, and
+        # the loop ran each of them a SECOND time — split_rust ran twice
+        # per full matrix from the day it was wired until now.
+        drain_suites
+        # The split scene: adaptive list-detail. Rust-only; the two
+        # panes are a TwoPaneView and resize_window drives the real
+        # size-class transition.
+        run_suite split_rust
+        drain_suites
+        # The listdetail scene: the same guest, asserting list-detail's
+        # bare invariant at whatever width this VM's window manager
+        # gives. Shared verbatim with the phone lanes, where it is the
+        # only list-detail coverage there is.
+        run_suite listdetail_rust
+        drain_suites
         # The menus scene — every language, each leg ALONE between
         # drains, never in the pool above. WinUI shortcut injection is
         # OS-global (docs/traps.md): the harness foregrounds the guest
         # and puts the real chord on the system input queue, so a
         # concurrent leg's SetForegroundWindow would steal it.
         # check-steps pins the drain/run/drain barrier on each one.
-        # Depth scenes: rust-only, one leg each, generated on the fly so
-        # a new scene needs no checked-in .cmd. Run BEFORE the menu
-        # block's foreground-sensitive legs, and drained around, since
-        # an accessibility read foregrounds nothing but a scene may.
-        for s in $DEPTH_SCENES; do
-            # WRITTEN HERE AND SHIPPED, not echoed into a batch file on
-            # the VM: generating .cmd via `echo` needs `^^>^^&1`-style
-            # escaping that silently produced `'1&' is not recognized`.
-            # A heredoc with CRLF is legible and cannot misquote.
-            tmp_cmd="$LEGS_DIR/run_${s}_rust.cmd"
-            printf '@echo off\r\ncd /d C:\\kaya\r\nset KAYA_SELFTEST=%s\r\n%s.exe > C:\\kaya\\out_%s_rust.txt 2>&1\r\necho EXIT=%%ERRORLEVEL%% >> C:\\kaya\\out_%s_rust.txt\r\n' \
-                "$s" "$s" "$s" "$s" >"$tmp_cmd"
-            scp -q "$tmp_cmd" "$HOST:C:/kaya/run_${s}_rust.cmd"
-            run_suite "${s}_rust"
-            drain_suites
-        done
-
-        drain_suites
         run_suite menus_rust
         drain_suites
         run_suite menus_python

@@ -53,6 +53,22 @@ for src in "${SOURCES[@]}"; do
     [ -d "$src" ] || { echo "check-detekt: no such source tree: $src"; exit 1; }
 done
 
+# WHAT UnusedImports DOES NOT COVER, stated here because the self-test
+# below passes for it and would otherwise read as a guarantee. The rule
+# is a TEXT heuristic — it has no type resolution, so an import counts
+# as used if its short name appears anywhere in the file, whoever owns
+# that name. Measured 2026-07-27: the Compose split arm stopped calling
+# `Modifier.width()`, the `androidx.compose.foundation.layout.width`
+# import went dead, and this gate stayed green because the file is full
+# of unrelated `bitmap.width` / `root.width` property reads. A
+# word-boundary check written here would miss it for the same reason;
+# only running detekt with --classpath (the full Android + Compose
+# classpath, which this deliberately standalone gate does not have)
+# distinguishes the extension from the property. So: dead imports whose
+# name is unique DO fail here, and dead imports whose name collides
+# with any identifier in the file DO NOT. Reach for the import list by
+# hand when a call site is removed.
+#
 # The built-in negative test (the check-sugar-surface fake-kind
 # pattern): a sample carrying one instance of each rule's defect must
 # make ALL of them fire. A curated config is exactly the shape that
