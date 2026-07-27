@@ -283,6 +283,74 @@ if [ -n "$badstatus" ]; then
     status=1
 fi
 
+# NO sed, NO awk. Repo policy, and not a style preference: BSD and GNU
+# differ in ways that bite silently and per-platform — this tree runs
+# the same scripts on macOS, inside a Debian container, and against a
+# Windows VM. python3 is available everywhere the scripts are, so the
+# rule has no "trivial enough" exception and this clause is what makes
+# that true rather than remembered. 27 invocations were converted at
+# once when it landed; the point of the gate is the 28th.
+#
+# Matched in COMMAND POSITION only — start of line, or after a pipe,
+# semicolon, ampersand or command substitution. A substring match
+# flags the word "used" inside a comment, which is how the first draft
+# of this scan reported a false positive on build-id.sh.
+badtool=$(python3 - <<'PY'
+import pathlib
+import re
+
+CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*(sed|awk)\b")
+HEREDOC = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
+
+
+def shell_lines(text):
+    """Lines that are actually SHELL: heredoc bodies dropped. This file
+    is inside the scanned tree and its own scanner lives in a heredoc,
+    so without this the gate reports itself — which it did, three
+    times, on the first run."""
+    delim = None
+    for n, line in enumerate(text.splitlines(), 1):
+        if delim is not None:
+            if line.strip() == delim:
+                delim = None
+            continue
+        if not line.lstrip().startswith("#"):
+            if (m := HEREDOC.search(line)):
+                delim = m.group(1)
+            yield n, line
+
+
+for f in sorted(pathlib.Path("tools").rglob("*.sh")):
+    for n, line in shell_lines(f.read_text()):
+        if (m := CMD.search(line)):
+            print(f"{f}:{n}: {m.group(1)} is banned — use python3 instead")
+PY
+) || true
+# Self-test: the scan must see a real invocation and must NOT see the
+# word inside another word.
+probe=$(python3 - <<'PY'
+import re
+CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*(sed|awk)\b")
+# Fixtures are BUILT, not written literally: this file is inside the
+# scanned tree, so a literal invocation here would be reported as a
+# real one.
+S, A = "s" + "ed", "a" + "wk"
+bad = [f"{S} -n p file", "cat x | " + A + " '{print $1}'", f"x=$({S} s/a/b/ f)"]
+# The word inside another word must NOT match.
+good = ["# u" + "sed by the thing", "echo unu" + "sed", "grep -o par" + "sed file"]
+print(f"{sum(1 for c in bad if CMD.search(c))}/{sum(1 for c in good if CMD.search(c))}")
+PY
+)
+if [ "$probe" != "3/0" ]; then
+    echo "check-shell: self-test failed — banned-tool scan scored $probe, want 3/0" >&2
+    status=1
+fi
+if [ -n "$badtool" ]; then
+    echo "check-shell: sed/awk in a tools script (repo policy: python3 instead):" >&2
+    echo "$badtool" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

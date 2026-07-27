@@ -81,10 +81,12 @@ make_bundle() {
     local app="$BUNDLES/$name.app"
     rm -rf "$app"
     mkdir -p "$app"
-    sed -e "s/@EXECUTABLE@/$name/" \
-        -e "s/@BUNDLE_ID@/$bundle_id/" \
-        -e "s/@NAME@/$name/" \
-        tools/ios/Info.plist.in > "$app/Info.plist"
+    KAYA_NAME="$name" KAYA_BUNDLE_ID="$bundle_id" python3 -c '
+import os, sys
+tpl = open("tools/ios/Info.plist.in").read()
+sys.stdout.write(tpl.replace("@EXECUTABLE@", os.environ["KAYA_NAME"])
+                    .replace("@BUNDLE_ID@", os.environ["KAYA_BUNDLE_ID"])
+                    .replace("@NAME@", os.environ["KAYA_NAME"]))' > "$app/Info.plist"
     cp "$executable_path" "$app/$name"
     echo "$app"
 }
@@ -303,7 +305,7 @@ rec_suite_start() {
         xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
         base=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
             -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
-            | awk -F. 'NR==1{print $1}')
+            | head -1 | cut -d. -f1)
         [ -n "$base" ] || base=175
         xcrun simctl ui "$udid" appearance dark
         seen=0
@@ -311,7 +313,7 @@ rec_suite_start() {
             xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
             luma=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
                 -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
-                | awk -F. 'NR==1{print $1}')
+                | head -1 | cut -d. -f1)
             if [ -n "$luma" ] && [ "$luma" -le $((base - 25)) ]; then
                 seen=1
                 break
@@ -337,7 +339,7 @@ rec_suite_start() {
         xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
         base=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
             -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
-            | awk -F. 'NR==1{print $1}')
+            | head -1 | cut -d. -f1)
         [ -n "$base" ] || base=107
         xcrun simctl ui "$udid" appearance light
         seen=0
@@ -345,7 +347,7 @@ rec_suite_start() {
             xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
             luma=$(ffprobe -v quiet -f lavfi "movie=$REC_ROOT/.flip-probe.png,signalstats" \
                 -show_entries frame_tags=lavfi.signalstats.YAVG -of csv=p=0 2>/dev/null \
-                | awk -F. 'NR==1{print $1}')
+                | head -1 | cut -d. -f1)
             if [ -n "$luma" ] && [ "$luma" -ge $((base + 25)) ]; then
                 seen=1
                 break
@@ -390,7 +392,7 @@ rec_suite_stop() {
     # recorder was live for it, else the rise back to light (the
     # recorder attached mid-flip). Boot and install churn is
     # bright-to-bright and crosses neither threshold.
-    # awk takes what it needs but reads the whole stream: head -1
+    # The reader takes what it needs but DRAINS the whole stream: head -1
     # would SIGPIPE ffprobe, which set -o pipefail turns fatal.
     local ANCHORS=()
     local t_flip
@@ -400,8 +402,24 @@ rec_suite_stop() {
             "movie=$REC_ROOT/suite-$i.mov,select=gt(scene\,0.3),signalstats" \
             -show_entries frame=pts_time:frame_tags=lavfi.signalstats.YAVG \
             -of csv=p=0 2>/dev/null \
-            | awk -F, 'NR==1{prev=$2+0; next}
-                {cur=$2+0; if (cur <= prev-25) {printf "%d", $1*1000; exit} prev=cur}')
+            | KAYA_DIR=down python3 -c '
+import os, sys
+# The first frame whose average luma steps by 25 in the wanted
+# direction; its presentation time in ms is the fiducial edge.
+down = os.environ["KAYA_DIR"] == "down"
+prev = None
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) < 2:
+        continue
+    try:
+        pts, luma = float(parts[0]), float(parts[1])
+    except ValueError:
+        continue
+    if prev is not None and ((luma <= prev - 25) if down else (luma >= prev + 25)):
+        print(int(pts * 1000))
+        break
+    prev = luma')
         if [ -n "$t_flip" ]; then
             ANCHORS[i]=$(( ${T_MARKS[$i]} - t_flip ))
         else
@@ -409,8 +427,24 @@ rec_suite_stop() {
                 "movie=$REC_ROOT/suite-$i.mov,select=gt(scene\,0.3),signalstats" \
                 -show_entries frame=pts_time:frame_tags=lavfi.signalstats.YAVG \
                 -of csv=p=0 2>/dev/null \
-                | awk -F, 'NR==1{prev=$2+0; next}
-                    {cur=$2+0; if (cur >= prev+25) {printf "%d", $1*1000; exit} prev=cur}')
+            | KAYA_DIR=up python3 -c '
+import os, sys
+# The first frame whose average luma steps by 25 in the wanted
+# direction; its presentation time in ms is the fiducial edge.
+down = os.environ["KAYA_DIR"] == "down"
+prev = None
+for line in sys.stdin:
+    parts = line.strip().split(",")
+    if len(parts) < 2:
+        continue
+    try:
+        pts, luma = float(parts[0]), float(parts[1])
+    except ValueError:
+        continue
+    if prev is not None and ((luma <= prev - 25) if down else (luma >= prev + 25)):
+        print(int(pts * 1000))
+        break
+    prev = luma')
             [ -n "$t_flip" ] || { echo "recording: no fiducial edge in suite-$i.mov"; return 1; }
             ANCHORS[i]=$(( ${L_MARKS[$i]} - t_flip ))
         fi

@@ -289,8 +289,8 @@ sweep_guests || status=1
 # load because the lane's duration anomaly fired first.
 launchers() {
     local status=0 leg scene lang
-    for leg in $(grep -oE '^[[:space:]]*run_suite [a-z0-9_]+' tools/deploy-win.sh \
-        | awk '{print $2}' | sort -u); do
+    for leg in $(grep -oE 'run_suite [a-z0-9_]+' tools/deploy-win.sh \
+        | cut -d' ' -f2 | sort -u); do
         case "$leg" in
             # The milestone2 legs are the unprefixed originals
             # (run_rust.cmd, run_python.cmd, ...).

@@ -53,6 +53,14 @@ fetch Microsoft.WindowsAppSDK.WinUI 2.2.1
 fetch Microsoft.WindowsAppSDK.Runtime 2.2.0
 
 echo "== winmd files =="
-find "$DEST" -name '*.winmd' | sed "s|$DEST/||" | sort
+find "$DEST" -name '*.winmd' | KAYA_DEST="$DEST" python3 -c '
+import os, sys
+prefix = os.environ["KAYA_DEST"] + "/"
+for line in sys.stdin:
+    print(line.strip().removeprefix(prefix))' | sort
 echo "== bootstrap DLLs (arm64) =="
-find "$DEST" -iname '*bootstrap*' -path '*arm64*' | sed "s|$DEST/||" | sort
+find "$DEST" -iname '*bootstrap*' -path '*arm64*' | KAYA_DEST="$DEST" python3 -c '
+import os, sys
+prefix = os.environ["KAYA_DEST"] + "/"
+for line in sys.stdin:
+    print(line.strip().removeprefix(prefix))' | sort

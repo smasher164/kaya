@@ -64,7 +64,7 @@ fi
 cat "$dir/leg.log"
 
 dur_ms=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 \
-    "$dir/video.mkv" 2>/dev/null | awk '{printf "%d", $1 * 1000}')
+    "$dir/video.mkv" 2>/dev/null | python3 -c 'import sys; print(int(float(sys.stdin.read().strip() or 0) * 1000))')
 if [ -z "$dur_ms" ]; then
     echo "record-leg: recording produced no readable video ($(cat "$dir/rec.log"))"
     exit 1

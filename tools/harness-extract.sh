@@ -80,7 +80,10 @@ if [ "${1:-}" = --selftest ]; then
         || { echo "harness-extract selftest: extraction failed"; exit 1; }
     dominant() { # r|g|b of a png's average pixel
         ffmpeg -loglevel error -i "$1" -vf scale=1:1 -f rawvideo -pix_fmt rgb24 - 2>/dev/null \
-            | od -An -tu1 | awk '{if ($1>=$2 && $1>=$3) print "r"; else if ($2>=$3) print "g"; else print "b"}'
+            | od -An -tu1 | python3 -c '
+import sys
+r, g, b = (int(v) for v in sys.stdin.read().split()[:3])
+print("r" if r >= g and r >= b else "g" if g >= b else "b")'
     }
     got="$(dominant "$T/steps/step-01-a.png")$(dominant "$T/steps/step-02-expect_q.png")$(dominant "$T/steps/step-03-b.png")$(dominant "$T/steps/step-04-c.png")"
     [ "$got" = rrgb ] || { echo "harness-extract selftest: covering frames wrong (got $got, want rrgb)"; exit 1; }
@@ -134,8 +137,14 @@ if [ ! -s "$PTS" ]; then
     [ "$PTS" = "${KAYA_PTS_INDEX:-}" ] || rm -f "$PTS"
     exit 1
 fi
-FIRST_MS=$(awk 'NR==1{printf "%d", $1 * 1000}' "$PTS")
-LAST_MS=$(awk 'END{printf "%d", $1 * 1000}' "$PTS")
+FIRST_MS=$(python3 -c '
+import sys
+v = open(sys.argv[1]).read().split()
+print(int(float(v[0]) * 1000) if v else 0)' "$PTS")
+LAST_MS=$(python3 -c '
+import sys
+v = open(sys.argv[1]).read().split()
+print(int(float(v[-1]) * 1000) if v else 0)' "$PTS")
 LAST_OFF=$(grep -o 'KAYA_HARNESS: +[0-9]*ms' "$TRANSCRIPT" | grep -o '[0-9]*' | sort -n | tail -1)
 # A suite-long film outlives each leg: after the guest exits, its
 # region shows whatever the canvas does without it. No step may sample
@@ -156,8 +165,14 @@ fi
 n=0
 grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT" | while IFS= read -r line; do
     n=$((n + 1))
-    offset=$(sed -n 's/KAYA_HARNESS: +\([0-9]*\)ms.*/\1/p' <<<"$line")
-    step=$(sed -e 's/KAYA_HARNESS: +[0-9]*ms //' -e 's/[^A-Za-z0-9._#-]/_/g' <<<"$line" | cut -c1-48)
+    read -r offset step <<<"$(KAYA_LINE="$line" python3 -c '
+import os, re
+# "KAYA_HARNESS: +<ms> <step text>" -> the offset and a filename-safe
+# step name, on one line for a single read.
+line = os.environ["KAYA_LINE"]
+m = re.search(r"KAYA_HARNESS: \+([0-9]+)ms ?(.*)", line)
+off, rest = (m.group(1), m.group(2)) if m else ("0", "")
+print(off, re.sub(r"[^A-Za-z0-9._#-]", "_", rest)[:48])')"
     case "$step" in
         [Ee]xpect*) bias=0 ;;
         *) bias=300 ;;
@@ -167,12 +182,20 @@ grep -o 'KAYA_HARNESS: +[0-9]*ms .*' "$TRANSCRIPT" | while IFS= read -r line; do
     if [ "$at_ms" -lt 0 ]; then at_ms=0; fi
     # Covering frame: last pts <= at; before the first frame, the
     # first frame (the earliest state the video knows).
-    covering=$(awk -v t="$(awk "BEGIN{printf \"%.3f\", $at_ms/1000}")" \
-        'NR==1{first=$1} $1+0 <= t+0 {last=$1} END{print (last=="" ? first : last)}' "$PTS")
+    covering=$(KAYA_AT_MS="$at_ms" python3 -c '
+import os, sys
+# The covering frame: the last pts at or before the target; before the
+# first frame, the first (the earliest state the video knows).
+t = int(os.environ["KAYA_AT_MS"]) / 1000
+pts = [float(v) for v in open(sys.argv[1]).read().split()]
+earlier = [p for p in pts if p <= t]
+print("%.3f" % (earlier[-1] if earlier else (pts[0] if pts else 0.0)))' "$PTS")
     # Seek a hair early: -ss outputs the first frame at/after the
     # target, and float printing must not round past the frame.
     ffmpeg -loglevel error \
-        -ss "$(awk "BEGIN{v=$covering-0.005; if (v<0) v=0; printf \"%.3f\", v}")" \
+        -ss "$(python3 -c '
+import sys
+print("%.3f" % max(0.0, float(sys.argv[1]) - 0.005))' "$covering")" \
         -i "$VIDEO" -frames:v 1 ${CROP:+-vf "$CROP"} -y \
         "$OUT/$(printf 'step-%02d' "$n")-$step.png" 2>/dev/null || true
 done

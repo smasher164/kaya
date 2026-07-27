@@ -260,7 +260,7 @@ run_apk_on() {
         adb -s "$serial" logcat -d -s kaya:* >"$dir/leg.log" 2>/dev/null || true
         local dur_ms
         dur_ms=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 \
-            "$dir/video.mp4" 2>/dev/null | awk '{printf "%d", $1 * 1000}')
+            "$dir/video.mp4" 2>/dev/null | python3 -c 'import sys; print(int(float(sys.stdin.read().strip() or 0) * 1000))')
         if [ -z "$dur_ms" ]; then
             echo "$name: recording produced no readable video"
             failed=1

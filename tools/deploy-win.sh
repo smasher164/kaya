@@ -206,8 +206,25 @@ echo "== building (aarch64-pc-windows-msvc, release) =="
 # Every kaya_* function declared in kaya.h must be exported by the DLL;
 # a missing export would otherwise surface as a remote link or load
 # error, or worse, pass by resolving against a stale deployed copy.
-declared=$(sed -nE 's/^[A-Za-z_].*[ *](kaya_[a-z0-9_]+)\(.*/\1/p' "$ROOT/crates/kaya/include/kaya.h" | sort -u)
-exported=$(objdump -p "$TARGET/kaya.dll" | awk '/Export Table:/,/^$/' | grep -oE 'kaya_[a-z0-9_]+' | sort -u)
+declared=$(python3 -c '
+import re, sys
+# A declaration line: starts in column 0 and names kaya_<something>(
+pat = re.compile(r"^[A-Za-z_].*[ *](kaya_[a-z0-9_]+)\(")
+seen = {m.group(1) for line in open(sys.argv[1]) if (m := pat.match(line))}
+print("\n".join(sorted(seen)))' "$ROOT/crates/kaya/include/kaya.h")
+exported=$(objdump -p "$TARGET/kaya.dll" | python3 -c '
+import re, sys
+# Only the Export Table section, then every kaya_ symbol in it.
+out, inside = set(), False
+for line in sys.stdin:
+    if "Export Table:" in line:
+        inside = True
+        continue
+    if inside and not line.strip():
+        break
+    if inside:
+        out.update(re.findall(r"kaya_[a-z0-9_]+", line))
+print("\n".join(sorted(out)))')
 missing=$(comm -23 <(echo "$declared") <(echo "$exported"))
 if [ -n "$missing" ]; then
     echo "kaya.dll does not export functions declared in kaya.h:" >&2
@@ -576,18 +593,37 @@ rec_suite_stop() {
             lo=$((epoch - 1500))
             hi=$((epoch + last_off + 2000))
             find "$recdir/frames" -name "${slot}-*.png" \
-                | awk -F'[/.]' -v lo="$lo" -v hi="$hi" \
-                    '{n = split($(NF-1), a, "-"); ts = a[n]; if (ts+0 >= lo && ts+0 <= hi) print ts}' \
-                | sort -n >"$dir/frames.txt"
+                | KAYA_LO="$lo" KAYA_HI="$hi" python3 -c '
+import os, pathlib, sys
+# Frame files are <slot>-<epoch-ms>.png; keep the ones inside the legs
+# window, sorted by time.
+lo, hi = int(os.environ["KAYA_LO"]), int(os.environ["KAYA_HI"])
+stamps = []
+for line in sys.stdin:
+    stem = pathlib.Path(line.strip()).stem
+    ts = stem.rsplit("-", 1)[-1]
+    if ts.isdigit() and lo <= int(ts) <= hi:
+        stamps.append(int(ts))
+print("\n".join(str(t) for t in sorted(stamps)))' >"$dir/frames.txt"
             if [ ! -s "$dir/frames.txt" ]; then
                 echo "$name: no frames overlap the leg's transcript"
                 exit 1
             fi
             anchor=$(head -1 "$dir/frames.txt")
-            awk -v dir="$recdir/frames" -v slot="$slot" 'NR>1 {print "file \x27" dir "/" slot "-" prev ".png\x27"; print "duration " ($1 - prev) / 1000}
-                {prev=$1}
-                END {print "file \x27" dir "/" slot "-" prev ".png\x27"; print "duration 0.2"}' \
-                "$dir/frames.txt" >"$dir/concat.txt"
+            KAYA_FRAMES="$recdir/frames" KAYA_SLOT="$slot" python3 -c '
+import os, sys
+# ffconcat: each frame held until the next one is due, the last for a
+# fixed beat so the tail is not dropped.
+frames, slot = os.environ["KAYA_FRAMES"], os.environ["KAYA_SLOT"]
+stamps = [int(x) for x in open(sys.argv[1]).read().split()]
+out = []
+for prev, cur in zip(stamps, stamps[1:]):
+    out.append("file %s/%s-%d.png" % (frames, slot, prev))
+    out.append("duration %s" % ((cur - prev) / 1000))
+if stamps:
+    out.append("file %s/%s-%d.png" % (frames, slot, stamps[-1]))
+    out.append("duration 0.2")
+print("\n".join(out))' "$dir/frames.txt" >"$dir/concat.txt"
             # Tiled windows have odd content sizes; h264 wants even.
             ffmpeg -loglevel error -f concat -safe 0 -i "$dir/concat.txt" \
                 -fps_mode vfr -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" \

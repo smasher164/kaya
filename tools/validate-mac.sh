@@ -248,8 +248,8 @@ rec_suite_stop() {
     fi
     wait "$REC_PID" 2>/dev/null
     local anchor scale
-    anchor=$(sed -n 's/RECORDING_START //p' "$RECORDINGS/rec.log")
-    scale=$(sed -n 's/SCALE //p' "$RECORDINGS/rec.log" | awk 'NR==1{print}')
+    anchor=$(grep '^RECORDING_START ' "$RECORDINGS/rec.log" | cut -d' ' -f2-)
+    scale=$(grep '^SCALE ' "$RECORDINGS/rec.log" | head -1 | cut -d' ' -f2-)
     if [ -z "$anchor" ] || [ -z "$scale" ]; then
         echo "recording: no anchor in rec.log — no stills"
         cat "$RECORDINGS/rec.log"
@@ -274,8 +274,10 @@ rec_suite_stop() {
                 exit 1
             fi
             read -r _ _ x y wd ht <<<"$line"
-            crop=$(awk -v s="$scale" -v x="$x" -v y="$y" -v w="$wd" -v h="$ht" \
-                'BEGIN{printf "crop=%d:%d:%d:%d", w*s, h*s, x*s, y*s}')
+            crop=$(python3 -c '
+import sys
+s, x, y, w, h = (float(v) for v in sys.argv[1:6])
+print("crop=%d:%d:%d:%d" % (w * s, h * s, x * s, y * s))' "$scale" "$x" "$y" "$wd" "$ht")
             echo "$crop" >"$dir/crop"
             tools/harness-extract.sh "$RECORDINGS/suite.mov" "$dir/leg.log" \
                 "$anchor" "$dir/steps" "$crop"
