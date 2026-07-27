@@ -735,10 +735,7 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     // libadwaita, and the semantic is expressible without it. That
     // dependency is a ledger item, not a blocker.
     let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
-    let regular = {
-        use gtk4::prelude::GtkWindowExt;
-        target.default_size().0 >= 600
-    };
+    let regular = window_width(core, window) >= 600;
     // No `top.is_some()` requirement: an empty stack on a regular
     // window shows the leading pane and an EMPTY trailing one
     // (DESIGN.md). Requiring an entry here made GTK report `stacked`
@@ -1589,6 +1586,24 @@ fn ensure_menu_strip(core: &mut CoreState, window: u64) {
 /// sections chrome — fills the strip's content slot instead. No strip
 /// means no menus were declared, and the window keeps GTK's own child
 /// slot.
+/// The window's live content width in pixels, read from its ALLOCATION
+/// rather than from `default_size()`.
+///
+/// default_size is the size REQUESTED, not the one in effect: under a
+/// bare Xvfb with no window manager the two drift apart, and the arm
+/// and the assertion then disagree about the same instant — the arm
+/// rendered `split` while the read said `compact`, which looks like a
+/// lowering bug and is not one. Same lesson the WinUI backend learned:
+/// measure the window, and measure it once for both readers.
+/// Falls back to the request before the window is mapped, when the
+/// allocation is legitimately 0.
+fn window_width(core: &CoreState, window: u64) -> i32 {
+    use gtk4::prelude::{GtkWindowExt, WidgetExt};
+    let target = gtk_window(core, window);
+    let allocated = target.width();
+    if allocated > 0 { allocated } else { target.default_size().0 }
+}
+
 /// Detach a widget from whatever currently holds it. GTK gives a
 /// widget EXACTLY ONE parent and asserts loudly on a second
 /// (`gtk_window_set_child: assertion ... failed`), and these roots move
@@ -3411,17 +3426,29 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn resize_window(&self, window: u64, width: f64, height: f64) {
+        // The REAL resize path: the size a user's drag would set.
         Self::on_main_mut(move |core| {
             use gtk4::prelude::GtkWindowExt;
-            // The REAL resize path: the size a user's drag would set,
-            // which is also what default_size reads back — so the size
-            // class this backend derives moves with it.
             gtk_window(core, window).set_default_size(width as i32, height as i32);
-            // And RE-RUN the arm. Setting the size is not the point;
-            // making the platform re-decide is. Without this the
-            // window changes size and keeps rendering the presentation
-            // it chose at the old one, which is precisely the defect
-            // the verb exists to catch.
+        });
+        // WAIT FOR THE ALLOCATION, then re-run the arm. set_default_size
+        // returns before GTK has laid out, so an arm that re-ran
+        // immediately measured the OLD width and stamped the OLD
+        // presentation — while the assertion, polling a beat later, saw
+        // the new one. The two disagreeing about one instant is the
+        // signature of reading a tree mid-update (docs/traps.md).
+        //
+        // Polled from the HARNESS thread, never by pumping the main
+        // loop from inside a CoreState borrow: re-entering CORE there
+        // aborts.
+        let want = width as i32;
+        for _ in 0..100 {
+            if Self::on_main(move |core| window_width(core, window)) == want {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Self::on_main_mut(move |core| {
             refresh_nav(core, window);
         });
     }
@@ -3432,7 +3459,8 @@ impl crate::harness::Stage for GtkStage {
             // The class from the window's real width, the same 600
             // boundary menu_presentation draws; the presentation from
             // the arm that actually ran.
-            let width = gtk_window(core, 0).default_size().0;
+            // The SAME source the arm used.
+            let width = window_width(core, 0);
             let class = if width >= 600 { "regular" } else { "compact" };
             let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
             format!("{class}/{presentation}")

@@ -43,6 +43,7 @@ mod grow;
 mod confirm;
 #[path = "nav.rs"]
 mod nav;
+mod split;
 #[path = "scroll.rs"]
 mod scroll;
 #[path = "progress.rs"]
@@ -83,6 +84,7 @@ fn app(ctx: kaya::AppCtx) {
         // Navigation is phone-native too: predictive back IS the
         // affordance; nav runs here for real.
         Ok("nav") => nav::app(ctx),
+        Ok("split") => split::app(ctx),
         Ok("scroll") => scroll::app(ctx),
         Ok("progress") => progress::app(ctx),
         Ok("select") => select::app(ctx),

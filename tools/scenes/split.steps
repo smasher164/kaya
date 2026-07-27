@@ -30,6 +30,13 @@ expect_entries 1
 expect label#0 "list pane"
 expect label#last "detail pane"
 expect_split "regular/split"
+# THE CLAIM THAT MATTERS, and the one the two lines above cannot make:
+# both panes are rendered AT ONCE. `expect label#N` reads kaya's model,
+# and `expect_split` reads a value the arm stamped about itself — both
+# pass for an arm that ran and drew nothing. These read each platform's
+# REAL tree, where an element that is not on screen is not present.
+expect_ax label#0 "label/list pane"
+expect_ax label#last "label/detail pane"
 # Narrow: the SAME scene, the same stack, one pane. Nothing in the
 # guest re-declared anything — the platform re-decided.
 resize_window 420x600

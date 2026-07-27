@@ -36,7 +36,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("list pane");
         let root = tx
             .column(|tx| {
-                tx.label(status); // label#0 — the leading pane's content
+                // Authored ids so the REAL-TREE read can address these:
+                // `expect label#N` reads kaya's own model and passes
+                // whether or not anything reached the screen, which is
+                // exactly the gap that let a non-rendering split arm
+                // look green.
+                tx.label(status).a11y_id("list"); // label#0
                 let open = tx.button("open detail").id(); // button#0
                 msgs.on_click(open, Msg::OpenDetail);
             })
@@ -53,7 +58,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let pane = tx
                         .column(|tx| {
                             let caption = tx.signal("detail pane");
-                            tx.label(caption);
+                            tx.label(caption).a11y_id("detail");
                         })
                         .id();
                     tx.mount_in(entry, pane);

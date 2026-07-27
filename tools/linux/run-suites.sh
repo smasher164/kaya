@@ -463,7 +463,13 @@ for proto in x11 wayland; do
     # The split scene: adaptive list-detail. Rust-only (a depth
     # scene); GTK renders the two panes in a Box and resize_window
     # drives the real size-class transition.
-    run "$proto" split-rust env KAYA_SELFTEST=split "$CARGO_TARGET_DIR/debug/examples/split"
+    # Through a11y-leg.sh, like the a11y legs: the scene asserts the
+    # REAL accessibility tree (that both panes are present AT ONCE,
+    # which the stamped presentation cannot prove), and on GTK that
+    # read is AT-SPI — which needs the per-leg dbus + at-spi bus this
+    # wrapper stands up.
+    run "$proto" split-rust env KAYA_SELFTEST=split \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/split"
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
     run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav
