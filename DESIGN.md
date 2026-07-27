@@ -1160,6 +1160,39 @@ specializes gates nothing.
   direction is legitimate — what counts as wide enough is the
   platform's call, and a compact window is never asked to show two.
 
+Two further rulings, ratified 2026-07-27 with the wrapper adoption:
+
+- **Each platform decides where one pane becomes two, and kaya does not
+  draw that line.** The app declares `list_detail`; the presentation is
+  the platform's answer — which is the same reason there is no prop for
+  WHICH way it presents. The four thresholds legitimately differ
+  (GNOME collapses below 400sp, Material's standard directive wants
+  840dp, TwoPaneView ships its own default between them), so a shared
+  scene may only assert a presentation at a width they all agree on;
+  `tools/check-steps.sh` enforces that band. The separate 600 that
+  decides compact-vs-regular FOR MENUS is a different question and is
+  not affected.
+- **Back on a two-pane window does not pop.** Back reveals what the top
+  entry covers, and in the split arm it covers nothing, so popping
+  would blank the detail pane. This is the platforms' own rule —
+  Compose's `canNavigateBack` reports false with both panes visible,
+  and neither libadwaita nor NavigationSplitView draws a back button in
+  an uncollapsed content pane. It must be REAL behavior rather than the
+  harness verb declining out of politeness: the affordance is ABSENT
+  from the screen, and the verb refuses to drive an affordance that is
+  not there. Both halves are load-bearing — a backend that hid the
+  affordance while its verb popped anyway shipped twice before this was
+  written down, once on Compose and once on GTK.
+- **The wrapper owns layout and gesture; kaya's core owns the stack.**
+  Never mirror a wrapper's navigation history into kaya's entry stack.
+  Tell the wrapper the ONE fact it needs — is a detail open — and let
+  it report intent back. Anything more and the guest's pop and the
+  widget's pop become two different truths. This is why
+  `androidx.compose.material3.adaptive:adaptive-navigation` is
+  deliberately not a dependency: its navigator owns a destination
+  history. `ListDetailPaneScaffold` takes a caller-supplied scaffold
+  value, which is what makes it usable without one.
+
 ### Sections (tabs) — ratified 2026-07-22
 
 Tabs are a presentation context, not a widget: a fixed-ish,

@@ -196,16 +196,23 @@ own the state (see the undo note in this file).
   `TwoPaneView.Mode`, the scaffold's per-role adapted values — instead
   of a value the arm stamped about itself.
 
-- **Adaptive LAYOUT is the second form-factor surface, and it owns
-  `resize_window`** (Akhil, 2026-07-25; deferred until after the
-  accessibility milestone). The menus milestone re-keyed adaptivity
-  onto size class but menus are the only lowering that obeys the rule.
-  The surface that makes the axis pay is layout: a regular window
-  wanting multi-column / list-detail where a compact one gets a single
-  column. REFRAMING WORTH KEEPING — `resize_window` was filed as this
+- ~~**Adaptive LAYOUT is the second form-factor surface, and it owns
+  `resize_window`**~~ — LANDED 2026-07-26/27 as list-detail. `list_detail`
+  is a window prop, all four backends lower it to their platform's own
+  adaptive container, each decides where one pane becomes two,
+  `resize_window` drives the real transition and `expect_split`
+  re-asserts on the far side. The scene runs on three desktop lanes and
+  its phone-safe sibling `listdetail` on all five, with a device per
+  size class on the two that cannot resize.
+  The REFRAMING this entry argued for is what happened, and is worth
+  keeping: `resize_window` was originally filed as the menus
   milestone's gate, but a verb that drives a transition no code
-  specializes gates nothing. It belongs WITH adaptive layout, as that
-  feature's gate, not before it.
+  specializes gates nothing, so it shipped WITH the feature it gates.
+  MULTI-COLUMN is the part of "adaptive layout" that did NOT land —
+  this entry covered two surfaces and only list-detail is done. A
+  regular window wanting several columns where a compact one wants
+  one is still unbuilt, and it wants its own admission pass (the
+  4/4 test list-detail passed is not automatic for a column grammar).
   Encouraging for admission: the adaptive split IS a 4/4 native
   intersection, unlike the DRAGGABLE splitter (2/4) it is easily
   confused with — SwiftUI `NavigationSplitView`, Compose's Material 3
@@ -238,6 +245,16 @@ own the state (see the undo note in this file).
   the size-class transition and re-asserts on the far side, which makes
   adaptivity a matrix fact instead of a claim. THE TWO ITEMS MERGE;
   do not schedule `resize_window` separately.
+  MOST OF THAT SCOPE IS SPENT (noted 2026-07-27, on an audit of this
+  file): every backend reads its own size class, `resize_window` and
+  both presentation assertions exist and run, and list-detail is a
+  second lowering that obeys the axis — so "menus are the only one" is
+  no longer true. WHAT REMAINS is the menus half alone: the compact
+  rule is still written `#if os(iOS)` in swift/KayaSwiftUI.swift
+  (`KayaPhoneMenuToolbar`), which is the same code the iPad DEFECT
+  entry at the top of this file is about. Schedule them together —
+  re-keying the rule off the platform IS the iPad fix, not a
+  prerequisite for it.
 
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
@@ -411,11 +428,24 @@ own the state (see the undo note in this file).
   accessibility identifier (accessibilityIdentifier / testTag /
   resource-id are the platform mappings) so it is a real product
   surface with the harness as first consumer, not test plumbing on the
-  production wire. Cost: a Prop in spec.rs (hash moves, everything
-  regenerates), a name→widget map in the backends + 2 interpreters,
-  and a steps migration. TRIGGER: the first scene that needs to assert
-  on a container the uniqueness convention cannot name — the layout
-  scene already qualifies whenever its rows deserve assertions.
+  production wire.
+  HALF OF THIS IS ALREADY PAID (noted 2026-07-27, on an audit of this
+  file). The accessibility milestone landed the prop: `a11y_id` is
+  spec prop 12, and it lowers to exactly the mappings proposed above —
+  `accessibilityIdentifier` on the Apple backends, `Modifier.testTag`
+  on Compose. So the expensive half of the original cost — a Prop in
+  spec.rs, the hash moving, everything regenerating — is spent, and
+  the framing question is settled rather than open. Do not plan it
+  again.
+  WHAT IS ACTUALLY LEFT is the ADDRESSING half: a name→widget map in
+  the backends and both interpreters, `parse_target` accepting an
+  authored key beside `kind#index`, and a steps migration. Every scene
+  still targets positionally, so the payoff is untouched — containers
+  freely addressable, no unique-by-convention discipline, check-steps'
+  container lint retired, and the layout scene's rows assertable
+  instead of observation-only. TRIGGER: the first scene that needs to
+  assert on a container the uniqueness convention cannot name — the
+  layout scene already qualifies whenever its rows deserve assertions.
 
 - **Undo/redo and session restoration — core-owned, and cheap only
   here** (from the 2026-07-24 survey; TRIGGER SATISFIED by the text
@@ -568,11 +598,12 @@ own the state (see the undo note in this file).
     output determinism wants -Zremap-path-prefix and friends, and its
     payoff is a shared build cache, which is a packaging-milestone
     concern.
-- deploy-win.sh uses `sed` and `awk` (the kaya.h export cross-check),
-  against repo policy — those are the BSD/GNU divergent tools every
-  other script avoids. It works today because that script only ever
-  runs on the mac host. Rewrite as python3 the next time that block is
-  touched, and consider a check-shell clause once it is clean.
+- ~~deploy-win.sh uses `sed` and `awk`~~ — LANDED 2026-07-27 (the
+  rewrite and its gate both rode `d1a64fd`). check-shell now bans both
+  in COMMAND POSITION across `tools/**/*.sh`, with a self-test that
+  scores a real invocation against the word inside another word — the
+  first draft flagged "used" in a comment. Heredoc bodies are dropped
+  from the scan, because the scanner itself lives in one.
 - Scene-run coverage, the remaining half: check-steps' wired() now
   demands per-runner LEG SIGNATURES (run $scene- / run "$proto"
   $scene- / run_suite ${scene}_), so a scene absent from a runner

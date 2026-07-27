@@ -400,7 +400,21 @@ the same patterns return through interpreter drop-downs
   signature must be an explicit filter, or bindings.rs is uncompilable
   (or silently missing methods, e.g. an async method whose operation
   type is unfiltered). windows-future 0.3 spells the blocking wait
-  `join()`, not `get()`.
+  `join()`, not `get()`. Enums count: adopting `TwoPaneView` meant
+  naming `Visibility` and every `TwoPaneView*` enum by hand
+  (2026-07-27). Regenerating is `cargo run` in
+  `tools/winui-bindgen` WITH THAT AS THE CWD — it writes a relative
+  `../../crates/kaya/src/winui/bindings.rs`, so from the repo root it
+  silently writes somewhere else.
+- **`unparent` must know every parent that owns its child through a
+  PROPERTY**, not just the container kinds. `adw::NavigationPage` is
+  one: a bare `child.unparent()` detaches the widget while the page
+  goes on pointing at it, so the pane lives in no tree the
+  accessibility walk can reach. `expect_ax` then reports it absent
+  while kaya's model still has it — every model assertion passes and
+  only the real-tree one fails, which reads like a broken a11y read
+  rather than a broken detach (2026-07-27; the arm is in gtk.rs's
+  `unparent`).
 - **WinUI code-only apps need a composed Application implementing
   IXamlMetadataProvider** (COM aggregation via
   IApplicationFactory::CreateInstance) or library-type XAML lookups
@@ -803,6 +817,20 @@ the same patterns return through interpreter drop-downs
   (2026-07-22). The general rule for mounted-tree builds: an
   incremental build that shares sources with a concurrent writer
   must assert output freshness itself.
+
+- **...and that freshness assert can be made UNSATISFIABLE by a
+  regeneration that changes nothing.** `tools/gen-bindings.sh` without
+  `--check` rewrites the binding sources with byte-identical content
+  and fresh mtimes. dune is CONTENT-based, so it correctly declines to
+  relink; the assert above is MTIME-based, so it demands a relink that
+  will never happen, and the lane cannot clear (2026-07-27). The two
+  halves are each right and the pair is stuck — which is the general
+  shape to watch for whenever a guard and the tool it guards measure
+  staleness differently. Deleting the stale `.exe` files makes it
+  worse: dune's database then believes targets exist that do not, and
+  `--force` does not repair it. The repair is `rm -rf _build-linux`.
+  Run gen-bindings with `--check` unless you actually mean to
+  regenerate.
 
 ## A deferral trigger written against a platform's current shape expires
 
@@ -1546,3 +1574,44 @@ the loop ALSO reads from fd 3 (`done 3< <(grep …)`), because -nostdin
 only fixes the command someone already thought about — the fd makes
 the loop immune to the next stdin-reader added inside it. Same shape
 to watch for with `ssh`, `adb`, `dotnet` and `java` in a read loop.
+
+## A per-entry affordance built once at mount cannot be rebuilt later
+
+2026-07-27, the list-detail wrapper swap. WinUI's back bar is created
+in `mount_entry`: the entry's WRAPPER is a two-row Grid whose row 0 is
+the bar and row 1 the content, and `entry.back_button` is the handle
+kept to it. Nothing rebuilds that wrapper afterwards.
+
+So the split arm, wanting no back arrow above a detail pane that covers
+nothing, cleared the handle. The arrow went away and the window was
+then permanently unable to pop: collapse it back to one pane and the
+affordance the other arm restores no longer exists. HIDE IT, NEVER
+CLEAR IT — `Visibility`, both arms writing it, so neither reads as an
+answer the other one left behind.
+
+Two smaller pieces of the same lesson. The split arm renders the
+entry's WRAPPER rather than its content, which is why a back arrow
+appeared above the detail pane at all — the bar is row 0 of the thing
+being handed to the pane. And the Windows lane was the only one that
+caught it: every other backend builds its back affordance per refresh,
+so the bug does not exist there to find.
+
+## libadwaita's collapse and its navigation stack are independent signals
+
+Measured on libadwaita 1.7.6 before the GTK list-detail arm was
+written, and worth keeping because two of the three are the reason the
+arm is shaped the way it is.
+
+- Flipping `collapsed`, which is what crossing the breakpoint does,
+  does NOT change `show-content`. A resize is therefore not mistakable
+  for a pop, and the detail page stays alive across the flip — which is
+  what lets `notify::show-content` going false MEAN "the user went
+  back" rather than "the window got narrow".
+- `navigation.pop` sets `show-content` false and emits that notify.
+  One signal, one meaning.
+- An UNCOLLAPSED view still accepts `navigation.pop`. GTK does not
+  decline back on a wide window the way Compose's `canNavigateBack`
+  does, so the two-pane rule CANNOT be enforced by trusting the widget
+  to refuse. It is enforced by removing the affordance: no button when
+  both panes are up, and a harness `back` that declines to press a
+  button that is not there.
