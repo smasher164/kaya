@@ -108,4 +108,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     at-spi2-core dbus dbus-x11 gir1.2-atspi-2.0 python3-gi \
     && rm -rf /var/lib/apt/lists/*
 
+# libadwaita: AdwNavigationSplitView is GNOME's list-detail component,
+# and adopting it is what gives the platform its own collapse animation,
+# pane proportions, and separator instead of arithmetic kaya invented.
+# The dev package is what the `libadwaita` crate's pkg-config build
+# needs; the runtime library rides along with it.
+#
+# A trailing layer on purpose, per the note above: appending rebuilds in
+# seconds where touching the first apt list rebuilds the toolchain world.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libadwaita-1-dev gir1.2-adw-1 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work

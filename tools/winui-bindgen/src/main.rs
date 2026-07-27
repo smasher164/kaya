@@ -87,6 +87,27 @@ fn main() {
         // vanish silently while Thickness is unfiltered (the
         // transitivity trap again).
         "Microsoft.UI.Xaml.Thickness".to_string(),
+        // The list-detail arm hides the covered entry's back bar, since
+        // a detail pane sitting BESIDE its list covers nothing and has
+        // nowhere to go back to. UIElement.Visibility carries that, and
+        // the enum must be named for the same transitivity reason as
+        // everything else in this list.
+        "Microsoft.UI.Xaml.Visibility".to_string(),
+        // TwoPaneView is the platform's own list-detail container, and
+        // unlike GNOME's and Material's it is pure layout: no
+        // navigation, no history, nothing that wants to own the stack
+        // kaya's core owns. Adopting it hands Windows the decision of
+        // WHERE one pane becomes two (MinWideModeWidth), which is the
+        // whole point — kaya no longer draws that line itself.
+        //
+        // Every enum it answers with has to be named here too, for the
+        // transitivity reason above: Mode is what the split observation
+        // reads, and PanePriority is which pane survives the collapse.
+        "Microsoft.UI.Xaml.Controls.TwoPaneView".to_string(),
+        "Microsoft.UI.Xaml.Controls.TwoPaneViewMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.TwoPaneViewPriority".to_string(),
+        "Microsoft.UI.Xaml.Controls.TwoPaneViewWideModeConfiguration".to_string(),
+        "Microsoft.UI.Xaml.Controls.TwoPaneViewTallModeConfiguration".to_string(),
         // The align observation reads child positions through
         // UIElement.TransformToVisual (and text baselines through
         // TextBlock.BaselineOffset beneath them); the transform's own

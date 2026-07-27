@@ -52,4 +52,16 @@ dependencies {
     api("androidx.activity:activity-compose:1.9.3")
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
     implementation("androidx.compose.material3:material3")
+    // Material 3 adaptive: ListDetailPaneScaffold is Android's own
+    // list-detail container, and adopting it hands Android the decision
+    // of where one pane becomes two instead of kaya drawing that line.
+    // NOT covered by the compose BOM above (it versions separately), so
+    // the versions are written out, which is also what check-pins wants.
+    //
+    // adaptive-layout carries the scaffold; adaptive carries the
+    // directive and the window-size reading it is computed from. The
+    // NAVIGATION artifact is deliberately absent: its navigator owns a
+    // destination history, and kaya's core already owns the stack.
+    implementation("androidx.compose.material3.adaptive:adaptive:1.0.0")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout:1.0.0")
 }

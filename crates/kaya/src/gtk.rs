@@ -501,6 +501,10 @@ struct CoreState {
     /// or the width, so expect_split cannot agree with the lowering by
     /// construction.
     split_presentation: HashMap<u64, &'static str>,
+    /// The live AdwNavigationSplitView per window. It answers whether it
+    /// collapsed, which is the only honest reading of which presentation
+    /// happened once GNOME owns that decision.
+    split_views: HashMap<u64, adw::NavigationSplitView>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, page
     /// containers by section id, the GtkStack that materializes the
     /// switcher, and the selection mirror. A section's page swaps
@@ -735,43 +739,102 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
     // libadwaita, and the semantic is expressible without it. That
     // dependency is a ledger item, not a blocker.
     let wants_split = core.list_detail.get(&window).copied().unwrap_or(false);
-    let regular = window_width(core, window) >= 600;
     // No `top.is_some()` requirement: an empty stack on a regular
     // window shows the leading pane and an EMPTY trailing one
     // (DESIGN.md). Requiring an entry here made GTK report `stacked`
     // where mac reported `split` for the same scene — a semantics
     // divergence, which is never a backend's call to make.
-    if wants_split && regular {
-        use gtk4::prelude::{BoxExt, WidgetExt};
+    // NO width test here any more. AdwNavigationSplitView collapses on
+    // a BREAKPOINT, and the condition is GNOME's documented one rather
+    // than a number kaya invented and then graded itself against.
+    if wants_split {
+        use adw::prelude::*;
         let base = core.window_roots.get(&window).cloned();
         let detail = top.and_then(|id| core.nav_entries.get(&id)).and_then(|e| e.root.clone());
         if let Some(base) = base {
-            let split = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            let split = adw::NavigationSplitView::new();
             unparent(&base);
-            // The leading pane is sized, not halved — see
-            // protocol::leading_pane_width for why, and why the number
-            // is the platforms' and not mine.
-            let lead = crate::protocol::leading_pane_width(f64::from(window_width(core, window)));
-            base.set_hexpand(false);
-            base.set_size_request(lead as i32, -1);
-            base.set_vexpand(true);
-            split.append(&base);
+            // The sidebar pane is sized by libadwaita's OWN rule now:
+            // sidebar-width-fraction with min/max, which is where
+            // protocol::leading_pane_width's 25%/180..280 came from in
+            // the first place. Adopting the widget means adopting the
+            // source rather than the copy.
+            let list = adw::NavigationPage::builder()
+                .child(&base)
+                .title(core.window_titles.get(&window).cloned().unwrap_or_default())
+                .tag("list")
+                .build();
+            split.set_sidebar(Some(&list));
             if let Some(detail) = &detail {
                 unparent(detail);
-                // The detail takes the remainder.
-                detail.set_hexpand(true);
-                detail.set_vexpand(true);
-                split.append(detail);
+                let title = top
+                    .and_then(|id| core.nav_entries.get(&id))
+                    .map(|e| e.title.clone())
+                    .unwrap_or_default();
+                let page = adw::NavigationPage::builder()
+                    .child(detail)
+                    .title(title)
+                    .tag("detail")
+                    .build();
+                split.set_content(Some(&page));
             }
-            set_window_content(core, window, Some(split.upcast_ref::<gtk4::Widget>()));
+            // show-content is the ONE stack fact the widget is told:
+            // whether a detail is open. Everything else about the stack
+            // stays in kaya's core, which is what keeps a pop and the
+            // widget's pop from being two different truths.
+            split.set_show_content(top.is_some());
+
+            // The COLLAPSE decision, handed to GNOME. AdwNavigationSplitView
+            // has no default of its own — libadwaita deliberately makes
+            // the application declare the breakpoint — so kaya supplies
+            // the condition from libadwaita's own documented example
+            // rather than choosing a width. A BreakpointBin is what lets
+            // a plain GtkApplicationWindow carry one; add_breakpoint
+            // otherwise lives on AdwWindow, which this backend is not.
+            let bin = adw::BreakpointBin::builder()
+                .width_request(1)
+                .height_request(1)
+                .child(&split)
+                .build();
+            if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 400sp") {
+                let breakpoint = adw::Breakpoint::new(condition);
+                breakpoint.add_setter(&split, "collapsed", Some(&true.to_value()));
+                bin.add_breakpoint(breakpoint);
+            }
+
+            // The user's back, caught where libadwaita reports it.
+            // Collapsed, its navigation view draws a back button whose
+            // pop sets show-content false; that transition IS the
+            // gesture, and it is distinguishable from a resize, which
+            // moves `collapsed` and leaves show-content alone (measured
+            // on libadwaita 1.7.6 before any of this was written).
+            split.connect_show_content_notify(move |view| {
+                if view.shows_content() {
+                    return;
+                }
+                glib::idle_add_local_once(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return };
+                        if core.nav_stacks.get(&window).is_some_and(|s| !s.is_empty()) {
+                            user_back(core, window);
+                        }
+                    });
+                });
+            });
+
+            set_window_content(core, window, Some(bin.upcast_ref::<gtk4::Widget>()));
             let title = top
                 .and_then(|id| core.nav_entries.get(&id))
                 .map(|e| e.title.clone())
                 .unwrap_or_default();
             target.set_title(Some(&title));
-            core.split_presentation.insert(window, "split");
+            core.split_views.insert(window, split);
+            // kaya's own header back button stays hidden for the whole
+            // list-detail presentation: collapsed, libadwaita draws its
+            // own inside the navigation view, and two back buttons in
+            // one header is not a thing any GNOME app ships.
             if let Some(back) = core.back_buttons.get(&window) {
-                back.set_visible(true);
+                back.set_visible(false);
             }
             return;
         }
@@ -1623,6 +1686,13 @@ fn unparent(child: &gtk4::Widget) {
         bx.remove(child);
     } else if let Some(win) = parent.downcast_ref::<gtk4::Window>() {
         win.set_child(None::<&gtk4::Widget>);
+    } else if let Some(page) = parent.downcast_ref::<adw::NavigationPage>() {
+        // A page owns its child through a PROPERTY, so a bare unparent
+        // detaches the widget while leaving the page still pointing at
+        // it. The pane then lives in no tree the accessibility walk can
+        // reach, and `expect_ax` reports it absent while kaya's own
+        // model still has it — which is exactly how this presented.
+        adw::prelude::NavigationPageExt::set_child(page, None::<&gtk4::Widget>);
     } else {
         child.unparent();
     }
@@ -3017,6 +3087,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // activate can fire more than once; the core is set up once.
     let ends = Rc::new(RefCell::new(Some((occ_tx, tx_rx))));
     app.connect_activate(move |app| {
+        // libadwaita has to be initialised before any Adw widget is
+        // constructed, and the list-detail arm constructs one. Safe to
+        // call more than once, and it must come after GTK is up, which
+        // inside activate it already is.
+        adw::init().expect("libadwaita init");
         let Some((occ_tx, tx_rx)) = ends.borrow_mut().take() else {
             return;
         };
@@ -3077,6 +3152,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 nav_stacks: HashMap::new(),
                 list_detail: HashMap::new(),
                 split_presentation: HashMap::new(),
+                split_views: HashMap::new(),
                 sections: HashMap::new(),
                 section_pages: HashMap::new(),
                 section_stacks: HashMap::new(),
@@ -3476,7 +3552,21 @@ impl crate::harness::Stage for GtkStage {
             // The SAME source the arm used.
             let width = window_width(core, 0);
             let class = if width >= 600 { "regular" } else { "compact" };
-            let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
+            // THE WIDGET'S OWN ANSWER, not a value the arm stamped
+            // about itself: GNOME decides where this collapses, so
+            // asking anything else would be asking kaya what kaya did.
+            // A window that never requested list-detail has no widget,
+            // and falls back to the serial arm's stamp.
+            let presentation = match core.split_views.get(&0) {
+                Some(view) => {
+                    if view.is_collapsed() {
+                        "stacked"
+                    } else {
+                        "split"
+                    }
+                }
+                None => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
+            };
             format!("{class}/{presentation}")
         })
     }
@@ -4032,7 +4122,35 @@ impl crate::harness::Stage for GtkStage {
             // button — its click handler runs the same user-pop path
             // a pointer press does. Deferred one idle tick: the
             // handler re-borrows CORE, which this closure holds.
+            //
+            // A list-detail window's back affordance belongs to
+            // libadwaita, not to kaya's header. Collapsed, its
+            // navigation view draws the button and `navigation.pop` is
+            // exactly what pressing it does; expanded, it draws none, so
+            // there is nothing to drive and back does nothing. That is
+            // the two-pane rule, expressed as the widget's own state
+            // rather than a flag kaya keeps beside it.
+            if let Some(split) = core.split_views.get(&window).cloned() {
+                if split.is_collapsed() {
+                    glib::idle_add_local_once(move || {
+                        let _ = gtk4::prelude::WidgetExt::activate_action(
+                            &split,
+                            "navigation.pop",
+                            None,
+                        );
+                    });
+                }
+                return;
+            }
+            // A HIDDEN button is not an affordance. emit_clicked runs
+            // the handler regardless of visibility, so without this the
+            // harness could pop where a user has no button to press,
+            // and the two-pane back rule would pass its own test while
+            // being false on screen.
             if let Some(back) = core.back_buttons.get(&window).cloned() {
+                if !gtk4::prelude::WidgetExt::get_visible(&back) {
+                    return;
+                }
                 glib::idle_add_local_once(move || {
                     use gtk4::prelude::ButtonExt;
                     back.emit_clicked();

@@ -38,11 +38,13 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
     RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
-    Slider, TextBlock, TextBox, TextChangedEventHandler, ToggleMenuFlyoutItem,
+    Slider, TextBlock, TextBox, TextChangedEventHandler, ToggleMenuFlyoutItem, TwoPaneView,
+    TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
+use bindings::Windows::Foundation::TypedEventHandler;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
-use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness};
+use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness, Visibility};
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -216,7 +218,7 @@ struct CoreState {
     split_presentation: HashMap<u64, &'static str>,
     /// The live list-detail Grid per window, kept so the next render
     /// can release the roots it holds (see release_split).
-    split_grids: HashMap<u64, Grid>,
+    split_views: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
@@ -1095,58 +1097,78 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             core.nav_stacks.get(&window).map(|s| s.len()).unwrap_or(0)
         );
     }
-    let regular = wants_split && measured.is_some_and(|w| w >= 600.0);
-    // No `top.is_some()`: an empty stack on a regular window shows the
-    // leading pane and an EMPTY trailing one, the same as every other
-    // backend. Semantics are never a backend's call.
-    if wants_split && regular {
+    // NO width test here any more. TwoPaneView decides where one pane
+    // becomes two, off its own MinWideModeWidth, and kaya no longer
+    // draws that line: the app declares list-detail and the platform
+    // says how it presents. The old `>= 600` was a number kaya invented
+    // and then graded itself against.
+    //
+    // No `top.is_some()` either: an empty stack on a wide window shows
+    // the leading pane and an EMPTY trailing one, the same as every
+    // other backend. Semantics are never a backend's call.
+    if wants_split {
         let base = core.window_roots.get(&window).cloned();
         let detail = top
             .and_then(|id| core.nav_entries.get(&id))
             .and_then(|e| e.wrapper.clone());
         if let Some(base) = base {
-            let grid = Grid::new()?;
+            let view = TwoPaneView::new()?;
+            view.SetWideModeConfiguration(TwoPaneViewWideModeConfiguration::LeftRight)?;
             // Leading pane sized, trailing pane takes the rest — see
-            // protocol::leading_pane_width. Two star columns would put
-            // the split down the middle, which no platform does.
+            // protocol::leading_pane_width. TwoPaneView's OWN default is
+            // two equal panes, because it was built for dual-SCREEN
+            // devices where each pane is a display; for list-detail on
+            // one screen that is the down-the-middle split no platform
+            // actually ships, so the proportion stays ours.
             let lead = crate::protocol::leading_pane_width(
                 window_client_width(core, window).unwrap_or(0.0),
             );
-            let lead_col = ColumnDefinition::new()?;
-            lead_col.SetWidth(GridLength {
+            view.SetPane1Length(GridLength {
                 Value: lead,
                 GridUnitType: GridUnitType::Pixel,
             })?;
-            grid.ColumnDefinitions()?.Append(&lead_col)?;
-            let rest_col = ColumnDefinition::new()?;
-            rest_col.SetWidth(GridLength {
+            view.SetPane2Length(GridLength {
                 Value: 1.0,
                 GridUnitType: GridUnitType::Star,
             })?;
-            grid.ColumnDefinitions()?.Append(&rest_col)?;
+            // Which pane survives the collapse: the detail once the
+            // stack has one, else the list. This is TwoPaneView's
+            // spelling of libadwaita's show-content, and it is the only
+            // stack fact the control is told.
+            view.SetPanePriority(if top.is_some() {
+                TwoPaneViewPriority::Pane2
+            } else {
+                TwoPaneViewPriority::Pane1
+            })?;
             let detail: UIElement = match &detail {
                 Some(d) => windows_core::Interface::cast(d)?,
                 None => windows_core::Interface::cast(&Grid::new()?)?,
             };
-            // SetColumn is a FrameworkElement attached property, not a
-            // UIElement one.
-            let base_fe: FrameworkElement = windows_core::Interface::cast(&base)?;
-            let detail_fe: FrameworkElement = windows_core::Interface::cast(&detail)?;
-            Grid::SetColumn(&base_fe, 0)?;
-            Grid::SetColumn(&detail_fe, 1)?;
             // The window is still holding the base root at this point.
             detach_window_content(core, window)?;
-            grid.Children()?.Append(&base)?;
-            grid.Children()?.Append(&detail)?;
-            core.split_grids.insert(window, grid.clone());
-            let grid: UIElement = windows_core::Interface::cast(&grid)?;
-            set_window_content(core, window, &grid)?;
+            view.SetPane1(&base)?;
+            view.SetPane2(&detail)?;
+            core.split_views.insert(window, view.clone());
+            let el: UIElement = windows_core::Interface::cast(&view)?;
+            set_window_content(core, window, &el)?;
             let title = top
                 .and_then(|id| core.nav_entries.get(&id))
                 .map(|e| e.title.clone())
                 .unwrap_or_default();
             target.SetTitle(&HSTRING::from(&*title))?;
-            core.split_presentation.insert(window, "split");
+            // The back bar follows the CONTROL's mode, now and every
+            // time Windows changes it. Mode is decided during layout, so
+            // reading it here alone would read the value from before
+            // this pane arrangement existed — the measuring-what-you-are-
+            // about-to-replace trap that cost this backend a day.
+            apply_split_back_bar(core, window)?;
+            let handler = TypedEventHandler::new(move |_, _| {
+                CORE.with_borrow_mut(|core| {
+                    let Some(core) = core.as_mut() else { return Ok(()) };
+                    apply_split_back_bar(core, window)
+                })
+            });
+            view.ModeChanged(&handler)?;
             return Ok(());
         }
     }
@@ -1155,6 +1177,14 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
 
     match top.and_then(|id| core.nav_entries.get(&id)) {
         Some(entry) => {
+            // Collapsed: the entry COVERS the leading pane, so back
+            // means something again and its bar comes back. The split
+            // arm above hid it; this is the other half, and both arms
+            // must write it or the state is derived-by-default in one.
+            if let Some(back) = &entry.back_button {
+                let back: UIElement = back.cast()?;
+                back.SetVisibility(Visibility::Visible)?;
+            }
             if let Some(wrapper) = &entry.wrapper {
                 let wrapper: UIElement = windows_core::Interface::cast(wrapper)?;
                 set_window_content(core, window, &wrapper)?;
@@ -1603,6 +1633,34 @@ fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
     Some(f64::from(client.right - client.left) / scale)
 }
 
+/// Show or hide the covered entry's back bar according to the CONTROL's
+/// mode.
+///
+/// The back affordance belongs to an entry that is covering something.
+/// TwoPaneView is what decides whether the detail covers the list or
+/// sits beside it, so the affordance follows its Mode rather than a
+/// width kaya measured for itself. Called once when the arm builds the
+/// view and again from ModeChanged, because Mode is settled during
+/// layout and not before.
+fn apply_split_back_bar(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let Some(view) = core.split_views.get(&window) else {
+        return Ok(());
+    };
+    let covering = view.Mode()? == TwoPaneViewMode::SinglePane;
+    let Some(top) = core.nav_stacks.get(&window).and_then(|s| s.last()).copied() else {
+        return Ok(());
+    };
+    if let Some(back) = core.nav_entries.get(&top).and_then(|e| e.back_button.clone()) {
+        let back: UIElement = back.cast()?;
+        back.SetVisibility(if covering {
+            Visibility::Visible
+        } else {
+            Visibility::Collapsed
+        })?;
+    }
+    Ok(())
+}
+
 /// Release the roots a previous list-detail render is still holding.
 /// A UIElement lives in exactly ONE Children collection, and appending
 /// a parented one does not warn the way GTK does — it takes a
@@ -1610,8 +1668,13 @@ fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
 /// The split Grid is the only container that keeps a root outside the
 /// window's own content path, so emptying it is the whole job.
 fn release_split(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
-    if let Some(grid) = core.split_grids.remove(&window) {
-        grid.Children()?.Clear()?;
+    if let Some(view) = core.split_views.remove(&window) {
+        // TwoPaneView holds its panes as PROPERTIES, not in a Children
+        // collection, so emptying it means nulling both. Same reason as
+        // before: a UIElement lives in exactly one parent, and handing a
+        // still-parented one to the next view aborts the process.
+        view.SetPane1(None::<&UIElement>)?;
+        view.SetPane2(None::<&UIElement>)?;
     }
     Ok(())
 }
@@ -4068,7 +4131,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             nav_stacks: HashMap::new(),
             list_detail: HashMap::new(),
             split_presentation: HashMap::new(),
-            split_grids: HashMap::new(),
+            split_views: HashMap::new(),
             window_roots: HashMap::new(),
             window_titles: HashMap::new(),
             window_veto: HashMap::new(),
@@ -4574,7 +4637,17 @@ impl crate::harness::Stage for WinUiStage {
                 Some(_) => "compact",
                 None => "unknown",
             };
-            let presentation = core.split_presentation.get(&0).copied().unwrap_or("stacked");
+            // THE CONTROL'S OWN ANSWER, not a value the arm stamped
+            // about itself. Windows decides where one pane becomes two,
+            // so the only honest reading of which presentation happened
+            // is to ask the control. A window that never asked for
+            // list-detail has no control, and falls back to the serial
+            // arm's stamp.
+            let presentation = match core.split_views.get(&0).map(|v| v.Mode()) {
+                Some(Ok(mode)) if mode != TwoPaneViewMode::SinglePane => "split",
+                Some(Ok(_)) => "stacked",
+                _ => core.split_presentation.get(&0).copied().unwrap_or("stacked"),
+            };
             Ok(format!("{class}/{presentation}"))
         })
         // The same fallback menu_presentation uses: a read that cannot
@@ -5277,6 +5350,15 @@ impl crate::harness::Stage for WinUiStage {
             else {
                 return Ok(());
             };
+            // A COLLAPSED button is not an affordance. The automation
+            // peer invokes it regardless of visibility, so without this
+            // the harness could pop where the split arm has hidden the
+            // bar, and the two-pane back rule would pass a test the
+            // screen does not satisfy.
+            let probe: UIElement = back.cast()?;
+            if probe.Visibility()? != Visibility::Visible {
+                return Ok(());
+            }
             let queue = DispatcherQueue::GetForCurrentThread()?;
             let handler = DispatcherQueueHandler::new(move || {
                 let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&back)?;

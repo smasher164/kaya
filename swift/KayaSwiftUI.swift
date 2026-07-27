@@ -2440,6 +2440,14 @@ private func kayaRunScript(_ script: String) {
                 // click.
                 let (wid, _, _) = kayaWindowTarget(Array(parts[1...]))
                 DispatchQueue.main.sync {
+                    // NO back affordance while both panes are on
+                    // screen. NavigationSplitView draws no back button
+                    // in a detail column sitting beside its sidebar, so
+                    // there is nothing for a user to press; driving the
+                    // pop anyway would let the harness do what the
+                    // screen does not offer, and the two-pane back rule
+                    // would pass a test it does not satisfy.
+                    guard !kayaSplitArm(wid) else { return }
                     let depth = kayaScene.windows[wid]?.entries.count ?? 0
                     kayaUserPops(wid, to: max(0, depth - 1))
                 }

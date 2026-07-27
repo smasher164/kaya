@@ -610,7 +610,12 @@ pub enum Prop {
 // a host that compiles neither sees it as dead. The tests exercise it
 // everywhere.
 #[cfg_attr(
-    not(any(target_os = "linux", target_os = "windows", test)),
+    // GTK dropped off this list when the backend adopted
+    // AdwNavigationSplitView: libadwaita sizes its own sidebar from the
+    // rule this function encodes, so asking it to is better than
+    // computing a copy. WinUI still needs the number, because
+    // TwoPaneView's own default is two EQUAL panes.
+    not(any(target_os = "windows", test)),
     allow(dead_code)
 )]
 pub(crate) fn leading_pane_width(total: f64) -> f64 {

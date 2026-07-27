@@ -2762,8 +2762,16 @@ fun KayaRoot() {
     // while the stack has entries (declared-ahead, the platform's own
     // OnBackPressedCallback model — the root's back still leaves the
     // app).
+    //
+    // And DISABLED while both panes are on screen. Back reveals what
+    // the top entry covers, and in the split arm it covers nothing: the
+    // leading pane is already beside it. Leaving the handler enabled
+    // would pop to a blank detail pane. This is Compose's own rule,
+    // where canNavigateBack reports false once both panes are visible;
+    // disabling the handler is how that is spelled here, and it lets
+    // back reach the system exactly as it would in a Material app.
     androidx.activity.compose.BackHandler(
-        enabled = KayaSceneModel.navEntries.isNotEmpty()
+        enabled = KayaSceneModel.navEntries.isNotEmpty() && !kayaSplitArm()
     ) { kayaUserBack() }
 
     KayaSceneModel.alertId?.let { alert ->
@@ -2792,6 +2800,21 @@ fun KayaRoot() {
         )
     }
 }
+
+/** Whether this window is presenting its entry stack as list-detail
+ * right now, meaning both panes are on screen.
+ *
+ * ONE source, read by the arm that renders and by the back rule that
+ * depends on it. Two copies of this condition drift, and the drift is
+ * invisible: the arm would show two panes while back still popped, or
+ * the reverse, and each half would look correct on its own. */
+@OptIn(androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+internal fun kayaSplitArm(): Boolean =
+    KayaSceneModel.listDetail &&
+        androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective(
+            androidx.compose.material3.adaptive.currentWindowAdaptiveInfo()
+        ).maxHorizontalPartitions > 1
 
 /** The one scene surface (sections scaffold | nav top | mounted root),
  * exactly the pre-menus KayaRoot body: the menus top bar stacks ABOVE
@@ -2831,10 +2854,13 @@ private fun KayaSurface() {
         // androidx dependency and the semantic is expressible without
         // one. Same call GTK made with Box over AdwNavigationSplitView;
         // both are ledger items, neither is a blocker.
-        val splitHere =
-            KayaSceneModel.listDetail &&
-                LocalConfiguration.current.screenWidthDp >= 600 &&
-                topEntry != null
+        // No `topEntry != null` requirement: an empty stack on a regular
+        // window shows the leading pane and an EMPTY trailing one, the
+        // same rule GTK and mac follow. Requiring an entry here reported
+        // `stacked` where they report `split` for one scene, which is a
+        // semantics divergence rather than a backend's call. It went
+        // unseen because no phone lane runs the split scene yet.
+        val splitHere = kayaSplitArm()
         if (splitHere) {
             KayaSceneModel.splitPresentation = "split"
             // The leading pane is SIZED and the detail takes the rest;

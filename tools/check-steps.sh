@@ -112,6 +112,75 @@ for f in tools/scenes/*.steps; do
     }
 done
 
+# WHICH WIDTHS AN expect_split MAY SAMPLE. Each backend defers the
+# one-pane/two-pane decision to its platform's own component, and those
+# components disagree about where the line falls: GNOME's documented
+# breakpoint collapses below 400sp, Material's standard directive wants
+# 840dp before it shows two panes, and TwoPaneView's default sits
+# between them. A width inside that band is legitimately one pane on one
+# platform and two on another.
+#
+# The scripts are compared byte-for-byte on every lane, so an assertion
+# taken in the band cannot be satisfied everywhere at once. What makes
+# this worth a gate rather than a comment is how the failure READS: one
+# platform disagreeing about pane count looks exactly like a broken
+# lowering, and the width that caused it is three lines up the file.
+split_width_lint() {
+    python3 -c '
+import re
+import sys
+
+# The band where the platforms legitimately disagree.
+LOW, HIGH = 400, 840
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+width = None
+bad = []
+for n, line in enumerate(text.splitlines(), 1):
+    s = line.strip()
+    if not s or s.startswith("#"):
+        continue
+    parts = s.split()
+    if parts[0] == "resize_window" and len(parts) > 1:
+        m = re.match(r"([0-9]+)x([0-9]+)$", parts[1])
+        width = int(m.group(1)) if m else None
+    elif parts[0] == "expect_split":
+        if width is None:
+            bad.append(f"{path}:{n}: expect_split with no preceding resize_window; "
+                       "a default window width is host-dependent")
+        elif LOW <= width < HIGH:
+            bad.append(f"{path}:{n}: expect_split at width {width}, inside the "
+                       f"{LOW}..{HIGH} band where platforms disagree "
+                       "(GNOME collapses below 400sp, Material wants 840dp). "
+                       "Sample a width every platform agrees on.")
+for b in bad:
+    print(b)
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself, both directions: a width in the band must be
+# caught, and the widths the split scene actually uses must not be.
+if printf 'expect_entries 0\nresize_window 500x600\nexpect_split "regular/split"\n' \
+    | split_width_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (expect_split inside the band passed)" >&2
+    exit 1
+fi
+if ! printf 'expect_entries 0\nresize_window 900x600\nexpect_split "regular/split"\nresize_window 360x600\nexpect_split "compact/stacked"\n' \
+    | split_width_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (agreed widths rejected)" >&2
+    exit 1
+fi
+
+for f in tools/scenes/*.steps; do
+    out="$(split_width_lint "$f")" || {
+        echo "check-steps: $f samples a width where platforms disagree:" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
 # Raw CR bytes: the scripts are LF files by contract. The Swift
 # interpreter splits script text on "\n", and Swift's grapheme-based
 # split sees CRLF as ONE cluster — a CRLF-ended script would parse as

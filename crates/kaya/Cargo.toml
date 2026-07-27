@@ -69,6 +69,17 @@ atspi = { version = "0.30", optional = true, features = ["zbus"] }
 # 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
 # image ships GTK 4.18.
 gtk4 = { version = "0.11.4", features = ["v4_10"] }
+# libadwaita: AdwNavigationSplitView is GNOME's list-detail component,
+# and adopting it is what gives the platform its own collapse animation,
+# pane proportions, separator, and back behaviour instead of geometry
+# kaya computed for itself.
+#
+# v1_4 is the floor that gates NavigationSplitView and BreakpointBin,
+# and it is deliberately not higher: the validation image ships
+# libadwaita 1.7.6, so anything above 1.7 would compile here and fail
+# there. Not optional — a semantics that appears only in some builds is
+# not a semantics.
+adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }
 # The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
 # cdylib and speaks the same KayaRing natives as Android's JVM tier.
 jni = "0.21"

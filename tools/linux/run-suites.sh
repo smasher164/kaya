@@ -96,7 +96,16 @@ run_build java build_java
 # dominated by debuginfo, and nothing in the container asserts on
 # symbols. This removes the pressure at its source instead of racing
 # the example count against the container's RAM.
-CARGO_PROFILE_DEV_DEBUG=0 cargo build --locked --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
+#
+# AND the link parallelism is bounded, which is what docs/traps.md said
+# to do if it ever recurred despite the debuginfo fix. It did, the day
+# the GTK backend took on libadwaita: two more binding rlibs per link
+# was enough to put ld back over the ceiling on 18 cores' worth of
+# concurrent links. Bounding jobs costs a little wall time on the
+# compile and takes the peak out of the link, which is where the
+# kernel was actually choosing a victim.
+CARGO_PROFILE_DEV_DEBUG=0 cargo build -j6 --locked --features harness --lib \
+    "${BUILD_EXAMPLES[@]}" || exit 1
 # The library every non-Rust guest here dlopens must be the one
 # this build produced, not a survivor of a build that failed.
 tools/build-id.sh --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1

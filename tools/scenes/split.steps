@@ -6,16 +6,18 @@
 # specializes gates nothing, which is why resize_window belongs to this
 # milestone rather than preceding it.
 #
-# PARKED as .pending, not in tools/scenes/: check-steps requires every
-# scene there to have live legs in all five runners, and only the mac
-# backend has the arm so far. It moves with the fan-out (the a11y
-# precedent).
+# WHICH WIDTHS THIS SCENE MAY SAMPLE. Each backend now defers the
+# one-pane/two-pane decision to its platform's own component, and those
+# components disagree about where the line falls: GNOME's documented
+# breakpoint collapses below 400sp, Material's standard directive wants
+# 840dp before it will show two panes, and TwoPaneView ships its own
+# default in between. Between those bounds a width is legitimately
+# one pane on one platform and two on another.
 #
-# The exact spellings here are mac-lane literals. The SHARED scene this
-# becomes will carry the bare `expect_split` — the asymmetric invariant
-# that holds on every platform — because the exact class differs per
-# lane while "a regular window must not show one pane while its stack
-# holds two" does not.
+# This file is compared byte-for-byte on every lane, so it samples only
+# the widths where all of them agree: 360 (below every boundary) and
+# 900 (above every boundary). check-steps enforces that, because the
+# failure it prevents reads as a backend bug rather than a bad width.
 expect_entries 0
 expect_title "split"
 # Wide: regular, and with nothing pushed the stack cannot be showing
@@ -37,17 +39,34 @@ expect_split "regular/split"
 # REAL tree, where an element that is not on screen is not present.
 expect_ax label#0 "label/list pane"
 expect_ax label#last "label/detail pane"
+# THE BACK RULE, asserted where it bites. On a regular window both
+# panes are on screen, so the back AFFORDANCE has nothing to reveal and
+# does not pop; every platform that ships a back gesture already
+# refuses here (Compose's canNavigateBack returns false with both panes
+# visible, and neither libadwaita nor NavigationSplitView draws a back
+# button in an uncollapsed content pane). Popping anyway would leave a
+# blank detail pane, which reads as a bug. The app can still pop itself.
+back
+expect_entries 1
+expect_split "regular/split"
 # Narrow: the SAME scene, the same stack, one pane. Nothing in the
 # guest re-declared anything — the platform re-decided.
-resize_window 420x600
+#
+# 360 rather than a width nearer the boundary: each platform draws its
+# own line now (GNOME collapses below 400sp, Material wants 840dp,
+# TwoPaneView has its own default), and this scene is compared
+# byte-for-byte across all of them. It may only sample widths where
+# every platform agrees (see check-steps' band rule).
+resize_window 360x600
 expect_split "compact/stacked"
 expect_entries 1
-# And back, because a transition that only works in one direction is
-# half a feature.
-resize_window 900x600
-expect_split "regular/split"
-# The stack still pops the way it always did: list-detail is a
+# Collapsed, the detail COVERS the list, so back means something again
+# and the stack pops the way it always did: list-detail is a
 # PRESENTATION of the stack, not a second lifecycle.
 back
 expect_entries 0
 expect label#0 "popped detail"
+# And back to regular, because a transition that only works in one
+# direction is half a feature.
+resize_window 900x600
+expect_split "regular/split"
