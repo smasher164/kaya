@@ -3285,6 +3285,21 @@ mod tests {
     }
 
     #[test]
+    fn the_leading_pane_is_a_quarter_not_a_half() {
+        use crate::protocol::leading_pane_width;
+        // The whole point: never half. A 1000-wide window gives the
+        // list 250 and the detail 750.
+        assert_eq!(leading_pane_width(1000.0), 250.0);
+        // Clamped at both ends, libadwaita's stated 180..280.
+        assert_eq!(leading_pane_width(600.0), 180.0);
+        assert_eq!(leading_pane_width(4000.0), 280.0);
+        // And never wider than the window it sits in, however narrow —
+        // a compact window never takes this arm, but the arithmetic
+        // must not produce a pane wider than its parent regardless.
+        assert_eq!(leading_pane_width(100.0), 100.0);
+    }
+
+    #[test]
     fn list_detail_takes_a_bool() {
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetWindowProp {

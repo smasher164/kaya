@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -2836,8 +2837,16 @@ private fun KayaSurface() {
                 topEntry != null
         if (splitHere) {
             KayaSceneModel.splitPresentation = "split"
+            // The leading pane is SIZED and the detail takes the rest;
+            // two equal weights would split the window down the middle,
+            // which no platform does. Same rule and same numbers as the
+            // other backends (protocol::leading_pane_width): 25% of the
+            // width, clamped to 180..280dp, adopted from libadwaita's
+            // stated defaults rather than invented here.
+            val totalDp = LocalConfiguration.current.screenWidthDp
+            val leadDp = (totalDp * 0.25f).coerceIn(180f, 280f).coerceAtMost(totalDp.toFloat())
             Row {
-                Box(Modifier.weight(1f)) {
+                Box(Modifier.width(leadDp.dp)) {
                     KayaSceneModel.root?.let { KayaRender(it, isRoot = true) }
                 }
                 Box(Modifier.weight(1f)) {

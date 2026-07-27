@@ -1106,14 +1106,24 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             .and_then(|e| e.wrapper.clone());
         if let Some(base) = base {
             let grid = Grid::new()?;
-            for _ in 0..2 {
-                let col = ColumnDefinition::new()?;
-                col.SetWidth(GridLength {
-                    Value: 1.0,
-                    GridUnitType: GridUnitType::Star,
-                })?;
-                grid.ColumnDefinitions()?.Append(&col)?;
-            }
+            // Leading pane sized, trailing pane takes the rest — see
+            // protocol::leading_pane_width. Two star columns would put
+            // the split down the middle, which no platform does.
+            let lead = crate::protocol::leading_pane_width(
+                window_client_width(core, window).unwrap_or(0.0),
+            );
+            let lead_col = ColumnDefinition::new()?;
+            lead_col.SetWidth(GridLength {
+                Value: lead,
+                GridUnitType: GridUnitType::Pixel,
+            })?;
+            grid.ColumnDefinitions()?.Append(&lead_col)?;
+            let rest_col = ColumnDefinition::new()?;
+            rest_col.SetWidth(GridLength {
+                Value: 1.0,
+                GridUnitType: GridUnitType::Star,
+            })?;
+            grid.ColumnDefinitions()?.Append(&rest_col)?;
             let detail: UIElement = match &detail {
                 Some(d) => windows_core::Interface::cast(d)?,
                 None => windows_core::Interface::cast(&Grid::new()?)?,

@@ -748,11 +748,17 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
         if let Some(base) = base {
             let split = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
             unparent(&base);
-            base.set_hexpand(true);
+            // The leading pane is sized, not halved — see
+            // protocol::leading_pane_width for why, and why the number
+            // is the platforms' and not mine.
+            let lead = crate::protocol::leading_pane_width(f64::from(window_width(core, window)));
+            base.set_hexpand(false);
+            base.set_size_request(lead as i32, -1);
             base.set_vexpand(true);
             split.append(&base);
             if let Some(detail) = &detail {
                 unparent(detail);
+                // The detail takes the remainder.
                 detail.set_hexpand(true);
                 detail.set_vexpand(true);
                 split.append(detail);
@@ -3441,9 +3447,17 @@ impl crate::harness::Stage for GtkStage {
         // Polled from the HARNESS thread, never by pumping the main
         // loop from inside a CoreState borrow: re-entering CORE there
         // aborts.
-        let want = width as i32;
+        // Wait until the allocation lands on the SAME SIDE OF THE
+        // BOUNDARY as the request — not until it equals it. A window
+        // manager (or, under Xvfb, its absence) is free to grant a
+        // different size, so exact equality never held and every resize
+        // paid the full timeout instead of ~a frame. The size class is
+        // the only thing the arm reads, so it is the only thing worth
+        // waiting for.
+        let want_regular = width >= 600.0;
         for _ in 0..100 {
-            if Self::on_main(move |core| window_width(core, window)) == want {
+            let now = f64::from(Self::on_main(move |core| window_width(core, window)));
+            if (now >= 600.0) == want_regular {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

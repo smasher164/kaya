@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 python3 - <<'EOF'
+import pathlib
 import re
 import sys
 
@@ -172,6 +173,25 @@ for field in STAMPED:
         fail(f"every write to `{field}` in KayaSwiftUI.swift sits inside a platform "
              f"conditional (lines {where}) — the platforms it excludes read the "
              "field's initial value as if it were an observation")
+
+# THE PANE PROPORTION IS ONE NUMBER IN TWO LANGUAGES. Rust's
+# protocol::leading_pane_width serves the GTK and WinUI arms; the
+# Compose arm restates the same rule in Kotlin because it cannot call
+# it. Two copies of a constant drift, and the symptom would be one
+# platform laying out differently from the others for no stated reason
+# — the exact class the wire-constant pins above exist to prevent.
+rust_rule = pathlib.Path("crates/kaya/src/protocol.rs").read_text()
+for literal, what in (("0.25", "the 25% fraction"),
+                      ("180.0", "the 180 minimum"),
+                      ("280.0", "the 280 maximum")):
+    if literal not in rust_rule:
+        fail(f"protocol.rs no longer states {what} for leading_pane_width")
+for literal, what in (("0.25f", "the 25% fraction"),
+                      ("180f", "the 180 minimum"),
+                      ("280f", "the 280 maximum")):
+    if literal not in kotlin:
+        fail(f"KayaCompose.kt no longer states {what} for the leading pane — "
+             "it must match protocol::leading_pane_width")
 
 if failures:
     for f in failures:

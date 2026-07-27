@@ -590,6 +590,33 @@ pub enum Prop {
 
 /// Window property keys — the presentation-context twin of [`Prop`],
 /// separate because windows are not widgets (the widget domain checks
+/// The leading pane's width for a list-detail split: a FRACTION of the
+/// window, clamped.
+///
+/// Not half. No platform splits a list-detail in half — the list is a
+/// navigation affordance and the detail is the content, so the detail
+/// takes the remainder. libadwaita states the rule outright for
+/// AdwNavigationSplitView (25% of the total, min 180, max 280), Apple's
+/// NavigationSplitView behaves the same way, and Material gives the
+/// list a preferred width with the detail taking the rest. Those
+/// numbers are adopted here rather than invented so that swapping in
+/// each platform's own wrapper later is a change of DRESSING, not of
+/// behaviour.
+///
+/// This lives in one place because three backends have to pick, and
+/// three independent guesses is how a lowering starts disagreeing with
+/// itself across platforms.
+// Used by the GTK and WinUI backends, which are cfg'd per platform, so
+// a host that compiles neither sees it as dead. The tests exercise it
+// everywhere.
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "windows", test)),
+    allow(dead_code)
+)]
+pub(crate) fn leading_pane_width(total: f64) -> f64 {
+    (total * 0.25).clamp(180.0, 280.0).min(total)
+}
+
 /// stay widget-pure; see DESIGN.md's Presentation contexts). Window 0
 /// is the primary surface and always exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
