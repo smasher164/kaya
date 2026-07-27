@@ -2748,7 +2748,13 @@ remains is implementation-scale:
 1. The binding style guide: expand the conventions section into the
    versioned deliverable it commits to. (The former slot-syntax question
    dissolved, since the slot schema is the component function's
-   signature.)
+   signature.) DEPRIORITIZED 2026-07-24 — kaya maintains its own
+   bindings, so cross-binding consistency comes from one set of hands
+   plus the gates, not from a document; a style guide is what you write
+   when OUTSIDE contributors author bindings. The per-family spellings
+   stay ratified and in force. See docs/deferred.md for the three items
+   filed under this heading that are NOT style and keep their own
+   standing.
 2. Shared-arena reclamation: resolved — refcount, shipped with the
    blob channel and the Image widget (see the transport section's blob
    table). The generation alternative lost: the Arc already tracks the

@@ -518,7 +518,16 @@ $extra"
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
     printf '%s\n' "$out"
     rec_finish "$out"
-    xcrun simctl io "$udid" screenshot "$ROOT/target/ios-shot-$name.png" >/dev/null 2>&1 || true
+    # (NO PER-LEG SCREENSHOT. There used to be a `simctl io screenshot`
+    # here, and 50 of its 51 outputs were the HOME SCREEN — 2.4MB of
+    # wallpaper apiece. Not a race, a certainty: `--console-pty`
+    # attaches to the guest's stdout and returns only when the guest
+    # EXITS, so any capture on this line is strictly after teardown.
+    # Arming it beforehand just moves the guess earlier, which on the
+    # Android side landed on the launch splash instead. The recording
+    # pipeline is the visual record: a still at EVERY step, anchored to
+    # the harness transcript rather than to a guessed delay.
+    # `KAYA_RECORD=1` when you want pictures.)
     grep -q "KAYA_SELFTEST: OK" <<<"$out"
 }
 

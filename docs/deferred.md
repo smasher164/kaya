@@ -361,12 +361,27 @@ own the state (see the undo note in this file).
   class needs the AppKit frame walked, which the bridge already
   makes moot for buttons; scope the first cut to SwiftUI-side
   self-agreement.
-- The suite runners screenshot AFTER teardown. run-emulator's
-  android-shot-*.png and run-sim's leg captures race app exit and
-  mostly record the home screen (207KB of wallpaper, byte-identical
-  across legs) — useless as visual evidence and confusing next to
-  real stills. Move the capture to before the final step/exit, or
-  drop it and keep the recording pipeline as the visual record.
+- ~~The suite runners screenshot AFTER teardown.~~ — CLOSED 2026-07-27
+  by taking this entry's SECOND option: the ad-hoc per-leg captures are
+  gone from run-emulator and run-sim, and the recording pipeline is the
+  visual record (a still at every step, anchored to the harness
+  transcript rather than to a guessed delay; `KAYA_RECORD=1`).
+  The first option — move the capture earlier — was tried and measured
+  three ways before giving up on it, which is the part worth keeping.
+  On Android `am start -W` already blocks until the first frame
+  (TotalTime ~420ms), the scene then reaches its verdict and exits
+  ~300ms later, and screencap costs ~100ms of that: waiting 2s and 1s
+  both produced wallpaper, and waiting 0s produced the launch SPLASH,
+  before the scene had drawn. The real-UI window is narrower than the
+  jitter around it. On iOS it was never a race at all —
+  `simctl launch --console-pty` returns only when the guest EXITS, so
+  every capture on that line was strictly post-teardown (50 of 51
+  outputs were the home screen, 2.4MB each).
+  IF THE SHOTS ARE EVER WANTED BACK, the deterministic hook is a
+  linger: `record_linger` in harness.rs already holds the window 750ms
+  after the last step under `KAYA_RECORD`/`KAYA_HARNESS_GATE`, and a
+  third trigger would make a capture landable. That is core surface for
+  a debug convenience, which is why it was not taken now.
 - The C floor's grow/layout scenes, out on purpose: the floor
   documents the explicit wire; a separate exercise. (Map for the next
   layout prop, from grow's landing: native weights on WinUI — `Grid`
@@ -604,6 +619,22 @@ own the state (see the undo note in this file).
   scores a real invocation against the word inside another word — the
   first draft flagged "used" in a comment. Heredoc bodies are dropped
   from the scan, because the scanner itself lives in one.
+- **`split` and `listdetail` are rust-only, and the per-language
+  verdict is still owed** (2026-07-27). Nothing is BLOCKED at the WIRE
+  level: `list_detail` is generated from spec.rs, so every language's
+  `wire` layer has carried it since it landed. What is missing is a
+  scene PROVING each language's SUGAR drives it, and an example in each
+  language's folder — and the sugar is hand-written per language, which
+  is exactly where a gap could hide.
+  THE COST IS SEVEN FILES, NOT FOURTEEN, and the reason is worth
+  keeping: a scene selects a SCRIPT, never an app. `KAYA_SELFTEST` only
+  tells the harness which `.steps` file to read, so one guest per
+  language serves BOTH scenes — the runners already do exactly that for
+  Rust, where both legs run `examples/split`. The one assertion that
+  cannot be shared is the window title (one app has one title), which
+  is why `listdetail.steps` deliberately does not make it.
+  Invariant 2 wants an explicit do/can't/defer verdict per language;
+  there is no recorded verdict yet, and that absence is the actual gap.
 - Scene-run coverage, the remaining half: check-steps' wired() now
   demands per-runner LEG SIGNATURES (run $scene- / run "$proto"
   $scene- / run_suite ${scene}_), so a scene absent from a runner

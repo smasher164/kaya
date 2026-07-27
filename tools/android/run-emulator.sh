@@ -337,8 +337,25 @@ run_apk_on() {
     # The selftest exits the app at ~2.5s; grab the scene while it is
     # still up. logcat then reads the verdict from the buffer even if it
     # was emitted before the watch attached.
-    sleep 2
-    adb -s "$serial" exec-out screencap -p > "$ROOT/target/android-shot-$name.png" 2>/dev/null || true
+    #
+    # (NO PER-LEG SCREENSHOT. There used to be a `sleep 2; screencap`
+    # here, and 48 of its 52 outputs were the launcher's WALLPAPER —
+    # 207KB, near-identical across legs — because the app had already
+    # exited. That is worse than no screenshot: it looks like evidence.
+    #
+    # Not fixable by tuning the wait, which is why it is gone rather
+    # than adjusted. Measured on emulator-5554, 2026-07-27: `am start -W`
+    # already blocks until the first frame (TotalTime ~420ms), the scene
+    # then runs to its verdict and exits ~300ms later, and screencap
+    # itself costs ~100ms of that. Waiting 2s and 1s both landed on
+    # wallpaper; waiting 0s landed on the launch SPLASH, before the
+    # scene had drawn. The window where the real UI is on screen is
+    # narrower than the jitter around it.
+    #
+    # The recording pipeline is the visual record and always was: it
+    # samples a still at EVERY step, anchored to the harness transcript
+    # rather than to a guessed delay. `KAYA_RECORD=1` when you want
+    # pictures.)
     local out
     out=$(timeout 60 adb -s "$serial" logcat -s kaya:* -e 'KAYA_SELFTEST: (OK|FAILED)' -m 1) || true
     printf '%s\n' "$out"
