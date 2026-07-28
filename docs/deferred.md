@@ -30,18 +30,32 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
-- **DEFECT — the iPad menu lowering is wrong as of iPadOS 26**
-  (found 2026-07-24). iPadOS 26 gives iPad apps a REAL system menu bar
-  (swipe down from the top edge, or hover a trackpad; third-party apps
-  populate it) plus real windowing with traffic lights. kaya routes the
-  entire catalog into a trailing More overflow on every iOS host:
-  `KayaPhoneMenuToolbar` in swift/KayaSwiftUI.swift, gated
-  `#if os(iOS)`, promoted primaries in `.primaryAction` plus the More
-  `Menu`. So a full command catalog hides behind a phone affordance
-  while the platform's own menu bar sits empty. The `menus/first-cut`
-  stash has the identical structure — this is not a regression from one
-  implementation, it is a shared assumption. Fix rides the form-factor
-  milestone below; the iPad arm wants `UIMenuBuilder`.
+- ~~**DEFECT — the iPad menu lowering is wrong as of iPadOS 26**~~ —
+  FIXED 2026-07-25, checked off 2026-07-27. As filed (2026-07-24): kaya
+  routed the entire catalog into a trailing More overflow on every iOS
+  host — `KayaPhoneMenuToolbar`, gated `#if os(iOS)` — so a full
+  command catalog hid behind a phone affordance while iPadOS 26's own
+  menu bar sat empty.
+  WHAT ACTUALLY SHIPPED: `KayaPhoneMenuToolbar` is gone. The arm is
+  chosen by `KayaMenuFormFactorChrome`, which reads the live horizontal
+  SIZE CLASS — regular takes the system menu bar, compact the toolbar —
+  and the bar itself is driven through `UIMenuBuilder`
+  (`kayaBuildCatalogMenus`), not SwiftUI's `.commands`, because
+  CommandsBuilder has no `buildArray` and cannot express an
+  append-at-any-time number of top-level menus. The menus-swiftui-pad
+  leg asserts `expect_menu_presentation "regular/bar"` and passes; that
+  literal reports `regular/overflow` if the arm choice ever regresses,
+  which is precisely the original defect.
+  WHY IT SAT HERE TWO DAYS AFTER BEING FIXED, and the lesson: the entry
+  below ("the iPad menu bar's gate is OWED") recorded the fix in
+  passing — "the lowering LANDED and is confirmed working" — while THIS
+  entry, the one titled DEFECT and sorted to the top of the file, was
+  never touched. A fix recorded in a neighbouring entry is not recorded.
+  Worse, on 2026-07-27 an audit of this very file repeated the stale
+  claim into the form-factor entry below, because it trusted this text
+  instead of grepping for the symbol it names. WHEN AN ENTRY NAMES A
+  SYMBOL, GREP FOR IT — that is a two-second check and it is the whole
+  audit.
   THE TRAP WORTH KEEPING: the ledger already carried an iPad item, but
   its trigger was "an artifact running on iPad with a keyboard", framed
   around `UIKeyCommand` HUD exposure — the pre-26 framing, when a
@@ -245,16 +259,20 @@ own the state (see the undo note in this file).
   the size-class transition and re-asserts on the far side, which makes
   adaptivity a matrix fact instead of a claim. THE TWO ITEMS MERGE;
   do not schedule `resize_window` separately.
-  MOST OF THAT SCOPE IS SPENT (noted 2026-07-27, on an audit of this
-  file): every backend reads its own size class, `resize_window` and
-  both presentation assertions exist and run, and list-detail is a
-  second lowering that obeys the axis — so "menus are the only one" is
-  no longer true. WHAT REMAINS is the menus half alone: the compact
-  rule is still written `#if os(iOS)` in swift/KayaSwiftUI.swift
-  (`KayaPhoneMenuToolbar`), which is the same code the iPad DEFECT
-  entry at the top of this file is about. Schedule them together —
-  re-keying the rule off the platform IS the iPad fix, not a
-  prerequisite for it.
+  THIS SCOPE IS SPENT — the item is DONE (corrected 2026-07-27, after
+  the first pass got it wrong). Every backend reads its own size class;
+  `resize_window` and both presentation assertions exist and run;
+  list-detail is a second lowering obeying the axis, so "menus are the
+  only one" stopped being true; and the menus rule is NO LONGER keyed
+  on the platform — `KayaMenuFormFactorChrome` reads the horizontal
+  size class, and the iPad `UIMenuBuilder` arm shipped with it. The
+  first pass claimed the `#if os(iOS)` gate survived; it did not, and
+  the claim came from reading the DEFECT entry above rather than the
+  source.
+  WHAT IS ACTUALLY LEFT is not this item at all: it is the OWED GATE in
+  the iPad entry above — on iOS-regular the presentation half is
+  ARM-DERIVED because the iPadOS bar cannot be observed headlessly.
+  That is a re-read item, not scheduled work.
 
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles

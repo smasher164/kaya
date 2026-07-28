@@ -4719,11 +4719,11 @@ struct KayaMenuChrome: ViewModifier {
         }
 
         /// Stamp both halves the harness reads. The presentation half
-        /// names THE ARM THIS BODY TOOK — today the toolbar in both
-        /// size classes, which is exactly the state the iPad defect
-        /// leaves behind and exactly what `expect_menu_presentation
-        /// "regular/bar"` is meant to fail on until the menu-bar arm
-        /// lands.
+        /// names THE ARM THIS BODY TOOK: the toolbar on compact, and on
+        /// regular the system menu bar that `kayaBuildCatalogMenus`
+        /// installs. (This comment used to say "the toolbar in both
+        /// size classes ... until the menu-bar arm lands" — it outlived
+        /// the arm landing above it by two days.)
         private func record() {
             guard let window = kayaScene.windows[windowId] else { return }
             window.formFactor = factor
