@@ -355,6 +355,41 @@ type pendingDerived struct {
 	recompute func(*Tx)
 }
 
+// emit queues one record, and is the ONE place that appends to a
+// transaction. Every constructor, setter and chain method goes through
+// it so the closed check above cannot be forgotten at a new callsite —
+// the check lived only on the Widget and MenuItem chains, so a write
+// through a Tx that had outlived its Build appended into a slice
+// already submitted and never submitted again. No panic, no error, the
+// write simply vanished. Nothing invited that mistake until App.Post
+// arrived; posting is exactly the reason a guest now holds a Tx near a
+// background thread, so the guard has to be total.
+//
+// A Tx is valid ONLY inside the Build or handler that made it, on the
+// app thread. To mutate from anywhere else, post.
+func (tx *Tx) emit(rec []byte) {
+	tx.alive()
+	tx.records = append(tx.records, rec)
+}
+
+// alive is the one panic, shared by the write chokepoint above and the
+// read chokepoint below so the two cannot drift in what they say.
+func (tx *Tx) alive() {
+	if tx == nil || tx.closed {
+		panic("kaya: transaction is over — a Tx is only usable inside the Build or handler that created it; to mutate from a background thread use App.Post")
+	}
+}
+
+// mirror is emit's read-side sibling: the same liveness check plus the
+// template-body rule. A read through a transaction that outlived its
+// Build is worse than a lost write — it races the app thread's own
+// model instead of failing — so it dies here for the same reason.
+func (tx *Tx) mirror(c Collection) *instance {
+	tx.alive()
+	tx.app.guardMirrorRead()
+	return tx.app.instanceOf(c.id, c.path)
+}
+
 // Build runs fn with a fresh transaction and submits it. A panic out
 // of fn abandons the transaction: the records never ship, and the
 // journal restores the model mirror to exactly what was shipped —
@@ -418,7 +453,7 @@ func (a *App) dispatch(fn func(*Tx)) {
 func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
 	tx.app.c.signal++
 	s := Signal[V]{tx.app.c.signal}
-	tx.records = append(tx.records, TxCreateSignal(s.id, scalarWire(initial)))
+	tx.emit(TxCreateSignal(s.id, scalarWire(initial)))
 	return s
 }
 
@@ -426,13 +461,13 @@ func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
 // encode time — handles are single-submit, so every write re-registers
 // (one copy into core memory per write).
 func (tx *Tx) Write[V Scalar](s Signal[V], value V) {
-	tx.records = append(tx.records, TxWriteSignal(s.id, scalarWire(value)))
+	tx.emit(TxWriteSignal(s.id, scalarWire(value)))
 }
 
 func (tx *Tx) Widget(kind uint32) Widget {
 	tx.app.c.widget++
 	w := Widget{id: tx.app.c.widget, tx: tx}
-	tx.records = append(tx.records, TxCreateWidget(w.id, kind))
+	tx.emit(TxCreateWidget(w.id, kind))
 	tx.autoParent(w.id)
 	return w
 }
@@ -448,20 +483,20 @@ func (tx *Tx) currentParent() uint64 {
 
 func (tx *Tx) autoParent(id uint64) {
 	if p := tx.currentParent(); p != 0 {
-		tx.records = append(tx.records, TxAddChild(p, id))
+		tx.emit(TxAddChild(p, id))
 	}
 }
 
 func (tx *Tx) SetText(w Widget, text string) {
-	tx.records = append(tx.records, TxSetText(w.id, text))
+	tx.emit(TxSetText(w.id, text))
 }
 
 func (tx *Tx) BindText(w Widget, s Signal[string]) {
-	tx.records = append(tx.records, TxBindText(w.id, s.id))
+	tx.emit(TxBindText(w.id, s.id))
 }
 
 func (tx *Tx) SetChecked(w Widget, checked bool) {
-	tx.records = append(tx.records, TxSetChecked(w.id, checked))
+	tx.emit(TxSetChecked(w.id, checked))
 }
 
 // SetGrow sets a widget's flex weight within its row/column: 0 is
@@ -470,7 +505,7 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 // dynamic path — collapsing a pane is SetGrow(w, 0) and back; the
 // declarative spelling is the Grow chain at construction.
 func (tx *Tx) SetGrow(w Widget, weight float64) {
-	tx.records = append(tx.records, TxSetGrow(w.id, weight))
+	tx.emit(TxSetGrow(w.id, weight))
 }
 
 // Grow weights this widget within its row/column at construction —
@@ -492,7 +527,7 @@ func (w Widget) Grow(weight float64) Widget {
 // misuse at the root. The dynamic path; the declarative spelling is
 // the Align chain at construction.
 func (tx *Tx) SetAlign(w Widget, mode int64) {
-	tx.records = append(tx.records, TxSetAlign(w.id, mode))
+	tx.emit(TxSetAlign(w.id, mode))
 }
 
 // Align sets this container's cross-axis child placement at
@@ -512,7 +547,7 @@ func (w Widget) Align(mode int64) Widget {
 // anywhere else. The dynamic path; the declarative spelling is the
 // Spacing chain at construction.
 func (tx *Tx) SetSpacing(w Widget, gap float64) {
-	tx.records = append(tx.records, TxSetSpacing(w.id, gap))
+	tx.emit(TxSetSpacing(w.id, gap))
 }
 
 // Spacing sets this container's inter-child gap at construction — the
@@ -531,7 +566,7 @@ func (w Widget) Spacing(gap float64) Widget {
 // is NEVER spoken. Universal — every kind carries one. The dynamic
 // path; the declarative spelling is the A11yID chain at construction.
 func (tx *Tx) SetA11yID(w Widget, id string) {
-	tx.records = append(tx.records, TxSetA11yId(w.id, id))
+	tx.emit(TxSetA11yId(w.id, id))
 }
 
 // A11yID sets this widget's accessibility identifier at construction —
@@ -553,7 +588,7 @@ func (w Widget) A11yID(id string) Widget {
 // nothing here. The dynamic path; the declarative spelling is the
 // A11yLabel chain at construction.
 func (tx *Tx) SetA11yLabel(w Widget, label string) {
-	tx.records = append(tx.records, TxSetA11yLabel(w.id, label))
+	tx.emit(TxSetA11yLabel(w.id, label))
 }
 
 // A11yLabel sets this widget's spoken label at construction — the
@@ -573,7 +608,7 @@ func (w Widget) A11yLabel(label string) Widget {
 // PHRASE: VoiceOver speaks it as written, TalkBack prefixes "double
 // tap to". Activation kinds only; the root rejects it elsewhere.
 func (tx *Tx) SetA11yHint(w Widget, hint string) {
-	tx.records = append(tx.records, TxSetA11yHint(w.id, hint))
+	tx.emit(TxSetA11yHint(w.id, hint))
 }
 
 // A11yHint sets this widget's hint at construction — the declarative
@@ -588,7 +623,7 @@ func (w Widget) A11yHint(hint string) Widget {
 }
 
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
-	tx.records = append(tx.records, TxBindChecked(w.id, s.id))
+	tx.emit(TxBindChecked(w.id, s.id))
 }
 
 // SetSource sets an image's encoded bytes: one registration copy into
@@ -597,17 +632,17 @@ func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 // free to drop the moment this returns. A later SetSource registers
 // again — handles are single-submit.
 func (tx *Tx) SetSource(w Widget, data []byte) {
-	tx.records = append(tx.records, TxSetSource(w.id, RegisterBlob(data)))
+	tx.emit(TxSetSource(w.id, RegisterBlob(data)))
 }
 
 // BindSource binds an image's source to a blob signal; each write of
 // the signal re-registers its bytes (see Tx.Write).
 func (tx *Tx) BindSource(w Widget, s Signal[[]byte]) {
-	tx.records = append(tx.records, TxBindSource(w.id, s.id))
+	tx.emit(TxBindSource(w.id, s.id))
 }
 
 func (tx *Tx) AddChild(parent, child Widget) {
-	tx.records = append(tx.records, TxAddChild(parent.id, child.id))
+	tx.emit(TxAddChild(parent.id, child.id))
 }
 
 // Clear drops the widget's owned content — a one-shot command:
@@ -618,14 +653,14 @@ func (tx *Tx) AddChild(parent, child Widget) {
 // path (a clear arrives back as a text change with empty text, so the
 // app's draft fold empties itself — never a side assignment).
 func (tx *Tx) Clear(w Widget) {
-	tx.records = append(tx.records, TxWidgetCommand(w.id, CommandClear))
+	tx.emit(TxWidgetCommand(w.id, CommandClear))
 }
 
 // Focus gives the widget keyboard focus (the post-submit refocus every
 // real form wants) — a one-shot command riding the transaction like
 // Clear.
 func (tx *Tx) Focus(w Widget) {
-	tx.records = append(tx.records, TxWidgetCommand(w.id, CommandFocus))
+	tx.emit(TxWidgetCommand(w.id, CommandFocus))
 }
 
 // Construction sugar: containers take their body as a closure and
@@ -657,7 +692,7 @@ func (tx *Tx) Scroll(body func()) Widget {
 // (the thing nested rows cannot express).
 func (tx *Tx) Grid(columns int, body func()) Widget {
 	parent := tx.Widget(KindGrid)
-	tx.records = append(tx.records, TxSetColumns(parent.id, float64(columns)))
+	tx.emit(TxSetColumns(parent.id, float64(columns)))
 	tx.app.parents = append(tx.app.parents, parent.id)
 	if body != nil {
 		body()
@@ -736,14 +771,14 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 // root); chain .Indeterminate() for the platform's activity mode.
 func (tx *Tx) Progress(value float64) Widget {
 	w := tx.Widget(KindProgress)
-	tx.records = append(tx.records, TxSetValue(w.id, value))
+	tx.emit(TxSetValue(w.id, value))
 	return w
 }
 
 // Indeterminate switches a progress bar to the platform's activity
 // mode (the fraction is ignored while it is on).
 func (w Widget) Indeterminate() Widget {
-	w.tx.records = append(w.tx.records, TxSetIndeterminate(w.id, true))
+	w.tx.emit(TxSetIndeterminate(w.id, true))
 	return w
 }
 
@@ -751,9 +786,9 @@ func (w Widget) Indeterminate() Widget {
 // handler co-located (nil for none) — the Fyne shape, like Button.
 func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
-	tx.records = append(tx.records, TxSetMin(w.id, min))
-	tx.records = append(tx.records, TxSetMax(w.id, max))
-	tx.records = append(tx.records, TxSetValue(w.id, value))
+	tx.emit(TxSetMin(w.id, min))
+	tx.emit(TxSetMax(w.id, max))
+	tx.emit(TxSetValue(w.id, value))
 	if onChange != nil {
 		tx.app.OnValueChanged(w, onChange)
 	}
@@ -766,9 +801,9 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 // handler's own writes cannot loop back at it).
 func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
-	tx.records = append(tx.records, TxSetMin(w.id, min))
-	tx.records = append(tx.records, TxSetMax(w.id, max))
-	tx.records = append(tx.records, TxBindValue(w.id, value.id))
+	tx.emit(TxSetMin(w.id, min))
+	tx.emit(TxSetMax(w.id, max))
+	tx.emit(TxBindValue(w.id, value.id))
 	if onChange != nil {
 		tx.app.OnValueChanged(w, onChange)
 	}
@@ -789,7 +824,7 @@ func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Wi
 		tx.SetText(o, option)
 	}
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
-	tx.records = append(tx.records, TxSetValue(w.id, float64(selected)))
+	tx.emit(TxSetValue(w.id, float64(selected)))
 	if onSelect != nil {
 		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
 	}
@@ -807,7 +842,7 @@ func (tx *Tx) Radio(options []string, selected int, onSelect func(*Tx, int)) Wid
 		tx.SetText(o, option)
 	}
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
-	tx.records = append(tx.records, TxSetValue(w.id, float64(selected)))
+	tx.emit(TxSetValue(w.id, float64(selected)))
 	if onSelect != nil {
 		tx.app.OnValueChanged(w, func(tx *Tx, v float64) { onSelect(tx, int(v)) })
 	}
@@ -852,7 +887,7 @@ func (tx *Tx) Collection() Collection {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	tx.records = append(tx.records, TxCreateCollection(c.id, [][]uint32{{ValueStr}}))
+	tx.emit(TxCreateCollection(c.id, [][]uint32{{ValueStr}}))
 	return c
 }
 
@@ -866,7 +901,7 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	// land after template_end — an add_child inside the blueprint
 	// would cross zones.
 	parent := tx.currentParent()
-	tx.records = append(tx.records, TxCreateFor(w.id, c.id))
+	tx.emit(TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
 	tx.app.tplDepth++
@@ -874,9 +909,9 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	tx.app.tplDepth--
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 	tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
-	tx.records = append(tx.records, TxTemplateEnd())
+	tx.emit(TxTemplateEnd())
 	if parent != 0 {
-		tx.records = append(tx.records, TxAddChild(parent, w.id))
+		tx.emit(TxAddChild(parent, w.id))
 	}
 	return w
 }
@@ -899,7 +934,7 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 		id = tx.app.c.widget
 	}
 	parent := tx.currentParent()
-	tx.records = append(tx.records, TxCreateFor(id, c.id))
+	tx.emit(TxCreateFor(id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
 	tx.app.parents = append(tx.app.parents, 0)
 	tx.app.tplDepth++
@@ -907,9 +942,9 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 		tx.app.tplDepth--
 		tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
 		tx.app.openFors = tx.app.openFors[:len(tx.app.openFors)-1]
-		tx.records = append(tx.records, TxTemplateEnd())
+		tx.emit(TxTemplateEnd())
 		if parent != 0 {
-			tx.records = append(tx.records, TxAddChild(parent, id))
+			tx.emit(TxAddChild(parent, id))
 		}
 	}
 }
@@ -950,34 +985,34 @@ func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 	tx.app.c.widget++
 	w := Widget{id: tx.app.c.widget, tx: tx}
 	parent := tx.currentParent()
-	tx.records = append(tx.records, TxCreateWhen(w.id, s.id))
+	tx.emit(TxCreateWhen(w.id, s.id))
 	tx.app.parents = append(tx.app.parents, 0)
 	tx.app.tplDepth++
 	fn(&Tpl{tx: tx})
 	tx.app.tplDepth--
 	tx.app.parents = tx.app.parents[:len(tx.app.parents)-1]
-	tx.records = append(tx.records, TxTemplateEnd())
+	tx.emit(TxTemplateEnd())
 	if parent != 0 {
-		tx.records = append(tx.records, TxAddChild(parent, w.id))
+		tx.emit(TxAddChild(parent, w.id))
 	}
 	return w
 }
 
 func (tx *Tx) Insert(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, 0, []any{value}))
+	tx.emit(TxCollectionInsert(c.id, c.path, key, 0, []any{value}))
 	tx.recomputeDerived(c.id, c.path)
 }
 
 func (tx *Tx) Update(c Collection, key, value any) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, 0, []any{value}))
+	tx.emit(TxCollectionUpdate(c.id, c.path, key, 0, []any{value}))
 	tx.recomputeDerived(c.id, c.path)
 }
 
 func (tx *Tx) Remove(c Collection, key any) {
 	tx.app.modelRemove(c.id, c.path, key)
-	tx.records = append(tx.records, TxCollectionRemove(c.id, c.path, key))
+	tx.emit(TxCollectionRemove(c.id, c.path, key))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -1050,7 +1085,7 @@ func (tx *Tx) moveEntry(c Collection, key any, before []any) {
 		panic(fmt.Sprintf("kaya: move of missing key %v", key))
 	}
 	tx.app.modelMove(c.id, c.path, key, before)
-	tx.records = append(tx.records, TxCollectionMove(c.id, c.path, key, before))
+	tx.emit(TxCollectionMove(c.id, c.path, key, before))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -1082,16 +1117,14 @@ func (a *App) guardMirrorRead() {
 // Items is the model: what this guest wrote, exactly — the fold of
 // every patch so far (this transaction's included), in insertion order.
 func (tx *Tx) Items(c Collection) []Entry {
-	tx.app.guardMirrorRead()
-	if in := tx.app.instanceOf(c.id, c.path); in != nil {
+	if in := tx.mirror(c); in != nil {
 		return append([]Entry(nil), in.entries...)
 	}
 	return nil
 }
 
 func (tx *Tx) Len(c Collection) int {
-	tx.app.guardMirrorRead()
-	if in := tx.app.instanceOf(c.id, c.path); in != nil {
+	if in := tx.mirror(c); in != nil {
 		return len(in.entries)
 	}
 	return 0
@@ -1102,7 +1135,7 @@ func (tx *Tx) Len(c Collection) int {
 // presents it. Returns the prop chain:
 // tx.CreateWindow(1).Title("inspector").Size(480, 320).VetoClose(true).
 func (tx *Tx) CreateWindow(id uint64) WindowRef {
-	tx.records = append(tx.records, TxCreateWindow(id))
+	tx.emit(TxCreateWindow(id))
 	return WindowRef{tx: tx, id: id}
 }
 
@@ -1115,13 +1148,13 @@ func (tx *Tx) Window(id uint64) WindowRef {
 // veto grammar's confirmation and the reconciliation after a chrome
 // close.
 func (tx *Tx) DestroyWindow(id uint64) {
-	tx.records = append(tx.records, TxDestroyWindow(id))
+	tx.emit(TxDestroyWindow(id))
 }
 
 // MountIn mounts a root into a specific window; mounting presents an
 // auxiliary.
 func (tx *Tx) MountIn(window uint64, root Widget) {
-	tx.records = append(tx.records, TxMount(window, root.id))
+	tx.emit(TxMount(window, root.id))
 }
 
 // PushEntry pushes a navigation entry onto the primary surface's
@@ -1130,14 +1163,14 @@ func (tx *Tx) MountIn(window uint64, root Widget) {
 // and a MountIn presents it. Returns the prop chain:
 // tx.PushEntry(7).Title("detail").InterceptBack(true).
 func (tx *Tx) PushEntry(id uint64) EntryRef {
-	tx.records = append(tx.records, TxPushEntry(0, id))
+	tx.emit(TxPushEntry(0, id))
 	return EntryRef{tx: tx, id: id}
 }
 
 // PushEntryIn pushes onto another window's stack (the System
 // Settings shape: a stack inside a desktop auxiliary).
 func (tx *Tx) PushEntryIn(window, id uint64) EntryRef {
-	tx.records = append(tx.records, TxPushEntry(window, id))
+	tx.emit(TxPushEntry(window, id))
 	return EntryRef{tx: tx, id: id}
 }
 
@@ -1145,11 +1178,11 @@ func (tx *Tx) PushEntryIn(window, id uint64) EntryRef {
 // also the back-veto grammar's confirmation after OnBackRequested.
 // Popping an empty stack is a scene error.
 func (tx *Tx) PopEntry() {
-	tx.records = append(tx.records, TxPopEntry(0))
+	tx.emit(TxPopEntry(0))
 }
 
 func (tx *Tx) PopEntryIn(window uint64) {
-	tx.records = append(tx.records, TxPopEntry(window))
+	tx.emit(TxPopEntry(window))
 }
 
 // AddSection appends a section to the primary window's section set
@@ -1159,24 +1192,24 @@ func (tx *Tx) PopEntryIn(window uint64) {
 // SELECTION, not lifecycle). A MountIn fills its pane. Returns the
 // prop chain: tx.AddSection(7).Title("Feed").OnSelected(fn).
 func (tx *Tx) AddSection(id uint64) SectionRef {
-	tx.records = append(tx.records, TxAddSection(0, id))
+	tx.emit(TxAddSection(0, id))
 	return SectionRef{tx: tx, id: id}
 }
 
 // AddSectionIn appends onto another window's section set.
 func (tx *Tx) AddSectionIn(window, id uint64) SectionRef {
-	tx.records = append(tx.records, TxAddSection(window, id))
+	tx.emit(TxAddSection(window, id))
 	return SectionRef{tx: tx, id: id}
 }
 
 // SelectSection selects a section programmatically: configuration,
 // never echoes OnSelected (the echo doctrine).
 func (tx *Tx) SelectSection(id uint64) {
-	tx.records = append(tx.records, TxSelectSection(0, id))
+	tx.emit(TxSelectSection(0, id))
 }
 
 func (tx *Tx) SelectSectionIn(window, id uint64) {
-	tx.records = append(tx.records, TxSelectSection(window, id))
+	tx.emit(TxSelectSection(window, id))
 }
 
 // ShowAlert requests a modal alert (the request/result grammar): a
@@ -1265,7 +1298,7 @@ func (r AlertRef) Show() uint64 {
 	if len(r.actions) == 2 {
 		action1 = r.actions[1]
 	}
-	r.tx.records = append(r.tx.records, TxShowAlert(
+	r.tx.emit(TxShowAlert(
 		r.window, r.id, uint32(len(r.actions)),
 		r.title, r.message, action0, action1, r.cancel))
 	return r.id
@@ -1278,14 +1311,14 @@ type WindowRef struct {
 }
 
 func (w WindowRef) Title(title string) WindowRef {
-	w.tx.records = append(w.tx.records, TxSetWindowTitle(w.id, title))
+	w.tx.emit(TxSetWindowTitle(w.id, title))
 	return w
 }
 
 // Size requests the content size in DIP — advisory on every platform.
 func (w WindowRef) Size(width, height float64) WindowRef {
-	w.tx.records = append(w.tx.records, TxSetWindowWidth(w.id, width))
-	w.tx.records = append(w.tx.records, TxSetWindowHeight(w.id, height))
+	w.tx.emit(TxSetWindowWidth(w.id, width))
+	w.tx.emit(TxSetWindowHeight(w.id, height))
 	return w
 }
 
@@ -1295,12 +1328,12 @@ func (w WindowRef) Size(width, height float64) WindowRef {
 // (SectionsPresentationAuto/Bar/Sidebar — the width/height
 // precedent; the phones ignore it by physics).
 func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
-	w.tx.records = append(w.tx.records, TxSetWindowSectionsPresentation(w.id, hint))
+	w.tx.emit(TxSetWindowSectionsPresentation(w.id, hint))
 	return w
 }
 
 func (w WindowRef) VetoClose(on bool) WindowRef {
-	w.tx.records = append(w.tx.records, TxSetWindowVetoClose(w.id, on))
+	w.tx.emit(TxSetWindowVetoClose(w.id, on))
 	return w
 }
 
@@ -1310,7 +1343,7 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 // nothing changes. There is no argument for WHICH way it presents —
 // that is the size class's answer, not the app's.
 func (w WindowRef) ListDetail(on bool) WindowRef {
-	w.tx.records = append(w.tx.records, TxSetWindowListDetail(w.id, on))
+	w.tx.emit(TxSetWindowListDetail(w.id, on))
 	return w
 }
 
@@ -1345,7 +1378,7 @@ func (w WindowRef) Id() uint64 {
 // transaction with tx.Menu(file).
 func (w WindowRef) Menu(label string) MenuItem {
 	m := newMenuItem(w.tx, MenuKindMenu, label, false)
-	w.tx.records = append(w.tx.records, TxMenubarAppend(w.id, m.id))
+	w.tx.emit(TxMenubarAppend(w.id, m.id))
 	return m
 }
 
@@ -1357,7 +1390,7 @@ func (w WindowRef) Menu(label string) MenuItem {
 // USER pick's new index.
 func (w WindowRef) RadioGroup(label string) MenuItem {
 	m := newMenuItem(w.tx, MenuKindRadioGroup, label, false)
-	w.tx.records = append(w.tx.records, TxMenubarAppend(w.id, m.id))
+	w.tx.emit(TxMenubarAppend(w.id, m.id))
 	return m
 }
 
@@ -1370,14 +1403,14 @@ type EntryRef struct {
 // Title names the entry — the back affordance's label source (the
 // iOS back button, the desktop headers).
 func (e EntryRef) Title(title string) EntryRef {
-	e.tx.records = append(e.tx.records, TxSetEntryTitle(e.id, title))
+	e.tx.emit(TxSetEntryTitle(e.id, title))
 	return e
 }
 
 // InterceptBack arms the close-veto class transplanted to POP: back
 // emits back_requested and nothing pops until PopEntry agrees.
 func (e EntryRef) InterceptBack(on bool) EntryRef {
-	e.tx.records = append(e.tx.records, TxSetEntryInterceptBack(e.id, on))
+	e.tx.emit(TxSetEntryInterceptBack(e.id, on))
 	return e
 }
 
@@ -1412,7 +1445,7 @@ type SectionRef struct {
 
 // Title names the switcher item — the tab title on every platform.
 func (r SectionRef) Title(title string) SectionRef {
-	r.tx.records = append(r.tx.records, TxSetSectionTitle(r.id, title))
+	r.tx.emit(TxSetSectionTitle(r.id, title))
 	return r
 }
 
@@ -1470,9 +1503,9 @@ func newMenuItem(tx *Tx, kind uint32, label string, ctx bool) MenuItem {
 	}
 	tx.app.c.menuItem++
 	m := MenuItem{id: tx.app.c.menuItem, tx: tx, ctx: ctx}
-	tx.records = append(tx.records, TxMenuItemCreate(m.id, kind))
+	tx.emit(TxMenuItemCreate(m.id, kind))
 	if kind != MenuKindSeparator {
-		tx.records = append(tx.records, TxSetMenuLabel(m.id, label))
+		tx.emit(TxSetMenuLabel(m.id, label))
 	}
 	return m
 }
@@ -1481,7 +1514,7 @@ func newMenuItem(tx *Tx, kind uint32, label string, ctx bool) MenuItem {
 // closed parent/child grammar and the depth cap are root errors).
 func (m MenuItem) child(kind uint32, label string) MenuItem {
 	c := newMenuItem(m.chain(), kind, label, m.ctx)
-	m.tx.records = append(m.tx.records, TxMenuItemAppend(m.id, c.id))
+	m.tx.emit(TxMenuItemAppend(m.id, c.id))
 	return c
 }
 
@@ -1522,19 +1555,19 @@ func (m MenuItem) Option(label string) MenuItem {
 // handle kept.
 func (m MenuItem) Separator() {
 	c := newMenuItem(m.chain(), MenuKindSeparator, "", m.ctx)
-	m.tx.records = append(m.tx.records, TxMenuItemAppend(m.id, c.id))
+	m.tx.emit(TxMenuItemAppend(m.id, c.id))
 }
 
 // Label renames the item to constant text. Label writes never emit
 // anything.
 func (m MenuItem) Label(text string) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuLabel(m.id, text))
+	m.chain().emit(TxSetMenuLabel(m.id, text))
 	return m
 }
 
 // BindLabel binds the item's label to a Str signal.
 func (m MenuItem) BindLabel(s Signal[string]) MenuItem {
-	m.chain().records = append(m.tx.records, TxBindMenuLabel(m.id, s.id))
+	m.chain().emit(TxBindMenuLabel(m.id, s.id))
 	return m
 }
 
@@ -1542,13 +1575,13 @@ func (m MenuItem) BindLabel(s Signal[string]) MenuItem {
 // writes never emit anything; disabling a grouping node disables its
 // subtree everywhere (the inherited-disabled contract).
 func (m MenuItem) Enabled(on bool) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuEnabled(m.id, on))
+	m.chain().emit(TxSetMenuEnabled(m.id, on))
 	return m
 }
 
 // BindEnabled binds the item's enablement to a Bool signal.
 func (m MenuItem) BindEnabled(s Signal[bool]) MenuItem {
-	m.chain().records = append(m.tx.records, TxBindMenuEnabled(m.id, s.id))
+	m.chain().emit(TxBindMenuEnabled(m.id, s.id))
 	return m
 }
 
@@ -1556,34 +1589,34 @@ func (m MenuItem) BindEnabled(s Signal[bool]) MenuItem {
 // the Checkbox contract. The programmatic write is configuration —
 // QUIET, no menu_toggled echo (the echo doctrine).
 func (m MenuItem) Checked(on bool) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuChecked(m.id, on))
+	m.chain().emit(TxSetMenuChecked(m.id, on))
 	return m
 }
 
 // BindChecked binds a toggle's state to a Bool signal, both ways.
 func (m MenuItem) BindChecked(s Signal[bool]) MenuItem {
-	m.chain().records = append(m.tx.records, TxBindMenuChecked(m.id, s.id))
+	m.chain().emit(TxBindMenuChecked(m.id, s.id))
 	return m
 }
 
 // Value sets a radio group's selected option index (radio groups only
 // — root-checked): the Choice contract. QUIET, like Checked.
 func (m MenuItem) Value(index int) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuValue(m.id, float64(index)))
+	m.chain().emit(TxSetMenuValue(m.id, float64(index)))
 	return m
 }
 
 // BindValue binds a radio group's selected index to a float signal,
 // both ways.
 func (m MenuItem) BindValue(s Signal[float64]) MenuItem {
-	m.chain().records = append(m.tx.records, TxBindMenuValue(m.id, s.id))
+	m.chain().emit(TxBindMenuValue(m.id, s.id))
 	return m
 }
 
 // Icon sets the item's icon (the blob channel): used by phone
 // promotion, ignored where native menu dress has no icons. Const-only.
 func (m MenuItem) Icon(data []byte) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuIcon(m.id, RegisterBlob(data)))
+	m.chain().emit(TxSetMenuIcon(m.id, RegisterBlob(data)))
 	return m
 }
 
@@ -1592,7 +1625,7 @@ func (m MenuItem) Icon(data []byte) MenuItem {
 // deterministically; INERT on desktops — not a toolbar grammar.
 // Const-only.
 func (m MenuItem) Primary(on bool) MenuItem {
-	m.chain().records = append(m.tx.records, TxSetMenuPrimary(m.id, on))
+	m.chain().emit(TxSetMenuPrimary(m.id, on))
 	return m
 }
 
@@ -1610,7 +1643,7 @@ func (m MenuItem) Role(name string) MenuItem {
 	if m.ctx {
 		panic("kaya: a context item takes no role — a role names a standard command in the window catalog")
 	}
-	m.chain().records = append(m.tx.records, TxSetMenuRole(m.id, name))
+	m.chain().emit(TxSetMenuRole(m.id, name))
 	return m
 }
 
@@ -1623,7 +1656,7 @@ func (m MenuItem) Shortcut(spelling string) MenuItem {
 	if m.ctx {
 		panic("kaya: a context item takes no shortcut — a shortcut needs a window catalog as its native dispatch home")
 	}
-	m.chain().records = append(m.tx.records, TxSetMenuShortcut(m.id, spelling))
+	m.chain().emit(TxSetMenuShortcut(m.id, spelling))
 	return m
 }
 
@@ -1700,7 +1733,7 @@ func (tx *Tx) ContextMenu(w Widget) ContextRef {
 
 func (c ContextRef) root(kind uint32, label string) MenuItem {
 	m := newMenuItem(c.tx, kind, label, true)
-	c.tx.records = append(c.tx.records, TxContextAttach(c.widget, m.id))
+	c.tx.emit(TxContextAttach(c.widget, m.id))
 	return m
 }
 
@@ -1761,7 +1794,7 @@ func (c *ContextCatalog) RadioGroup(label string) MenuItem { return c.root(MenuK
 func (c *ContextCatalog) Separator() { c.root(MenuKindSeparator, "") }
 
 func (tx *Tx) Mount(root Widget) {
-	tx.records = append(tx.records, TxMount(0, root.id))
+	tx.emit(TxMount(0, root.id))
 }
 
 // Tpl is a template body: the same declaration vocabulary with
@@ -1773,19 +1806,19 @@ type Tpl struct {
 func (t *Tpl) Widget(kind uint32) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
-	t.tx.records = append(t.tx.records, TxCreateWidget(n.id, kind))
+	t.tx.emit(TxCreateWidget(n.id, kind))
 	t.tx.autoParent(n.id)
 	return n
 }
 
 func (t *Tpl) SetText(n Node, text string) {
-	t.tx.records = append(t.tx.records, TxSetText(n.id, text))
+	t.tx.emit(TxSetText(n.id, text))
 }
 
 // BindTextElement binds text to the element of the enclosing For,
 // `level` Fors up (0 = nearest).
 func (t *Tpl) BindTextElement(n Node, level uint32) {
-	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level, 0))
+	t.tx.emit(TxBindTextElement(n.id, level, 0))
 }
 
 // The template flavor of the containers.
@@ -1808,7 +1841,7 @@ func (t *Tpl) containerOf(kind uint32, body func()) Node {
 }
 
 func (t *Tpl) AddChild(parent, child Node) {
-	t.tx.records = append(t.tx.records, TxAddChild(parent.id, child.id))
+	t.tx.emit(TxAddChild(parent.id, child.id))
 }
 
 func (t *Tpl) Collection() Collection {
@@ -1820,7 +1853,7 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
 	parent := t.tx.currentParent()
-	t.tx.records = append(t.tx.records, TxCreateFor(n.id, c.id))
+	t.tx.emit(TxCreateFor(n.id, c.id))
 	t.tx.app.openFors = append(t.tx.app.openFors, c.id)
 	t.tx.app.parents = append(t.tx.app.parents, 0)
 	t.tx.app.tplDepth++
@@ -1828,9 +1861,9 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	t.tx.app.tplDepth--
 	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	t.tx.app.openFors = t.tx.app.openFors[:len(t.tx.app.openFors)-1]
-	t.tx.records = append(t.tx.records, TxTemplateEnd())
+	t.tx.emit(TxTemplateEnd())
 	if parent != 0 {
-		t.tx.records = append(t.tx.records, TxAddChild(parent, n.id))
+		t.tx.emit(TxAddChild(parent, n.id))
 	}
 	return n
 }
@@ -1847,18 +1880,18 @@ func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
 	}
 	c.attached = true
 	for _, root := range c.roots {
-		t.tx.records = append(t.tx.records, TxContextAttachNode(n.id, root))
+		t.tx.emit(TxContextAttachNode(n.id, root))
 	}
 }
 
 func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	t.tx.app.c.node++
 	n := Node{t.tx.app.c.node}
-	t.tx.records = append(t.tx.records, TxCreateWhen(n.id, s.id))
+	t.tx.emit(TxCreateWhen(n.id, s.id))
 	t.tx.app.tplDepth++
 	fn(&Tpl{tx: t.tx})
 	t.tx.app.tplDepth--
-	t.tx.records = append(t.tx.records, TxTemplateEnd())
+	t.tx.emit(TxTemplateEnd())
 	return n
 }
 

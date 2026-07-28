@@ -143,7 +143,7 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	tx.records = append(tx.records, TxCreateCollection(c.id, [][]uint32{info.schema}))
+	tx.emit(TxCreateCollection(c.id, [][]uint32{info.schema}))
 	return RecordCollection[K, T]{c, info}
 }
 
@@ -191,14 +191,14 @@ func (info *recordInfo) encode(field uint32, v any) any {
 // fields positionally.
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionInsert(c.id, c.path, key, 0, c.info.values(value)))
+	tx.emit(TxCollectionInsert(c.id, c.path, key, 0, c.info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
 // Update replaces a record wholesale; UpdateField is the one-field way.
 func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records, TxCollectionUpdate(c.id, c.path, key, 0, c.info.values(value)))
+	tx.emit(TxCollectionUpdate(c.id, c.path, key, 0, c.info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -269,7 +269,7 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 			break
 		}
 	}
-	tx.records = append(tx.records, TxCollectionUpdateField(c.id, c.path, key, f.index, 0, c.info.encode(f.index, value)))
+	tx.emit(TxCollectionUpdateField(c.id, c.path, key, f.index, 0, c.info.encode(f.index, value)))
 	tx.recomputeDerived(c.id, c.path)
 }
 
@@ -315,7 +315,7 @@ func (p RecordPatch[K, T]) SetAt[V any](f Field[V], value V) RecordPatch[K, T] {
 // BindTextField binds a label's text to one field of the element of
 // the enclosing For; Field[string] only.
 func (t *Tpl) BindTextField(n Node, level uint32, f Field[string]) {
-	t.tx.records = append(t.tx.records, TxBindTextElement(n.id, level, f.index))
+	t.tx.emit(TxBindTextElement(n.id, level, f.index))
 }
 
 // Label creates a label bound to any addressable source: a constant,
@@ -330,7 +330,7 @@ func (c RecordCollection[K, T]) Label[S interface {
 	case string:
 		t.SetText(n, v)
 	case Signal[string]:
-		t.tx.records = append(t.tx.records, TxBindText(n.id, v.id))
+		t.tx.emit(TxBindText(n.id, v.id))
 	case func(*T) *string:
 		t.BindTextField(n, 0, FieldBy(v))
 	case Field[string]:
@@ -349,9 +349,9 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 	n := t.Widget(KindCheckbox)
 	switch v := any(src).(type) {
 	case bool:
-		t.tx.records = append(t.tx.records, TxSetChecked(n.id, v))
+		t.tx.emit(TxSetChecked(n.id, v))
 	case Signal[bool]:
-		t.tx.records = append(t.tx.records, TxBindChecked(n.id, v.id))
+		t.tx.emit(TxBindChecked(n.id, v.id))
 	case func(*T) *bool:
 		t.BindCheckedField(n, 0, FieldBy(v))
 	case Field[bool]:
@@ -368,7 +368,7 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 // BindCheckedField binds a checkbox's state to one field of the
 // element; Field[bool] only.
 func (t *Tpl) BindCheckedField(n Node, level uint32, f Field[bool]) {
-	t.tx.records = append(t.tx.records, TxBindCheckedElement(n.id, level, f.index))
+	t.tx.emit(TxBindCheckedElement(n.id, level, f.index))
 }
 
 // Image creates an image bound to any addressable source: encoded
@@ -381,14 +381,14 @@ func (c RecordCollection[K, T]) Image[S interface {
 	n := t.Widget(KindImage)
 	switch v := any(src).(type) {
 	case Signal[[]byte]:
-		t.tx.records = append(t.tx.records, TxBindSource(n.id, v.id))
+		t.tx.emit(TxBindSource(n.id, v.id))
 	case func(*T) *[]byte:
 		t.BindSourceField(n, 0, FieldBy(v))
 	case Field[[]byte]:
 		t.BindSourceField(n, 0, v)
 	default:
 		// ~[]byte, named byte-slice types included: register now.
-		t.tx.records = append(t.tx.records, TxSetSource(n.id, uint64(blobWire(v))))
+		t.tx.emit(TxSetSource(n.id, uint64(blobWire(v))))
 	}
 	return n
 }
@@ -396,5 +396,5 @@ func (c RecordCollection[K, T]) Image[S interface {
 // BindSourceField binds an image's source to one field of the element
 // of the enclosing For; Field[[]byte] only.
 func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
-	t.tx.records = append(t.tx.records, TxBindSourceElement(n.id, level, f.index))
+	t.tx.emit(TxBindSourceElement(n.id, level, f.index))
 }

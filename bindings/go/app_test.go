@@ -8,6 +8,8 @@ package kaya
 
 import (
 	"encoding/binary"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -289,4 +291,85 @@ func TestMenuConstructionEmitsAndAbortsWithTheTx(t *testing.T) {
 	app.Build(func(tx *Tx) {
 		tx.Menu(file).Item("Recovered")
 	})
+}
+
+// A Tx IS ONLY VALID INSIDE THE Build OR HANDLER THAT MADE IT, and a
+// captured one must die loudly. It used to die SILENTLY: Tx.Write
+// appended into a record slice Build had already submitted and would
+// never submit again, so the write vanished with no panic and no error.
+// The `closed` flag existed and the Widget/MenuItem chains checked it;
+// the transaction's own methods did not.
+//
+// Nothing invited that mistake until App.Post, which is precisely a
+// reason to hold a Tx near a background thread — so the guard is now
+// total, at two chokepoints (Tx.emit for writes, Tx.mirror for model
+// reads), and this proves BOTH fire.
+func TestAClosedTransactionRefusesLoudly(t *testing.T) {
+	app := NewApp()
+	var escaped *Tx
+	var s Signal[string]
+	var c Collection
+	app.Build(func(tx *Tx) {
+		escaped, s, c = tx, tx.Signal("before"), tx.Collection()
+	})
+
+	panics := func(what string, fn func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("%s through a closed transaction did not panic — "+
+					"it was silently accepted, which is the defect this guards", what)
+			}
+		}()
+		fn()
+	}
+	panics("a write", func() { escaped.Write(s, "after") })
+	panics("a signal declaration", func() { escaped.Signal("late") })
+	panics("a widget declaration", func() { escaped.LabelText("late") })
+	panics("a collection insert", func() { escaped.Insert(c, "k", "v") })
+	panics("a model read", func() { escaped.Items(c) })
+	panics("a model length read", func() { escaped.Len(c) })
+
+	// And the app survives all of it: a later transaction still works,
+	// so the guard rejects the caller without poisoning the App.
+	app.Build(func(tx *Tx) { tx.Write(s, "after all") })
+}
+
+// THE CHOKEPOINT MUST STAY A CHOKEPOINT. Tx.emit is the only place that
+// appends to a transaction's records, which is what makes the liveness
+// check impossible to forget at a new callsite — there were 109 such
+// callsites before this, spread over three files, and every one of them
+// was a place the check was already missing. A new direct append would
+// silently reopen the hole, and no compiler or vet pass would say so.
+func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
+	direct := regexp.MustCompile(`\.records = append\(`)
+	found := map[string]int{}
+	for _, name := range []string{"app.go", "records.go", "sums.go"} {
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if n := len(direct.FindAll(src, -1)); n > 0 {
+			found[name] = n
+		}
+	}
+	// Exactly one, and it is emit's own body.
+	if len(found) != 1 || found["app.go"] != 1 {
+		t.Fatalf("direct appends to a transaction's records: %v — want exactly "+
+			"one, in Tx.emit. A callsite that appends directly skips the "+
+			"liveness check; that is how a write through a dead Tx used to "+
+			"vanish. Route it through tx.emit instead.", found)
+	}
+	src, err := os.ReadFile("app.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func (tx *Tx) emit(")
+	if i < 0 {
+		t.Fatal("Tx.emit is gone; the chokepoint moved without this test moving")
+	}
+	if j := strings.Index(body[i:], "\n}\n"); j < 0 || !direct.MatchString(body[i:i+j]) {
+		t.Fatal("the one direct append is not inside Tx.emit")
+	}
 }

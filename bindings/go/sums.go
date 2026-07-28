@@ -44,7 +44,7 @@ func SumOf[K Key, T any](tx *Tx, prototypes ...T) SumCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	tx.records = append(tx.records, TxCreateCollection(c.id, schemas))
+	tx.emit(TxCreateCollection(c.id, schemas))
 	return SumCollection[K, T]{c, variants}
 }
 
@@ -62,7 +62,7 @@ func (c SumCollection[K, T]) variantOf(t reflect.Type) (uint32, *recordInfo) {
 func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records,
+	tx.emit(
 		TxCollectionInsert(c.id, c.path, key, variant, info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
@@ -72,7 +72,7 @@ func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 func (c SumCollection[K, T]) Update(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.records = append(tx.records,
+	tx.emit(
 		TxCollectionUpdate(c.id, c.path, key, variant, info.values(value)))
 	tx.recomputeDerived(c.id, c.path)
 }
@@ -137,7 +137,7 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 		// language's sum path: a blob field registers its bytes at
 		// encode time (handles are single-submit); scalars pass
 		// through unchanged.
-		tx.records = append(tx.records,
+		tx.emit(
 			TxCollectionUpdateField(c.id, c.path, key, f.index, variant, info.encode(f.index, value)))
 		tx.recomputeDerived(c.id, c.path)
 		return
@@ -164,7 +164,7 @@ func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []Recor
 // parameter the head already named.
 func (c SumCollection[K, T]) Case[V any](t *Tpl, arm func(SumCase[K, V])) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
-	t.tx.records = append(t.tx.records, TxVariantCase(variant))
+	t.tx.emit(TxVariantCase(variant))
 	arm(SumCase[K, V]{t: t, info: info})
 }
 
