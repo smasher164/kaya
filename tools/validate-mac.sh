@@ -102,6 +102,7 @@ tools/keyed.sh check-sugar-surface -- tools/check-sugar-surface.sh || exit 1
 tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
+tools/check-ambient-tx.sh || exit 1
 tools/check-build-id.sh || exit 1
 tools/check-keyed.sh || exit 1
 tools/keyed.sh check-pins -- tools/check-pins.sh || exit 1

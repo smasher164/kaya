@@ -592,6 +592,28 @@ own the state (see the undo note in this file).
 
 ## Testing / infrastructure
 
+- ~~**Python's lifecycle handlers ran outside a transaction**~~ — FIXED
+  2026-07-27, and GUARDED. The dispatch loop wrapped widget and menu
+  handlers but called the six lifecycle handlers bare
+  (close_requested, window_closed, entry_popped, section_selected,
+  back_requested, alert_result), so `destroy_window` inside an
+  on_close_requested raised "no ambient transaction" and DESIGN's
+  ratified "a handler is a transaction" was false in Python alone. All
+  seven sites now share one `App._dispatch`, which also gives the
+  lifecycle paths the rollback-and-log discipline they never had.
+  WHY NO GATE SAW IT: the scenes passed, because five guests each
+  opened a transaction by hand. The workaround was the camouflage. The
+  guard is therefore `tools/check-ambient-tx.sh`, which forbids a guest
+  from opening one inside a handler — with nothing able to compensate,
+  the existing scenes ARE the test.
+  SCOPE, stated so nobody widens it carelessly: the defect needs an
+  AMBIENT transaction. Go/Java/Swift/C# pass the tx as a parameter, so
+  it is not expressible; Haskell opens one explicitly in every handler
+  (idiom, uniform, not a workaround); OCaml is ambient and was already
+  correct, but has no reliable textual discriminator — its guard, if
+  ever wanted, is a behavioural check in the check-abort family.
+
+
 - Reproducibility, the remainder after 2026-07-26. What landed: the
   container base pinned by digest, opam's rolling index pinned to a
   commit (with the direct packages version-pinned on top), `--locked`

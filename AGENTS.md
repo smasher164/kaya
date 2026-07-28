@@ -142,6 +142,10 @@ in docs/deferred.md.
    SwiftUI interpreter — a gate named after a layer it does not
    compile has burned someone here; docs/traps.md),
    `tools/java-typecheck.sh`,
+   `tools/check-ambient-tx.sh` (no guest opens a transaction inside a
+   handler — the binding already did, and a guest that opens its own is
+   CAMOUFLAGE: five of them hid a real Python defect behind green
+   scenes for months),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which
