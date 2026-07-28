@@ -802,6 +802,21 @@
 
 #define KAYA_SOURCE_ELEMENT 2
 
+/**
+ * Returned by `kaya_next_occurrence` when the core has shut down.
+ */
+#define KAYA_OCCURRENCE_SHUTDOWN 0
+
+/**
+ * Returned by `kaya_next_occurrence` when a background thread called
+ * `kaya_wake`: nothing was written to `buf`, and the caller should run
+ * whatever it has queued of its own before waiting again. Chosen
+ * SMALLER than any real record (a header alone is 8 bytes) rather than
+ * as a huge sentinel, so a consumer that has not learned about it yet
+ * cannot mistake it for a length and read past the buffer.
+ */
+#define KAYA_OCCURRENCE_WOKEN 1
+
 typedef struct BoolKind BoolKind;
 
 /**
@@ -975,12 +990,40 @@ void kaya_submit(const uint8_t *records, uintptr_t len);
 /**
  * Function-floor consumption: block until the next occurrence and write
  * one complete record — header included, exactly the ring's bytes — to
- * `buf`. Returns the record size, or 0 when the core has shut down.
+ * `buf`. Returns the record size, `KAYA_OCCURRENCE_SHUTDOWN` when the
+ * core has shut down, or `KAYA_OCCURRENCE_WOKEN` when a background
+ * thread rang the doorbell for work of the caller's own.
  * 256 bytes of capacity covers any occurrence with a reasonable key
  * path; an overflowing record fails loudly. Call from a single app
  * thread, and do not mix with direct ring access.
  */
 uintptr_t kaya_next_occurrence(uint8_t *buf, uintptr_t cap);
+
+/**
+ * Wake this process's app thread from wherever it is parked waiting for
+ * occurrences. SAFE FROM ANY THREAD — the only entry here that is.
+ *
+ * WHO CALLS IT. In the sugar languages, the BINDING does, inside its
+ * post: the guest hands over a closure, the binding queues it in the
+ * binding's own closure type, and this is how it tells the app thread
+ * to come and look. A guest in those languages never names this
+ * function, the same way it never names kaya_submit.
+ *
+ * A C guest has no binding, so it calls this itself. It owns the queue
+ * — a mutex and a list — rings this, and drains the queue in the
+ * occurrence loop it already writes by hand. That is the floor being
+ * the floor, exactly as a C guest builds its widget tree with
+ * kaya_tx_* calls rather than a construction chain.
+ *
+ * EITHER WAY, CLOSURES DO NOT CROSS THIS ABI. All the core owes a
+ * posting thread is the wake-up. A function-pointer-plus-void-star
+ * work queue down here would be one uniform mechanism, and also the
+ * worst spelling available in seven of the eight sugar languages.
+ *
+ * Calling it with nothing queued is harmless: the app thread spins
+ * once, finds the ring empty and its own queue empty, and parks again.
+ */
+void kaya_wake(void);
 
 /**
  * Direct-access setup: the occurrence ring's memory layout. Pointers

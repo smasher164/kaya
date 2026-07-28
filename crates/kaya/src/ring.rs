@@ -15,7 +15,7 @@
 //! segment growth arrives with the full protocol.
 
 use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
 pub const REC_PAD: u16 = 0;
@@ -72,10 +72,32 @@ const HEADER_SIZE: u32 = 8;
 #[repr(C, align(64))]
 struct Cursor(AtomicU32);
 
+/// What a blocking consumer woke up for.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Waited {
+    /// One occurrence record: kind and body.
+    Record(u16, Vec<u8>),
+    /// A background thread rang `wake`. Nothing is in the ring; the
+    /// consumer has work of its own queued.
+    Woken,
+    /// The core has shut down and the ring is drained.
+    Shutdown,
+}
+
 pub struct OccRing {
     head: Cursor,
     tail: Cursor,
     shutdown: AtomicBool,
+    // A wake pending for the consumer: the app thread parks here for
+    // occurrences, and a guest's background thread may have work for it
+    // that is NOT an occurrence — a posted closure. One-shot, consumed
+    // by whichever waiter sees it.
+    woken: AtomicBool,
+    // Consumers inside `cond.wait` right now. This exists so a test can
+    // KNOW the consumer is parked before waking it; without it the wake
+    // test races and passes whenever the flag happens to be set before
+    // the waiter arrives, which proves nothing about the notify.
+    parked: AtomicUsize,
     buf: Box<[UnsafeCell<u64>]>,
     waiter: Mutex<()>,
     cond: Condvar,
@@ -95,6 +117,8 @@ impl OccRing {
             head: Cursor(AtomicU32::new(0)),
             tail: Cursor(AtomicU32::new(0)),
             shutdown: AtomicBool::new(false),
+            woken: AtomicBool::new(false),
+            parked: AtomicUsize::new(0),
             buf: (0..qwords).map(|_| UnsafeCell::new(0)).collect(),
             waiter: Mutex::new(()),
             cond: Condvar::new(),
@@ -188,8 +212,11 @@ impl OccRing {
 
     /// Consumer side, for in-process consumers (the C function floor).
     /// Foreign consumers with atomics read the ring directly instead.
-    /// Single consumer only. Returns None after shutdown drains the ring.
-    pub fn wait_pop(&self) -> Option<(u16, Vec<u8>)> {
+    /// Single consumer only. `Shutdown` after shutdown drains the ring;
+    /// `Woken` when a background thread rang `wake` and the consumer
+    /// should look at its OWN queue instead (a posted closure is not an
+    /// occurrence and never enters this ring).
+    pub fn wait_pop(&self) -> Waited {
         loop {
             let head = self.head.0.load(Ordering::Relaxed);
             let tail = self.tail.0.load(Ordering::Acquire);
@@ -211,21 +238,28 @@ impl OccRing {
                 self.head
                     .0
                     .store(head.wrapping_add(header.size), Ordering::Release);
-                return Some((header.kind, body));
+                return Waited::Record(header.kind, body);
             }
             if self.shutdown.load(Ordering::Acquire) {
-                return None;
+                return Waited::Shutdown;
+            }
+            if self.woken.swap(false, Ordering::AcqRel) {
+                return Waited::Woken;
             }
             let guard = self.waiter.lock().unwrap();
             // Re-check under the lock so a push between the emptiness check
-            // and the wait is not a lost wakeup.
+            // and the wait is not a lost wakeup. The wake flag rides the
+            // same re-check for the same reason.
             let tail = self.tail.0.load(Ordering::Acquire);
             if tail != self.head.0.load(Ordering::Relaxed)
                 || self.shutdown.load(Ordering::Acquire)
+                || self.woken.load(Ordering::Acquire)
             {
                 continue;
             }
+            self.parked.fetch_add(1, Ordering::Release);
             let _guard = self.cond.wait(guard).unwrap();
+            self.parked.fetch_sub(1, Ordering::Release);
         }
     }
 
@@ -242,14 +276,25 @@ impl OccRing {
             if self.shutdown.load(Ordering::Acquire) {
                 return false;
             }
+            // A wake returns TRUE with the ring still empty. That is not a
+            // lie the consumer has to detect: its loop drains its own queue
+            // and re-checks, so "there may be something for you" is the
+            // whole contract. One extra spin, never a spin loop — the flag
+            // is consumed here.
+            if self.woken.swap(false, Ordering::AcqRel) {
+                return true;
+            }
             let guard = self.waiter.lock().unwrap();
             let tail = self.tail.0.load(Ordering::Acquire);
             if tail != self.head.0.load(Ordering::Acquire)
                 || self.shutdown.load(Ordering::Acquire)
+                || self.woken.load(Ordering::Acquire)
             {
                 continue;
             }
+            self.parked.fetch_add(1, Ordering::Release);
             let _guard = self.cond.wait(guard).unwrap();
+            self.parked.fetch_sub(1, Ordering::Release);
         }
     }
 
@@ -261,6 +306,36 @@ impl OccRing {
         self.shutdown.store(true, Ordering::Release);
         let _guard = self.waiter.lock().unwrap();
         self.cond.notify_all();
+    }
+
+    /// Wake the parked consumer WITHOUT pushing anything. The app thread
+    /// blocks on this ring waiting for occurrences; a guest's background
+    /// thread has work for it that is not an occurrence — a closure
+    /// posted with App.Post — and this is how that thread says so. Safe
+    /// from any thread, unlike the producer side.
+    ///
+    /// One-shot: whichever waiter sees the flag consumes it and reports
+    /// `Woken` (or `true`, on the direct path). Setting it while nobody
+    /// is parked is not lost — the next waiter takes it before parking,
+    /// which is the same lost-wakeup re-check the push side does.
+    pub fn wake(&self) {
+        self.woken.store(true, Ordering::Release);
+        let _guard = self.waiter.lock().unwrap();
+        self.cond.notify_all();
+    }
+
+    /// Consumers inside `cond.wait` right now. This is observability for
+    /// ONE purpose: a wake test that does not first know the consumer is
+    /// parked proves nothing, because the flag is also honored on the way
+    /// in. The shutdown test above had exactly that weakness (it slept 50ms)
+    /// and now spins on this instead.
+    ///
+    /// Test-only, and cfg'd rather than allow'd so it says which: a shipped
+    /// build has no reason to ask, and a silenced dead-code warning is how
+    /// dead machinery survives (the lesson check-detekt exists for).
+    #[cfg(test)]
+    pub fn parked(&self) -> usize {
+        self.parked.load(Ordering::Acquire)
     }
 
     /// Raw layout for direct consumers, io_uring-offsets style. The
@@ -288,7 +363,7 @@ mod tests {
     fn round_trip_one_record() {
         let ring = OccRing::new(64);
         ring.push_record(REC_BUTTON_CLICKED, &body(7));
-        assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(7))));
+        assert_eq!(ring.wait_pop(), Waited::Record(REC_BUTTON_CLICKED, body(7)));
     }
 
     #[test]
@@ -296,7 +371,7 @@ mod tests {
         let ring = OccRing::new(128);
         let long: Vec<u8> = (0..32).collect();
         ring.push_record(REC_BUTTON_CLICKED, &long);
-        assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, long)));
+        assert_eq!(ring.wait_pop(), Waited::Record(REC_BUTTON_CLICKED, long));
     }
 
     #[test]
@@ -308,10 +383,10 @@ mod tests {
             ring.push_record(REC_BUTTON_CLICKED, &body(i));
             if i % 2 == 0 {
                 ring.push_record(REC_BUTTON_CLICKED, &body(i + 1000));
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i))));
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i + 1000))));
+                assert_eq!(ring.wait_pop(), Waited::Record(REC_BUTTON_CLICKED, body(i)));
+                assert_eq!(ring.wait_pop(), Waited::Record(REC_BUTTON_CLICKED, body(i + 1000)));
             } else {
-                assert_eq!(ring.wait_pop(), Some((REC_BUTTON_CLICKED, body(i))));
+                assert_eq!(ring.wait_pop(), Waited::Record(REC_BUTTON_CLICKED, body(i)));
             }
         }
     }
@@ -331,7 +406,7 @@ mod tests {
             })
         };
         let mut expected = 0u64;
-        while let Some((kind, payload)) = ring.wait_pop() {
+        while let Waited::Record(kind, payload) = ring.wait_pop() {
             assert_eq!(kind, REC_BUTTON_CLICKED);
             assert_eq!(payload, body(expected));
             expected += 1;
@@ -347,9 +422,74 @@ mod tests {
             let ring = ring.clone();
             std::thread::spawn(move || ring.wait_pop())
         };
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        while ring.parked() == 0 {
+            std::thread::yield_now();
+        }
         ring.set_shutdown();
-        assert_eq!(consumer.join().unwrap(), None);
+        assert_eq!(consumer.join().unwrap(), Waited::Shutdown);
+    }
+
+    // THE WAKE, and the reason `parked` exists. A background thread rings
+    // the doorbell for work that is NOT an occurrence — a posted closure
+    // — and the app thread must come back from `cond.wait` for it.
+    //
+    // Spinning on `parked` first is what makes this a test of the NOTIFY
+    // rather than of the flag: the wake is also honored on the way in, so
+    // a version that slept and lost the race would pass while proving
+    // nothing. The scene cannot make this observation at all, which is
+    // why it lives here (docs/background-work-plan.md §5).
+    // Wait for a woken consumer WITHOUT joining. A missing notify leaves
+    // the consumer parked forever, and `join` would turn that into a hung
+    // matrix lane instead of a failure — the worst way for a gate to
+    // report. Verified by deleting the notify: this says so in seconds.
+    fn woke_within<T: Send + 'static>(
+        ring: &Arc<OccRing>,
+        wait: impl FnOnce(Arc<OccRing>) -> T + Send + 'static,
+    ) -> T {
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let handle = ring.clone();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(wait(handle));
+        });
+        while ring.parked() == 0 {
+            std::thread::yield_now();
+        }
+        ring.wake();
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("wake left the consumer parked: the notify is missing")
+    }
+
+    #[test]
+    fn wake_returns_a_parked_consumer_with_an_empty_ring() {
+        for _ in 0..200 {
+            let ring = Arc::new(OccRing::new(64));
+            assert_eq!(woke_within(&ring, |r| r.wait_pop()), Waited::Woken);
+            // One-shot: the flag was consumed, so the ring is quiet again.
+            assert!(!ring.woken.load(Ordering::Acquire));
+        }
+    }
+
+    // The same for the direct path, whose consumers (Go, C#, Haskell,
+    // OCaml) never call wait_pop. A wake there returns TRUE with the ring
+    // still empty — deliberately indistinguishable from data, because the
+    // consumer's loop drains its own queue and re-checks either way.
+    #[test]
+    fn wake_returns_a_parked_direct_consumer() {
+        for _ in 0..200 {
+            let ring = Arc::new(OccRing::new(64));
+            assert!(woke_within(&ring, |r| r.wait_nonempty()));
+        }
+    }
+
+    // A wake set while NOBODY is parked is not lost: the next waiter
+    // takes it before parking. Same lost-wakeup re-check the push side
+    // does, and the case a naive implementation drops.
+    #[test]
+    fn wake_before_the_consumer_arrives_is_not_lost() {
+        let ring = OccRing::new(64);
+        ring.wake();
+        assert_eq!(ring.wait_pop(), Waited::Woken);
     }
 
     #[test]

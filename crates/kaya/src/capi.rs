@@ -828,19 +828,32 @@ pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
     }
 }
 
+/// Returned by `kaya_next_occurrence` when the core has shut down.
+pub const KAYA_OCCURRENCE_SHUTDOWN: usize = 0;
+
+/// Returned by `kaya_next_occurrence` when a background thread called
+/// `kaya_wake`: nothing was written to `buf`, and the caller should run
+/// whatever it has queued of its own before waiting again. Chosen
+/// SMALLER than any real record (a header alone is 8 bytes) rather than
+/// as a huge sentinel, so a consumer that has not learned about it yet
+/// cannot mistake it for a length and read past the buffer.
+pub const KAYA_OCCURRENCE_WOKEN: usize = 1;
+
 /// Function-floor consumption: block until the next occurrence and write
 /// one complete record — header included, exactly the ring's bytes — to
-/// `buf`. Returns the record size, or 0 when the core has shut down.
+/// `buf`. Returns the record size, `KAYA_OCCURRENCE_SHUTDOWN` when the
+/// core has shut down, or `KAYA_OCCURRENCE_WOKEN` when a background
+/// thread rang the doorbell for work of the caller's own.
 /// 256 bytes of capacity covers any occurrence with a reasonable key
 /// path; an overflowing record fails loudly. Call from a single app
 /// thread, and do not mix with direct ring access.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_next_occurrence(buf: *mut u8, cap: usize) -> usize {
     if buf.is_null() {
-        return 0;
+        return KAYA_OCCURRENCE_SHUTDOWN;
     }
     match state().ring.wait_pop() {
-        Some((kind, body)) => {
+        crate::ring::Waited::Record(kind, body) => {
             let size = wire::HEADER_SIZE + body.len();
             assert!(
                 size <= cap,
@@ -854,8 +867,36 @@ pub unsafe extern "C" fn kaya_next_occurrence(buf: *mut u8, cap: usize) -> usize
             unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), buf, size) };
             size
         }
-        None => 0,
+        crate::ring::Waited::Woken => KAYA_OCCURRENCE_WOKEN,
+        crate::ring::Waited::Shutdown => KAYA_OCCURRENCE_SHUTDOWN,
     }
+}
+
+/// Wake this process's app thread from wherever it is parked waiting for
+/// occurrences. SAFE FROM ANY THREAD — the only entry here that is.
+///
+/// WHO CALLS IT. In the sugar languages, the BINDING does, inside its
+/// post: the guest hands over a closure, the binding queues it in the
+/// binding's own closure type, and this is how it tells the app thread
+/// to come and look. A guest in those languages never names this
+/// function, the same way it never names kaya_submit.
+///
+/// A C guest has no binding, so it calls this itself. It owns the queue
+/// — a mutex and a list — rings this, and drains the queue in the
+/// occurrence loop it already writes by hand. That is the floor being
+/// the floor, exactly as a C guest builds its widget tree with
+/// kaya_tx_* calls rather than a construction chain.
+///
+/// EITHER WAY, CLOSURES DO NOT CROSS THIS ABI. All the core owes a
+/// posting thread is the wake-up. A function-pointer-plus-void-star
+/// work queue down here would be one uniform mechanism, and also the
+/// worst spelling available in seven of the eight sugar languages.
+///
+/// Calling it with nothing queued is harmless: the app thread spins
+/// once, finds the ring empty and its own queue empty, and parks again.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_wake() {
+    state().ring.wake();
 }
 
 /// Direct-access setup: the occurrence ring's memory layout. Pointers
