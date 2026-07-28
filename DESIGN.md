@@ -1205,13 +1205,26 @@ edge in the vocabulary. So the rule is not "the path where the platform
 has one": it is EMPTY UNLESS RE-OPENING THAT NAME ACTUALLY WORKS, which
 today means the three desktops, and neither phone.
 
-`seekable` EXISTS BECAUSE THE TYPE IS NOT THE CAPABILITY. Android's
-`"r"` mode may return a pipe or socket pair for a streaming provider, so
-an fd is not necessarily seekable and `mmap` is not necessarily
-available; `getStatSize()` returning -1 is the platform's own tell. A
-guest that assumed otherwise would discover the difference as a runtime
-error on one platform, which is the failure mode this project exists to
+`seekable` EXISTS BECAUSE THE TYPE IS NOT THE CAPABILITY. An Android
+provider may hand back any of three shapes, and they are not
+interchangeable: `ParcelFileDescriptor.open` on a locally cached copy
+(an ordinary seekable file), `createPipe`/`createSocketPair` for a
+streaming provider (a stream — no seek, no `mmap`, and `getStatSize()`
+returning -1 is the platform's own tell), or
+`openProxyFileDescriptor`, whose callback is offset-addressed
+(`onRead(long offset, ...)`, `onGetSize()`) and which is therefore
+SEEKABLE even though the bytes arrive from the provider on demand. A
+guest that assumed one shape would meet the others as a runtime error
+on one platform, which is the failure mode this project exists to
 prevent.
+
+So a remote file is not automatically a stream, and this is the answer
+to whether ordinary file APIs mean anything against a cloud URI: they
+always do, and `seekable` is which subset applies. What it does NOT
+promise is SPEED — an `mmap` over a proxy descriptor pages in over the
+network. That is an NFS mount by another name, it is the platform's
+business rather than kaya's, and programmers already have habits for
+it.
 
 And it rides the OPEN rather than the pick because that is the only
 place the answer exists. Nothing short of opening an Android fd reveals
