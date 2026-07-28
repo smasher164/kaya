@@ -23,15 +23,22 @@ architecture). This file is the how-to layer: the recipes that repeat.
   `tools/kaya-swift-gen` — the KayaGen generators (record/sum surfaces
   from guest type declarations), driven by `tools/gen-guests.sh`.
 - `guests/<lang>/` — the example scenes, one project per language.
-- `tools/scenes/*.steps` — the shared scene scripts (embedded into Rust
-  backends via include_str!; env/intent-delivered to the interpreters).
+- `tools/scenes/*.steps` — the shared scene scripts. TWO transports, no
+  registry: `KAYA_SELFTEST_SCRIPT` carries the script's TEXT (the
+  interpreters need this — an iOS bundle or an Android intent shares no
+  filesystem with the runner), and otherwise the Rust backends read
+  `$KAYA_SCENES_DIR/<scene>.steps` FROM DISK at run time. Editing a
+  .steps file needs no rebuild; only the default directory is baked in.
+  deploy-win ships tools/scenes to the VM and points KAYA_SCENES_DIR at
+  it; the linux container points it at the mount.
 - `tools/checks/` + `tools/check-*.sh` — the gate layer.
 
 ## The regeneration workflow (any spec.rs change)
 
 1. Edit `crates/kaya/src/spec.rs` (records, enums, PROPS). The spec
    hash moves automatically.
-2. `cargo test -p kaya` — the pin tables (`tx_kinds_match_wire`,
+2. `cargo test -p kaya --features harness --locked` — the pin tables
+   (`tx_kinds_match_wire`,
    `apply_and_occurrence_kinds_match_wire`, `enums_match_wire`,
    `c_abi_constants_cover_the_spec`, round-trips) fail until
    protocol.rs / wire.rs / capi.rs carry matching arms and constants.
@@ -111,7 +118,8 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   scripts fold newlines to `;` for transport — comments are stripped
   first; verdicts read from logcat; on FAIL the runner dumps
   AndroidRuntime:E — crashes are otherwise hidden by the tag filter).
-- Windows: `tools/deploy-win.sh <user@host> [rust|python|go|all]` — the
+- Windows: `tools/deploy-win.sh <user@host> [--provision]
+  [rust|python|go|csharp|java|all|<scene>_<lang>]` — the
   UTM VM (default akhil@192.168.64.2; auto-starts it; the VM drops ICMP
   so probe via ssh, which `tools/probe-env.sh` does for every platform).
 - The accessibility scene is the one leg with an environment
@@ -122,7 +130,35 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   per-leg because exported lane-wide it timed out eleven legs that
   never asked for accessibility. `tools/linux/atspi_probe.py` walks the
   bus by hand when a role or name needs measuring rather than guessing.
-- Scene selection everywhere: KAYA_SELFTEST=<scene>. There is no
+- The matrix enforces PER-LANE DURATION CEILINGS, not just the doctrine
+  in CLAUDE.md's invariant 8: tools/validate-all.sh fails a lane that
+  exceeds its budget with "DURATION ANOMALY" even when every leg passed
+  (mac 400s, linux 300s, windows 400s, ios 300s, android 250s). A lane
+  that slows by this much changed in KIND — look for work added to every
+  leg before assuming load. Raise a ceiling in validate-all.sh only with
+  a reason.
+- `DEPTH_SCENES` is the tier for a scene wired RUST-ONLY during a depth
+  slice: it builds and runs the rust example without demanding the other
+  languages' guests, which SCENES membership does. check-steps enforces
+  the difference (a scene in SCENES whose per-language guests do not
+  exist fails loudly). It is empty on every runner today.
+- Traces, all env-gated and permanent: `KAYA_AX_TRACE` dumps the REAL
+  accessibility tree (gtk.rs, winui/mod.rs and KayaSwiftUI.swift all
+  honour it — this is the tool for the class that cost most of a day),
+  `KAYA_WINUI_TRACE` prints every WinUI op before applying it,
+  `KAYA_MENU_TRACE` proved the iPadOS menu-build laziness, and
+  `KAYA_WINUI_NAV_PROBE` / `KAYA_WINUI_MENU_PROBE` isolate those two
+  subsystems.
+- Pool widths: `KAYA_JOBS` (mac/linux legs), `KAYA_ANDROID_EMUS`
+  (emulators, default 3), `KAYA_IOS_SIMS` (simulators, default 3),
+  `KAYA_WIN_JOBS` (windows legs, default 4). `tools/probe-env.sh
+  --warm` boots the simulator, emulator and VM instead of only
+  reporting them.
+- Scene selection everywhere: KAYA_SELFTEST=<scene> names the SCRIPT,
+  never the app — two scenes can share one guest, and `split` and
+  `listdetail` do. KAYA_SCENES_DIR overrides where the .steps files are
+  read from (set by the windows and linux runners, which run the guest
+  away from the source tree). There is no
   backend selection — the roster is one backend per platform
   (KAYA_BACKEND is gone); what remains is locating the SwiftUI
   interpreter dylib (KAYA_SWIFTUI_LIB — see validate-mac.sh for the
@@ -142,10 +178,16 @@ touching layout code:
 - **Android, live bounds**: uiautomator before the selftest exits —
   ```
   S=emulator-5554   # adb -s: the pool runs KAYA_ANDROID_EMUS (default 3) emulators
+  # KAYA_SELFTEST_SCRIPT is REQUIRED, not optional: with KAYA_SELFTEST
+  # set and no script the interpreter logs FAILED and calls
+  # finishAndRemoveTask, so the app is gone before the dump. (This is
+  # run-emulator's scene_script: comments stripped, newlines folded to
+  # `;`, since intent extras cannot carry a newline.)
+  SCRIPT=$(grep -v '^#' tools/scenes/grow.steps | tr '\n' ';')
   adb -s $S shell am force-stop dev.kaya.milestone2
   adb -s $S shell "am start -n dev.kaya.milestone2/.MainActivity \
-      --es KAYA_SELFTEST grow && sleep 0.3 && \
-      uiautomator dump /sdcard/kaya-dump.xml"
+      --es KAYA_SELFTEST grow --es KAYA_SELFTEST_SCRIPT \"'$SCRIPT'\" \
+      && sleep 0.3 && uiautomator dump /sdcard/kaya-dump.xml"
   adb -s $S pull /sdcard/kaya-dump.xml
   ```
   The one-shell `&&` chain matters: the selftest exits the app within
@@ -155,8 +197,8 @@ touching layout code:
   in the XML are the allocated tracks. `text=` precedes `class=` in
   the dump's attribute order.
 - **iOS/macOS**: the pixel measurement above, or expect_shares against
-  a throwaway env script (the interpreters read KAYA_SELFTEST_SCRIPT;
-  Rust backends embed theirs at build time and need a rebuild).
+  a throwaway env script — every backend reads KAYA_SELFTEST_SCRIPT
+  when it is set, so no rebuild is involved on any of them).
 
 ## The fast inner loop (KAYA_FAST=1)
 

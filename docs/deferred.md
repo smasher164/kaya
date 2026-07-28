@@ -428,7 +428,7 @@ own the state (see the undo note in this file).
     that the KayaGen generators superseded — debt with a real deletion
     behind it.
   The rest — per-language tiers, ambient-tx spellings for the remaining
-  languages, Rust's chained `.grow()`, optional static analyzers,
+  languages, optional static analyzers,
   multi-window ergonomics — waits for the guide, and the guide waits
   for maturity.
 - STANDING CONSTRAINT — do not bump the flake SDK without preserving
@@ -533,9 +533,14 @@ own the state (see the undo note in this file).
   no hardware-keyboard route to the catalog. The interpreter holds
   the shortcut table (the harness verb drives it, and the scene
   proves the dispatch), but nothing binds it to a real iPad keyboard
-  or to the hold-Command HUD — that wants `UIKeyCommand` /
-  `UIMenuBuilder`, since the macOS lowering is NSMenu rather than
-  SwiftUI `.commands`. TRIGGER (SUPERSEDED 2026-07-24 — see the iPad
+  or to the hold-Command HUD. NARROWER THAN IT READS (corrected
+  2026-07-27): the `UIMenuBuilder` half SHIPPED — `kayaBuildCatalogMenus`
+  runs on BOTH iOS form factors, and on iPhone it feeds the
+  hardware-keyboard HUD; only the VISIBLE arm keys on size class. What
+  is actually missing is the CHORD: the generated `UIAction`s carry no
+  `input:`/`modifierFlags`, so nothing is bound to a key. (The macOS
+  lowering is NSMenu rather than SwiftUI `.commands`, which is why
+  neither side goes through CommandsBuilder.) TRIGGER (SUPERSEDED 2026-07-24 — see the iPad
   DEFECT entry at the top; iPadOS 26's menu bar is not keyboard-gated,
   so this trigger could never fire for the case that matters): an
   artifact running on iPad with a keyboard. Android's equivalent route
@@ -687,7 +692,8 @@ own the state (see the undo note in this file).
   expected tuple set is the missing gate.
   Packaging notes for whoever adds the next scene (walked end to end
   by menus, 2026-07-24): on iOS the swift guest rides
-  IOS_SWIFT_SCENES — one name, bundle and leg derived — while a rust
+  IOS_SWIFT_SCENES — a bare name, or `scene:guest` where two scenes
+  share one app, with bundle and leg derived — while a rust
   example needs its own build+bundle+queue_leg block; Android has one
   apk PER GUEST TIER, each a scene selector keyed on KAYA_SELFTEST —
   milestone2 (the Rust guest: a new scene needs a `mod` + match arm
@@ -720,7 +726,9 @@ own the state (see the undo note in this file).
   then reported "the capturer produced no frames" — the WGC capturer
   never attached to a window that lives about two seconds.
 - Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
-  records a construction emits) in every language, not just Python.
+  records a construction emits) in Java and Haskell — Go, Swift, C#
+  and OCaml already have one (run by tools/check-abort.sh), so this is
+  two languages owed, not seven.
   The motivating miss: the Swift binding's containerOf ACCEPTED
   construction-time `spacing:` but never applied it (one commit's
   worth of silently dropped writes) — and no gate could see it,
@@ -732,8 +740,11 @@ own the state (see the undo note in this file).
   unlike gen-header/gen-bindings/gen-guests there is no `--check`
   proving the checked-in file matches the generator — a hand edit (or a
   filter change without regeneration) goes unnoticed until the next
-  regeneration clobbers it. deploy-win compiling the file is the only
-  gate today, and it proves compilability, not provenance.
+  regeneration clobbers it. COMPILABILITY is already covered on every
+  mac run — `tools/check-targets.sh` cross-compiles the windows target,
+  so a broken bindings.rs fails in seconds rather than on the VM. What
+  is missing is PROVENANCE: nothing proves the checked-in file is what
+  the generator would emit.
 - Mount-transaction focus negative test: the Focus command now
   defers until the element is loaded/mapped on WinUI/GTK (the
   materialization class, traps.md), but no scene issues focus IN the
@@ -741,15 +752,16 @@ own the state (see the undo note in this file).
   load. The class fix is structural; the missing gate is a scene (or
   an entry-scene opening step) that focuses at mount and asserts
   expect_focused, proving the deferral on all platforms.
-- resize_window harness verb (Akhil asked 2026-07-22) — MERGED into the
-  form-factor milestone 2026-07-24; the same verb is the size-class
-  transition gate, so do not schedule it separately. Backends
-  reflow natively on user resize but the matrix never drives one —
-  add a verb that resizes the REAL window then re-asserts
-  root_fills/shares/fills, making reflow-under-resize a matrix fact.
-  Also the place to watch WinUI's known interactive-resize flicker
-  (platform-level; we already avoid the transparent-background worst
-  case — keep WinAppSDK current).
+- resize_window harness verb — the VERB LANDED with the form-factor
+  milestone: `split.steps` drives three REAL resizes and re-asserts the
+  presentation on the far side, on all three desktop lanes. WHAT IS
+  STILL OWED is narrower than this entry used to claim (corrected
+  2026-07-27): no scene re-asserts GEOMETRY across a resize —
+  `expect_root_fills` / `expect_shares` / `expect_fills` appear nowhere
+  in split.steps — so reflow-under-resize is not a matrix fact even
+  though the transition is. Also still the place to watch WinUI's known
+  interactive-resize flicker (platform-level; we already avoid the
+  transparent-background worst case — keep WinAppSDK current).
 - The macOS `back` verb drives the path binding (GTK/WinUI/Compose
   drive real chrome; mac needs a stable handle on NavigationStack's
   private toolbar button).
@@ -841,7 +853,7 @@ own the state (see the undo note in this file).
 - Swift guests on Linux and Windows. Upstream swift.org toolchains
   exist for both, but neither pinned world (docker image, VM) carries
   one, and the swift SURFACE is already fully proven — typecheck on
-  two Apple targets plus 11 live mac legs and the iOS suite. The
+  two Apple targets plus 25 live mac legs and the iOS suite. The
   value would be backend×language matrix breadth, not new surface
   proof; take it only if a real swift-on-linux/windows user appears.
 - Node.js guest (the roster's first async surface): Node first;

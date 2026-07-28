@@ -55,10 +55,15 @@ the same patterns return through interpreter drop-downs
   way of losing the code is caught whatever its cause. The general
   lesson: a runner that reads only an exit code trusts every layer
   between the assertion and the process boundary.
-- **An interpreter leg inherits the previous group's scene script.** The
-  Rust backends embed their script at build time (`include_str!`), but
-  SwiftUI and Compose read `KAYA_SELFTEST_SCRIPT` from the environment —
-  and validate-mac exports it once per scene group. A new leg added
+- **A leg inherits the previous group's scene script.** Every backend
+  reads `KAYA_SELFTEST_SCRIPT` when it is set — `harness::script` checks
+  the env var FIRST and only then falls back to
+  `$KAYA_SCENES_DIR/<scene>.steps` — and validate-mac exports it once
+  per scene group. This entry used to exempt the Rust backends on the
+  grounds that they embedded their script with `include_str!`; that
+  stopped being true when the include_str match was replaced by
+  file resolution, so the exemption was BACKWARDS — a rust leg in the
+  wrong group inherits exactly like an interpreter leg. A new leg added
   after a group therefore runs the PREVIOUS scene's script against the
   new scene's tree, which surfaces as an index-out-of-range deep inside
   the interpreter, not as anything resembling "wrong script". Every
@@ -67,9 +72,10 @@ the same patterns return through interpreter drop-downs
   silently read `columns[0]` — a wrong-widget read, the false-verdict
   class — and a malformed or out-of-range index was a hard trap
   (Swift's "Index out of range") rather than a failure. check-steps
-  parses every checked-in scene with the RUST grammar, so only an
-  env-supplied script could reach it, which is exactly how it was found
-  (a hand-run `expect_shares row#2` probe). Both interpreters now match
+  never PARSES a scene — it is regex and python lints — but one of them
+  rejects any container target except index 0, so no checked-in scene
+  could reach the bug and only a hand-run script could, which is
+  exactly how it was found (an `expect_shares row#2` probe). Both interpreters now match
   the kind against the registry the verb reads and bounds-check the
   index; the outcome is a loud "no such target …", never a crash and
   never a misresolved read.
@@ -243,7 +249,7 @@ the same patterns return through interpreter drop-downs
   UIStackView's always-excluded hidden arranged views). Guard:
   `expect_fills` — children (plus normalized gaps) must SPAN the
   container's content box, asserted for both containers in the grow
-  scene on all seven backends; `Stage::container_fills` is no-default
+  scene on all four backends; `Stage::container_fills` is no-default
   so a backend cannot skip it silently. Diagnosis pattern worth the
   price of admission: attach lldb to the live process and ask the
   engine (`_subtreeDescription`, `[view constraints]`,

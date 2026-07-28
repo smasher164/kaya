@@ -83,7 +83,7 @@ in docs/deferred.md.
    round-trips, pin tables,
    compile_fail doc-tests. THE FEATURE IS REQUIRED: `harness` is off by
    default so shipped apps do not carry the scene interpreter, and
-   without it the 21 harness tests silently vanish (188 -> 167) rather
+   without it the 22 harness tests silently vanish (194 -> 172) rather
    than failing. GTK and WinUI builds need it too — mac/iOS do not,
    since the SwiftUI interpreter carries its own harness.
 2. Fast gates (all run by validate-mac, all runnable standalone):
@@ -95,15 +95,24 @@ in docs/deferred.md.
    `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two
    milestones),
-   `tools/check-targets.sh` (cross-compiles every cfg'd backend),
+   `tools/check-targets.sh` (cross-compiles every cfg'd backend, in BOTH
+   feature configurations — it once reported "windows OK" while the
+   windows lane failed to build the WinUI accessibility read, which
+   only the harness config compiles),
    `tools/check-sugar-surface.sh` (every widget kind has a live-zone
-   constructor in all 8 bindings),
+   constructor in all 8 bindings, AND every window prop has a sugar
+   spelling in all 8 — the generic floor spells a prop without the
+   sugar noticing, which is how Python shipped unable to declare
+   `list_detail` at all),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
    still keyed on the prop alone), `tools/check-abort.sh` (uniform abort
    semantics, all languages), `tools/check-verbs.sh` (every harness verb
-   and wire constant present in BOTH interpreter backends),
+   and wire constant present in BOTH interpreter backends — plus the
+   spec hash pinned against bindings/c/kaya_wire.h, the
+   byte-compared-verdict rule, the vtable rule, and the
+   stamped-observation rule),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination),
@@ -121,12 +130,18 @@ in docs/deferred.md.
    the verifier rejects one carrying any other, and every lane verifies
    what it runs or ships before it runs or ships it),
    `tools/check-pins.sh` (every dependency resolved over the network
-   names an exact version — gradle, nuget, and the container's opam
-   index, none of which has a lockfile the way cargo and nix do),
+   names an exact version — gradle, nuget, SwiftPM, and the container's
+   opam index, none of which has a lockfile the way cargo and nix do;
+   the SwiftPM clause is the one whose false green cost a debugging
+   round, see docs/traps.md),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing, and the three
    gates that read a built artifact are never keyed),
+   `tools/swift-typecheck.sh` (the guests, the Swift bindings AND the
+   SwiftUI interpreter — a gate named after a layer it does not
+   compile has burned someone here; docs/traps.md),
+   `tools/java-typecheck.sh`,
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside validate-mac because it needs docker:
    `tools/check-gtk.sh` compile-checks the GTK backend, which
