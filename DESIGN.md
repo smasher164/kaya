@@ -991,6 +991,201 @@ The modal tier splits in two, because the platforms' own dialogs do:
   context hosting an arbitrary scene root — come later, reusing the
   same mount-target machinery windows introduce.
 
+### File dialogs — ratified 2026-07-27
+
+The third presentation context, and the first that returns something
+other than a choice. The grammar is the alert's, unchanged: one atomic
+request naming a guest-chosen id, one live per process, a handler that
+rides the request, and an id that retires with the result. What differs
+is the payload — and the payload is where every cross-platform framework
+before us made a decision kaya should not copy.
+
+**kaya hands over a CAPABILITY. It never moves the bytes.** The dialog
+resolves to an already-open file descriptor, and the guest reads and
+writes it with its own language's file API — `mmap`, `O_DIRECT`,
+`sendfile`, a buffered reader, whatever it likes. The core is nowhere in
+the data path.
+
+WHY THIS INVERTS WHAT EVERYONE ELSE DOES. The frameworks that ship on
+both desktop and mobile all return a stream the framework itself
+services: Avalonia's `IStorageFile.OpenReadAsync`, MAUI's
+`FileResult.OpenReadAsync`, Fyne's `URIReadCloser`, Gio's
+`io.ReadCloser`, FileKit's `PlatformFile`; Qt taught `QFile` itself to
+open `content://` URIs. Every one of them also ships a demoted
+path accessor — `TryGetLocalPath`, `URI.Path()`, `FullPath` —
+documented as the last resort. (Flutter appears to be the exception and
+is not: on Android its picker COPIES the file into the app cache so it
+can hand back a path.) Avalonia is the sharpest precedent, because it
+MIGRATED: version 10 returned paths, version 11 replaced them with the
+storage provider, citing cross-platform consistency and sandboxing.
+
+That consensus is correct FOR THEM and wrong for kaya, and the reason is
+polyglot. Those frameworks are written in the language their apps are
+written in, so "the framework reads the file" costs them one Stream
+implementation. kaya would have to invent a file vocabulary in the C ABI
+— read, write, seek, length, close, and an error taxonomy — and then
+spell it eight times, once per binding, each a place semantics could
+drift. Capability-passing instead REUSES eight mature file APIs that
+already exist and are already idiomatic. For a single-language framework
+core-mediated I/O is the cheap option; for a polyglot one it is the
+expensive option. It is also the only choice consistent with wrapping
+native things rather than reimplementing them, which this document
+argues everywhere else.
+
+WHAT MAKES IT POSSIBLE, measured rather than assumed:
+
+- **Android** has no path in the universe — SAF resolves to a
+  `content://` URI — but `ContentResolver.openFileDescriptor(uri, "r")`
+  yields a `ParcelFileDescriptor` whose `detachFd()` returns the native
+  fd AND detaches ownership.
+- **iOS** hands back a security-scoped URL. Permissions resolve at
+  `open()` and the descriptor stays valid afterwards, so the core starts
+  the scope, opens, and stops IMMEDIATELY. That is not a workaround: the
+  scope is a kernel-tracked capability with a concurrency limit that
+  leaks if held, so releasing it at once is the correct handling.
+  MEASURED ON DEVICE, 2026-07-27 (iPhone 17 Pro, iOS 26.5.2, a 1 MB PDF
+  picked from outside the app container), because the SIMULATOR CANNOT
+  SEE THIS — it does not enforce the app sandbox at all, so every result
+  there is vacuous (docs/traps.md). On hardware, with the guard that
+  makes the rest meaningful:
+    1. opening the picked path with NO scope is DENIED (EPERM) —
+       enforcement confirmed, so nothing below passes for free;
+    2. start, open, stop, then read: the fd reads fine — IT SURVIVES;
+    3. mmap after the stop succeeds — RANDOM ACCESS IS REAL, which is
+       the whole point of handing over a descriptor rather than bytes;
+    4. re-opening BY PATH after the stop is DENIED (EPERM) — the path is
+       not a durable capability, only the fd is;
+    5. the URL object can re-acquire its scope and open again.
+- **macOS, Windows, GTK** give a path, which is a descriptor plus more
+  freedom (reopen with different flags, `O_TRUNC` for save).
+
+So on every host the core can hand over an opened capability with no
+KERNEL-tracked obligation left behind — nothing to release later, no
+scope held, no descriptor pinned.
+
+WHAT THE DIALOG CAN SELECT, and how many capabilities that implies.
+
+The request names ARITY and FILTERS; the result is ALWAYS A LIST. All
+four backends do multi-select, each spelling the choice differently:
+SwiftUI and AppKit take a FLAG (`allowsMultipleSelection`), GTK and
+WinUI take a different METHOD (`FileDialog::open_multiple`,
+`PickMultipleFilesAsync`), Android takes a different CONTRACT
+(`OpenMultipleDocuments`). That is the ordinary shape — one field on the
+wire, four spellings under it. Verified 2026-07-27 against the artifacts
+this repo actually depends on rather than against documentation:
+apple-sdk-14.4's SwiftUI `.swiftinterface`, androidx.activity 1.9.3,
+gtk4 0.11.4, windows 0.62.2. The floor returns a one-element list for a
+single pick; the sugar returns what the caller asked for — `open_file`
+yields one optional file, `open_files` yields a list, the same record
+underneath. Cancel is the EMPTY LIST, faithfully, because no platform
+can confirm a zero-file selection. Filters ride the request as advisory
+`(label, extensions)` pairs: every platform treats them as a default
+view rather than a guarantee, so the guest still validates what it got.
+
+THE DESCRIPTOR IS OPENED ON FIRST USE, NOT AT THE PICK. This reverses
+the obvious reading of the capability rule above — "hand over an open
+fd" seemed to mean opening at the moment of the pick — and multi-select
+is where that reading breaks:
+
+- a GUI-launched macOS app inherits launchd's soft limit of **256**
+  descriptors. MEASURED 2026-07-27 by launching a bundle through `open`
+  and having it read its own `RLIMIT_NOFILE`, because a dev-shell
+  `ulimit -n` says 1048576 and is not what a shipped app sees. Apple's
+  security scopes carry a separate ceiling of their own.
+- so an eager pick of a photo-library-sized selection exhausts the app's
+  descriptors BEFORE THE GUEST SEES THE FIRST FILE, and the failure
+  surfaces in whatever unrelated code opens next.
+
+The survey agrees, and the shape of its agreement is the useful part.
+Every framework that DESIGNED for N returns a reference: Avalonia's
+`IReadOnlyList<IStorageFile>`, MAUI's `IEnumerable<FileResult>`,
+FileKit's `List<PlatformFile>`, SwiftUI's `[URL]`, Qt's `QStringList`.
+The one eager multi-select found is Gio's `ChooseFiles`, which returns
+`[]io.ReadCloser` ALREADY OPEN — and it is eager because its singular
+`ChooseFile` was, not because anyone chose it for the plural; it also
+documents a one-picker-at-a-time constraint the others do not need.
+Fyne, the other eager one, never grew multi-select at all. Eagerness is
+a shape that does not survive the plural.
+
+WHAT THE MAINSTREAM RETURNS IS NOT A PATH, which is what makes deferred
+opening consistent with the rule above rather than a retreat from it.
+`IStorageFile`, `FileResult` and `PlatformFile` are framework-HELD
+handles: the framework keeps whatever the platform needs alive and opens
+on demand. Handing the guest a NAME and hoping it still resolves is what
+measurement 4 forbids. Handing it a token KAYA CAN STILL REDEEM is a
+different thing, and every platform supports it — the iOS URL
+re-acquires its scope (measurement 5), Android URIs are persistable,
+desktop paths reopen.
+
+THE PICK RETURNS NAMED HANDLES; THE OPEN RETURNS THE CAPABILITY. Each
+picked record carries a handle, a display name, and `local_path`.
+Opening a handle yields the descriptor and `seekable` together.
+
+`local_path` IS A RE-OPENABLE NAME, NOT A PATH — and the distinction is
+measured, not fussy. iOS has a perfectly good-looking POSIX path for the
+picked file, and re-opening it after the scope is released fails with
+EPERM (measurement 4 above). A guest handed that string would branch on
+"is there a path", succeed on every desktop, and fail on one platform at
+runtime — the field added AS the escape hatch would become the sharpest
+edge in the vocabulary. So the rule is not "the path where the platform
+has one": it is EMPTY UNLESS RE-OPENING THAT NAME ACTUALLY WORKS, which
+today means the three desktops, and neither phone.
+
+`seekable` EXISTS BECAUSE THE TYPE IS NOT THE CAPABILITY. Android's
+`"r"` mode may return a pipe or socket pair for a streaming provider, so
+an fd is not necessarily seekable and `mmap` is not necessarily
+available; `getStatSize()` returning -1 is the platform's own tell. A
+guest that assumed otherwise would discover the difference as a runtime
+error on one platform, which is the failure mode this project exists to
+prevent.
+
+And it rides the OPEN rather than the pick because that is the only
+place the answer exists. Nothing short of opening an Android fd reveals
+whether it seeks, so a pick that reported `seekable` would have to open
+every selected file just to fill the field in — reintroducing the
+descriptor storm the previous point exists to avoid. Deferring it is not
+a compromise: the sugar wants the answer exactly when it must choose a
+type, which is at the open, not before.
+
+TWO TIERS, and this is where the divergence is absorbed. The FLOOR — the
+wire records and the C guests — carries those fields verbatim. The
+SUGAR tier gives each language its own idiom, and uses `seekable` to
+decide WHAT IT RETURNS rather than exposing it as a flag: Go hands back
+a value satisfying `io/fs.File` that implements `io.Seeker` only when
+the platform said so, and the caller's comma-ok assertion is then
+correct BY CONSTRUCTION rather than by luck. Most of the roster already
+has the predicate as a first-class idiom — Python's `seekable()`, C#'s
+`CanSeek`, Haskell's `hIsSeekable` — so surfacing it their way is not an
+invention. One readable stream everywhere, random access where the
+platform really has it, and no app code shaped by which host it is on.
+
+WHAT THIS DISSOLVES, worth recording because they looked like the hard
+questions: FFI overhead per byte (there are no bytes crossing), sync
+versus async I/O (the guest's own runtime owns it, and kaya's app thread
+may block freely — see the threading model), and slurp versus chunked
+reads (the guest chooses, per read). All three were artifacts of assuming
+the core would move the data.
+
+MEASUREMENT 5 IS WHAT THE HANDLE RESTS ON, and it pays twice. A held
+URL re-acquires its scope and opens again, so the handle is redeemable
+for the process lifetime — that is what lets the pick defer the open at
+all, and it is also what makes SAVE-BACK possible on iOS. Writing to the
+file the user opened therefore does not require pinning a writable fd
+from the moment of the pick, which would have been the alternative and
+an ugly one.
+
+Deferred, each with a stated reason rather than for lack of time: SAVE
+is designed alongside but comes second, because creating a document
+through SAF is a different request from opening one and the error
+surface (permissions, disk full, a revoked scope) is the real work;
+directory selection waits for an artifact that needs it; the Windows
+descriptor is a HANDLE rather than an fd, so the field's meaning is
+per-platform and the bindings bridge it with `_open_osfhandle`; and
+EXPLICIT handle release waits for a caller who needs it, because an
+unreleased handle holds a URL and a string rather than anything the
+kernel counts — the resource that made eager opening untenable is
+exactly the one a handle does not consume.
+
 ### Navigation (ratified 2026-07-21)
 
 A stack of scene roots inside one surface, exactly one visible; the
@@ -2401,9 +2596,12 @@ ProgressBar, plus Select and Spacer which never sat in the queue.
 ContextMenu has since joined the MenuBar milestone as its second
 anchor rather than a separate widget admission, and the menu/context
 command vocabulary landed 2026-07-24 with standard commands behind it.
-Still ahead: Canvas, file dialogs — which are a presentation context
-returning a result, the alert grammar with a path instead of a button,
-NOT a widget — Separator, Splitter, Tree, and date/time pickers. Table
+Still ahead: Canvas, Separator, Splitter, Tree, and date/time pickers.
+(File dialogs left this queue: they are a presentation context, not a
+widget, and are ratified in "File dialogs" above. The framing here used
+to say "the alert grammar with a PATH instead of a button" — the
+grammar half held, the path half did not survive contact with Android
+and iOS, which have no path to give.) Table
 left this queue; see the column-props note above.) Not core: webview (a
 separate crate, if
 ever), rich text (after display lists), and the audio implementation

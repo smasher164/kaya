@@ -499,9 +499,12 @@ own the state (see the undo note in this file).
   triggers the first three). Four surfaces, native on every platform,
   none previously in this ledger, and collectively what separates a
   demo from an app. In the order real apps need them: **file dialogs**
-  — NOT a widget, a presentation context returning a result, i.e. the
-  alert grammar with a path instead of a button (DESIGN's admissions
-  queue has been corrected); **clipboard** — note it is SYNCHRONOUS on
+  — NOT a widget, a presentation context returning a result. RATIFIED
+  2026-07-27, see DESIGN's "File dialogs": the alert grammar holds, but
+  the result is a LIST OF HANDLES redeemable for open DESCRIPTORS, not
+  paths — Android and iOS have no path to give, and kaya hands over a
+  capability rather than moving bytes. Open comes first, save second;
+  **clipboard** — note it is SYNCHRONOUS on
   mac/Windows and ASYNCHRONOUS on Linux, so the API must be
   async-shaped or it is wrong on one platform, and it is also the
   unblocker for the deferred cut/copy/paste roles; **notifications** —
