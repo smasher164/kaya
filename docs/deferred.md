@@ -30,6 +30,42 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
+- **GAP — a kaya app cannot do background work.** Found 2026-07-28
+  while designing file dialogs, and it is the reason that design kept
+  contorting. There is NO way for a guest thread to get back onto the
+  app thread: `App` is not thread-safe (Go's `Build` has a re-entrancy
+  panic but no lock, and its maps are unsynchronized), no binding has a
+  post primitive (grepped, all eight), and the app thread's only wake-up
+  is `kaya_wait_occurrences`, blocked in C. So a guest that opens a file
+  over the network, reads 2 GB, or calls an HTTP API either blocks the
+  app thread — where the window keeps drawing but input stops doing
+  anything, which is the worst possible failure because it LOOKS alive —
+  or does it on its own thread and then cannot write the result into a
+  signal. Without this, features whose result arrives late have to be
+  designed in continuation-passing style, one callback per step, which
+  is designing around the hole rather than fixing it.
+  THE FIX IS SMALL: `ring.rs`'s `wait_nonempty` is a condvar loop with a
+  shutdown flag, so a `kaya_wake()` is a second flag plus a notify.
+  Closures never cross the C ABI — each binding keeps its own queue in
+  its own closure type and drains it in the loop it already runs. No
+  backend work at all. Sequenced BEFORE file dialogs
+  (docs/background-work-plan.md); it also unblocks clipboard,
+  notifications, and the editor's own reads.
+- **DEFECT — Go silently drops a write to a closed transaction.**
+  `Tx` carries a `closed` flag and the Widget/MenuItem chain methods
+  check it, but `tx.Write` and `tx.Signal` do not: they append to
+  `tx.records`, a slice `Build` has already submitted and will never
+  submit again. The write vanishes with no panic and no error. Today it
+  is nearly unreachable because nothing invites a guest to hold a `Tx`
+  past its handler; the post primitive above is exactly that invitation,
+  so this must be fixed WITH it. Rust is already safe for free and by
+  the strongest available means — `Tx<'a>` borrows an `AppCtx` full of
+  `Cell`/`RefCell`, hence `!Sync`, hence `Tx: !Send`, hence a compile
+  error — which nobody designed and which therefore wants a
+  `compile_fail` doctest to pin it. Audit all eight, plus a negative
+  test each: the rule is that a background thread may call exactly ONE
+  method, the post, and everything else needs a `Tx` that only exists
+  inside a transaction on the app thread.
 - ~~**DEFECT — the iPad menu lowering is wrong as of iPadOS 26**~~ —
   FIXED 2026-07-25, checked off 2026-07-27. As filed (2026-07-24): kaya
   routed the entire catalog into a trailing More overflow on every iOS
