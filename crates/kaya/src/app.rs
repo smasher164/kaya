@@ -620,6 +620,40 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
 /// sends the batch and rings the doorbell once. Dropping a Tx without
 /// committing abandons its records — and rolls the model back with
 /// them, so reads never show writes that were never sent.
+///
+/// # A `Tx` never leaves the app thread
+///
+/// It borrows [`AppCtx`], which holds `Cell`s and `RefCell`s and is
+/// therefore `!Sync`, so `Tx` is `!Send` and the compiler refuses to
+/// move one onto another thread. That is the whole rule for background
+/// work: a guest may post a closure to the app thread and mutate from
+/// inside it, and may capture ids on the way, but the transaction
+/// itself stays put.
+///
+/// NOBODY DESIGNED THIS — it fell out of the interior mutability above,
+/// and an innocent refactor (swapping a `Cell` for an atomic, say)
+/// would delete the guard in silence. So it is pinned here. Go and
+/// Java police the same rule with a runtime panic because they cannot
+/// do this; the semantics are one, the spelling is per language.
+///
+/// ```compile_fail
+/// fn assert_send<T: Send>() {}
+/// assert_send::<kaya::Tx<'static>>();
+/// ```
+///
+/// A `compile_fail` that dies of an unrelated error pins nothing (this
+/// crate has shipped that mistake), so the same assertion must PASS for
+/// the ids a posted closure is meant to carry:
+///
+/// ```
+/// fn assert_send<T: Send>() {}
+/// assert_send::<kaya::SignalId>();
+/// assert_send::<kaya::WidgetId>();
+/// ```
+///
+/// Note the failing case says `Tx<'static>`: with a shorter lifetime it
+/// would also fail the `'static` bound of anything like
+/// `thread::spawn`, and then the test would pass for the wrong reason.
 pub struct Tx<'a> {
     ctx: &'a AppCtx,
     ops: Vec<TxOp>,
