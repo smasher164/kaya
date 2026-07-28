@@ -99,13 +99,77 @@ negative test, rather than a note asking people to remember.
 
 ## §5 — the scene
 
-A scene proves the primitive end to end: a handler starts background
-work, the work posts back, an assertion sees the posted write land. The
-interesting part is that it must prove the app thread STAYED LIVE while
-the work ran — otherwise it passes for an implementation that just
-blocked. Shape to reach for: the background side waits on something the
-scene controls, the scene drives an unrelated interaction meanwhile and
-asserts it worked, and only then releases the background side.
+`tools/scenes/background.steps` (name follows the primitive's). NO NEW
+HARNESS VERBS — `click` and `expect` carry all of it, which is worth
+protecting: every new verb costs an arm in BOTH interpreters.
+
+THE DESIGN PRINCIPLE: a wrong implementation must DEADLOCK, not merely
+disagree. The worker parks until a CLICK releases it, and a click can
+only be processed by a live app thread. So a binding that lets
+background work occupy the app thread cannot reach the end of the
+script at all — it cannot even deliver its own release. That is much
+stronger than observing a different value, and it is what stops the
+scene passing for an implementation that simply blocked.
+
+```
+expect label#0 "idle"
+click button#0
+expect label#0 "working"          # the worker started and PARKED
+
+# THE CLAIM. The worker is parked, nothing is posted, and the app
+# thread must still be serving input.
+click button#1
+expect label#1 "alive"
+
+# Nothing has been posted YET. This separates a real background post
+# from a guest that computed everything eagerly on the app thread and
+# only pretended to park — that guest reaches here already showing the
+# final value.
+expect label#0 "working"
+
+click button#2                    # release
+expect label#0 "123"              # three posts, IN ORDER
+
+# A post from INSIDE a handler QUEUES; it never nests. The handler
+# appends "a", posts a closure appending "b", appends "c" — so the
+# handler commits "ac" and the posted closure commits "acb". A nested
+# implementation runs the closure between them and can only ever
+# produce "abc"; the two strings are unreachable from each other.
+click button#3
+expect label#2 "acb"
+
+# One real-tree read, because every assertion above is kaya's own
+# model and would pass for an arm that ran and drew nothing.
+expect_ax label#2 "label/acb"
+```
+
+WHAT EACH LINE KILLS, checked adversarially:
+
+- posts dropped, or drained only when an occurrence happens to arrive
+  -> the "123" expect polls its five seconds and fails;
+- a LIFO queue instead of FIFO -> "321", deterministic, not a race;
+- `Post` running the closure inline on the caller -> the nesting test
+  gives "abc". This is the discriminator for the whole roster, since a
+  thread-identity assertion is not expressible in a scene;
+- a guest that fakes the background thread -> the mid-script "working"
+  expect catches it, because its value would already be final;
+- background work occupying the app thread -> deadlock, as above.
+
+WHAT THE SCENE CANNOT GATE, stated so nobody believes otherwise. THE
+WAKE ITSELF is not deterministically exercised here. After the release
+click the app thread is freshly awake, and whether it re-enters
+`wait_nonempty` before the worker posts is a genuine race won either
+way on a multicore host — so a missing `kaya_wake()` would fail this
+scene only sometimes, and a flaky gate is worse than an honest gap.
+The wake belongs in `cargo test`, where the waiter can be observed
+parked before the post is issued, and that observation is the only new
+test-only surface this slice needs.
+
+TRAP TO AVOID IN THE JVM GUESTS: a parked NON-DAEMON thread keeps the
+JVM alive. On a passing run the worker is released and exits, so it
+never shows; on a FAILING run the guest hangs instead of reporting,
+which converts a clear failure into a timeout. Make the worker a
+daemon thread in the Java and Kotlin guests.
 
 ## §6 — the ladder
 
