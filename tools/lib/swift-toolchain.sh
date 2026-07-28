@@ -1,4 +1,7 @@
+# shellcheck shell=bash
 # Shared Swift/macOS toolchain resolution — source, don't execute.
+# (No shebang, because it is sourced. The directive on line 1 is what
+# names the dialect to lint this as; without it the check errors out.)
 #
 # Inside the nix dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
 # where `xcrun` finds no swiftc, so every Swift build has to steer back to

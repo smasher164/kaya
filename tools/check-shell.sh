@@ -38,13 +38,21 @@ if shellcheck -S warning "$T/bad.sh" >/dev/null 2>&1; then
     exit 1
 fi
 
+# EVERY .sh under tools/, found rather than enumerated. This loop used
+# to list the directories it knew about, so a script in a NEW
+# subdirectory was linted by nothing and the gate stayed green. The four
+# python rules below already walk the tree with rglob, so this was the
+# only rule here a new directory could slip past. Found 2026-07-27 while
+# adding tools/ios/scopeprobe/, and it had already cost something:
+# widening it surfaced tools/lib/swift-toolchain.sh, a sourced library
+# in a directory the old list never named, unlinted since the day it was
+# written.
 status=0
-for f in tools/*.sh tools/ios/*.sh tools/android/*.sh tools/swiftui/*.sh tools/linux/*.sh; do
-    [ -f "$f" ] || continue
+while IFS= read -r f; do
     if ! shellcheck -S warning "$f"; then
         status=1
     fi
-done
+done < <(find tools -name '*.sh' -type f | sort)
 
 # javac takes the PLATFORM charset, and the hosts disagree: UTF-8 on
 # mac and linux, a legacy code page on the Windows VM. A scene label

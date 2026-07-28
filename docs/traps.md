@@ -1658,3 +1658,13 @@ compiles, signs, installs and launches it on a paired phone; it is
 deliberately NOT a lane and cannot become one, since it needs hardware,
 a developer account, and a human to tap through a picker. New
 measurements go in main.swift, behind the same vacuity guard.
+
+Two smaller things that cost time on the way in. Adding the probe put a
+shell script in a NEW tools/ subdirectory, and check-shell's shellcheck
+loop enumerated the directories it knew about instead of walking the
+tree — so the new script was linted by nothing, silently. Widening it to
+`find tools -name '*.sh'` immediately surfaced tools/lib/swift-toolchain.sh,
+a sourced library that had never been linted at all. And when writing
+that fix: a comment line STARTING with `# shellcheck` is parsed as a
+directive rather than prose, so a sentence that happens to begin with
+the tool's name fails the gate with a parse error about a missing `=`.
