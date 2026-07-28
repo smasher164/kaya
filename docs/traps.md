@@ -1621,3 +1621,40 @@ arm is shaped the way it is.
   to refuse. It is enforced by removing the affordance: no button when
   both panes are up, and a harness `back` that declines to press a
   button that is not there.
+
+## The iOS simulator does not enforce the app sandbox
+
+2026-07-27, designing file dialogs. The whole shape of that feature
+rests on one fact — that a file descriptor opened from a security-scoped
+URL stays readable after `stopAccessingSecurityScopedResource()` — and
+the obvious move was to prove it on the iOS lane.
+
+It cannot be proven there. A simulator app built and installed the
+normal way read `/Users/<me>/Projects/kaya/DESIGN.md` — arbitrarily far
+outside its container, on the host filesystem — with a plain `open()`
+and no security scope of any kind. There is nothing to enforce, so any
+scope-related assertion passes for free.
+
+That makes the simulator lane STRUCTURALLY BLIND to an entire class:
+anything whose behaviour depends on the sandbox denying something. A
+green leg there is not evidence. It is the same shape as the iPadOS
+menu-bar gate (docs/deferred.md) — a platform behaviour the lane cannot
+witness — and it will not be the last one, because the simulator is a
+different security world wearing the same SDK.
+
+The remedy is a real device, which needs code signing that this repo
+otherwise never wants: `security find-identity -p codesigning` was empty
+until an Apple ID was added to Xcode. The file-dialog facts were
+measured that way on an iPhone 17 Pro, and the measurement CARRIED ITS
+OWN VACUITY GUARD — step one opened the picked file with no scope and
+required EPERM, so a phone that also failed to enforce would have
+reported that rather than a row of green ticks. Copy that shape: when a
+test depends on something being DENIED, assert the denial first, or the
+result means nothing.
+
+That probe is KEPT, at tools/ios/scopeprobe/, because the next question
+the simulator cannot answer will not be the last one. `build.sh` there
+compiles, signs, installs and launches it on a paired phone; it is
+deliberately NOT a lane and cannot become one, since it needs hardware,
+a developer account, and a human to tap through a picker. New
+measurements go in main.swift, behind the same vacuity guard.
