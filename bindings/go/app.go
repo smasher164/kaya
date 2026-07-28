@@ -21,6 +21,7 @@ package kaya
 import (
 	"fmt"
 	"os"
+	"sync"
 )
 
 // Typed handles over the id spaces.
@@ -151,6 +152,12 @@ type App struct {
 	// so an abandoned transaction restores the mirror to what was
 	// actually shipped (the same discipline as every other binding).
 	journal map[uint64][]*instance
+	// Closures handed to Post from other goroutines, waiting to run as
+	// transactions on the app goroutine. THE ONLY FIELD HERE TOUCHED
+	// FROM ANOTHER THREAD, and the only reason App carries a mutex at
+	// all — everything above is app-goroutine-only by construction.
+	postMu sync.Mutex
+	posted []func(*Tx)
 }
 
 func NewApp() *App {
@@ -448,6 +455,65 @@ func (a *App) dispatch(fn func(*Tx)) {
 		}
 	}()
 	a.Build(fn)
+}
+
+// Post runs fn as a transaction on the app goroutine, soon. It is the
+// ONE method safe to call from another goroutine, and the answer to
+// "how does background work reach the UI".
+//
+// Build is a transaction NOW on the calling goroutine; Post is the same
+// transaction SOON on the app goroutine. Same shape, same *Tx, and the
+// *Tx is made where it is used — so a background goroutine writes
+// ordinary blocking Go and hands back only the result:
+//
+//	go func() {
+//		data, err := os.ReadFile(name)      // blocks this goroutine
+//		app.Post(func(tx *kaya.Tx) {        // back on the app goroutine
+//			if err != nil {
+//				tx.Write(status, err.Error())
+//				return
+//			}
+//			tx.Write(content, string(data))
+//		})
+//	}()
+//
+// What must NOT cross is a *Tx: it belongs to the Build or handler that
+// made it, and capturing one is refused (see Tx.emit). Ids — signals,
+// widgets — are values and are meant to be captured; that is how the
+// posted closure names what to write.
+//
+// A posted closure runs in its OWN transaction, after whatever is
+// running now. Posting from inside a handler therefore queues for
+// after; it never nests.
+func (a *App) Post(fn func(*Tx)) {
+	if fn == nil {
+		return
+	}
+	a.postMu.Lock()
+	a.posted = append(a.posted, fn)
+	a.postMu.Unlock()
+	// The app goroutine may be parked in C waiting on the ring. Posted
+	// work is not an occurrence and never enters that ring, so this is
+	// the only way it hears about it.
+	Wake()
+}
+
+// drainPosted runs everything queued, each as its own transaction, in
+// the order it was posted.
+//
+// It takes the batch and releases the lock BEFORE running any of it, so
+// a closure that posts again lands in the NEXT batch rather than this
+// one. That is what stops a self-posting closure from starving the
+// occurrence loop — hold the batch open and Post becomes an infinite
+// drain that never returns to the ring.
+func (a *App) drainPosted() {
+	a.postMu.Lock()
+	batch := a.posted
+	a.posted = nil
+	a.postMu.Unlock()
+	for _, fn := range batch {
+		a.dispatch(fn)
+	}
 }
 
 func (tx *Tx) Signal[V Scalar](initial V) Signal[V] {
@@ -1949,9 +2015,19 @@ func (a *App) Run() int {
 	go func() {
 		defer close(done)
 		for {
-			kind, id, keys, payload, ok := NextOccurrence()
-			if !ok {
-				return // shutdown
+			// Posted work first, then the ring, then park. Draining at
+			// the TOP is what makes a wake sufficient: whatever reason
+			// the goroutine came back for, it looks here before it looks
+			// anywhere else. Posts queued after the core shuts down are
+			// dropped — the last drain before the false below is the
+			// last one there is.
+			a.drainPosted()
+			kind, id, keys, payload, ready := PollOccurrence()
+			if !ready {
+				if !WaitOccurrences() {
+					return // shutdown
+				}
+				continue
 			}
 			text, _ := payload.(string)
 			checked, _ := payload.(bool)

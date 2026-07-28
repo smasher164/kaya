@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -371,5 +372,93 @@ func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 	}
 	if j := strings.Index(body[i:], "\n}\n"); j < 0 || !direct.MatchString(body[i:i+j]) {
 		t.Fatal("the one direct append is not inside Tx.emit")
+	}
+}
+
+// POST IS THE ONE METHOD SAFE FROM ANOTHER GOROUTINE, and it must QUEUE
+// rather than run: a closure executed on the caller's goroutine would
+// race the app goroutine's own model and transaction state, which no
+// amount of care in the closure could fix.
+//
+// The first assertion is the one that matters. Everything is still
+// unrun after the posting goroutine has finished and been joined, so
+// "did not run inline" is a fact here, not a timing accident.
+func TestPostQueuesForTheAppGoroutineInOrder(t *testing.T) {
+	app := NewApp()
+	var s Signal[string]
+	app.Build(func(tx *Tx) { s = tx.Signal("") })
+
+	order := ""
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, c := range []string{"1", "2", "3"} {
+			app.Post(func(tx *Tx) {
+				order += c
+				tx.Write(s, order)
+			})
+		}
+	}()
+	wg.Wait()
+	if order != "" {
+		t.Fatalf("Post ran the closure on the CALLER's goroutine (order %q) — "+
+			"it must queue for the app goroutine", order)
+	}
+
+	app.drainPosted()
+	if order != "123" {
+		t.Fatalf("drained %q, want \"123\" — posts run in the order they were made", order)
+	}
+}
+
+// A POST FROM INSIDE A HANDLER QUEUES FOR AFTER; IT NEVER NESTS. The
+// handler appends a, posts a closure appending b, appends c. Queued, the
+// handler finishes "ac" and the closure then makes it "acb". Nested, the
+// closure would run between them and the only reachable answer is "abc"
+// — the two strings cannot be confused, which is what makes this the
+// discriminator the scene uses too (docs/background-work-plan.md §5).
+func TestPostFromInsideAHandlerQueuesForAfter(t *testing.T) {
+	app := NewApp()
+	seq := ""
+	app.dispatch(func(tx *Tx) {
+		seq += "a"
+		app.Post(func(*Tx) { seq += "b" })
+		seq += "c"
+	})
+	if seq != "ac" {
+		t.Fatalf("handler saw %q, want \"ac\" — the post nested instead of queueing", seq)
+	}
+	app.drainPosted()
+	if seq != "acb" {
+		t.Fatalf("after the drain %q, want \"acb\"", seq)
+	}
+}
+
+// A CLOSURE THAT POSTS AGAIN LANDS IN THE NEXT BATCH. drainPosted takes
+// the queue and drops the lock before running any of it, precisely so
+// this cannot loop forever inside one drain and starve the occurrence
+// ring — an app that re-posts on a timerish loop would otherwise never
+// see another click.
+func TestASelfPostWaitsForTheNextDrain(t *testing.T) {
+	app := NewApp()
+	ran := 0
+	var again func()
+	again = func() {
+		app.Post(func(*Tx) {
+			ran++
+			if ran < 3 {
+				again()
+			}
+		})
+	}
+	again()
+	app.drainPosted()
+	if ran != 1 {
+		t.Fatalf("one drain ran %d closures, want 1 — a self-post must wait for the next batch", ran)
+	}
+	app.drainPosted()
+	if ran != 2 {
+		t.Fatalf("second drain left ran=%d, want 2", ran)
 	}
 }

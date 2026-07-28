@@ -75,13 +75,19 @@ func RegisterBlob(data []byte) uint64 {
 	return uint64(C.kaya_blob_register((*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data))))
 }
 
-// NextOccurrence blocks for the next occurrence; ok is false when the
-// core has shut down. keys is nil when id is a widget id, else id is a
-// template node id and keys is the stamped copy's key path, outermost
-// first. payload carries the entry's new text (string) for
-// OccurrenceTextChanged, the checkbox's new state (bool) for
-// OccurrenceToggled.
-func NextOccurrence() (kind uint16, id uint64, keys []any, payload any, ok bool) {
+// PollOccurrence reads the next occurrence if one is ready and NEVER
+// blocks; ready is false when the ring is empty right now. keys is nil
+// when id is a widget id, else id is a template node id and keys is the
+// stamped copy's key path, outermost first. payload carries the entry's
+// new text (string) for OccurrenceTextChanged, the checkbox's new state
+// (bool) for OccurrenceToggled.
+//
+// Polling and waiting are separate calls, rather than one blocking
+// NextOccurrence, because the app goroutine has a SECOND source of work:
+// closures posted from other goroutines. A single blocking read would
+// park inside C with no way back out to drain them — the loop in App.Run
+// is what needs both halves.
+func PollOccurrence() (kind uint16, id uint64, keys []any, payload any, ready bool) {
 	head := (*uint32)(unsafe.Pointer(ring.head))
 	tail := (*uint32)(unsafe.Pointer(ring.tail))
 	data := uintptr(unsafe.Pointer(ring.data))
@@ -91,10 +97,7 @@ func NextOccurrence() (kind uint16, id uint64, keys []any, payload any, ok bool)
 	for {
 		t := atomic.LoadUint32(tail) // acquire: records below are visible
 		if h == t {
-			if !C.kaya_wait_occurrences() {
-				return 0, 0, nil, nil, false // shutdown
-			}
-			continue
+			return 0, 0, nil, nil, false
 		}
 		at := data + uintptr(h&mask)
 		size := *(*uint32)(unsafe.Pointer(at))
@@ -105,5 +108,25 @@ func NextOccurrence() (kind uint16, id uint64, keys []any, payload any, ok bool)
 		if valid {
 			return kind, id, keys, payload, true
 		}
+		// A pad or an unparsable record: consume it and keep looking,
+		// still without blocking.
 	}
+}
+
+// WaitOccurrences blocks until there MAY be something to do: a record
+// arrived, or another goroutine called Wake. Returns false once the core
+// has shut down and the ring is drained.
+//
+// "May" is the honest word. A wake returns true with the ring still
+// empty, and the caller is expected to re-check both sources rather than
+// trust the return — which is exactly what a drain-then-poll loop does
+// anyway.
+func WaitOccurrences() bool {
+	return bool(C.kaya_wait_occurrences())
+}
+
+// Wake returns the app goroutine from WaitOccurrences. Safe from any
+// goroutine; the binding calls it from Post, and guests do not name it.
+func Wake() {
+	C.kaya_wake()
 }
