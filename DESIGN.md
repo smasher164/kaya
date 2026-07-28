@@ -1055,7 +1055,15 @@ WHAT MAKES IT POSSIBLE, measured rather than assumed:
        the whole point of handing over a descriptor rather than bytes;
     4. re-opening BY PATH after the stop is DENIED (EPERM) — the path is
        not a durable capability, only the fd is;
-    5. the URL object can re-acquire its scope and open again.
+    5. the URL object can re-acquire its scope and open again;
+    6. `NSURLIsWritableKey` answers TRUE with nothing opened —
+       writability is knowable before committing to a mode;
+    7. `open(O_RDWR)` succeeds and a write lands, and the write
+       descriptor OUTLIVES the scope exactly as the read one does. THE
+       OPEN PICKER GRANTS WRITE. The published material says otherwise,
+       repeatedly and confidently, which is why this is measured: the
+       probe performs a NO-OP write (read a byte, seek back, put the
+       same byte) so the capability is proven without editing the file.
 - **macOS, Windows, GTK** give a path, which is a descriptor plus more
   freedom (reopen with different flags, `O_TRUNC` for save).
 
@@ -1119,7 +1127,73 @@ desktop paths reopen.
 
 THE PICK RETURNS NAMED HANDLES; THE OPEN RETURNS THE CAPABILITY. Each
 picked record carries a handle, a display name, and `local_path`.
-Opening a handle yields the descriptor and `seekable` together.
+Opening a handle takes a MODE and yields the descriptor and `seekable`
+together.
+
+THE MODE IS ON THE OPEN, NOT THE PICK, and it is what keeps re-opening
+rare rather than routine. A descriptor's access mode is fixed by the
+`open()` that created it and cannot be raised afterwards: `F_SETFL`
+accepts the request, ignores it, and the write still fails EBADF
+(measured). So an editor that will save says read-write ONCE and saves
+through the same descriptor; nothing re-opens. What genuinely needs a
+second open is narrower than it first appears, and worth naming so the
+mechanism is not mistaken for a constant tax: RELOADING after another
+program replaced the file (an atomic save renames a new inode over the
+old one, so the held descriptor keeps showing stale bytes however you
+seek), and a BROWSE-THEN-EDIT flow, which cannot open read-write
+optimistically because that fails outright on a read-only location.
+Three modes cover every platform: read, write-truncating, read-write.
+Android takes them as the mode string of
+`openFileDescriptor(uri, mode)`, WinUI as `FileAccessMode`, iOS and the
+desktops as ordinary open flags.
+
+WRITABILITY IS DISCOVERABLE BUT NOT REQUESTABLE, on all four, and that
+is what FORCES the deferred open rather than merely permitting it. NO
+open picker anywhere in the roster takes an access mode. Verified
+2026-07-27 by decompiling and reading, not by reputation: androidx's
+`OpenDocument` contract builds a bare `ACTION_OPEN_DOCUMENT` intent and
+sets NO URI-permission flags at all, and the platform offers no way to
+ask that dialog for a writable document; WinUI's `FileOpenPicker`
+exposes exactly `CommitButtonText`, `SettingsIdentifier`,
+`SuggestedStartLocation` and `ViewMode`, and no access mode; the Apple
+and GTK pickers likewise just pick. Every one of them can however be
+ASKED, cheaply and without opening — `FLAG_SUPPORTS_WRITE` (2) in
+`DocumentsContract.Document.COLUMN_FLAGS`, `NSURLIsWritableKey`,
+`access::can-write`. The Apple half of that is measured, not inferred:
+measurements 6 and 7 above answer the question with nothing opened AND
+then prove the write really lands.
+
+What follows is that an EAGER open would have had to GUESS a mode,
+because the mode it should want is not knowable at pick time and not
+requestable at any time. The deferred open is not the lesser evil here;
+it is the only shape that does not guess. The price, stated plainly, is
+that the open is fallible in ways the pick is not.
+
+WHAT DOES NOT FOLLOW is a `writable` field, and the reason is a rule
+worth stating on its own because it will come up again:
+
+**kaya surfaces the platform's answer; it does not stand between the
+guest and the error.** Opening a read-only document for writing FAILS,
+in the guest's ordinary error idiom, and that is the correct outcome —
+not something to pre-empt with a check kaya invents or a type split
+kaya enforces. These are POSIX-shaped descriptors handed to people who
+already know how to program against files. A GUI framework that tried
+to make bad file code impossible would succeed only at making good file
+code unidiomatic.
+
+So the editor's flow needs no field: ask for read-write, and on failure
+open for reading and show the badge. One call, the one it was making
+anyway, and no window in which a separately-queried answer can go
+stale. A pre-open `writable` would be a second route to the same fact
+and a racier one. It waits for an artifact that genuinely cannot try —
+listing two hundred picked files with per-file badges and opening none
+of them — which the text editor is not.
+
+The rule has a limit that keeps it from becoming an excuse. Surfacing
+the platform's failure is right; MANUFACTURING A FALSE AFFORDANCE is
+not. That is exactly why `local_path` is empty where re-opening does not
+work: a path that EPERMs is not the platform's error being surfaced, it
+is kaya handing over something that looks usable and is not.
 
 `local_path` IS A RE-OPENABLE NAME, NOT A PATH — and the distinction is
 measured, not fussy. iOS has a perfectly good-looking POSIX path for the
@@ -1147,6 +1221,16 @@ descriptor storm the previous point exists to avoid. Deferring it is not
 a compromise: the sugar wants the answer exactly when it must choose a
 type, which is at the open, not before.
 
+AND IT SURVIVES THE RULE THAT KILLED `writable`, which is worth saying
+because the two look alike. Writability is settled by the open the guest
+was making anyway, so reporting it separately duplicates a call and adds
+a staleness window. Seekability is not: the guest already HOLDS the
+descriptor and must choose between `mmap` and streaming, and the only
+way to try is a seek that fails, on a platform where a failed seek is
+ambiguous. So this is the platform's volunteered answer arriving where
+trying is awkward, not kaya inserting itself between the guest and an
+error it was going to get anyway.
+
 TWO TIERS, and this is where the divergence is absorbed. The FLOOR — the
 wire records and the C guests — carries those fields verbatim. The
 SUGAR tier gives each language its own idiom, and uses `seekable` to
@@ -1159,6 +1243,29 @@ has the predicate as a first-class idiom — Python's `seekable()`, C#'s
 invention. One readable stream everywhere, random access where the
 platform really has it, and no app code shaped by which host it is on.
 
+THE SELECTION IS KAYA'S OWN STRUCTURE, NOT AN ADOPTED ONE — iterate it,
+open an entry, that is the whole surface. The tempting alternative was
+to hand each language its native filesystem abstraction, and the survey
+says why that fails: four of the five frameworks studied INVENTED a type
+(`IStorageFile`, `FileResult`, `PlatformFile`, `URIReadCloser`) because
+.NET and Kotlin have nothing to adopt. Across kaya's eight, exactly one
+language has a real, well-known filesystem abstraction (Go's `io/fs`);
+C#'s `IFileProvider` is outside the BCL, Python's `Traversable` is
+stdlib but obscure, Java's `FileSystemProvider` is a thirty-method SPI
+plus a URI scheme, and Swift, Rust, OCaml and Haskell have none at all.
+Adopting where possible would make the API different in kind in one
+language and invented in the other seven.
+
+`io/fs` also cannot express the primary operation, which settles it
+rather than merely arguing it: `FS.Open(name)` takes NO mode, because
+`io/fs` is read-only by construction and has no write side. An
+abstraction that cannot say "open this for writing" cannot be the
+interface to a dialog whose point is choosing what to open and how. Go's
+selection may still SATISFY `fs.FS` as a secondary interface — that is
+free, and it buys real interop with `fs.WalkDir`, `http.FS` and
+`template.ParseFS`, all of which want exactly the read-only view. One
+language gets a bonus; none gets a different design.
+
 WHAT THIS DISSOLVES, worth recording because they looked like the hard
 questions: FFI overhead per byte (there are no bytes crossing), sync
 versus async I/O (the guest's own runtime owns it, and kaya's app thread
@@ -1166,13 +1273,19 @@ may block freely — see the threading model), and slurp versus chunked
 reads (the guest chooses, per read). All three were artifacts of assuming
 the core would move the data.
 
-MEASUREMENT 5 IS WHAT THE HANDLE RESTS ON, and it pays twice. A held
-URL re-acquires its scope and opens again, so the handle is redeemable
-for the process lifetime — that is what lets the pick defer the open at
-all, and it is also what makes SAVE-BACK possible on iOS. Writing to the
-file the user opened therefore does not require pinning a writable fd
-from the moment of the pick, which would have been the alternative and
-an ugly one.
+MEASUREMENT 5 IS WHAT THE HANDLE RESTS ON. A held URL re-acquires its
+scope and opens again, so the handle is redeemable for the process
+lifetime, which is what lets the pick defer the open at all.
+
+SAVE-BACK NEEDS NO SPECIAL MACHINERY, which measurement 7 is what
+settles. The document the user opened can be opened `O_RDWR` through
+the ordinary handle, the write lands, and the descriptor outlives the
+scope like any other. So saving is the same call as opening with a
+different mode — not a second grammar, not a pinned writable fd held
+from the moment of the pick, and not the re-acquisition dance the
+design was prepared to pay for. What remains genuinely different about
+SAVE is creating a document that does not exist yet, which is why it
+is deferred below.
 
 Deferred, each with a stated reason rather than for lack of time: SAVE
 is designed alongside but comes second, because creating a document

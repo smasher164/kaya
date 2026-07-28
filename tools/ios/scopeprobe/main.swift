@@ -136,6 +136,51 @@ final class VC: UIViewController, UIDocumentPickerDelegate {
         url.stopAccessingSecurityScopedResource()
         say("5. re-start scope: \(again), re-open: \(fd3 >= 0 ? "OK" : "denied errno \(errno)")")
         say(fd3 >= 0 ? "   => the URL can re-acquire" : "   => one-shot")
+        say("")
+
+        // (6) IS WRITABILITY KNOWABLE WITHOUT OPENING? Every platform can
+        // be ASKED — NSURLIsWritableKey here, access::can-write on GTK,
+        // FLAG_SUPPORTS_WRITE on Android — and NONE can be TOLD, because
+        // no open picker on any of the four takes an access mode. This
+        // answer is what an editor uses to say "read-only" in the title
+        // bar before the user types a paragraph and finds out.
+        var scopeHeld = url.startAccessingSecurityScopedResource()
+        let writable = (try? url.resourceValues(forKeys: [.isWritableKey]))?.isWritable
+        say("6. NSURLIsWritableKey (no open): "
+            + (writable.map { $0 ? "true" : "false" } ?? "unknown"))
+
+        // (7) THE CLAIM THAT NEEDS HARDWARE, because the published
+        // material contradicts itself on whether a URL from
+        // forOpeningContentTypes permits writing at all. Open O_RDWR and
+        // perform a NO-OP write — read the first byte, seek back, put the
+        // SAME byte back — which proves the capability without altering
+        // the user's file.
+        let wfd = open(url.path, O_RDWR)
+        if wfd < 0 {
+            say("7. open O_RDWR: denied (errno \(errno))")
+            say("   => the OPEN picker does NOT grant write")
+        } else {
+            var b: UInt8 = 0
+            let got = read(wfd, &b, 1)
+            _ = lseek(wfd, 0, SEEK_SET)
+            let put = got == 1 ? write(wfd, &b, 1) : -1
+            say("7. open O_RDWR: fd=\(wfd), no-op write: "
+                + (put == 1 ? "OK" : "FAILED errno \(errno)"))
+            say(put == 1 ? "   => THE OPEN PICKER DOES GRANT WRITE"
+                         : "   => opened, but not writable")
+            // And does a WRITE fd outlive the scope the way the read fd did?
+            if scopeHeld {
+                url.stopAccessingSecurityScopedResource()
+                scopeHeld = false
+            }
+            _ = lseek(wfd, 0, SEEK_SET)
+            let after = got == 1 ? write(wfd, &b, 1) : -1
+            say("   write AFTER stop: "
+                + (after == 1 ? "OK, the write fd survives too"
+                              : "failed errno \(errno)"))
+            close(wfd)
+        }
+        if scopeHeld { url.stopAccessingSecurityScopedResource() }
 
         out.text = log
     }

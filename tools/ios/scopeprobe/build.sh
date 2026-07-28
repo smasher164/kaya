@@ -161,7 +161,15 @@ print(live[0]["identifier"])
 fi
 
 xcrun devicectl device install app --device "$DEVICE" "$BUNDLE"
-xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID"
+
+# A LOCKED PHONE INSTALLS FINE AND REFUSES TO LAUNCH, and devicectl says
+# so ten lines into a nested error dump. Say it in one line instead: the
+# build was good, the phone just needs unlocking.
+if ! xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID"; then
+    echo "scopeprobe: installed OK but could not launch. If the dump above" \
+        "says Locked, unlock the phone and re-run — nothing needs rebuilding." >&2
+    exit 1
+fi
 
 echo "scopeprobe: launched $BUNDLE_ID on $DEVICE."
 echo 'Tap "Pick a file" and choose something OUTSIDE the app: iCloud'

@@ -1659,6 +1659,17 @@ deliberately NOT a lane and cannot become one, since it needs hardware,
 a developer account, and a human to tap through a picker. New
 measurements go in main.swift, behind the same vacuity guard.
 
+IT PAID OFF THE SAME DAY, on a question the published material answers
+WRONGLY AND CONFIDENTLY: whether a URL from `forOpeningContentTypes`
+permits writing. Forum answers and tutorials say it is read-only and
+that you must use `init(forExporting:)` to write. On hardware,
+`open(O_RDWR)` succeeds, the write lands, and the write descriptor
+outlives the scope exactly as the read one does. Had that been taken on
+reputation, save would have been designed around a second picker it
+does not need. When hardware can answer a capability question, ask the
+hardware — and make the probe's write a NO-OP (read a byte, seek back,
+put the same byte) so proving the capability never edits the file.
+
 Two smaller things that cost time on the way in. Adding the probe put a
 shell script in a NEW tools/ subdirectory, and check-shell's shellcheck
 loop enumerated the directories it knew about instead of walking the
