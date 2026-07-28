@@ -176,7 +176,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-background}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -979,6 +979,14 @@ case "$SUITE" in
         # launcher to be checked in. So every depth scene had both, and
         # the loop ran each of them a SECOND time — split_rust ran twice
         # per full matrix from the day it was wired until now.
+        # The background scene: work off the app thread, posted back.
+        # Its worker parks until a click releases it, so a binding that
+        # ran background work ON the app thread cannot deliver its own
+        # release and this leg TIMES OUT rather than failing an
+        # assertion. The deadlock IS the gate
+        # (docs/background-work-plan.md §5) — read a timeout here as
+        # that, not as VM load, before blaming the lane.
+        run_suite background_rust
         drain_suites
         # The split scene: adaptive list-detail through TwoPaneView,
         # with resize_window driving the real size-class transition.

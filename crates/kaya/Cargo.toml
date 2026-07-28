@@ -108,6 +108,10 @@ name = "milestone2"
 path = "../../guests/rust/milestone2.rs"
 
 [[example]]
+name = "background"
+path = "../../guests/rust/background.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 

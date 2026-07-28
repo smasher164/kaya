@@ -55,7 +55,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES=""
+DEPTH_SCENES="background"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -769,6 +769,16 @@ run listdetail-haskell-swiftui env KAYA_SELFTEST=listdetail "$(hs_bin split)"
 run listdetail-swift-swiftui env KAYA_SELFTEST=listdetail target/swift-guests/split
 run listdetail-java-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The background scene: work off the app thread, posted back. DEPTH
+# TIER — rust only until the sweep lands the other seven. Its worker
+# parks until a click releases it, so a binding that ran background
+# work ON the app thread cannot deliver its own release and this leg
+# TIMES OUT rather than failing an assertion. That is deliberate
+# (docs/background-work-plan.md §5): the deadlock is the gate.
+KAYA_SELFTEST_SCRIPT="$(scene_script background)"
+export KAYA_SELFTEST_SCRIPT
+run background-rust-swiftui env KAYA_SELFTEST=background target/debug/examples/background
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

@@ -41,7 +41,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES=""
+DEPTH_SCENES="background"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -480,10 +480,18 @@ for proto in x11 wayland; do
     # back button is GTK's back affordance, driven for real; the
     # intercept_back veto class answers with pop_entry.
     run "$proto" nav-rust env KAYA_SELFTEST=nav "$CARGO_TARGET_DIR/debug/examples/nav"
+    # The background scene: work off the app thread, posted back. DEPTH
+    # TIER — rust only until the sweep lands the other seven. Its worker
+    # parks until a click releases it, so a binding that ran background
+    # work ON the app thread cannot deliver its own release and this leg
+    # TIMES OUT rather than failing an assertion. The deadlock IS the
+    # gate (docs/background-work-plan.md §5). Through a11y-leg.sh for
+    # the closing expect_ax, which on GTK is an AT-SPI read.
+    run "$proto" background-rust env KAYA_SELFTEST=background \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
     # The split scene: adaptive list-detail through
     # AdwNavigationSplitView, with resize_window driving the real
     # size-class transition. All eight languages.
-    #
     # Every leg goes through a11y-leg.sh, like the a11y legs: the scene
     # asserts the REAL accessibility tree (that both panes are present
     # AT ONCE, which the stamped presentation cannot prove), and on GTK
