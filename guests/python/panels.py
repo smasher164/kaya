@@ -21,9 +21,8 @@ def close_asked():
     # Bound to the inspector at its declaration (handlers scope to
     # the thing that creates them): this can only ever mean this
     # window's close was vetoed.
-    with app.build():
-        status.set("close requested")
-        kaya.destroy_window(INSPECTOR)
+    status.set("close requested")
+    kaya.destroy_window(INSPECTOR)
 
 
 with app.create_window(INSPECTOR, title="inspector", width=480, height=320,

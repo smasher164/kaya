@@ -22,8 +22,7 @@ visit_count = 0
 def archive_shown():
     global visit_count
     visit_count += 1
-    with app.build():
-        visits.set(f"archive: {visit_count} visits")
+    visits.set(f"archive: {visit_count} visits")
 
 
 def go_archive():

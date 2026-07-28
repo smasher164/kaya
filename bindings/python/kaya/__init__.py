@@ -2058,16 +2058,39 @@ class App:
         return _MenuScope(("item", it.id), shortcut_ok=True, value=it,
                           on_exit=on_exit)
 
+    def _dispatch(self, handler, *args):
+        """One handler dispatch, INSIDE an ambient transaction. The
+        rule is uniform across every binding (DESIGN.md, "a handler is
+        a transaction"): the runtime opens the transaction, the handler
+        body queues into it, and it commits atomically on return. An
+        exception crosses the build boundary — which rolled the mirrors
+        back and dropped the records — is logged, and the loop moves to
+        the next occurrence. Non-Exception aborts (KeyboardInterrupt)
+        still propagate: the fatal floor.
+
+        The LIFECYCLE occurrences used to skip this and call the handler
+        bare, so `kaya.destroy_window` inside an on_close_requested
+        raised "no ambient transaction" and every scene opened one by
+        hand. Go wrapped all of them from the start; Python was the
+        outlier (fixed 2026-07-27).
+        """
+        try:
+            with self.build():
+                handler(*args)
+        except Exception:
+            traceback.print_exc()
+            print(
+                "kaya: handler raised (transaction rolled back)",
+                file=sys.stderr,
+            )
+
     def _dispatch_loop(self):
         while occurrence := runtime.next_occurrence():
             kind, ident, keys, payload = occurrence
             if kind == wire.OCC_CLOSE_REQUESTED:
                 handler = self._close_requested.get(ident)
                 if handler is not None:
-                    try:
-                        handler()
-                    except Exception:
-                        traceback.print_exc()
+                    self._dispatch(handler)
                 continue
             if kind == wire.OCC_WINDOW_CLOSED:
                 # One-shot: the window is gone; both registrations
@@ -2075,10 +2098,7 @@ class App:
                 self._close_requested.pop(ident, None)
                 handler = self._window_closed.pop(ident, None)
                 if handler is not None:
-                    try:
-                        handler()
-                    except Exception:
-                        traceback.print_exc()
+                    self._dispatch(handler)
                 continue
             if kind == wire.OCC_ENTRY_POPPED:
                 # One-shot: the entry is gone; both registrations
@@ -2086,10 +2106,7 @@ class App:
                 self._back_requested.pop(ident, None)
                 handler = self._entry_popped.pop(ident, None)
                 if handler is not None:
-                    try:
-                        handler()
-                    except Exception:
-                        traceback.print_exc()
+                    self._dispatch(handler)
                 continue
             if kind == wire.OCC_SECTION_SELECTED:
                 # NOT one-shot: sections never die, and the user can
@@ -2097,28 +2114,19 @@ class App:
                 # the window rides as the payload).
                 handler = self._section_selected.get(ident)
                 if handler is not None:
-                    try:
-                        handler()
-                    except Exception:
-                        traceback.print_exc()
+                    self._dispatch(handler)
                 continue
             if kind == wire.OCC_BACK_REQUESTED:
                 handler = self._back_requested.get(ident)
                 if handler is not None:
-                    try:
-                        handler()
-                    except Exception:
-                        traceback.print_exc()
+                    self._dispatch(handler)
                 continue
             if kind == wire.OCC_ALERT_RESULT:
                 # One-shot: the registration retires with the result.
                 handler = self._alert_handlers.pop(ident, None)
                 if handler is not None:
-                    try:
-                        # payload is the parsed u32 choice.
-                        handler(payload)
-                    except Exception:
-                        traceback.print_exc()
+                    # payload is the parsed u32 choice.
+                    self._dispatch(handler, payload)
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):
@@ -2161,15 +2169,7 @@ class App:
             # occurrence — the uniform dispatch discipline across every
             # binding. Non-Exception aborts (KeyboardInterrupt) still
             # propagate: the fatal floor.
-            try:
-                with self.build():
-                    handler(*args)
-            except Exception:
-                traceback.print_exc()
-                print(
-                    "kaya: handler raised (transaction rolled back)",
-                    file=sys.stderr,
-                )
+            self._dispatch(handler, *args)
 
     def run(self):
         """Enter the core on the calling thread (must be the process

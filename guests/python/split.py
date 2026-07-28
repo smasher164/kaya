@@ -31,8 +31,7 @@ DETAIL = 7
 def popped_detail():
     # Retention: the base root took this write while the detail was up,
     # on a regular window where it was VISIBLE the whole time.
-    with app.build():
-        status.set("popped detail")
+    status.set("popped detail")
 
 
 def open_detail():

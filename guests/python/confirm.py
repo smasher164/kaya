@@ -16,21 +16,19 @@ app = kaya.App()
 
 
 def delete_answered(choice):
-    with app.build():
-        if choice == kaya.CANCEL:
-            status.set("kept")
-        elif choice == 1:
-            status.set("archived")
-        else:
-            status.set("deleted")
+    if choice == kaya.CANCEL:
+        status.set("kept")
+    elif choice == 1:
+        status.set("archived")
+    else:
+        status.set("deleted")
 
 
 def eject_answered(choice):
     # A different dialog, a different handler: the association is the
     # registration itself — this function can never see a delete
     # answer.
-    with app.build():
-        status.set("held" if choice == kaya.CANCEL else "ejected")
+    status.set("held" if choice == kaya.CANCEL else "ejected")
 
 
 def ask_delete():

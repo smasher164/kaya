@@ -20,16 +20,14 @@ SETTINGS = 8
 def popped_detail():
     # Bound to the detail entry at push (the on_result precedent):
     # this can only ever mean the detail screen popped.
-    with app.build():
-        status.set("popped detail")
+    status.set("popped detail")
 
 
 def back_asked_settings():
     # The veto class: nothing has popped; agree and confirm. No
     # entry_popped will fire — this write is the round's final status.
-    with app.build():
-        status.set("back requested")
-        kaya.pop_entry()
+    status.set("back requested")
+    kaya.pop_entry()
 
 
 def open_detail():
