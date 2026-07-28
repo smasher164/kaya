@@ -56,11 +56,17 @@ Posting is therefore `a.dispatch` deferred, not a new concept.
 
 ## §3 — what must be ratified before code
 
-- **THE NAME.** The literature is consistent — Android `Handler.post`,
-  Qt `postEvent`, Win32 `PostMessage`, Swing `invokeLater` — but every
-  one of those posts to the UI thread, and kaya's target is the APP
-  thread. A name that implies the wrong thread is worse than a duller
-  one that does not.
+- ~~**THE NAME.**~~ RATIFIED 2026-07-28: **`post`**, as
+  `app.Post(func(tx))`. The literature is consistent — Android
+  `Handler.post`, Qt `postEvent`, Win32 `PostMessage` — and although
+  every one of those targets the UI thread, here the RECEIVER carries
+  the target: you post to the app. The confusion is also unreachable in
+  practice, since guest code cannot touch native widgets from any
+  thread. It pairs with what exists: `Build` is a transaction NOW on the
+  calling thread, `Post` is a transaction SOON on the app thread, same
+  shape and same `Tx`. Rejected: `schedule` (invites a timer API),
+  `invokeLater` (vaguer than "queued"), `transact` (precise about the
+  transaction, silent about the thread).
 - **It runs as its own transaction.** Falls out of dispatch already
   calling the transaction entry, and it is what makes a posted closure
   atomic exactly like a handler.
