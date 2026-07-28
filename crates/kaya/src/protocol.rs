@@ -81,6 +81,17 @@ pub const DEFAULT_WINDOW: WindowId = WindowId(0);
 /// zone.
 pub type Path = Vec<Value>;
 
+/// What the app thread's inbox carries. A guest only ever sees
+/// `Occurrence`; `Woken` is how a [`crate::Poster`] gets the app thread
+/// out of `recv()` for work that is NOT an event and never belongs in
+/// the public vocabulary. Keeping it out of `Occurrence` matters: guests
+/// match that enum exhaustively (guests/rust/milestone2.rs does), and a
+/// variant they can never receive would be a case they must write anyway.
+pub(crate) enum Inbox {
+    Occ(Occurrence),
+    Woken,
+}
+
 /// Core -> app. Ordered, lossless, consumed exactly once.
 #[derive(Debug, PartialEq)]
 pub enum Occurrence {
@@ -959,7 +970,7 @@ pub enum ApplyOp {
 /// the byte-record ring. One consumer either way.
 #[derive(Clone)]
 pub(crate) enum OccSink {
-    Mpsc(std::sync::mpsc::Sender<Occurrence>),
+    Mpsc(std::sync::mpsc::Sender<Inbox>),
     Ring(std::sync::Arc<crate::ring::OccRing>),
 }
 
@@ -974,7 +985,7 @@ impl OccSink {
     pub(crate) fn send(&self, occurrence: Occurrence) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(occurrence);
+                let _ = tx.send(Inbox::Occ(occurrence));
             }
             OccSink::Ring(ring) => match occurrence {
                 Occurrence::ButtonClicked { id } => {
@@ -1083,7 +1094,7 @@ impl OccSink {
     pub(crate) fn send_click_tag(&self, tag: &[u8]) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_click_tag(tag));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_click_tag(tag)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_BUTTON_CLICKED, tag);
@@ -1096,7 +1107,7 @@ impl OccSink {
     pub(crate) fn send_toggle_tag(&self, tag: &[u8], checked: bool) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_toggled_tag(tag, checked));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_toggled_tag(tag, checked)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(
@@ -1112,7 +1123,7 @@ impl OccSink {
     pub(crate) fn send_value_tag(&self, tag: &[u8], value: f64) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_value_changed_tag(tag, value));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_value_changed_tag(tag, value)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(
@@ -1128,7 +1139,7 @@ impl OccSink {
     pub(crate) fn send_text_tag(&self, tag: &[u8], text: &str) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_text_changed_tag(tag, text));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_text_changed_tag(tag, text)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(
@@ -1150,7 +1161,7 @@ impl OccSink {
     pub(crate) fn send_menu_activated_tag(&self, tag: &[u8]) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_menu_activated_tag(tag));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_activated_tag(tag)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_MENU_ACTIVATED, tag);
@@ -1167,7 +1178,7 @@ impl OccSink {
     pub(crate) fn send_menu_toggled_tag(&self, tag: &[u8], checked: bool) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_menu_toggled_tag(tag, checked));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_toggled_tag(tag, checked)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(
@@ -1187,7 +1198,7 @@ impl OccSink {
     pub(crate) fn send_menu_value_tag(&self, tag: &[u8], index: f64) {
         match self {
             OccSink::Mpsc(tx) => {
-                let _ = tx.send(crate::wire::decode_menu_value_tag(tag, index));
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_value_tag(tag, index)));
             }
             OccSink::Ring(ring) => {
                 ring.push_record(

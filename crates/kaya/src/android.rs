@@ -70,7 +70,7 @@ pub fn attach(
     let _ = &activity;
 
     let (occ_tx, occ_rx) = mpsc::channel();
-    let ctx = AppCtx::new(occ_rx, crate::capi::presentation_tx_sender());
+    let ctx = AppCtx::new(occ_rx, crate::capi::presentation_tx_sender(), occ_tx.clone());
     std::thread::Builder::new()
         .name("kaya-app".into())
         .spawn(move || app_main(ctx))

@@ -17,8 +17,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 
 use crate::protocol::{
+    Inbox,
     AlertChoice, AlertId, AlertSpec,
     CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind, MenuProp,
     Occurrence, Path, Prop, PropValue,
@@ -399,9 +401,65 @@ struct Derived {
     compute: std::sync::Arc<dyn Fn(&[(Value, u32, Record)]) -> Value + Send + Sync>,
 }
 
+/// One unit of posted work: a closure that will be handed a fresh
+/// transaction on the app thread. `Send` because it crosses a thread
+/// boundary to get here; the `Tx` it receives is made where it is used
+/// and never crosses anything.
+type PostedFn = Box<dyn for<'a, 'b> FnOnce(&'a mut Tx<'b>) -> () + Send>;
+
+/// A handle for running work on the app thread from anywhere else.
+///
+/// Obtained with [`AppCtx::poster`], cheap to clone, and safe to send
+/// wherever the work is: a spawned thread, a rayon job, a task inside
+/// whatever async runtime the guest chose. kaya has no runtime of its
+/// own and does not need one — a plain `Send + Sync` handle is callable
+/// from all of them.
+///
+/// ```no_run
+/// # fn slow_read() -> String { String::new() }
+/// # fn demo(ctx: &kaya::AppCtx, content: kaya::SignalId) {
+/// let poster = ctx.poster();
+/// std::thread::spawn(move || {
+///     let data = slow_read();          // blocks this thread, nothing else
+///     poster.post(move |tx| {          // back on the app thread
+///         tx.write(content, data);
+///     });
+/// });
+/// # }
+/// ```
+#[derive(Clone)]
+pub struct Poster {
+    queue: Arc<Mutex<Vec<PostedFn>>>,
+    wake: Sender<Inbox>,
+}
+
+impl Poster {
+    /// Queue `body` to run as a transaction on the app thread, soon.
+    ///
+    /// The app thread runs it after whatever it is doing now, so posting
+    /// from inside a handler queues for after and never nests. Posts run
+    /// in the order they were made.
+    ///
+    /// After the app thread has shut down this is a no-op: the queue
+    /// still accepts the closure, and nothing is left to run it.
+    pub fn post(&self, body: impl for<'a, 'b> FnOnce(&'a mut Tx<'b>) + Send + 'static) {
+        self.queue.lock().unwrap().push(Box::new(body));
+        // The app thread is parked in recv(); posted work is not an
+        // occurrence, so this is the only way it hears about it.
+        let _ = self.wake.send(Inbox::Woken);
+    }
+}
+
 pub struct AppCtx {
-    pub(crate) occurrences: Receiver<Occurrence>,
+    pub(crate) occurrences: Receiver<Inbox>,
     pub(crate) transactions: Sender<Transaction>,
+    // Work handed over by other threads, waiting to run as transactions
+    // here. Shared with every Poster, so it is behind a real lock —
+    // unlike every other field, which is app-thread-only and uses Cell.
+    posted: Arc<Mutex<Vec<PostedFn>>>,
+    // How a Poster says "look at that queue". The app thread is parked
+    // in `occurrences.recv()`, so the wake has to arrive there.
+    wake: Sender<Inbox>,
     next_signal: Cell<u64>,
     next_widget: Cell<u64>,
     next_alert: Cell<u64>,
@@ -420,10 +478,16 @@ pub struct AppCtx {
 }
 
 impl AppCtx {
-    pub(crate) fn new(occurrences: Receiver<Occurrence>, transactions: Sender<Transaction>) -> Self {
+    pub(crate) fn new(
+        occurrences: Receiver<Inbox>,
+        transactions: Sender<Transaction>,
+        wake: Sender<Inbox>,
+    ) -> Self {
         AppCtx {
             occurrences,
             transactions,
+            posted: Arc::new(Mutex::new(Vec::new())),
+            wake,
             next_signal: Cell::new(1),
             next_widget: Cell::new(1),
             next_alert: Cell::new(1),
@@ -441,7 +505,49 @@ impl AppCtx {
     /// means the core is shutting down, which is an occurrence, not an
     /// error.
     pub fn next(&self) -> Occurrence {
-        self.occurrences.recv().unwrap_or(Occurrence::Shutdown)
+        loop {
+            // Posted work first, then the channel. Draining at the TOP is
+            // what makes the wake sufficient: whatever brought this thread
+            // back, it looks here before anywhere else.
+            self.drain_posted();
+            match self.occurrences.recv() {
+                // Not the guest's business: the drain above already ran
+                // whatever the wake was about.
+                Ok(Inbox::Woken) => continue,
+                Ok(Inbox::Occ(occ)) => return occ,
+                Err(_) => return Occurrence::Shutdown,
+            }
+        }
+    }
+
+    /// Run everything posted, each in its own transaction, in the order
+    /// it was posted.
+    ///
+    /// The batch is taken and the lock released BEFORE any of it runs, so
+    /// a closure that posts again lands in the NEXT batch. Holding the
+    /// lock across the calls would let a self-posting closure drain
+    /// forever and starve the occurrence channel.
+    fn drain_posted(&self) {
+        let batch = std::mem::take(&mut *self.posted.lock().unwrap());
+        for f in batch {
+            self.apply(|tx| f(tx));
+        }
+    }
+
+    /// A handle for reaching this app thread from another thread.
+    ///
+    /// `AppCtx` itself cannot travel: it holds `Cell`s and `RefCell`s, so
+    /// it is `!Sync`, so `&AppCtx` is not `Send`. That is deliberate and
+    /// worth keeping — making it shareable would not fix the danger, it
+    /// would legalize it, letting another thread mutate the model while a
+    /// transaction is open here. So the one safe operation gets its own
+    /// type instead, and the compiler checks the whole rule: `Tx` stays,
+    /// `AppCtx` stays, `Poster` travels.
+    pub fn poster(&self) -> Poster {
+        Poster {
+            queue: Arc::clone(&self.posted),
+            wake: self.wake.clone(),
+        }
     }
 
     /// Start a transaction: a batch of records applied atomically when
@@ -3670,9 +3776,121 @@ impl Tpl<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::protocol::{Inbox, Transaction};
+    use std::sync::mpsc::Receiver;
+    use std::sync::{Arc, Mutex};
+
+
+    // THE RULE TRIANGLE, checked by the compiler rather than documented:
+    // Tx cannot cross a thread (the compile_fail doctest on Tx), AppCtx
+    // cannot either (it holds Cell/RefCell, so !Sync), and Poster can.
+    // Only the third is assertable positively, so it is asserted here.
+    #[test]
+    fn a_poster_crosses_threads() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Poster>();
+    }
+
+    fn posting_ctx() -> (AppCtx, Poster, Receiver<Transaction>) {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, occ_tx);
+        let poster = ctx.poster();
+        (ctx, poster, tx_rx)
+    }
+
+    // POST MUST QUEUE, NOT RUN. A closure executed on the caller's thread
+    // would touch AppCtx's Cells concurrently with the app thread, which
+    // is precisely what !Sync exists to prevent — so the first assertion
+    // is the load-bearing one, and it is a fact rather than a race
+    // because the posting thread has been joined by then.
+    #[test]
+    fn post_queues_for_the_app_thread_in_order() {
+        let (ctx, poster, _tx_rx) = posting_ctx();
+        let order = Arc::new(Mutex::new(String::new()));
+
+        let worker = {
+            let poster = poster.clone();
+            let order = Arc::clone(&order);
+            std::thread::spawn(move || {
+                for c in ["1", "2", "3"] {
+                    let order = Arc::clone(&order);
+                    poster.post(move |_tx| order.lock().unwrap().push_str(c));
+                }
+            })
+        };
+        worker.join().unwrap();
+        assert_eq!(
+            *order.lock().unwrap(),
+            "",
+            "post ran the closure on the CALLER's thread"
+        );
+
+        ctx.drain_posted();
+        assert_eq!(*order.lock().unwrap(), "123", "posts run in the order made");
+    }
+
+    // A POST FROM INSIDE A TRANSACTION QUEUES FOR AFTER; IT NEVER NESTS.
+    // "ac" then "acb" if queued; "abc" is the only thing nesting can
+    // produce, and the two are unreachable from each other — the same
+    // discriminator the scene uses (docs/background-work-plan.md §5).
+    #[test]
+    fn post_from_inside_a_transaction_queues_for_after() {
+        let (ctx, poster, _tx_rx) = posting_ctx();
+        let seq = Arc::new(Mutex::new(String::new()));
+
+        ctx.apply(|_tx| {
+            seq.lock().unwrap().push('a');
+            let inner = Arc::clone(&seq);
+            poster.post(move |_tx| inner.lock().unwrap().push('b'));
+            seq.lock().unwrap().push('c');
+        });
+        assert_eq!(*seq.lock().unwrap(), "ac", "the post nested inside its transaction");
+
+        ctx.drain_posted();
+        assert_eq!(*seq.lock().unwrap(), "acb");
+    }
+
+    // A CLOSURE THAT POSTS AGAIN LANDS IN THE NEXT BATCH. drain_posted
+    // takes the queue and drops the lock before running any of it, so a
+    // self-posting closure cannot loop inside one drain and starve the
+    // occurrence channel — an app that re-posts would otherwise never see
+    // another click.
+    #[test]
+    fn a_self_post_waits_for_the_next_drain() {
+        let (ctx, poster, _tx_rx) = posting_ctx();
+        let ran = Arc::new(Mutex::new(0u32));
+
+        fn again(poster: Poster, ran: Arc<Mutex<u32>>) {
+            let p = poster.clone();
+            poster.post(move |_tx| {
+                let mut n = ran.lock().unwrap();
+                *n += 1;
+                let keep_going = *n < 3;
+                drop(n);
+                if keep_going {
+                    again(p, ran);
+                }
+            });
+        }
+        again(poster, Arc::clone(&ran));
+
+        ctx.drain_posted();
+        assert_eq!(*ran.lock().unwrap(), 1, "a self-post must wait for the next batch");
+        ctx.drain_posted();
+        assert_eq!(*ran.lock().unwrap(), 2);
+    }
+
+    /// A wake sender for tests that never post. Deliberately NOT a clone
+    /// of the test's own occ_tx: a live clone keeps the inbox connected,
+    /// and the tests that `drop(occ_tx)` are asserting exactly that
+    /// disconnect. Tests that DO post make a real clone themselves.
+    fn no_wake() -> mpsc::Sender<Inbox> {
+        mpsc::channel().0
+    }
     use std::sync::mpsc;
 
-    use super::{AppCtx, KayaRecord, KayaSum, Tx};
+    use super::{AppCtx, KayaRecord, KayaSum, Poster, Tx};
     use crate::protocol::{Value, ValueType};
     use kaya_derive::KayaGen;
 
@@ -3707,7 +3925,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let field = tx.widget(WidgetKind::Entry);
@@ -3735,7 +3953,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
@@ -3773,7 +3991,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
@@ -3821,7 +4039,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
         tx.insert(&todos, "a", Todo { title: "a".into(), done: false });
@@ -3834,7 +4052,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
         tx.insert(&todos, "a", Todo { title: "a".into(), done: false });
@@ -3851,7 +4069,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
@@ -3898,7 +4116,7 @@ mod tests {
         use super::Messages;
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _keep) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let add = tx.widget(WidgetKind::Button);
@@ -3912,9 +4130,9 @@ mod tests {
         let msgs = Messages::new();
         msgs.on_click(add, Msg::Add);
 
-        occ_tx.send(Occurrence::ButtonClicked { id: other }).unwrap();
-        occ_tx.send(Occurrence::ButtonClicked { id: add }).unwrap();
-        occ_tx.send(Occurrence::Shutdown).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::ButtonClicked { id: other })).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::ButtonClicked { id: add })).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::Shutdown)).unwrap();
         assert_eq!(msgs.next(&ctx), Some(Msg::Add));
         assert_eq!(msgs.next(&ctx), None);
     }
@@ -3926,7 +4144,7 @@ mod tests {
         use crate::protocol::TxOp;
         let (_occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, tx_rx) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let todos = tx.collection::<Todo>();
@@ -3964,7 +4182,7 @@ mod tests {
     fn occurrence_to_resolved_set_round_trip() {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, tx_rx) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let app = std::thread::spawn(move || {
             let mut tx = ctx.begin();
@@ -4019,8 +4237,8 @@ mod tests {
         let ops = scene.apply(construction);
         assert!(ops.len() >= 8);
 
-        occ_tx.send(Occurrence::ButtonClicked { id: WidgetId(2) }).unwrap();
-        occ_tx.send(Occurrence::ButtonClicked { id: WidgetId(2) }).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::ButtonClicked { id: WidgetId(2) })).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::ButtonClicked { id: WidgetId(2) })).unwrap();
 
         let _ = scene.apply(tx_rx.recv().unwrap());
         let last = scene.apply(tx_rx.recv().unwrap());
@@ -4044,7 +4262,7 @@ mod tests {
     fn collection_model_folds_purges_and_rolls_back() {
         let (_occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, tx_rx) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let groups = tx.collection::<String>();
@@ -4083,7 +4301,7 @@ mod tests {
     fn for_each_rejects_instance_handles() {
         let (_occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
         let mut tx = ctx.begin();
         let c = tx.collection::<String>();
         let _ = tx.for_each(&c.at("g1"), |_| ());
@@ -4103,7 +4321,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let can_save = tx.signal(false);
@@ -4150,7 +4368,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let details_on = tx.signal(false);
@@ -4201,7 +4419,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let status = tx.signal("ready");
@@ -4233,7 +4451,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let catalog = tx.context_catalog(|m| m.item("Remove").id());
@@ -4267,7 +4485,7 @@ mod tests {
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _tx_rx) = mpsc::channel();
         drop(occ_tx);
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let (file, save) = tx
@@ -4308,7 +4526,7 @@ mod tests {
 
         let (_occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, tx_rx) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let mut tx = ctx.begin();
         let can_save = tx.signal(false);
@@ -4419,7 +4637,7 @@ mod tests {
 
         let (occ_tx, occ_rx) = mpsc::channel();
         let (tx_tx, _keep) = mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
 
         let save = MenuItemId(1);
         let details = MenuItemId(2);
@@ -4441,18 +4659,18 @@ mod tests {
         msgs.on_menu_item_node(remove, Msg::Removed);
 
         let keys: Path = vec![Value::from("g2"), Value::from("a")];
-        occ_tx.send(Occurrence::MenuActivated { item: unmapped }).unwrap();
-        occ_tx.send(Occurrence::MenuActivated { item: save }).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::MenuActivated { item: unmapped })).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::MenuActivated { item: save })).unwrap();
         occ_tx
-            .send(Occurrence::MenuToggled { item: details, checked: true })
+            .send(Inbox::Occ(Occurrence::MenuToggled { item: details, checked: true }))
             .unwrap();
         occ_tx
-            .send(Occurrence::MenuValueChanged { group: sort, index: 1.0 })
+            .send(Inbox::Occ(Occurrence::MenuValueChanged { group: sort, index: 1.0 }))
             .unwrap();
         occ_tx
-            .send(Occurrence::InstanceMenuActivated { item: remove, path: keys.clone() })
+            .send(Inbox::Occ(Occurrence::InstanceMenuActivated { item: remove, path: keys.clone() }))
             .unwrap();
-        occ_tx.send(Occurrence::Shutdown).unwrap();
+        occ_tx.send(Inbox::Occ(Occurrence::Shutdown)).unwrap();
 
         assert_eq!(msgs.next(&ctx), Some(Msg::Save));
         assert_eq!(msgs.next(&ctx), Some(Msg::Details(true)));

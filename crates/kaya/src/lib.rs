@@ -113,7 +113,7 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, capi::presentation_tx_sender());
+        let ctx = AppCtx::new(occ_rx, capi::presentation_tx_sender(), occ_tx.clone());
         std::thread::Builder::new()
             .name("kaya-app".into())
             .spawn(move || app_main(ctx))
@@ -126,7 +126,7 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     {
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();
         let (tx_tx, tx_rx) = std::sync::mpsc::channel();
-        let ctx = AppCtx::new(occ_rx, tx_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, occ_tx.clone());
         std::thread::Builder::new()
             .name("kaya-app".into())
             .spawn(move || app_main(ctx))
