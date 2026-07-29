@@ -31,11 +31,58 @@ because someone will otherwise re-propose the callback shape.
 question: the PICKER is asynchronous, on the alert grammar, tx ->
 apply -> occurrence. Only the open is at issue.
 
-RESOLVED, ONCE THE POST PRIMITIVE EXISTS: a plain blocking C entry,
-called on whatever thread the guest chose, result posted back. No
-request ids, no completion occurrence, no cancellation protocol, and no
-continuation-passing anywhere. The rest of this subsection is the road
-that got there; skip it unless re-opening the question.
+RATIFIED 2026-07-28 (Akhil): a plain blocking C FUNCTION.
+It does the work and returns the descriptor to its caller, on the
+caller's thread. Not a submission with a completion elsewhere — that
+was the earlier proposal (option C below) and it is REJECTED. The rest
+of this subsection is the road that got there; skip it unless
+re-opening the question.
+
+WHY NOT THE SUBMISSION SHAPE, which is where this design sat for a
+while. Three reasons, the first decisive:
+
+  - THE DESCRIPTOR WOULD LAND ON THE WRONG THREAD. Completions are
+    occurrences, and occurrences drain on the APP thread. But the guest
+    called open from a worker precisely so it can READ there, so the fd
+    would have to be shipped straight back out — a round trip through
+    the one thread this whole design exists to keep free.
+  - NO SPEC CHANGE AT ALL. A C ABI function is not a record: the hash
+    does not move, the eight emitters do not regenerate, neither
+    interpreter needs an arm, check-verbs is not involved, and no
+    harness verb appears. The submission shape touches every one of
+    those.
+  - NO SECOND ID SPACE. The pick already has an id with a lifetime; a
+    submission would add an unrelated one plus its retirement rules.
+
+TWO COSTS ACCEPTED, stated rather than hidden. CANCELLATION: with no
+request id there is nothing to name in a cancel, so adding one later
+means adding the id after all — acceptable because a slow open now
+occupies only a thread the guest spawned on purpose. AND A PROCESS
+SPLIT: a C function does not translate over a socket where a record
+would. Narrow and speculative — nothing on the roadmap needs it, and
+over an actual NETWORK the descriptor itself cannot travel, so the
+capability design is local-only by construction either way. WHAT WOULD
+REOPEN THIS: an out-of-process guest on the same machine, where
+SCM_RIGHTS makes fd passing real. Then open becomes a submission, gains
+a request id, and cancellation arrives with it.
+
+WHAT SURVIVES THE FUNCTION SHAPE, checked rather than assumed: the
+stall diagnostic. DESIGN gets it free from the transport — "the core
+reads the app's log-consumer cursor, and undrained for N seconds is the
+health signal". A guest that blocks the APP thread on a slow open stops
+draining and trips it, correctly, on exactly the misuse worth catching;
+a guest that opens on its own worker keeps draining and stays quiet.
+The signal gets sharper here rather than being given up.
+
+AND IT IS ALL RUST. `extern "C"` fixes the calling convention and name
+mangling; the body, the table and the lock are ordinary Rust behind a
+cbindgen-generated declaration. capi.rs already holds four tables of
+this kind — `kaya_blob_register` is the same shape line for line
+(monotonic counter, `Mutex<HashMap<u64, _>>` behind a `OnceLock`,
+integer to the guest) with bytes where this has an `NSURL`, a `Uri` or
+a path. So "no spec change" is stronger than it sounds: no wire
+records, no emitters, no interpreters, no verbs — a Rust function, a
+Rust table, and one line in kaya.h.
 
 The record grammar's three channels are tx (mutate the tree), apply
 (tell the presentation), and occurrence (report an event). The open is
@@ -106,10 +153,49 @@ here are neither of them sync-versus-async:
 HOW THAT RESOLVED. Question 1 is answered by the post primitive rather
 than by choosing a shape: the guest opens on its own thread and posts
 the result back, so kaya never decides who waits. Question 2 shrinks to
-a deferral. What is left of the Android JNI note is real but bounded —
-the open still reaches `ContentResolver`, so an arbitrary calling
-thread still means `AttachCurrentThread`, and that should be priced
-during §2 rather than promised now.
+a deferral.
+
+AND THE ANDROID JNI NOTE IS CLOSED, smaller than three messages of mine
+made it sound. The open reaches `ContentResolver.openFileDescriptor`
+through JNI, so the calling thread needs a `JNIEnv` — which is
+`vm.attach_current_thread()`, returning an `AttachGuard` that detaches
+on drop (jni 0.21). Two lines on the Android path, not architecture;
+native code calls into Java from arbitrary threads constantly. Use the
+SCOPED guard: a permanently-attached thread that exits without
+detaching can take the JVM down.
+
+REJECTED: dispatching the open to a long-lived backend worker. It looks
+like it avoids the attach, and it breaks the feature — ONE worker
+SERIALIZES opens, so a guest that spawned five threads to open five
+files in parallel would get them one at a time, losing exactly the
+concurrency it created. The fix for that is a pool, and a pool is kaya
+owning a scheduler, which this design rejected twice already (the
+effect-system framing, and an async runtime). The guest's own threads
+ARE the concurrency; kaya supplies none.
+
+Android's "do not call openFileDescriptor on the main thread" is then
+satisfied for free: the guest calls from a thread it spawned, and the
+warning is about the MAIN thread.
+
+WHY THE FLOOR IS SYNC AND STAYS SYNC, since an async-first language will
+raise it again. SYNC COMPOSES UPWARD INTO ASYNC; ASYNC DOES NOT COMPOSE
+DOWNWARD INTO SYNC. Wrapping a blocking call in a Promise, a Task or an
+`async fn` is mechanical. Going the other way on a single-threaded event
+loop does not merely cost something, it DEADLOCKS: you block waiting for
+a completion only the loop you just blocked can deliver.
+
+The roster's own async surface is already sketched and agrees — the Node
+entry in docs/deferred.md puts app logic in a WORKER, which is a real
+thread with its own loop and can block, so the sync floor works there
+unchanged; promises and `for-await` are layer 3 wrapping it, exactly as
+Swift's `async` and C#'s `Task` do.
+
+What the sync floor does NOT promise is that callers are on a background
+thread. Blocking is the caller's choice, as `File::open` is in all nine
+languages. On the app thread it costs QUEUED OCCURRENCES, not a frozen
+window. The honest wart: a guest cannot tell a local file from a cloud
+one — the picked record looks identical — so "is this open fast" is not
+answerable before making it.
 
 **(b) How does the picked LIST ride the occurrence?** `FieldTy::Values`
 is already `{ u32 count; u32 reserved; count values }`, and its own doc
@@ -128,6 +214,26 @@ the answer BEFORE opening. The one case that would have justified it —
 listing hundreds of picked files with sizes while opening none — is not
 the text editor, and admission here is trigger-gated. So the picked
 record is three fields, and the group in (b) is three.
+
+**(d) THE SUGAR'S NAME — settled: `pick_files`.** (Akhil, 2026-07-28.)
+`open_files` was the working name and it is wrong twice: it promises
+OPEN files and delivers references that are opened later, contradicting
+the deferred-open design; and it collides with the call that really does
+open, four lines away —
+
+```
+sel, _ := app.OpenFiles(...)    // opens nothing
+file, _ := f.Open(kaya.Read)    // opens
+```
+
+`pick` is also the platform's own word: `FileOpenPicker` (WinUI),
+`UIDocumentPickerViewController` (iOS), `FilePicker.PickMultipleAsync`
+(MAUI), `OpenFilePickerAsync` (Avalonia), `pickFiles` (Flutter).
+`ChooseFiles` is gio's and old GTK's `GtkFileChooser` — real, narrower.
+
+The WIRE record stays `show_file_dialog`: at that level a dialog
+genuinely is being shown, and it matches `show_alert`. The sugar is
+`pick_file` / `pick_files`, with the alert chain's terminal `.show()`.
 
 ## §1 — spec.rs, and the hash moves
 
@@ -162,9 +268,46 @@ if guest-visible surfaces moved. Commit generators WITH their outputs.
   the platform object the backend is holding: a path, a `content://`
   URI, an `NSURL`. It is process-lifetime and holds nothing the kernel
   counts (DESIGN.md says why explicit release is deferred).
-- `kaya_open_picked` resolves a handle, asks the backend to open in the
-  requested mode, and returns the fd plus `seekable`. Fallible in ways
-  the pick is not; that is stated in the design and must reach the
+- WHY A TABLE AND NOT JUST A STRING, since that is the obvious question.
+  On the desktops a path IS the name, and on Android a `content://` URI
+  is textual and re-parses fine (the grant is per-process, keyed by the
+  URI). IOS IS WHAT FORCES IT: there the picked thing is an `NSURL`
+  whose AUTHORITY belongs to the object, not to its text — measurement 4
+  found re-opening by path denied with EPERM, while measurement 5 found
+  the object can re-acquire and open again. Stringify it and you hold
+  something that looks usable and is dead. One mechanism everywhere
+  beats strings on three platforms and handles on the fourth.
+- WHY NOT HAND OVER THE POINTER, which is the fair follow-up — an
+  `NSURL*` could cross as a `uintptr_t`. It is possible and it buys
+  four problems. LIFETIME: the object is refcounted, so kaya retains on
+  the guest's behalf and the guest must say when to release — a manual
+  protocol spelled nine times. VALIDATION: a bogus `uintptr_t` is
+  undefined behaviour where a bogus integer is a clean error. IT IS NOT
+  ONE KIND OF POINTER: ObjC retain/release, a JNI reference, WinRT
+  AddRef/Release, and a `char*` to free — four disciplines behind one
+  `void*`, and uniform semantics means the guest cannot see which.
+  AND JNI IS WORSE STILL: a local `jobject` is valid only on its
+  creating thread and frame, so it must be promoted to a global ref and
+  then explicitly deleted or it leaks. Decisive for this codebase: every
+  id here is ALREADY an integer with a core-side table — widgets,
+  signals, collections, alerts, menu items, windows, entries, sections —
+  so a pointer would be the protocol's sole exception and its first
+  place a wrong value crashes rather than fails.
+- THE TABLE IS CORE-SIDE AND MUTEX-GUARDED, which is what lets the open
+  be a plain function: any thread must be able to resolve a handle. The
+  platform objects it holds are then safe to use off-thread — an
+  `NSURL` is immutable, a path is a string, and Android's URI needs the
+  scoped `attach_current_thread` from §0(a).
+- RESOLVE UNDER THE LOCK, RELEASE, THEN OPEN. The lock covers a map
+  lookup — tens of nanoseconds against an open that is a syscall at
+  best and a network download at worst. Holding it ACROSS the open
+  turns the table into the serialization bottleneck it has no reason to
+  be, and would undo the parallelism the guest created by spawning
+  threads. Same discipline as drainPosted taking its batch before
+  running any of it.
+- `kaya_open_picked` resolves a handle, opens in the requested mode ON
+  THE CALLING THREAD, and returns the fd plus `seekable`. Fallible in
+  ways the pick is not; that is stated in the design and must reach the
   guest as the language's ordinary I/O error.
 
 ## §3 — SwiftUI on mac (the one depth backend)
