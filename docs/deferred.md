@@ -30,6 +30,23 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
+- **GAP — the stall diagnostic DESIGN promises is not implemented.**
+  DESIGN's threading section says it comes free from the transport:
+  "the core reads the app's log-consumer cursor, and undrained for N
+  seconds is the health signal". Nothing in crates/ reads that cursor,
+  so today an app thread stuck inside a handler is INVISIBLE — the
+  window keeps drawing while input silently stops.
+  WHAT MAKES IT WORTH BUILDING (2026-07-28): the background sweep found
+  Haskell's release using `putMVar`, which BLOCKS when the MVar is
+  full, so a second click would have blocked the app thread forever.
+  The scene clicks once, so no gate saw it; Akhil found it by asking
+  whether Go's `close` blocks. That is the general class — a handler
+  that blocks — and it has no gate at all. The stall signal IS that
+  gate, and it would also catch the misuse the file-dialog design
+  explicitly permits (a guest calling the blocking open on the app
+  thread), turning "the app looks alive and ignores you" into a
+  reported fault. Wire it into the harness so a scene FAILS on a stall
+  rather than timing out.
 - **GAP — a kaya app cannot do background work.** Found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the

@@ -1622,6 +1622,44 @@ arm is shaped the way it is.
   both panes are up, and a harness `back` that declines to press a
   button that is not there.
 
+## A case-only rename does not stick on macOS
+
+2026-07-28, the background-work sweep. A Haskell guest was written as
+`Background.hs` while its cabal stanza said `main-is: background.hs`.
+The local build found it, the scene ran, validate-mac went green. Linux
+is case-sensitive and would have failed — after a full matrix, on the
+lane furthest from the change.
+
+TWO THINGS COMPOUND HERE. First, every build manifest in this repo
+names files as STRINGS — cabal `main-is`, dune `modules`, Cargo `path`,
+csproj globs, gradle sources, the C Makefile's SCENES — so a case
+disagreement is invisible to every macOS tool. Second, the obvious fix
+does not work: `mv Background.hs background.hs` is a NO-OP on a
+case-insensitive filesystem, and `git add` keeps the old name, so the
+mismatch survives a fix that looks like it worked. RENAME THROUGH A
+TEMP PATH, then `git add` the lowercase name and confirm with
+`git diff --cached --name-only`.
+
+Gated since, by tools/check-case.sh: git already stores the exact bytes
+of every tracked path, so the check compares them against the directory
+listing case-sensitively. It is self-tested both directions and it
+reproduces this exact defect.
+
+## A test that waits on another thread must be bounded
+
+Same day, adding `kaya_wake`. The wake test spawned a consumer, parked
+it, rang the doorbell and `join`ed. To prove the test could fail I
+deleted the notify — and the suite HUNG for ten minutes before the
+harness killed it.
+
+A hanging gate is the worst way to report: it burns the timeout, says
+nothing about what broke, and on a matrix lane reads as contention. The
+test now hands the result back over a channel and takes it with
+`recv_timeout`, so a missing notify says "wake left the consumer
+parked: the notify is missing" in five seconds. Any test that waits on
+another thread wants the same shape — `join` is only safe when the
+thread cannot fail to finish.
+
 ## The iOS simulator does not enforce the app sandbox
 
 2026-07-27, designing file dialogs. The whole shape of that feature

@@ -1647,6 +1647,39 @@ mod tests {
 
     /// Every record kind survives the encode/decode round trip byte-for
     /// semantics: what a foreign guest packs is what the core parses.
+    /// EVERY SPEC RECORD MUST HAVE A DECODE ARM, checked against this
+    /// file's own source.
+    ///
+    /// THE GAP THIS EXISTS FOR (found 2026-07-28, while adding file
+    /// dialogs). A new tx record needs an arm here or a foreign guest's
+    /// bytes hit the catch-all and panic — LOUDLY, but only when that
+    /// guest actually sends one, which is a matrix leg, not a build. The
+    /// missing arm was found by accident: a dead-code warning fired on
+    /// the unused constant. Had the constant been referenced anywhere
+    /// else, it would have shipped.
+    ///
+    /// Source inspection rather than a round-trip because every record
+    /// has different fields, and a generic encoder for all 34 would be
+    /// more machinery than the thing it guards. The Go binding's
+    /// chokepoint test uses the same shape for the same reason.
+    #[test]
+    fn every_spec_record_has_a_decode_arm() {
+        let src = include_str!("wire.rs");
+        let mut missing = Vec::new();
+        for row in crate::spec::SPEC.tx {
+            let arm = format!("TX_{} =>", row.name.to_uppercase());
+            if !src.contains(&arm) {
+                missing.push(arm);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "spec tx records with no decoder arm in wire.rs: {missing:?} — a \
+             foreign guest sending one hits the catch-all and panics on a \
+             matrix leg instead of here"
+        );
+    }
+
     #[test]
     fn transaction_round_trip() {
         let ops = vec![

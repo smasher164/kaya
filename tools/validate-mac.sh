@@ -98,6 +98,10 @@ python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks
 tools/keyed.sh check-targets -- tools/check-targets.sh || exit 1
 tools/keyed.sh check-shell -- tools/check-shell.sh || exit 1
 tools/keyed.sh check-mirror -- tools/check-mirror.sh || exit 1
+# NOT keyed: its input is every tracked path plus the directory
+# listings around them, so any add, delete or rename is a real input.
+# A cache key that cheap to invalidate is a cache that never hits.
+tools/check-case.sh || exit 1
 tools/keyed.sh check-sugar-surface -- tools/check-sugar-surface.sh || exit 1
 tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
 tools/check-wheel.sh || exit 1
