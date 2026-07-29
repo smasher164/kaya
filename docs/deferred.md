@@ -44,13 +44,35 @@ own the state (see the undo note in this file).
   signal. Without this, features whose result arrives late have to be
   designed in continuation-passing style, one callback per step, which
   is designing around the hole rather than fixing it.
-  THE FIX IS SMALL: `ring.rs`'s `wait_nonempty` is a condvar loop with a
-  shutdown flag, so a `kaya_wake()` is a second flag plus a notify.
-  Closures never cross the C ABI — each binding keeps its own queue in
-  its own closure type and drains it in the loop it already runs. No
-  backend work at all. Sequenced BEFORE file dialogs
-  (docs/background-work-plan.md); it also unblocks clipboard,
-  notifications, and the editor's own reads.
+  DEPTH SLICE LANDED 2026-07-28 (`c8a7ae1`, `1dc01c0`, `6f18896`,
+  `0f65315`), validate-mac ALL PASS at 202 legs. `kaya_wake` rings both
+  waiting paths; Go got `App.Post` with a drain-poll-wait loop; Rust got
+  `Poster`, which must be a SEPARATE Send+Sync handle because `AppCtx`
+  holds `Cell`/`RefCell` and is deliberately `!Sync` — making it
+  shareable would legalize the danger rather than remove it. Closures
+  never cross the C ABI: the floor says only "wake up".
+  SWEEP LANDED the same day: all EIGHT languages post, each parking in
+  its own idiom (channel, Event, DispatchSemaphore, ManualResetEventSlim,
+  Mutex+Condition, MVar, CountDownLatch, mpsc), and the background scene
+  runs in all eight on mac. Two finds the sweep paid for: the byte-path
+  bindings (Python, Swift) would have RE-PARSED THE PREVIOUS RECORD on a
+  wake, since they decoded the buffer whenever the size was non-zero —
+  latent until they got a post; and Haskell's release used `putMVar`,
+  which BLOCKS when full, so a second click would have blocked the app
+  thread forever (`tryPutMVar` now). OCaml's release takes a bounded
+  lock, the only one that does, and says so.
+  STILL OPEN: the C floor's queue-plus-wake, which is where the pattern
+  gets documented rather than hidden in a binding, and the four
+  non-mac lanes.
+  Two things the slice cost that the plan did not predict: the wake
+  CANNOT be gated by a scene (after the release click the app thread is
+  freshly awake, so re-entering the wait before the worker posts is a
+  genuine race), so it is a `cargo test` that spins on a new parked-count
+  observation; and a public `Occurrence::Woken` variant was the wrong
+  shape, because guests match that enum exhaustively — it is a
+  `pub(crate) enum Inbox` instead. This unblocks file dialogs
+  (docs/file-dialogs-plan.md), clipboard, notifications, and the
+  editor's own reads.
 - **DEFECT — Go silently drops a write to a closed transaction.**
   `Tx` carries a `closed` flag and the Widget/MenuItem chain methods
   check it, but `tx.Write` and `tx.Signal` do not: they append to
@@ -58,14 +80,26 @@ own the state (see the undo note in this file).
   submit again. The write vanishes with no panic and no error. Today it
   is nearly unreachable because nothing invites a guest to hold a `Tx`
   past its handler; the post primitive above is exactly that invitation,
-  so this must be fixed WITH it. Rust is already safe for free and by
-  the strongest available means — `Tx<'a>` borrows an `AppCtx` full of
-  `Cell`/`RefCell`, hence `!Sync`, hence `Tx: !Send`, hence a compile
-  error — which nobody designed and which therefore wants a
-  `compile_fail` doctest to pin it. Audit all eight, plus a negative
-  test each: the rule is that a background thread may call exactly ONE
-  method, the post, and everything else needs a `Tx` that only exists
-  inside a transaction on the app thread.
+  so this must be fixed WITH it.
+  FIXED FOR GO AND RUST 2026-07-28. Go routes all 109 append sites
+  through one `Tx.emit` (plus `Tx.mirror` for model reads), so the
+  liveness check cannot be missed at a new callsite, and a test asserts
+  exactly one direct append survives. Rust's compile error is pinned by
+  a `compile_fail` doctest on `Tx<'static>` — `'static` deliberately, so
+  it cannot pass for failing some unrelated `'static` bound — paired
+  with a PASSING assertion that `SignalId` and `WidgetId` are `Send`,
+  because a compile_fail that dies of an unrelated error pins nothing.
+  PYTHON NEEDED ITS OWN SPELLING, added with the sweep: its ambient `_tx`
+  is a module GLOBAL, not thread-local, so a background
+  `with app.build():` would stamp records into the app thread's open
+  transaction, silently interleaved. It has no handle to check, so it
+  checks the THREAD — `_require_app_thread` raises and names `app.post`
+  as the fix. Signal writes needed no new guard: outside a transaction
+  they already raise.
+  STILL OPEN for C#, Swift, Java, OCaml and Haskell: same audit, same
+  negative test. The rule is that a background thread may call exactly
+  ONE method, the post, and everything else needs a transaction handle
+  that only exists on the app thread.
 - ~~**DEFECT — the iPad menu lowering is wrong as of iPadOS 26**~~ —
   FIXED 2026-07-25, checked off 2026-07-27. As filed (2026-07-24): kaya
   routed the entire catalog into a trailing More overflow on every iOS
