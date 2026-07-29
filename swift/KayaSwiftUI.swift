@@ -472,6 +472,92 @@ func kayaDiag(_ msg: String) {
             + "appWindows=[\(wins)]"
     }
 #endif
+#if os(macOS)
+    /// The AX identifiers NSOpenPanel publishes, measured with
+    /// tools/mac/paneldrive.swift rather than assumed. Building a
+    /// reader against a guessed tree cost this project a day once
+    /// already (docs/traps.md, the macOS a11y read).
+    private let kayaPanelListId = "ListView"
+    private let kayaPanelWhereId = "where popup"
+    private let kayaPanelOkId = "OKButton"
+    private let kayaPanelCancelId = "CancelButton"
+
+    /// The app element with the announce dance done. macOS builds the
+    /// tree LAZILY, so without these two attributes the walk returns
+    /// nothing at all.
+    private func kayaPanelAxApp() -> AXUIElement {
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(
+                app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(
+                app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+        return app
+    }
+
+    /// Every string under an element. A row's filename sits in a cell's
+    /// static text, and its depth varies with the panel's view mode, so
+    /// the read collects rather than indexes.
+    private func kayaPanelTexts(_ e: AXUIElement, _ depth: Int = 0) -> [String] {
+        if depth > 6 { return [] }
+        var out: [String] = []
+        if let v = kayaAxCopy(e, kAXValueAttribute) as? String, !v.isEmpty { out.append(v) }
+        if let t = kayaAxCopy(e, kAXTitleAttribute) as? String, !t.isEmpty { out.append(t) }
+        for c in (kayaAxCopy(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+            out.append(contentsOf: kayaPanelTexts(c, depth + 1))
+        }
+        return out
+    }
+
+    /// What the live panel is REALLY showing: its directory, and the
+    /// file names its list holds. nil when no panel is live.
+    func kayaOpenPanelState() -> (String, [String])? {
+        guard kayaLiveOpenPanel != nil else { return nil }
+        let app = kayaPanelAxApp()
+        guard let list = kayaAxFind(app, kayaPanelListId) else { return nil }
+        let where_ =
+            kayaAxFind(app, kayaPanelWhereId)
+            .flatMap { kayaAxCopy($0, kAXValueAttribute) as? String } ?? ""
+        var names: [String] = []
+        for row in (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+            if let first = kayaPanelTexts(row).first { names.append(first) }
+        }
+        return (where_, names)
+    }
+
+    /// Select the named row and press Open, or press Cancel.
+    ///
+    /// PRESSING OPEN RETURNS kAXErrorCannotComplete (-25204) AND THAT IS
+    /// NOT A FAILURE: the press dismisses the panel, which tears the
+    /// element down before the AX call finishes its round trip. The
+    /// panel's completion firing is the proof. Measured — do not
+    /// "fix" it by checking the return code.
+    func kayaOpenPanelDrive(_ name: String) {
+        guard kayaLiveOpenPanel != nil else { return }
+        let app = kayaPanelAxApp()
+        if name == "cancel" {
+            if let cancel = kayaAxFind(app, kayaPanelCancelId) {
+                AXUIElementPerformAction(cancel, kAXPressAction as CFString)
+            }
+            return
+        }
+        guard let list = kayaAxFind(app, kayaPanelListId) else { return }
+        var target: AXUIElement?
+        for row in (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+            if kayaPanelTexts(row).contains(name) { target = row }
+        }
+        guard let row = target else { return }
+        AXUIElementSetAttributeValue(
+            list, kAXSelectedRowsAttribute as CFString, [row] as CFArray)
+        if let ok = kayaAxFind(app, kayaPanelOkId) {
+            AXUIElementPerformAction(ok, kAXPressAction as CFString)
+        }
+    }
+#endif
+
 /// Present the platform's real file picker and answer exactly once.
 ///
 /// macOS is NSOpenPanel. `allowsMultiple` rides the request as a FLAG
@@ -490,6 +576,7 @@ func kayaPresentFileDialog(
 ) {
     #if os(macOS)
         let panel = NSOpenPanel()
+        kayaLiveOpenPanel = panel
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = allowsMultiple
@@ -502,6 +589,7 @@ func kayaPresentFileDialog(
             }
         }
         func answer(_ urls: [URL]) {
+            kayaLiveOpenPanel = nil
             // strdup because the C side reads the strings during the
             // call and nothing may outlive it; freed on the way out.
             let pathBufs: [UnsafeMutablePointer<CChar>?] = urls.map { strdup($0.path) }
@@ -602,6 +690,9 @@ var kayaLiveAlert: KayaLiveAlert?
 var kayaTearingDown: Set<UInt64> = []
 #if os(macOS)
     var kayaLiveNSAlert: NSAlert?
+    /// The live picker, held so the harness verbs can read and drive
+    /// the REAL panel rather than a copy of the request.
+    var kayaLiveOpenPanel: NSOpenPanel?
     var kayaNSWindows: [UInt64: NSWindow] = [:]
     /// Parked waiters for window materialization, keyed by surface id
     /// (main-thread state like the registry): registration signals
@@ -2640,6 +2731,51 @@ private func kayaRunScript(_ script: String) {
                     }
                 } else {
                     failures.append("no such target \(parts[1])")
+                }
+            case "expect_file_dialog":
+                // The REAL panel, read over accessibility: the directory
+                // it is actually showing and the names its list actually
+                // contains. Both matter — a panel aimed at the wrong
+                // place, or filtered down to nothing, presents perfectly
+                // and is useless, and only these two reads catch it.
+                // Identifiers measured with tools/mac/paneldrive.swift.
+                let wantDir = parts.count > 1 ? String(parts[1]) : ""
+                let wantNames = parts.count > 2 ? parts[2...].map(String.init) : []
+                let state = DispatchQueue.main.sync { () -> (String, [String])? in
+                    #if os(macOS)
+                        return kayaOpenPanelState()
+                    #else
+                        // UIDocumentPickerViewController is the phone
+                        // arm and is not built yet; None fails the
+                        // expect loudly rather than passing it.
+                        return nil
+                    #endif
+                }
+                if let (where_, rows) = state {
+                    if !where_.hasSuffix(wantDir) {
+                        failures.append(
+                            "file dialog showing \"\(where_)\", wanted \"\(wantDir)\"")
+                    } else if let missing = wantNames.first(where: { !rows.contains($0) }) {
+                        failures.append(
+                            "file dialog list has \(rows), missing \"\(missing)\"")
+                    } else {
+                        observed.append("file dialog \"\(wantDir)\" \(wantNames)")
+                    }
+                } else {
+                    failures.append("no file dialog live, wanted \"\(wantDir)\"")
+                }
+            case "file_choose":
+                // Drive the REAL controls: select the row and press
+                // Open, or press Cancel. Not a synthesized completion —
+                // the panel's own handler runs because its own button
+                // was pressed. Silent, like click.
+                let arg = parts.count > 1 ? String(parts[1]) : ""
+                DispatchQueue.main.sync {
+                    #if os(macOS)
+                        kayaOpenPanelDrive(arg)
+                    #else
+                        _ = arg
+                    #endif
                 }
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's

@@ -271,6 +271,8 @@ pub enum Step {
     /// button (0 or 1) or fire the platform's dismissal (the cancel
     /// slot). An action, silent like click and close_window.
     AlertChoose(u32),
+    ExpectFileDialog(String, Vec<String>),
+    FileChoose(Option<String>),
     /// The number of live alerts (0 or 1 — one per process).
     ExpectAlerts(usize),
     /// The window's navigation-stack depth (None = the implicit
@@ -432,6 +434,8 @@ impl Step {
             Step::CloseWindow { .. } => false,
             Step::ExpectWindows { .. } => true,
             Step::ExpectAlert { .. } => true,
+            Step::FileChoose(..) => false,
+            Step::ExpectFileDialog(..) => true,
             Step::AlertChoose { .. } => false,
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
@@ -559,6 +563,21 @@ pub trait Stage: Send + 'static {
     fn choose_alert(&self, choice: u32);
     /// The number of live alerts (0 or 1). No default.
     fn alert_count(&self) -> usize;
+    /// What the live file picker is REALLY showing: the directory it is
+    /// pointed at, and the file names its list actually contains — read
+    /// from the platform panel, never from the request. None when no
+    /// picker is live.
+    ///
+    /// Both halves matter and neither is stamped. A panel aimed at the
+    /// wrong place, or with a filter that excludes everything, presents
+    /// perfectly and is useless; only reading the real "where" and the
+    /// real rows catches that. No default: a backend that forgets it
+    /// must fail to compile.
+    fn file_dialog_state(&self) -> Option<(String, Vec<String>)>;
+    /// Drive the live picker's REAL answer path: select the named row
+    /// and press Open, or press Cancel when `name` is None — the same
+    /// controls a user works, not a synthesized completion. No default.
+    fn choose_file(&self, name: Option<&str>);
     /// The window's navigation-stack depth — the observation
     /// expect_entries verifies. No default: a backend that forgets it
     /// must fail to compile rather than pass a navigation leg
@@ -845,6 +864,28 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     }
                 };
                 Step::AlertChoose(choice)
+            }
+            "expect_file_dialog" => {
+                // `expect_file_dialog <dir> <name>...`: the directory the
+                // panel is showing, then every file its list must
+                // contain. Bare names, so the script stays identical on
+                // lanes whose temp dirs differ.
+                let mut words = rest.split_whitespace().map(str::to_owned);
+                let dir = words.next().ok_or_else(|| {
+                    format!("expect_file_dialog wants a directory then names: {line:?}")
+                })?;
+                Step::ExpectFileDialog(dir, words.collect())
+            }
+            "file_choose" => {
+                let arg = rest.trim();
+                if arg.is_empty() {
+                    return Err(format!("file_choose wants a name or cancel: {line:?}"));
+                }
+                Step::FileChoose(if arg == "cancel" {
+                    None
+                } else {
+                    Some(arg.to_owned())
+                })
             }
             "expect_alerts" => {
                 let n = rest.trim().parse::<usize>().map_err(|_| {
@@ -1443,6 +1484,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 stage.close_window(*window);
                 None
             }
+            Step::FileChoose(name) => {
+                // An action, silent like click: the observable is the
+                // guest's reaction to the result.
+                stage.choose_file(name.as_deref());
+                None
+            }
+            Step::ExpectFileDialog(dir, names) => Some(poll(|| match stage.file_dialog_state() {
+                Some((where_, rows)) => {
+                    if !where_.ends_with(dir.as_str()) {
+                        return Err(format!("file dialog showing {where_:?}, wanted {dir:?}"));
+                    }
+                    if let Some(missing) = names.iter().find(|n| !rows.contains(n)) {
+                        return Err(format!(
+                            "file dialog list has {rows:?}, missing {missing:?}"
+                        ));
+                    }
+                    Ok(format!("file dialog {dir:?} {names:?}"))
+                }
+                None => Err(format!("no file dialog live, wanted {dir:?}")),
+            })),
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result.
@@ -2113,6 +2174,10 @@ mod tests {
             None
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
+            None
+        }
+        fn choose_file(&self, _: Option<&str>) {}
         fn alert_count(&self) -> usize {
             0
         }
@@ -2319,6 +2384,10 @@ mod tests {
             None
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
+            None
+        }
+        fn choose_file(&self, _: Option<&str>) {}
         fn alert_count(&self) -> usize {
             0
         }
@@ -2464,6 +2533,10 @@ mod tests {
             None
         }
         fn choose_alert(&self, _choice: u32) {}
+        fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
+            None
+        }
+        fn choose_file(&self, _: Option<&str>) {}
         fn alert_count(&self) -> usize {
             0
         }

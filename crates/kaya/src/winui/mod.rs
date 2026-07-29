@@ -5561,6 +5561,17 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
+        // DEPTH SLICE: the SwiftUI arm lands first, and this backend's
+        // apply arm refuses the record outright — so no picker can be
+        // live here and None is the honest answer, not a stub hiding a
+        // gap. check-stubs is what keeps a runner from wiring the
+        // scene's legs against this.
+        None
+    }
+
+    fn choose_file(&self, _: Option<&str>) {}
+
     fn alert_count(&self) -> usize {
         Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))
     }

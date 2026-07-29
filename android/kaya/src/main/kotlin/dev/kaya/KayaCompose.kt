@@ -1159,6 +1159,21 @@ object KayaCompose {
      * does (a kind that names a different registry is the
      * false-verdict class the [target] helper guards).
      */
+    /// What the live picker is REALLY showing, or null when none is.
+    ///
+    /// A NOT-IMPLEMENTED SENTINEL until Android's arm lands: its real
+    /// picker is ActivityResultContracts.OpenDocument, and reading it
+    /// means UiAutomator, the way the mac arm reads through AX. Null
+    /// FAILS every expect_file_dialog, so no leg can pass here by
+    /// accident — the work stays visible.
+    private fun kayaFileDialogState(): Pair<String, List<String>>? = null
+
+    /// Drive the live picker's real controls. The sentinel's partner:
+    /// nothing can be live, so there is nothing to drive.
+    private fun kayaFileDialogDrive(name: String) {
+        check(name.isEmpty() || name.isNotEmpty())
+    }
+
     private fun kayaWidgetTarget(spec: String): KayaNode? {
         val kind = spec.substringBefore('#')
         val registry = when (kind) {
@@ -1665,6 +1680,38 @@ object KayaCompose {
                         } else {
                             failures.add("${prefix}no alert live, wanted \"$want\"")
                         }
+                    }
+                    "expect_file_dialog" -> {
+                        val wantDir = parts.getOrNull(1) ?: ""
+                        val wantNames = parts.drop(2)
+                        // Reads the REAL picker: the directory it is
+                        // showing and the names its list holds. Both
+                        // matter — a panel aimed at the wrong place, or
+                        // filtered down to nothing, presents perfectly
+                        // and is useless.
+                        val state = kayaFileDialogState()
+                        if (state == null) {
+                            failures.add("no file dialog live, wanted \"$wantDir\"")
+                        } else {
+                            val (where, rows) = state
+                            val missing = wantNames.firstOrNull { !rows.contains(it) }
+                            when {
+                                !where.endsWith(wantDir) ->
+                                    failures.add(
+                                        "file dialog showing \"$where\", wanted \"$wantDir\""
+                                    )
+                                missing != null ->
+                                    failures.add(
+                                        "file dialog list has $rows, missing \"$missing\""
+                                    )
+                                else -> observed.add("file dialog \"$wantDir\" $wantNames")
+                            }
+                        }
+                    }
+                    "file_choose" -> {
+                        // Silent like click: the observable is the
+                        // guest's reaction to the result.
+                        kayaFileDialogDrive(parts.getOrNull(1) ?: "")
                     }
                     "alert_choose" -> {
                         // Drive the SAME answer path the dialog's
