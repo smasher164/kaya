@@ -271,8 +271,9 @@ pub enum Step {
     /// button (0 or 1) or fire the platform's dismissal (the cancel
     /// slot). An action, silent like click and close_window.
     AlertChoose(u32),
-    ExpectFileDialog(String, Vec<String>),
+    ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
+    FileDialogGoto(String),
     /// The number of live alerts (0 or 1 — one per process).
     ExpectAlerts(usize),
     /// The window's navigation-stack depth (None = the implicit
@@ -435,6 +436,7 @@ impl Step {
             Step::ExpectWindows { .. } => true,
             Step::ExpectAlert { .. } => true,
             Step::FileChoose(..) => false,
+            Step::FileDialogGoto(..) => false,
             Step::ExpectFileDialog(..) => true,
             Step::AlertChoose { .. } => false,
             Step::ExpectAlerts { .. } => true,
@@ -578,6 +580,19 @@ pub trait Stage: Send + 'static {
     /// and press Open, or press Cancel when `name` is None — the same
     /// controls a user works, not a synthesized completion. No default.
     fn choose_file(&self, name: Option<&str>);
+    /// Point the live picker at a directory, the way a user navigating
+    /// there would leave it.
+    ///
+    /// HARNESS MACHINERY, NOT VOCABULARY — the same tier as set_text,
+    /// which sets a field's text rather than simulating keystrokes. It
+    /// deliberately is NOT a request field: every platform has a start
+    /// location, but WinUI's is a PickerLocationId ENUM of well-known
+    /// folders, so a `directory` on the wire would be honorable on four
+    /// platforms and not the fifth — the "looks usable and isn't" shape
+    /// `local_path` already exists to avoid. Whether it took effect is
+    /// not assumed either: expect_file_dialog reads the panel back.
+    /// No default.
+    fn goto_directory(&self, path: &str);
     /// The window's navigation-stack depth — the observation
     /// expect_entries verifies. No default: a backend that forgets it
     /// must fail to compile rather than pass a navigation leg
@@ -870,11 +885,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 // panel is showing, then every file its list must
                 // contain. Bare names, so the script stays identical on
                 // lanes whose temp dirs differ.
+                // BARE means "a picker is live" — the wait a scene needs
+                // before it can navigate, since an action fired before
+                // the panel exists silently does nothing. With arguments
+                // it also asserts the directory being shown and the
+                // names the list holds.
                 let mut words = rest.split_whitespace().map(str::to_owned);
-                let dir = words.next().ok_or_else(|| {
-                    format!("expect_file_dialog wants a directory then names: {line:?}")
-                })?;
-                Step::ExpectFileDialog(dir, words.collect())
+                Step::ExpectFileDialog(words.next(), words.collect())
+            }
+            "file_dialog_goto" => {
+                let path = rest.trim();
+                if path.is_empty() {
+                    return Err(format!("file_dialog_goto wants a directory: {line:?}"));
+                }
+                Step::FileDialogGoto(path.to_owned())
             }
             "file_choose" => {
                 let arg = rest.trim();
@@ -1484,6 +1508,12 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 stage.close_window(*window);
                 None
             }
+            Step::FileDialogGoto(path) => {
+                // An action, silent like click: expect_file_dialog is
+                // what says whether it landed.
+                stage.goto_directory(path);
+                None
+            }
             Step::FileChoose(name) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result.
@@ -1492,6 +1522,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             }
             Step::ExpectFileDialog(dir, names) => Some(poll(|| match stage.file_dialog_state() {
                 Some((where_, rows)) => {
+                    let Some(dir) = dir else {
+                        return Ok("file dialog live".to_string());
+                    };
                     if !where_.ends_with(dir.as_str()) {
                         return Err(format!("file dialog showing {where_:?}, wanted {dir:?}"));
                     }
@@ -1502,7 +1535,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     }
                     Ok(format!("file dialog {dir:?} {names:?}"))
                 }
-                None => Err(format!("no file dialog live, wanted {dir:?}")),
+                None => Err("no file dialog live".to_string()),
             })),
             Step::AlertChoose(choice) => {
                 // An action, silent like click: the observable is the
@@ -2178,6 +2211,7 @@ mod tests {
             None
         }
         fn choose_file(&self, _: Option<&str>) {}
+        fn goto_directory(&self, _: &str) {}
         fn alert_count(&self) -> usize {
             0
         }
@@ -2388,6 +2422,7 @@ mod tests {
             None
         }
         fn choose_file(&self, _: Option<&str>) {}
+        fn goto_directory(&self, _: &str) {}
         fn alert_count(&self) -> usize {
             0
         }
@@ -2537,6 +2572,7 @@ mod tests {
             None
         }
         fn choose_file(&self, _: Option<&str>) {}
+        fn goto_directory(&self, _: &str) {}
         fn alert_count(&self) -> usize {
             0
         }

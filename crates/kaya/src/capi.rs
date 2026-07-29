@@ -1204,7 +1204,7 @@ fn libc_einval() -> i32 {
 #[cfg(all(test, unix))]
 mod picked_tests {
     use super::*;
-    use crate::protocol::{FileMode, PathSource};
+    use crate::protocol::PathSource;
     use std::io::Read;
 
     /// THE CENTRAL CLAIM OF THE FILE-DIALOG DESIGN, at unit level: a

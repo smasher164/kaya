@@ -58,6 +58,53 @@ pub struct PickedFile {
     pub local_path: String,
 }
 
+/// An opened picked file: the descriptor as the language's own file
+/// type, plus whether it seeks.
+///
+/// `seekable` rides the OPEN and not the pick because that is the only
+/// place the answer exists — an Android provider may hand back a pipe,
+/// and nothing short of opening reveals it. FALSE means a stream: `mmap`
+/// and random access are unavailable, sequential reads are fine.
+#[cfg(unix)]
+pub struct PickedOpen {
+    pub file: std::fs::File,
+    pub seekable: bool,
+}
+
+#[cfg(unix)]
+impl PickedFile {
+    /// Redeem the handle for a real descriptor. BLOCKS, and may block
+    /// for a long time — a cloud provider can download the file first —
+    /// so call it from a thread you chose and post the result back
+    /// (DESIGN.md, File dialogs). Safe from any thread.
+    ///
+    /// Fallible in ways the pick is not: no picker on any platform lets
+    /// you REQUEST write, so a read-only document refuses here. That is
+    /// the correct place — kaya surfaces the platform's answer and does
+    /// not stand between the guest and the error.
+    pub fn open(&self, mode: FileMode) -> std::io::Result<PickedOpen> {
+        use std::os::fd::FromRawFd;
+        let raw = match mode {
+            FileMode::Read => crate::wire::FILE_MODE_READ,
+            FileMode::Write => crate::wire::FILE_MODE_WRITE,
+            FileMode::ReadWrite => crate::wire::FILE_MODE_READ_WRITE,
+        };
+        let mut fd = -1i32;
+        let mut seekable = 0u32;
+        let rc = crate::capi::kaya_open_picked(self.handle.0, raw, &mut fd, &mut seekable);
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc));
+        }
+        Ok(PickedOpen {
+            // The descriptor is the guest's from here: File closes it on
+            // drop, with the guest's own file API in between. Windows is
+            // the open divergence DESIGN names — a HANDLE, not an fd.
+            file: unsafe { std::fs::File::from_raw_fd(fd) },
+            seekable: seekable != 0,
+        })
+    }
+}
+
 /// What the backend registers for each picked file. The core stores
 /// these behind integer handles and never interprets them; only the
 /// backend that made one knows what it is.

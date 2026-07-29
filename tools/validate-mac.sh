@@ -55,7 +55,7 @@ SCENES="background milestone2 entry gallery todos reorder feed grow layout align
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES=""
+DEPTH_SCENES="filedialog"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -793,6 +793,16 @@ run background-haskell-swiftui env KAYA_SELFTEST=background "$(hs_bin background
 run background-swift-swiftui env KAYA_SELFTEST=background target/swift-guests/background
 run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The filedialog scene: the picker's request/result grammar and the
+# capability it hands back. DEPTH TIER — rust only until the sweep lands
+# the other seven, and mac-only until §6 gives GTK/WinUI/Compose real
+# arms (check-steps stays red on the other four runners until then, by
+# design). It drives REAL NSOpenPanel chrome over accessibility, so it
+# needs the same logged-in GUI session the alert legs do.
+KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
+export KAYA_SELFTEST_SCRIPT
+run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog target/debug/examples/filedialog
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

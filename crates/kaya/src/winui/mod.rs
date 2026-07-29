@@ -5569,6 +5569,8 @@ impl crate::harness::Stage for WinUiStage {
 
     fn choose_file(&self, _: Option<&str>) {}
 
+    fn goto_directory(&self, _: &str) {}
+
     fn alert_count(&self) -> usize {
         Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))
     }

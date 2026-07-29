@@ -472,6 +472,70 @@ func kayaDiag(_ msg: String) {
             + "appWindows=[\(wins)]"
     }
 #endif
+/// The temp directory THE GUEST WILL USE — `$TMPDIR` or `/tmp`,
+/// which is what every guest language's own API returns
+/// (std::env::temp_dir, tempfile.gettempdir, java.io.tmpdir).
+///
+/// DELIBERATELY NOT NSTemporaryDirectory(): that asks Darwin for the
+/// per-user directory and ignores `$TMPDIR`, so under `nix develop`
+/// — which sets a FRESH TMPDIR per invocation — the two disagree.
+/// Measured: the guest wrote to /tmp/nix-shell.PDldIE/... while the
+/// interpreter pointed the panel at /var/folders/.../T/..., which
+/// does not exist, so NSOpenPanel silently fell back to the last
+/// location it had used and the scene compared the wrong directory.
+func kayaTempDir() -> String {
+    ProcessInfo.processInfo.environment["TMPDIR"].map {
+        ($0 as NSString).standardizingPath
+    } ?? "/tmp"
+}
+
+/// $TMP and $PID in a scene path. General substitutions, not
+/// scene-specific magic: a script has to name a real directory that
+/// differs per lane and per parallel leg, and these are the two
+/// things that vary. The guest computes the same path from the same
+/// two values, and they are the same process.
+/// The one spelling of "this backend has not reached that scene yet",
+/// matching Rust's `depth_stub` and Kotlin's `depthStub`. check-stubs
+/// refuses a runner that wires the scene's legs while this stands, and
+/// check-steps stops demanding them. Both read the CALL: the convention
+/// was a free-form sentence for four milestones and no backend ever
+/// wrote it, so check-stubs could only ever pass.
+///
+/// THIS FILE SERVES TWO PLATFORMS, which is why this one names the
+/// platform and the other languages' do not: gtk.rs is linux and
+/// winui/mod.rs is windows by construction, so their file IS the
+/// answer, while a `#if os(macOS)` arm that works on the desktop says
+/// nothing at all about the phone. The compiler knows which side it
+/// compiled; a gate grepping the file does not, and would otherwise
+/// read mac's finished implementation as iOS's.
+func kayaDepthStub(_ scene: String, on platform: String) -> Never {
+    fatalError(
+        "kaya: the \(scene) scene is not yet materialized on \(platform) — "
+            + "it is a depth slice; see CLAUDE.md's sequencing")
+}
+
+func kayaExpandPath(_ path: String) -> String {
+    // WHOLE NAMES, not prefixes. A plain replace of "$TMP" also eats the
+    // first four characters of "$TMPDIR" and leaves "<tmp>DIR" — a path
+    // that does not exist, spelled just plausibly enough to look like the
+    // caller's typo rather than the expander's. So take the whole
+    // identifier after the $ and look THAT up; an unknown name survives
+    // intact and trips the leftover-$ check by the name that is wrong.
+    let known = ["TMP": kayaTempDir(), "PID": String(getpid())]
+    var out = ""
+    var rest = Substring(path)
+    while let dollar = rest.firstIndex(of: "$") {
+        out += rest[rest.startIndex..<dollar]
+        let after = rest.index(after: dollar)
+        let nameEnd =
+            rest[after...].firstIndex { !$0.isUppercase && $0 != "_" } ?? rest.endIndex
+        let name = String(rest[after..<nameEnd])
+        out += known[name] ?? "$\(name)"
+        rest = rest[nameEnd...]
+    }
+    return out + rest
+}
+
 #if os(macOS)
     /// The AX identifiers NSOpenPanel publishes, measured with
     /// tools/mac/paneldrive.swift rather than assumed. Building a
@@ -528,6 +592,14 @@ func kayaDiag(_ msg: String) {
         return (where_, names)
     }
 
+    /// Point the live panel at a directory. The harness placing the app
+    /// where a user would have navigated — set_text's tier, not a
+    /// stamp: expect_file_dialog reads the "where" popup back, so a
+    /// directory that did not take effect fails the scene.
+    func kayaOpenPanelGoto(_ path: String) {
+        kayaPendingPanelDirectory = kayaExpandPath(path)
+    }
+
     /// Select the named row and press Open, or press Cancel.
     ///
     /// PRESSING OPEN RETURNS kAXErrorCannotComplete (-25204) AND THAT IS
@@ -579,6 +651,12 @@ func kayaPresentFileDialog(
         kayaLiveOpenPanel = panel
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
+        // Armed by file_dialog_goto, applied HERE — the one moment the
+        // platform honors it. Always set under the harness, so a run
+        // can never inherit a location some earlier process left behind.
+        if let pending = kayaPendingPanelDirectory {
+            panel.directoryURL = URL(fileURLWithPath: pending)
+        }
         panel.allowsMultipleSelection = allowsMultiple
         if !extensions.isEmpty {
             // ADVISORY on every platform: the panel treats these as a
@@ -625,8 +703,14 @@ func kayaPresentFileDialog(
         // iOS wants UIDocumentPickerViewController plus the
         // security-scoped URL held object-side; that is the phone half
         // of this milestone, not the depth slice.
-        _ = (window, allowsMultiple, extensions)
-        KayaHost.api.emit_file_dialog_result(dialog, nil, nil, 0)
+        //
+        // IT USED TO EMIT AN EMPTY RESULT HERE, which is a LIE the shape
+        // of a real answer: the empty list IS cancel, so a phone leg
+        // would have watched a picker that never appeared and passed the
+        // cancel assertion. Refuse instead, through the call both
+        // check-stubs and check-steps read.
+        _ = (window, allowsMultiple, extensions, dialog)
+        kayaDepthStub("filedialog", on: "ios")
     #endif
 }
 
@@ -693,6 +777,13 @@ var kayaTearingDown: Set<UInt64> = []
     /// The live picker, held so the harness verbs can read and drive
     /// the REAL panel rather than a copy of the request.
     var kayaLiveOpenPanel: NSOpenPanel?
+    /// Where the NEXT picker opens. Armed by file_dialog_goto and
+    /// applied at presentation, because that is the only moment
+    /// NSOpenPanel honors `directoryURL` — setting it on a panel that
+    /// is already up is ignored, and the panel then restores whatever
+    /// location it used last. Measured: a run inherited a directory
+    /// left behind by an unrelated probe binary.
+    var kayaPendingPanelDirectory: String?
     var kayaNSWindows: [UInt64: NSWindow] = [:]
     /// Parked waiters for window materialization, keyed by surface id
     /// (main-thread state like the registry): registration signals
@@ -2739,7 +2830,10 @@ private func kayaRunScript(_ script: String) {
                 // place, or filtered down to nothing, presents perfectly
                 // and is useless, and only these two reads catch it.
                 // Identifiers measured with tools/mac/paneldrive.swift.
-                let wantDir = parts.count > 1 ? String(parts[1]) : ""
+                // Expanded like the goto's argument, so a scene can name
+                // the same directory both places and the pid stays out
+                // of the script.
+                let wantDir = parts.count > 1 ? kayaExpandPath(String(parts[1])) : ""
                 let wantNames = parts.count > 2 ? parts[2...].map(String.init) : []
                 let state = DispatchQueue.main.sync { () -> (String, [String])? in
                     #if os(macOS)
@@ -2752,7 +2846,12 @@ private func kayaRunScript(_ script: String) {
                     #endif
                 }
                 if let (where_, rows) = state {
-                    if !where_.hasSuffix(wantDir) {
+                    if wantDir.isEmpty {
+                        // Bare: the wait a scene needs before it can
+                        // navigate. An action fired before the panel
+                        // exists silently does nothing.
+                        observed.append("file dialog live")
+                    } else if !where_.hasSuffix(wantDir) {
                         failures.append(
                             "file dialog showing \"\(where_)\", wanted \"\(wantDir)\"")
                     } else if let missing = wantNames.first(where: { !rows.contains($0) }) {
@@ -2764,6 +2863,45 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no file dialog live, wanted \"\(wantDir)\"")
                 }
+            case "file_dialog_goto":
+                // Silent like click; the expect that follows is what
+                // says whether the panel actually moved — EXCEPT for the
+                // two scene bugs below, which are silent everywhere else
+                // and cost a debugging session each.
+                let dir = parts.count > 1 ? String(parts[1]) : ""
+                #if os(macOS)
+                    let resolved = kayaExpandPath(dir)
+                    // A LEFTOVER $ means a substitution that does not
+                    // exist — `$TMPDIR` instead of `$TMP`, say. Without
+                    // this the literal is used as a path, nothing
+                    // matches, and the panel falls back silently.
+                    if resolved.contains("$") {
+                        failures.append(
+                            "file_dialog_goto \(dir): unexpanded substitution in "
+                                + "\(resolved) — only $TMP and $PID exist")
+                    } else if !FileManager.default.fileExists(atPath: resolved) {
+                        // THE ONE THAT MATTERS. NSOpenPanel silently
+                        // RESTORES ITS LAST-USED LOCATION when pointed at
+                        // a directory that does not exist — including one
+                        // left behind by an unrelated process — so the
+                        // scene then asserts against someone else's
+                        // directory. Two separate bugs landed here:
+                        // setting directoryURL after presentation (it is
+                        // honored only AT presentation), and $TMP
+                        // resolving differently on the two sides. Both
+                        // looked like "the panel is showing the wrong
+                        // place" and neither said why.
+                        failures.append(
+                            "file_dialog_goto \(dir): \(resolved) does not exist — "
+                                + "the picker would silently fall back to its "
+                                + "last-used location and the scene would compare "
+                                + "against that")
+                    } else {
+                        DispatchQueue.main.sync { kayaOpenPanelGoto(dir) }
+                    }
+                #else
+                    _ = dir
+                #endif
             case "file_choose":
                 // Drive the REAL controls: select the row and press
                 // Open, or press Cancel. Not a synthesized completion —

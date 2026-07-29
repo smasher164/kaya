@@ -1718,6 +1718,55 @@ that fix: a comment line STARTING with `# shellcheck` is parsed as a
 directive rather than prose, so a sentence that happens to begin with
 the tool's name fails the gate with a parse error about a missing `=`.
 
+## The panel that shows you someone else's directory
+
+Driving a real NSOpenPanel in the filedialog scene cost most of a
+session to two facts that produce the SAME symptom — the panel opens
+somewhere other than where it was aimed — and neither says anything at
+all when it happens.
+
+**`directoryURL` is read only at presentation.** Setting it on a panel
+that is already on screen is not an error and has no effect. The
+interpreter first did exactly that: presented the panel, then pointed
+it. The fix is to ARM the directory on a pending variable and apply it
+in the presentation path; the scene's `file_dialog_goto` therefore comes
+BEFORE the click that shows the panel, which reads backwards until you
+know why.
+
+**A panel aimed at a directory that does not exist silently restores
+its last-used location** — where "last used" is remembered per app
+identity and outlives the process. One run inherited `kaya-paneldrive`,
+a directory left by an unrelated probe binary that had run an hour
+earlier. The scene then compared against that. Nothing in the panel, the
+logs, or the completion mentions a substitution happened, so the failure
+reads as "our aim is wrong" rather than "our aim was ignored".
+
+**And the two APIs named after the temp directory disagree.** `nix
+develop` sets a fresh `$TMPDIR` per invocation; `std::env::temp_dir()`
+honors it, and Foundation's `NSTemporaryDirectory()` does not. The guest
+wrote its file under `/tmp/nix-shell.PDldIE/...` while the interpreter
+aimed the panel at `/var/folders/.../T/...`, which had never existed —
+straight into the silent-fallback above. The scene's whole premise is
+that guest and interpreter are one process and can agree on a path
+without runner involvement; that premise holds only if both sides
+compute the path the same way, so the Swift side reads `$TMPDIR` itself
+(`kayaTempDir()`) rather than asking Foundation.
+
+The guard for all three is one line of precondition in the
+`file_dialog_goto` verb: if the resolved directory does not exist, FAIL
+THERE, naming the resolved path. Whichever of the three went wrong, the
+scene now stops at the aim with the path in hand instead of at an
+assertion about a directory nobody chose. A sibling check rejects a path
+still containing `$` after expansion, since an unknown substitution
+otherwise becomes a literal path segment and lands in the same fallback.
+
+That expander is worth one more line. Substituting `$TMP` by plain text
+replacement also consumes the first four characters of `$TMPDIR` and
+leaves `<tmp>DIR` — a nonexistent path that looks like the scene author's
+typo rather than the expander's. It takes the whole identifier after the
+`$` and looks THAT up, so an unknown name survives intact and is
+reported by the name that is actually wrong.
+
 ## check-targets is blind to exactly one backend
 
 `gtk-sys` needs the distro's pkg-config world, so check-targets cannot

@@ -112,6 +112,10 @@ name = "background"
 path = "../../guests/rust/background.rs"
 
 [[example]]
+name = "filedialog"
+path = "../../guests/rust/filedialog.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 

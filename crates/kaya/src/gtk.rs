@@ -4403,6 +4403,10 @@ impl crate::harness::Stage for GtkStage {
 
     fn choose_file(&self, _: Option<&str>) {}
 
+    fn goto_directory(&self, _: &str) {
+        // Same depth slice: nothing can be aimed when nothing presents.
+    }
+
     fn alert_count(&self) -> usize {
         Self::on_main(move |core| usize::from(core.live_alert.borrow().is_some()))
     }

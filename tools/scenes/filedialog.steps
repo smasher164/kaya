@@ -1,0 +1,72 @@
+# The filedialog scene: the picker's request/result grammar, and the
+# capability it hands back (DESIGN.md, File dialogs).
+#
+# THE ASSERTION GOES ALL THE WAY TO THE BYTES. The design's whole claim
+# is that kaya hands over a CAPABILITY and never moves the data, so this
+# never asserts that a dialog closed. The guest opens the handle it was
+# given, reads the file with ordinary `std::fs`, and writes what it read
+# into the status label. The line below therefore fails unless a real
+# descriptor came back carrying the real file.
+#
+# WHAT THIS SCENE UNIQUELY PROVES, beyond the handoff itself: the
+# capability SURVIVES CROSSING A THREAD. That is the platform-sensitive
+# part — a security-scoped URL on iOS, a content:// URI plus a JNI
+# reference on Android — and a handle that only opened on the thread
+# that picked it would pass every assertion here if the guest read
+# inline. Post ordering and transaction nesting are background.steps's
+# job, not repeated here.
+#
+# THE FILE IS THE GUEST'S OWN, written before anything is shown, at
+# <temp>/kaya-picked-<pid>/picked.txt. Guest and interpreter are the
+# same process, so they agree on that path with no runner involvement,
+# and the pid keeps parallel legs from colliding. The script names only
+# the BASENAME, so one file serves five lanes whose temp dirs differ.
+expect label#0 "no file"
+
+# ARM THE DIRECTORY FIRST. NSOpenPanel honors `directoryURL` only when
+# it is PRESENTED — set on an open panel it is ignored, and the panel
+# restores whatever location it used last, which is how one run
+# inherited a directory an unrelated binary had left behind.
+file_dialog_goto $TMP/kaya-picked-$PID
+click button#0
+
+# THE PANEL IS REAL AND CORRECTLY AIMED, both read back from the
+# platform rather than stamped: the "where" popup names the directory it
+# is actually showing, and the list really contains the file. A panel
+# pointed somewhere else, or filtered down to nothing, presents
+# perfectly and is useless — these two reads are what catch that.
+expect_file_dialog kaya-picked-$PID picked.txt
+
+# Select the row and press Open, for real: AX selection and a real
+# press of the panel's own OK button, so the panel's own completion
+# runs. Not a synthesized answer.
+file_choose picked.txt
+
+# THE HANDLER RETURNED WITHOUT READING. The worker holds the capability,
+# has opened and read it OFF the app thread, and parks with the result
+# undelivered. A guest that read inline arrives here already showing the
+# final text and fails on this line.
+expect label#0 "reading"
+
+# THE CLAIM. The app thread must still serve input while a read is
+# outstanding — `PickedFile::open` blocks, and a cloud provider may
+# download the file before it returns. A guest that did this work ON the
+# app thread wedged it, so this click is never processed and EVERY step
+# below fails too: the second picker never opens, cancel never lands,
+# and the closing accessibility read still says "reading". Measured, by
+# building that guest and running it. The cascade is the signature — a
+# guest that is merely fast cannot imitate it.
+click button#2
+expect label#0 "1 picked bytes"
+
+# CANCEL IS THE EMPTY LIST, faithfully — no platform can confirm an
+# empty selection, so there is no sentinel. This also proves the dialog
+# id RETIRED: a second show would panic if the first were still live.
+click button#1
+expect_file_dialog kaya-picked-$PID picked.txt
+file_choose cancel
+expect label#0 "cancelled"
+
+# One REAL-TREE read at the end: every assertion above reads kaya's own
+# model, and would pass for an arm that ran and drew nothing.
+expect_ax label#0 "label/cancelled"
