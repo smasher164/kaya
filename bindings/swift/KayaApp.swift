@@ -256,6 +256,12 @@ extension Double: KayaMenuIndex {}
 extension KayaSignal: KayaMenuIndex {}
 
 final class KayaApp {
+    // Work handed over by other threads, waiting to run as transactions
+    // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
+    // THREAD, and the only reason this class carries a lock at all —
+    // everything below is app-thread-only by construction.
+    private let postLock = NSLock()
+    private var posted: [(KayaAppTx) throws -> Void] = []
     private var signals: UInt64 = 0
     private var widgets: UInt64 = 0
     private var collections: UInt64 = 0
@@ -548,6 +554,50 @@ final class KayaApp {
     /// has already rolled the mirrors back and dropped the records), is
     /// logged, and the loop moves to the next occurrence — the uniform
     /// dispatch discipline across every binding. Traps still die.
+    /// Run `body` as a transaction on the app thread, soon. THE ONE
+    /// method safe to call from another thread, and the answer to "how
+    /// does background work reach the UI".
+    ///
+    /// `build` is a transaction NOW on the calling thread; `post` is the
+    /// same transaction SOON on the app thread — so a background thread
+    /// writes ordinary blocking Swift and hands back only the result:
+    ///
+    ///     Thread.detachNewThread {
+    ///         let data = try! Data(contentsOf: url)   // blocks this thread
+    ///         app.post { tx in try tx.write(content, String(decoding: data, as: UTF8.self)) }
+    ///     }
+    ///
+    /// The `KayaAppTx` is made where it is used and never crosses a
+    /// thread; ids are values and are meant to be captured. A posted
+    /// body runs in its OWN transaction, after whatever is running now,
+    /// so posting from inside a handler queues for after and never
+    /// nests.
+    func post(_ body: @escaping (KayaAppTx) throws -> Void) {
+        postLock.lock()
+        posted.append(body)
+        postLock.unlock()
+        // The app thread may be parked in C waiting on the ring. Posted
+        // work is not an occurrence and never enters that ring, so this
+        // is the only way it hears about it.
+        kaya_wake()
+    }
+
+    /// Run everything posted, each as its own transaction, in order.
+    ///
+    /// The batch is taken and the lock released BEFORE any of it runs,
+    /// so a body that posts again lands in the NEXT batch. Holding the
+    /// lock across the calls would let a self-posting body drain forever
+    /// and starve the occurrence loop.
+    private func drainPosted() {
+        postLock.lock()
+        let batch = posted
+        posted = []
+        postLock.unlock()
+        for body in batch {
+            dispatch { try build(body) }
+        }
+    }
+
     private func dispatch(_ body: () throws -> Void) {
         do {
             try body()
@@ -601,10 +651,20 @@ final class KayaApp {
     private func dispatchLoop() {
         var buf = [UInt8](repeating: 0, count: 256)
         while true {
+            // Posted work first, then the ring. Draining at the TOP is
+            // what makes a wake sufficient: whatever brought this thread
+            // back, it looks here before anywhere else.
+            drainPosted()
             let size = buf.withUnsafeMutableBufferPointer { p in
                 kaya_next_occurrence(p.baseAddress, 256)
             }
-            if size == 0 { return } // shutdown
+            if size == KAYA_OCCURRENCE_SHUTDOWN { return }
+            if size == KAYA_OCCURRENCE_WOKEN {
+                // NOTHING was written to the buffer. Decoding it here
+                // would re-parse the PREVIOUS record — a stale
+                // re-dispatch, and the bug this branch prevents.
+                continue
+            }
             guard let (kind, id, keys, payload) = kayaParseOccurrence(buf) else { continue }
             var text: String?
             var checked = false

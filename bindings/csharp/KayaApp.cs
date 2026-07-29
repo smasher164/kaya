@@ -269,6 +269,13 @@ sealed class KayaInstance
 
 sealed class KayaApp
 {
+    // Work handed over by other threads, waiting to run as transactions
+    // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
+    // THREAD, and the only reason this class carries a lock at all —
+    // everything else is app-thread-only by construction.
+    readonly object postLock = new object();
+    List<Action<Tx>> posted = new List<Action<Tx>>();
+
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
     internal readonly Dictionary<ulong, List<Action<Tx>>> Derived = new();
@@ -452,11 +459,64 @@ sealed class KayaApp
         }
     }
 
+    /// Run body as a transaction on the app thread, soon. THE ONE method
+    /// safe to call from another thread, and the answer to "how does
+    /// background work reach the UI".
+    ///
+    /// Build is a transaction NOW on the calling thread; Post is the
+    /// same transaction SOON on the app thread — so a background thread
+    /// writes ordinary blocking C# and hands back only the result:
+    ///
+    ///     _ = Task.Run(() => {
+    ///         var data = File.ReadAllText(path);   // blocks this thread
+    ///         app.Post(tx => tx.Write(content, data));
+    ///     });
+    ///
+    /// The Tx is made where it is used and never crosses a
+    /// thread; ids are values and are meant to be captured. A posted
+    /// body runs in its OWN transaction, after whatever is running now,
+    /// so posting from inside a handler queues for after, never nests.
+    public void Post(Action<Tx> body)
+    {
+        lock (postLock) posted.Add(body);
+        // The app thread may be parked in C waiting on the ring. Posted
+        // work is not an occurrence and never enters that ring, so this
+        // is the only way it hears about it.
+        Kaya.Wake();
+    }
+
+    /// Run everything posted, each as its own transaction, in order.
+    ///
+    /// The batch is taken and the lock released BEFORE any of it runs,
+    /// so a body that posts again lands in the NEXT batch. Holding the
+    /// lock across the calls would let a self-posting body drain forever
+    /// and starve the occurrence loop.
+    void DrainPosted()
+    {
+        List<Action<Tx>> batch;
+        lock (postLock)
+        {
+            batch = posted;
+            posted = new List<Action<Tx>>();
+        }
+        foreach (var body in batch)
+            Dispatch(tx => body(tx));
+    }
+
     void DispatchLoop()
     {
-        while (Kaya.NextOccurrence(
-            out ushort kind, out ulong id, out List<object> keys, out object payload))
+        while (true)
         {
+            // Posted work first, then the ring, then park. Draining at
+            // the TOP is what makes a wake sufficient: whatever brought
+            // this thread back, it looks here before anywhere else.
+            DrainPosted();
+            if (!Kaya.PollOccurrence(
+                out ushort kind, out ulong id, out List<object> keys, out object payload))
+            {
+                if (!Kaya.WaitOccurrences()) return; // shutdown
+                continue;
+            }
             string text = payload as string;
             bool isChecked = payload is bool b && b;
             if (kind == KayaWire.OccKindButtonClicked && keys.Count == 0)

@@ -28,6 +28,9 @@ object KayaRing {
     @JvmStatic external fun headAddress(): Long
     @JvmStatic external fun tailAddress(): Long
     @JvmStatic external fun waitOccurrences(): Boolean
+
+    /** Return the app thread from [waitOccurrences]. Safe from any thread. */
+    @JvmStatic external fun wake()
     @JvmStatic external fun specHash(): Long
 
     /** kaya_blob_register's JNI spelling: one copy of the bytes into

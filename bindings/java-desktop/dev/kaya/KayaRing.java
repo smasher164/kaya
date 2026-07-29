@@ -42,6 +42,9 @@ public final class KayaRing {
 
     public static native boolean waitOccurrences();
 
+    /** Return the app thread from waitOccurrences. Safe from any thread. */
+    public static native void wake();
+
     /**
      * One copy of the encoded bytes into core-owned memory, returning
      * the u64 handle the next submit from this guest consumes —

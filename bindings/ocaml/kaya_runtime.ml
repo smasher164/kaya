@@ -50,6 +50,19 @@ let kaya_wait_occurrences =
   foreign ~from:lib ~release_runtime_lock:true "kaya_wait_occurrences"
     (void @-> returning bool)
 
+let kaya_wake = foreign ~from:lib "kaya_wake" (void @-> returning void)
+
+(* Return the app thread from wait_occurrences. Safe from any thread;
+   the binding calls it from Kaya_app.post, and guests do not name it. *)
+let wake () = kaya_wake ()
+
+(* Block until there MAY be something to do: a record arrived, or
+   another thread called wake. false once the core has shut down.
+   "May" is the honest word — a wake returns true with the ring still
+   empty, and the caller re-checks both sources, which a
+   drain-then-poll loop does anyway. *)
+let wait_occurrences () = kaya_wait_occurrences ()
+
 let kaya_submit =
   foreign ~from:lib "kaya_submit" (string @-> size_t @-> returning void)
 
@@ -107,7 +120,14 @@ let register_blob data =
    id, else the id is a template node id and the keys are the stamped
    copy's key path, outermost first; payload is Some for text_changed
    (a Str) and toggled (a Bool). *)
-let next_occurrence =
+(* Read the next occurrence if one is ready, WITHOUT blocking; None
+   means the ring is empty right now.
+
+   Polling and waiting are separate calls, rather than one blocking
+   next_occurrence, because the app thread has a SECOND source of work:
+   closures posted from other threads. A single blocking read would park
+   inside C with no way back out to drain them. *)
+let poll_occurrence =
   let state = ref None in
   fun () ->
     let data, mask, head_addr, tail_addr, h =
@@ -133,8 +153,7 @@ let next_occurrence =
     let byte i = Char.code (Bigarray.Array1.get data i) in
     let rec scan () =
       let t = load_acquire_u32 tail_addr in (* acquire: records visible *)
-      if !h = t then
-        if kaya_wait_occurrences () then scan () else None (* shutdown *)
+      if !h = t then None (* nothing ready; the caller waits *)
       else begin
         let at = !h land mask in
         let size = Kaya_wire.u32_at byte at in

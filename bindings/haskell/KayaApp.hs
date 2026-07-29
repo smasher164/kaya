@@ -36,6 +36,7 @@ module KayaApp
     Declare (..),
     kayaMain,
     newApp,
+    post,
     buildTx,
     submitTx,
     dispatch,
@@ -178,6 +179,7 @@ module KayaApp
 where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder)
@@ -196,7 +198,7 @@ import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import Control.Exception (SomeException, catch, evaluate)
 import System.IO (hPutStrLn, stderr)
 
-import KayaRuntime (kayaRun, kayaSubmit, nextOccurrence, registerBlob)
+import KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, registerBlob, wake, waitOccurrences)
 import qualified KayaWire as W
 
 newtype Signal = Signal Word64
@@ -1881,7 +1883,12 @@ bindSourceField (Node n) level (KField i) = emitT (W.txBindSourceElement n level
 -- dispatch tables.
 
 data App = App
-  { appCounters :: IORef Counters,
+  { -- Work handed over by other threads, waiting to run as
+    -- transactions on the app thread. THE ONLY FIELD HERE TOUCHED FROM
+    -- ANOTHER THREAD, and the only reason this record carries an MVar
+    -- at all — every IORef below is app-thread-only by construction.
+    appPosted :: MVar [IO ()],
+    appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
     appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
@@ -2020,7 +2027,8 @@ onToggleNode app (Node n) handler =
 newApp :: IO App
 newApp =
   App
-    <$> newIORef (Counters 0 0 0 0 0 0)
+    <$> newMVar []
+    <*> newIORef (Counters 0 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -2068,11 +2076,51 @@ dispatch body =
   body `catch` \e ->
     hPutStrLn stderr ("kaya: handler threw (transaction rolled back): " ++ show (e :: SomeException))
 
+-- | Run @body@ as a transaction on the app thread, soon. THE ONE
+-- action safe to call from another thread, and the answer to "how does
+-- background work reach the UI".
+--
+-- @build app@ is a transaction NOW on the calling thread; @post app@ is
+-- the same transaction SOON on the app thread — so a background thread
+-- writes ordinary blocking Haskell and hands back only the result:
+--
+-- > _ <- forkIO $ do
+-- >   text <- readFile path            -- blocks this thread
+-- >   post app (set content text)      -- back on the app thread
+--
+-- Signals are ids and are meant to be captured; that is how the posted
+-- action names what to write. A posted action runs in its OWN
+-- transaction, after whatever is running now, so posting from inside a
+-- handler queues for after and never nests.
+post :: App -> IO () -> IO ()
+post app body = do
+  modifyMVar_ (appPosted app) (return . (++ [body]))
+  -- The app thread may be parked in C waiting on the ring. Posted work
+  -- is not an occurrence and never enters that ring, so this is the
+  -- only way it hears about it.
+  wake
+
+-- | Run everything posted, each as its own transaction, in order.
+--
+-- The batch is taken and the MVar put back BEFORE any of it runs, so an
+-- action that posts again lands in the NEXT batch. Holding the MVar
+-- across the calls would deadlock the moment one of them posted.
+drainPosted :: App -> IO ()
+drainPosted app = do
+  batch <- modifyMVar (appPosted app) (\queued -> return ([], queued))
+  mapM_ dispatch batch
+
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
-  occurrence <- nextOccurrence
+  -- Posted work first, then the ring, then park. Draining at the TOP is
+  -- what makes a wake sufficient: whatever brought this thread back, it
+  -- looks here before anywhere else.
+  drainPosted app
+  occurrence <- pollOccurrence
   case occurrence of
-    Nothing -> return () -- shutdown
+    Nothing -> do
+      more <- waitOccurrences
+      if more then dispatchLoop app else return () -- shutdown
     Just (kind, ident, keys, payload)
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""

@@ -11,7 +11,7 @@
 -- while C blocks; the -threaded runtime is required. Link against
 -- libkaya at build time; kaya_run must own the process main thread, and
 -- GHC's main runs bound to it.
-module KayaRuntime (kayaRun, kayaSubmit, nextOccurrence, registerBlob) where
+module KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, waitOccurrences, wake, registerBlob) where
 
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
@@ -31,6 +31,9 @@ import KayaWire (Value, parseOccurrence, specHash)
 
 foreign import ccall safe "kaya_run"
   c_kaya_run :: IO Int32
+
+foreign import ccall safe "kaya_wake"
+  c_kaya_wake :: IO ()
 
 foreign import ccall unsafe "kaya_occurrence_ring"
   c_kaya_occurrence_ring :: Ptr () -> IO ()
@@ -120,18 +123,36 @@ ring = do
 -- outermost first; the last member is the payload — the entry's new
 -- text (a VStr) for text_changed, the checkbox's new state (a VBool)
 -- for toggled. Single consumer.
-nextOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe Value))
-nextOccurrence = do
+-- Return the app thread from waitOccurrences. Safe from any thread;
+-- the binding calls it from KayaApp\'s post, and guests do not name it.
+wake :: IO ()
+wake = c_kaya_wake
+
+-- Block until there MAY be something to do: a record arrived, or
+-- another thread called wake. False once the core has shut down.
+-- "May" is the honest word — a wake returns True with the ring still
+-- empty, and the caller re-checks both sources, which a drain-then-poll
+-- loop does anyway.
+waitOccurrences :: IO Bool
+waitOccurrences = do
+  more <- c_kaya_wait_occurrences
+  return (more /= CBool 0)
+
+-- Read the next occurrence if one is ready, WITHOUT blocking; Nothing
+-- means the ring is empty right now.
+--
+-- Polling and waiting are separate actions, rather than one blocking
+-- nextOccurrence, because the app thread has a SECOND source of work:
+-- actions posted from other threads. A single blocking read would park
+-- inside C with no way back out to run them.
+pollOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe Value))
+pollOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1
       loop hh = do
         t <- loadAcquireU32 tailPtr -- acquire: records below are visible
         if hh == t
-          then do
-            more <- c_kaya_wait_occurrences
-            if more == CBool 0
-              then return Nothing -- shutdown
-              else loop hh
+          then return Nothing -- nothing ready; the caller waits
           else do
             let at = fromIntegral (hh .&. mask)
             size <- peekByteOff dat at :: IO Word32

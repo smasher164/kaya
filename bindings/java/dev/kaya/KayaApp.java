@@ -33,6 +33,13 @@ import java.util.function.Consumer;
  * </ul>
  */
 public final class KayaApp {
+    // Work handed over by other threads, waiting to run as transactions
+    // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
+    // THREAD, and the only reason this class carries a monitor at all —
+    // everything else is app-thread-only by construction.
+    private final Object postLock = new Object();
+    private List<Consumer<Tx>> posted = new ArrayList<>();
+
     /** The closed standard-command vocabulary (DESIGN.md, Menus):
      * macOS places this one in the application menu, and every other
      * host leaves the item where the app declared it. */
@@ -2443,6 +2450,60 @@ public final class KayaApp {
      */
 
 
+    /**
+     * Run {@code body} as a transaction on the app thread, soon. THE ONE
+     * method safe to call from another thread, and the answer to "how
+     * does background work reach the UI".
+     *
+     * <p>{@code build} is a transaction NOW on the calling thread;
+     * {@code post} is the same transaction SOON on the app thread — so a
+     * background thread writes ordinary blocking Java and hands back
+     * only the result:
+     *
+     * <pre>{@code
+     * new Thread(() -> {
+     *     String data = Files.readString(path);   // blocks this thread
+     *     app.post(tx -> tx.write(content, data));   // back on the app thread
+     * }).start();
+     * }</pre>
+     *
+     * <p>The {@code Tx} is made where it is used and never crosses a
+     * thread; ids are values and are meant to be captured. A posted body
+     * runs in its OWN transaction, after whatever is running now, so
+     * posting from inside a handler queues for after and never nests.
+     */
+    public void post(Consumer<Tx> body) {
+        synchronized (postLock) {
+            posted.add(body);
+        }
+        // The app thread may be parked in waitOccurrences. Posted work is
+        // not an occurrence and never enters the ring, so this is the
+        // only way it hears about it.
+        KayaRing.wake();
+    }
+
+    /**
+     * Run everything posted, each as its own transaction, in order.
+     *
+     * <p>The batch is taken and the monitor released BEFORE any of it
+     * runs, so a body that posts again lands in the NEXT batch. Holding
+     * the monitor across the calls would let a self-posting body drain
+     * forever and starve the occurrence loop.
+     */
+    private void drainPosted() {
+        List<Consumer<Tx>> batch;
+        synchronized (postLock) {
+            if (posted.isEmpty()) {
+                return;
+            }
+            batch = posted;
+            posted = new ArrayList<>();
+        }
+        for (Consumer<Tx> body : batch) {
+            dispatch(body);
+        }
+    }
+
     private void dispatch(Consumer<Tx> handler) {
         try {
             build(handler);
@@ -2459,6 +2520,10 @@ public final class KayaApp {
 
         int h = (int) GET_INT.invokeExact(headAddr);
         while (true) {
+            // Posted work first, then the ring, then park. Draining at
+            // the TOP is what makes a wake sufficient: whatever brought
+            // this thread back, it looks here before anywhere else.
+            drainPosted();
             int t = (int) GET_INT.invokeExact(tailAddr);
             LOAD_FENCE.invokeExact(); // acquire: record reads stay below the tail load
             if (h == t) {

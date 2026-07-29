@@ -73,8 +73,29 @@ def register_blob(data):
     return _lib.kaya_blob_register(data, len(data))
 
 
+# What kaya_next_occurrence returns instead of a record size. WOKEN is
+# deliberately smaller than any real record (a header alone is 8 bytes)
+# so a consumer that has not learned about it cannot mistake it for a
+# length and read past the buffer.
+_OCCURRENCE_SHUTDOWN = 0
+_OCCURRENCE_WOKEN = 1
+
+# next_occurrence's answer when a background thread rang the doorbell:
+# nothing was decoded, and the caller should run whatever it has queued
+# of its own before waiting again. A distinct object rather than None,
+# which already means shutdown.
+WOKEN = object()
+
+
+def wake():
+    """Return the app thread from next_occurrence. Safe from any thread;
+    the binding calls it from App.post, and guests do not name it."""
+    _lib.kaya_wake()
+
+
 def next_occurrence():
-    """Block for the next occurrence; None when the core has shut down.
+    """Block for the next occurrence; None when the core has shut down,
+    WOKEN when a background thread has queued work for the app thread.
 
     Returns (kind, id, keys, payload): keys is [] when id is a widget
     id, else id is a template node id and keys is the stamped copy's
@@ -84,8 +105,13 @@ def next_occurrence():
     """
     while True:
         size = _lib.kaya_next_occurrence(_occ_buf, 256)
-        if size == 0:
+        if size == _OCCURRENCE_SHUTDOWN:
             return None
+        if size == _OCCURRENCE_WOKEN:
+            # NOTHING was written to the buffer. Decoding it here would
+            # re-parse the PREVIOUS record — a stale re-dispatch, and the
+            # bug this branch exists to prevent.
+            return WOKEN
         kind, ident, keys, payload = parse_occurrence(_occ_buf.raw)
         if ident is not None:
             return kind, ident, keys, payload

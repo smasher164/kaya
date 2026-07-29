@@ -34,6 +34,20 @@ static class Kaya
     static extern bool kaya_wait_occurrences();
 
     [DllImport("kaya")]
+    static extern void kaya_wake();
+
+    /// Return the app thread from WaitOccurrences. Safe from any thread;
+    /// the binding calls it from KayaApp.Post, and guests do not name it.
+    public static void Wake() => kaya_wake();
+
+    /// Block until there MAY be something to do: a record arrived, or
+    /// another thread called Wake. False once the core has shut down.
+    /// "May" is the honest word — a wake returns true with the ring
+    /// still empty, and the caller re-checks both sources, which a
+    /// drain-then-poll loop does anyway.
+    public static bool WaitOccurrences() => kaya_wait_occurrences();
+
+    [DllImport("kaya")]
     static extern void kaya_submit(byte[] records, nuint len);
 
     [DllImport("kaya")]
@@ -102,7 +116,14 @@ static class Kaya
     /// outermost first. payload carries the entry's new text (string)
     /// for OccKindTextChanged, the checkbox's new state (bool) for
     /// OccKindToggled, null for clicks.
-    public static unsafe bool NextOccurrence(
+    /// Read the next occurrence if one is ready, WITHOUT blocking;
+    /// false means the ring is empty right now.
+    ///
+    /// Polling and waiting are separate calls, rather than one blocking
+    /// NextOccurrence, because the app thread has a SECOND source of
+    /// work: closures posted from other threads. A single blocking read
+    /// would park inside C with no way back out to drain them.
+    public static unsafe bool PollOccurrence(
         out ushort kind, out ulong id, out List<object> keys, out object payload)
     {
         uint* head = (uint*)ring.Head;
@@ -116,15 +137,11 @@ static class Kaya
             uint t = Volatile.Read(ref *tail); // acquire: records below are visible
             if (h == t)
             {
-                if (!kaya_wait_occurrences())
-                {
-                    kind = 0;
-                    id = 0;
-                    keys = new List<object>();
-                    payload = null;
-                    return false; // shutdown
-                }
-                continue;
+                kind = 0;
+                id = 0;
+                keys = new List<object>();
+                payload = null;
+                return false; // nothing ready; the caller waits
             }
             byte* at = data + (h & mask);
             uint size = *(uint*)at;

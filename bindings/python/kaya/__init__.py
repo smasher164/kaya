@@ -91,6 +91,32 @@ def _text_value(what, text):
 
 _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
+# The thread the dispatch loop runs on, once it starts. None before
+# that, which is why module-scope declaration on the main thread still
+# works.
+_app_thread = None
+
+
+def _require_app_thread():
+    """The Python spelling of a rule the other bindings get from types.
+
+    `_tx` above is a module GLOBAL, not thread-local, so a transaction
+    opened on a background thread would stamp its records into the app
+    thread's open transaction — silently, and interleaved. Rust makes
+    that a compile error (`Tx` is `!Send`) and Go a panic; Python has
+    neither handle to check, so it checks the thread.
+
+    Reads and writes need no guard of their own: a signal write outside
+    a transaction already raises "no ambient transaction", which is
+    exactly what a background thread gets.
+    """
+    if _app_thread is not None and threading.get_ident() != _app_thread:
+        raise RuntimeError(
+            "kaya: a transaction belongs to the app thread — this is "
+            f"thread {threading.get_ident()}, the app thread is "
+            f"{_app_thread}. To mutate from a background thread use "
+            "app.post(fn), which runs fn as a transaction over there."
+        )
 _parents = []  # the container stack; None marks a template body's floor
 _menu_scopes = []  # open menu scopes: creators seat under the top
 _for_stack = []  # depth indices of enclosing Fors, for element levels
@@ -1732,6 +1758,7 @@ class _TxScope:
 
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
+        _require_app_thread()
         if self._section:
             # A section's scene scope (the push_entry nesting rules:
             # it may open inside the ambient build): add_section into
@@ -1910,6 +1937,12 @@ class App:
         self._close_requested = {}
         self._window_closed = {}
         self._node_handlers = {}
+        # Work handed over by other threads, waiting to run as
+        # transactions on the app thread. THE ONLY STATE HERE TOUCHED
+        # FROM ANOTHER THREAD, and the only reason App carries a lock at
+        # all — everything above is app-thread-only by construction.
+        self._post_lock = threading.Lock()
+        self._posted = []
         _app = self
 
     def _next(self, space):
@@ -2084,8 +2117,60 @@ class App:
                 file=sys.stderr,
             )
 
+    def post(self, fn, *args):
+        """Run fn as a transaction on the app thread, soon. THE ONE
+        method safe to call from another thread, and the answer to "how
+        does background work reach the UI".
+
+        `with app.build():` is a transaction NOW on the calling thread;
+        post is the same transaction SOON on the app thread — so a
+        background thread writes ordinary blocking Python and hands back
+        only the result:
+
+            def worker():
+                data = urlopen(url).read()      # blocks this thread
+                app.post(lambda: content.set(data))   # back on the app thread
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        Signals are ids and are meant to be captured; that is how the
+        posted callable names what to write. A posted callable runs in
+        its OWN transaction, after whatever is running now, so posting
+        from inside a handler queues for after and never nests.
+        """
+        with self._post_lock:
+            self._posted.append((fn, args))
+        # The app thread may be parked in C waiting on the ring. Posted
+        # work is not an occurrence and never enters that ring, so this
+        # is the only way it hears about it.
+        runtime.wake()
+
+    def _drain_posted(self):
+        """Run everything posted, each as its own transaction, in order.
+
+        The batch is taken and the lock released BEFORE any of it runs,
+        so a callable that posts again lands in the NEXT batch. Holding
+        the lock across the calls would let a self-posting callable drain
+        forever and starve the occurrence loop.
+        """
+        with self._post_lock:
+            batch, self._posted = self._posted, []
+        for fn, args in batch:
+            self._dispatch(fn, *args)
+
     def _dispatch_loop(self):
-        while occurrence := runtime.next_occurrence():
+        global _app_thread
+        _app_thread = threading.get_ident()
+        while True:
+            # Posted work first, then the ring. Draining at the TOP is
+            # what makes a wake sufficient: whatever brought this thread
+            # back, it looks here before anywhere else.
+            self._drain_posted()
+            occurrence = runtime.next_occurrence()
+            if occurrence is None:
+                return  # shutdown
+            if occurrence is runtime.WOKEN:
+                continue  # drained at the top of the next turn
             kind, ident, keys, payload = occurrence
             if kind == wire.OCC_CLOSE_REQUESTED:
                 handler = self._close_requested.get(ident)

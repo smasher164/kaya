@@ -60,6 +60,11 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 fn_ptr: ring_wait as *mut _,
             },
             NativeMethod {
+                name: "wake".into(),
+                sig: "()V".into(),
+                fn_ptr: ring_wake as *mut _,
+            },
+            NativeMethod {
                 name: "blobRegister".into(),
                 sig: "([B)J".into(),
                 fn_ptr: ring_blob_register as *mut _,
@@ -96,6 +101,13 @@ extern "system" fn ring_tail_address(_env: JNIEnv, _class: JClass) -> jlong {
 
 extern "system" fn ring_wait(_env: JNIEnv, _class: JClass) -> jni::sys::jboolean {
     crate::capi::kaya_wait_occurrences() as jni::sys::jboolean
+}
+
+// The app thread parks in waitOccurrences; posted work is not an
+// occurrence and never enters the ring, so this is how a background
+// thread says it has queued something. Safe from any thread.
+extern "system" fn ring_wake(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_wake()
 }
 
 pub(crate) extern "system" fn ring_spec_hash(_env: JNIEnv, _class: JClass) -> jlong {

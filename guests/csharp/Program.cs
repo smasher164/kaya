@@ -25,6 +25,7 @@ static class Program
             case "window": WindowScene.Run(); break;
             case "panels": PanelsScene.Run(); break;
             case "nav": NavScene.Run(); break;
+            case "background": BackgroundScene.Run(); break;
             case "split": SplitScene.Run(); break;
             case "listdetail": SplitScene.Run(); break;
             case "scroll": ScrollScene.Run(); break;

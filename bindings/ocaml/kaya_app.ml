@@ -72,6 +72,12 @@ type instance = {
 }
 
 type app = {
+  (* Work handed over by other threads, waiting to run as transactions
+     on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
+     THREAD, and the only reason this record carries a mutex at all —
+     everything else is app-thread-only by construction. *)
+  post_lock : Mutex.t;
+  mutable posted : (unit -> unit) list;
   mutable c_signal : int64;
   mutable c_widget : int64;
   mutable c_collection : int64;
@@ -152,6 +158,8 @@ let the_tx () =
 
 let create () =
   {
+    post_lock = Mutex.create ();
+    posted = [];
     c_signal = 0L;
     c_widget = 0L;
     c_collection = 0L;
@@ -315,6 +323,31 @@ let build app (program : unit -> 'a) =
    (which restored the model and dropped the records), is logged, and
    the loop moves to the next occurrence -- the uniform dispatch
    discipline across every binding. *)
+(* Run [program] as a transaction on the app thread, soon. THE ONE
+   function safe to call from another thread, and the answer to "how
+   does background work reach the UI".
+
+   [build app] is a transaction NOW on the calling thread; [post app] is
+   the same transaction SOON on the app thread — so a background thread
+   writes ordinary blocking OCaml and hands back only the result:
+
+     ignore (Thread.create (fun () ->
+       let data = slow_read () in
+       Kaya_app.post app (fun () -> Kaya_app.set status data)) ())
+
+   Signals are ids and are meant to be captured; that is how the posted
+   thunk names what to write. A posted thunk runs in its OWN
+   transaction, after whatever is running now, so posting from inside a
+   handler queues for after and never nests. *)
+let post app (program : unit -> unit) =
+  Mutex.lock app.post_lock;
+  app.posted <- app.posted @ [ program ];
+  Mutex.unlock app.post_lock;
+  (* The app thread may be parked in C waiting on the ring. Posted work
+     is not an occurrence and never enters that ring, so this is the
+     only way it hears about it. *)
+  Kaya_runtime.wake ()
+
 let dispatch app (program : unit -> unit) =
   try build app program
   with e ->
@@ -1674,10 +1707,28 @@ let on_value_changed app (Widget id) (handler : float -> unit) =
 let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit) =
   Hashtbl.replace app.node_toggles id handler
 
+(* Run everything posted, each as its own transaction, in order.
+
+   The batch is taken and the lock released BEFORE any of it runs, so a
+   thunk that posts again lands in the NEXT batch. Holding the lock
+   across the calls would let a self-posting thunk drain forever and
+   starve the occurrence loop. *)
+let drain_posted app =
+  Mutex.lock app.post_lock;
+  let batch = app.posted in
+  app.posted <- [];
+  Mutex.unlock app.post_lock;
+  List.iter (fun program -> dispatch app program) batch
+
 let dispatch_loop app =
   let rec loop () =
-    match Kaya_runtime.next_occurrence () with
-    | None -> () (* shutdown *)
+    (* Posted work first, then the ring, then park. Draining at the TOP
+       is what makes a wake sufficient: whatever brought this thread
+       back, it looks here before anywhere else. *)
+    drain_posted app;
+    match Kaya_runtime.poll_occurrence () with
+    | None ->
+        if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
     | Some (kind, id, keys, payload) ->
         (if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
