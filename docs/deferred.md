@@ -61,9 +61,13 @@ own the state (see the undo note in this file).
   which BLOCKS when full, so a second click would have blocked the app
   thread forever (`tryPutMVar` now). OCaml's release takes a bounded
   lock, the only one that does, and says so.
-  STILL OPEN: the C floor's queue-plus-wake, which is where the pattern
-  gets documented rather than hidden in a binding, and the four
-  non-mac lanes.
+  COMPLETE 2026-07-28, matrix ALL PASS at 808 legs across all five
+  lanes (up from 779). NINE languages including the C floor, which is
+  where queue-plus-wake is written out rather than hidden behind a
+  `post` — and which found a defect no sugar binding could: C queues
+  DATA where every other language queues a CLOSURE, so one queue cannot
+  carry two destinations, and the first version wrote every posted step
+  to the wrong signal. Each entry now names its own target.
   Two things the slice cost that the plan did not predict: the wake
   CANNOT be gated by a scene (after the release click the app thread is
   freshly awake, so re-entering the wait before the worker posts is a
