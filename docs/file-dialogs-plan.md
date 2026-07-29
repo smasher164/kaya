@@ -327,15 +327,75 @@ adopted, nothing invented beyond what the floor already says.
 
 ## §5 — the scene
 
-New `tools/scenes/filedialog.steps`. THE HARD PART IS THAT A FILE
-DIALOG IS MODAL AND SYSTEM-OWNED, exactly like alerts — so copy the
-alert verbs' shape: a verb that reads the REAL panel, and a verb that
-answers it. Do not stamp a verdict the arm wrote about itself
-(check-verbs' stamped-observation rule exists for this).
+Both open questions have answers; the second needs a stated carve-out.
 
-Open question to answer when writing it: what file does the scene pick?
-It must exist on all five lanes and be byte-identical, so it probably
-has to be created by the runner rather than shipped.
+**WHICH FILE IT PICKS — the guest makes it.** The guest and the
+interpreter are THE SAME PROCESS, so they can agree on a path with no
+runner involvement at all: `<temp dir>/kaya-picked-<pid>/picked.txt`,
+computed identically on both sides. The guest writes known bytes at
+startup; the scene names the file by BASENAME only, so the script stays
+byte-identical across five lanes whose temp dirs differ. The pid is
+load-bearing — validate-mac runs legs in parallel, so a fixed name
+would collide.
+
+That also makes the assertion end-to-end rather than about the picker:
+the guest opens the returned handle, reads it with its own file API,
+and writes what it read into a signal. `expect label#0 "picked bytes"`
+therefore proves the handle redeemed for a real descriptor carrying the
+right file — the design's central claim, not just that a dialog closed.
+
+**DRIVING THE PANEL — NO CARVE-OUT. It is real chrome, all of it.**
+Measured 2026-07-28 with a probe rather than assumed, and the probe
+overturned the design that was written here first. `NSOpenPanel`
+publishes a full accessibility tree with stable identifiers, and every
+step a user takes is drivable:
+
+```
+AXWindow  id=open-panel      title=Open
+  AXOutline   id=ListView       <- the file list, one AXRow per file
+  AXPopUpButton id=where popup  value=<the directory it is showing>
+  AXButton    id=CancelButton   acts=[AXPress]
+  AXButton    id=OKButton       acts=[AXPress]
+```
+
+The probe selected the row with `kAXSelectedRowsAttribute`, pressed
+`OKButton` with `kAXPressAction`, and the panel's OWN completion fired
+with the right URL:
+
+```
+WHERE = kaya-paneldrive
+ROW texts=["picked.txt", "12 bytes", "Plain Text", ...]
+SELECT rc=0
+PRESS OPEN rc=-25204
+COMPLETION response=OK urls=["picked.txt"]
+```
+
+THE TRAP IN THAT OUTPUT, worth keeping: `rc=-25204` is
+`kAXErrorCannotComplete`, and it is NOT a failure. Pressing a button
+that dismisses its own window tears the element down before the AX call
+can finish its round trip, so the error is expected and the completion
+firing is the proof. A future reader who treats that code as a failure
+will "fix" a working drive.
+
+AND THE SCENE GETS MORE THAN PLANNED. Both of these are readable, so
+the hole the carve-out would have left is closed rather than merely
+narrowed:
+  - `id=where popup`'s value names the directory the panel is ACTUALLY
+    showing — proof it was aimed correctly, not just that it opened;
+  - the row's own text carries the filename — proof the list was
+    POPULATED with the file, not empty.
+
+A panel that presents pointed at the wrong place, or with a filter that
+excludes everything, now fails the scene instead of passing it.
+
+The probe is kept at tools/mac/paneldrive.swift for the next question
+the tree can answer, the ScopeProbe precedent.
+
+VERBS, one pair, mirroring the alert's: `expect_file_dialog` reads the
+REAL live panel (never the request's copy — a backend that materialized
+nothing must fail), and `file_choose <basename>` / `file_choose cancel`
+answers it. check-verbs will require both in BOTH interpreters, which
+is the usual mid-milestone red.
 
 ## §6 — green on mac, then fan out
 
