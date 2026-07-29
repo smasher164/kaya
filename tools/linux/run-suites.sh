@@ -38,10 +38,10 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES="background"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -489,6 +489,18 @@ for proto in x11 wayland; do
     # the closing expect_ax, which on GTK is an AT-SPI read.
     run "$proto" background-rust env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
+    run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/background.py
+    run "$proto" background-go env KAYA_SELFTEST=background \
+        tools/linux/a11y-leg.sh /tmp/go-guests/background
+    run "$proto" background-csharp env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" background-ocaml env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/background.exe
+    run "$proto" background-haskell env KAYA_SELFTEST=background \
+        tools/linux/a11y-leg.sh "$(hs_bin background)"
+    run "$proto" background-java env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The split scene: adaptive list-detail through
     # AdwNavigationSplitView, with resize_window driving the real
     # size-class transition. All eight languages.

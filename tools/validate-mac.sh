@@ -48,14 +48,14 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. (Empty since the menus sweep
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES="background"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -779,6 +779,16 @@ run listdetail-java-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/
 KAYA_SELFTEST_SCRIPT="$(scene_script background)"
 export KAYA_SELFTEST_SCRIPT
 run background-rust-swiftui env KAYA_SELFTEST=background target/debug/examples/background
+run background-python-swiftui env KAYA_SELFTEST=background python3 guests/python/background.py
+run background-go-swiftui env KAYA_SELFTEST=background target/go-guests/background
+run background-csharp-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run background-ocaml-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/background.exe
+run background-haskell-swiftui env KAYA_SELFTEST=background "$(hs_bin background)"
+run background-swift-swiftui env KAYA_SELFTEST=background target/swift-guests/background
+run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

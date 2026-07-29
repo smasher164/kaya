@@ -168,7 +168,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -176,7 +176,7 @@ SCENES="milestone2 entry gallery todos reorder feed grow layout align window pan
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-background}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -987,6 +987,10 @@ case "$SUITE" in
         # (docs/background-work-plan.md §5) — read a timeout here as
         # that, not as VM load, before blaming the lane.
         run_suite background_rust
+        run_suite background_python
+        run_suite background_go
+        run_suite background_csharp
+        run_suite background_java
         drain_suites
         # The split scene: adaptive list-detail through TwoPaneView,
         # with resize_window driving the real size-class transition.
