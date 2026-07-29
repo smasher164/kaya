@@ -24,6 +24,99 @@ pub struct WindowId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AlertId(pub u64);
 
+/// A live file dialog, guest-chosen like an alert id, retiring when its
+/// result fires. One may be live per process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileDialogId(pub u64);
+
+/// A handle on one picked file — core-minted, redeemed with
+/// `kaya_open_picked`. An INTEGER because the thing it names is a
+/// platform object the guest can never hold: an `NSURL` whose authority
+/// dies if you stringify it (measured), a Java `Uri`, a WinRT
+/// `StorageFile`, or a path. See DESIGN.md, File dialogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PickedId(pub u64);
+
+/// What a handle is opened for. Writability is DISCOVERABLE on every
+/// platform and REQUESTABLE on none, so the open is fallible in ways
+/// the pick is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMode {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+/// One picked file as it reaches the guest: the handle to redeem, a
+/// display name, and `local_path` — a RE-OPENABLE NAME, empty unless
+/// re-opening it actually works, which measurement put at the three
+/// desktops and neither phone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickedFile {
+    pub handle: PickedId,
+    pub name: String,
+    pub local_path: String,
+}
+
+/// What the backend registers for each picked file. The core stores
+/// these behind integer handles and never interprets them; only the
+/// backend that made one knows what it is.
+///
+/// `open` runs ON THE CALLING THREAD by design — the guest called it
+/// from a thread it spawned, and dispatching to a shared worker would
+/// SERIALIZE opens, losing exactly the concurrency the guest created.
+pub trait PickedSource: Send + Sync {
+    /// Open in `mode`, returning the descriptor and whether it seeks.
+    /// Seekability is only knowable by opening (Android may hand back a
+    /// pipe), which is why it rides the open and not the pick.
+    fn open(&self, mode: FileMode) -> std::io::Result<(i32, bool)>;
+    fn name(&self) -> &str;
+    /// Empty unless re-opening this name actually works.
+    fn local_path(&self) -> &str;
+}
+
+/// The three desktops' source: a path is the capability, so the open is
+/// ordinary `std::fs`. `into_raw_fd` transfers ownership — the guest
+/// owns the descriptor from here and closes it with its own file API,
+/// which is the whole point of handing over a capability rather than
+/// bytes.
+///
+/// The phones do NOT use this: Android has no path at all, and iOS has
+/// one that EPERMs once the security scope drops (measured). Their
+/// sources hold the platform object instead.
+#[cfg(unix)]
+pub struct PathSource {
+    pub name: String,
+    pub path: String,
+}
+
+#[cfg(unix)]
+impl PickedSource for PathSource {
+    fn open(&self, mode: FileMode) -> std::io::Result<(i32, bool)> {
+        use std::os::fd::IntoRawFd;
+        let mut opts = std::fs::OpenOptions::new();
+        match mode {
+            FileMode::Read => opts.read(true),
+            FileMode::Write => opts.write(true).truncate(true),
+            FileMode::ReadWrite => opts.read(true).write(true),
+        };
+        let file = opts.open(&self.path)?;
+        // A regular file seeks; anything else here (a fifo the user
+        // picked, a device) does not. The phones answer this from the
+        // descriptor they were handed, which is why it rides the OPEN.
+        let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
+        Ok((file.into_raw_fd(), seekable))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn local_path(&self) -> &str {
+        &self.path
+    }
+}
+
 /// An alert's one answer. The wire carries a u32: action indices, or
 /// the deliberately-not-an-index cancel sentinel (ALERT_CHOICE_CANCEL)
 /// that every platform-native dismissal — Esc, back, outside tap, the
@@ -49,6 +142,17 @@ pub struct AlertSpec {
     pub message: String,
     pub actions: Vec<String>,
     pub cancel: String,
+}
+
+/// A file-picker request. `filters` are ADVISORY `(label, extensions)`
+/// pairs — every platform treats them as a default view rather than a
+/// guarantee, so the guest still validates what it got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileDialogSpec {
+    pub window: WindowId,
+    pub dialog: FileDialogId,
+    pub multiple: bool,
+    pub filters: Vec<(String, String)>,
 }
 
 /// A collection: a core-side ordered key→value table, the sibling of a
@@ -119,6 +223,13 @@ pub enum Occurrence {
     /// scene (idempotent: the backend tolerates the native window
     /// already being gone).
     WindowClosed { window: WindowId },
+    /// The picker's one answer: the chosen files, or an EMPTY list for
+    /// cancel — no platform can confirm an empty selection, so the
+    /// empty list needs no sentinel. The dialog id retires here.
+    FileDialogResult {
+        dialog: FileDialogId,
+        files: Vec<PickedFile>,
+    },
     /// The alert's one answer; the dialog is already gone when this
     /// fires, and the alert id retired with it.
     AlertResult { alert: AlertId, choice: AlertChoice },
@@ -781,6 +892,10 @@ pub enum TxOp {
     /// answered by exactly one AlertResult (the request/result
     /// grammar). One alert may be live per process.
     ShowAlert(AlertSpec),
+    /// Request the platform's file picker over a live window: the
+    /// alert's grammar exactly, answered by one FileDialogResult. One
+    /// dialog may be live per process.
+    ShowFileDialog(FileDialogSpec),
     /// Push a navigation entry onto `window`'s stack (no capability
     /// gate — every host materializes a serial stack natively).
     /// Materializes covered/incoming; mounting a root into it
@@ -916,6 +1031,8 @@ pub enum ApplyOp {
     /// validated the spec); answer exactly once with an AlertResult
     /// emission — an action index or the cancel sentinel.
     PresentAlert(AlertSpec),
+    /// Present the platform's real file picker (already validated).
+    PresentFileDialog(FileDialogSpec),
     /// Push a navigation entry onto the window's stack, hidden until
     /// a mount presents it. The covered root stays alive.
     PushEntry { window: WindowId, entry: WindowId },
@@ -988,6 +1105,10 @@ impl OccSink {
                 let _ = tx.send(Inbox::Occ(occurrence));
             }
             OccSink::Ring(ring) => match occurrence {
+                Occurrence::FileDialogResult { dialog, files } => {
+                    let body = crate::wire::file_dialog_result_body(dialog, &files);
+                    ring.push_record(crate::ring::REC_FILE_DIALOG_RESULT, &body);
+                }
                 Occurrence::ButtonClicked { id } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     ring.push_record(crate::ring::REC_BUTTON_CLICKED, &tag);

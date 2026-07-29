@@ -47,6 +47,16 @@ pub struct KayaHostApi {
     /// The alert's one answer (an ALERT_CHOICE value: an action index
     /// or the cancel sentinel). Retires the live alert id.
     pub emit_alert_result: extern "C" fn(u64, u32),
+    /// The picker's answer: parallel arrays of `count` NUL-terminated
+    /// paths and names, or count 0 for cancel. Through the vtable like
+    /// every other emission — a direct symbol dies on static-Rust and
+    /// RTLD_LOCAL-Python hosts.
+    pub emit_file_dialog_result: unsafe extern "C" fn(
+        u64,
+        *const *const std::os::raw::c_char,
+        *const *const std::os::raw::c_char,
+        usize,
+    ),
     /// Navigation lifecycle emits: entry_popped after the user's back
     /// affordance popped natively (the core's stack reconciles inside
     /// this call), back_requested when the top entry's intercept_back
@@ -105,6 +115,7 @@ pub(crate) fn run() -> i32 {
         emit_close_requested: crate::capi::kaya_emit_close_requested,
         emit_window_closed: crate::capi::kaya_emit_window_closed,
         emit_alert_result: crate::capi::kaya_emit_alert_result,
+        emit_file_dialog_result: crate::capi::kaya_emit_file_dialog_result,
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,
         emit_back_requested: crate::capi::kaya_emit_back_requested,
         emit_section_selected: crate::capi::kaya_emit_section_selected,

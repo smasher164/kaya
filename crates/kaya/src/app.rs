@@ -589,6 +589,16 @@ impl AppCtx {
         AlertId(id)
     }
 
+    /// File dialogs share the alert counter: both are one-live-per-
+    /// process request ids that retire with their result, so a single
+    /// monotonic space keeps a stray id from ever naming the wrong kind
+    /// of request.
+    fn alloc_file_dialog(&self) -> crate::protocol::FileDialogId {
+        let id = self.next_alert.get();
+        self.next_alert.set(id + 1);
+        crate::protocol::FileDialogId(id)
+    }
+
     fn alloc_widget(&self) -> WidgetId {
         let id = self.next_widget.get();
         self.next_widget.set(id + 1);
@@ -1164,6 +1174,34 @@ impl<'a> Tx<'a> {
                 cancel: String::new(),
             },
         }
+    }
+
+    /// Ask the platform for files. THE PICK, not the open — the result
+    /// carries handles you redeem later, so the name says `pick`
+    /// (DESIGN.md, File dialogs).
+    ///
+    /// One dialog may be live per process; show the next from the
+    /// first's result handler. Cancel arrives as an EMPTY list.
+    pub fn pick_files(&mut self) -> FileDialogRef<'_, 'a> {
+        let dialog = self.ctx.alloc_file_dialog();
+        FileDialogRef {
+            tx: self,
+            spec: crate::protocol::FileDialogSpec {
+                window: DEFAULT_WINDOW,
+                dialog,
+                multiple: true,
+                filters: Vec::new(),
+            },
+        }
+    }
+
+    /// The single-file spelling. The floor always returns a LIST; this
+    /// only asks the platform for one, so the result carries zero or
+    /// one file.
+    pub fn pick_file(&mut self) -> FileDialogRef<'_, 'a> {
+        let mut r = self.pick_files();
+        r.spec.multiple = false;
+        r
     }
 
     /// Set a property on any window ([`set_window`] targets the
@@ -2111,6 +2149,9 @@ pub struct Messages<M> {
     entry_popped: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
+    /// Per-dialog, one-shot like an alert: the registration retires with
+    /// the one result, so no guest ever inspects a dialog id.
+    dialogs: RefCell<HashMap<u64, Box<dyn Fn(Vec<crate::protocol::PickedFile>) -> M>>>,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -2133,6 +2174,7 @@ impl<M> Messages<M> {
             entry_popped: RefCell::new(HashMap::new()),
             section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
+            dialogs: RefCell::new(HashMap::new()),
         }
     }
 
@@ -2408,6 +2450,17 @@ impl<M> Messages<M> {
         self.alerts.borrow_mut().insert(alert.0, Box::new(f));
     }
 
+    /// Bind the one-shot result handler to a file-dialog request. Cancel
+    /// arrives as an EMPTY list — no platform can confirm an empty
+    /// selection, so it needs no sentinel.
+    pub fn on_files(
+        &self,
+        dialog: crate::protocol::FileDialogId,
+        f: impl Fn(Vec<crate::protocol::PickedFile>) -> M + 'static,
+    ) {
+        self.dialogs.borrow_mut().insert(dialog.0, Box::new(f));
+    }
+
     /// The mapped occurrence stream: blocks for the next occurrence
     /// with a registered meaning. Unmapped occurrences fold into
     /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
@@ -2440,6 +2493,15 @@ impl<M> Messages<M> {
                 Occurrence::AlertResult { alert, choice } => {
                     // One-shot: the registration retires with the result.
                     self.alerts.borrow_mut().remove(&alert.0).map(|f| f(*choice))
+                }
+                Occurrence::FileDialogResult { dialog, files } => {
+                    // One-shot, exactly as the alert: the registration
+                    // retires with the result. Cancel arrives here as an
+                    // EMPTY list, not a sentinel.
+                    self.dialogs
+                        .borrow_mut()
+                        .remove(&dialog.0)
+                        .map(|f| f(files.clone()))
                 }
                 Occurrence::BackRequested { entry } => {
                     self.back_requested.borrow().get(&entry.0).map(|f| f())
@@ -2491,6 +2553,37 @@ impl<M> Messages<M> {
 pub struct AlertRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     spec: AlertSpec,
+}
+
+/// A file-picker request under construction — the alert chain's shape,
+/// terminated by `show`.
+pub struct FileDialogRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: crate::protocol::FileDialogSpec,
+}
+
+impl FileDialogRef<'_, '_> {
+    /// Present over this window instead of the primary.
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+
+    /// Add an ADVISORY filter: a label and its extensions. Every
+    /// platform treats these as a default view rather than a guarantee,
+    /// so validate what you actually got.
+    pub fn filter(mut self, label: impl Into<String>, extensions: impl Into<String>) -> Self {
+        self.spec.filters.push((label.into(), extensions.into()));
+        self
+    }
+
+    /// Send the request, returning its id — the handle
+    /// [`Messages::on_files`] binds the one-shot result handler to.
+    pub fn show(self) -> crate::protocol::FileDialogId {
+        let id = self.spec.dialog;
+        self.tx.ops.push(TxOp::ShowFileDialog(self.spec));
+        id
+    }
 }
 
 impl AlertRef<'_, '_> {
@@ -4214,6 +4307,7 @@ mod tests {
                     | Occurrence::CloseRequested { .. }
                     | Occurrence::WindowClosed { .. }
                     | Occurrence::AlertResult { .. }
+                    | Occurrence::FileDialogResult { .. }
                     | Occurrence::EntryPopped { .. }
                     | Occurrence::BackRequested { .. }
                     | Occurrence::SectionSelected { .. }

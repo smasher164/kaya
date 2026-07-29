@@ -1102,11 +1102,236 @@ pub extern "C" fn kaya_emit_back_requested(entry: u64) {
 // purpose: the scene sets it at show (apply side) and the result that
 // frees it arrives on the presentation side — this singleton is the
 // one state both ends share.
+/// THE PICKED-FILE TABLE. Handles are integers into this map, and the
+/// map holds what only the backend understands — an `NSURL`, a Java
+/// `Uri`, a `StorageFile`, a path. Same shape as the blob table above:
+/// a monotonic counter, a `Mutex<HashMap<u64, _>>` behind a `OnceLock`,
+/// an integer out to the guest.
+///
+/// WHY A TABLE AND NOT THE POINTER ITSELF. Four things a raw
+/// `uintptr_t` would cost: the object is refcounted, so its lifetime
+/// becomes a manual protocol spelled nine times; a bogus value is
+/// undefined behaviour where a bogus integer is a clean error; it is
+/// not ONE kind of pointer (ObjC retain/release, a JNI reference, WinRT
+/// AddRef/Release, a `char*` to free) and uniform semantics means the
+/// guest cannot see which; and a JNI local ref is valid only on its
+/// creating thread and frame. Every id in kaya is already an integer
+/// with a table behind it; a pointer would be the sole exception.
+///
+/// Entries are process-lifetime. They hold nothing the kernel counts,
+/// which is why explicit release is deferred (DESIGN.md).
+struct Picked {
+    next: u64,
+    live: std::collections::HashMap<u64, std::sync::Arc<dyn crate::protocol::PickedSource>>,
+}
+
+fn picked() -> &'static Mutex<Picked> {
+    static PICKED: std::sync::OnceLock<Mutex<Picked>> = std::sync::OnceLock::new();
+    PICKED.get_or_init(|| {
+        Mutex::new(Picked {
+            next: 1,
+            live: std::collections::HashMap::new(),
+        })
+    })
+}
+
+/// Backend side: register one picked file and get the handle the guest
+/// will name it by.
+pub(crate) fn picked_register(
+    source: std::sync::Arc<dyn crate::protocol::PickedSource>,
+) -> crate::protocol::PickedId {
+    let mut table = picked().lock().unwrap();
+    let handle = table.next;
+    table.next += 1;
+    table.live.insert(handle, source);
+    crate::protocol::PickedId(handle)
+}
+
+/// Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS
+/// SAFE FROM ANY THREAD, alongside kaya_wake.
+///
+/// Returns 0 on success and writes `out_fd` plus `out_seekable`;
+/// returns the errno-shaped failure otherwise. The open is FALLIBLE in
+/// ways the pick is not: no picker on any platform lets you request
+/// write, so a read-only document refuses here rather than earlier, and
+/// that is the correct place — kaya surfaces the platform's answer and
+/// does not stand between the guest and the error.
+///
+/// RESOLVE UNDER THE LOCK, RELEASE, THEN OPEN. The lock covers a map
+/// lookup; holding it across the open would serialize every concurrent
+/// open and undo the parallelism the guest created by spawning threads.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_open_picked(
+    handle: u64,
+    mode: u32,
+    out_fd: *mut i32,
+    out_seekable: *mut u32,
+) -> i32 {
+    if out_fd.is_null() || out_seekable.is_null() {
+        return libc_einval();
+    }
+    let source = {
+        let table = picked().lock().unwrap();
+        match table.live.get(&handle) {
+            Some(s) => std::sync::Arc::clone(s),
+            None => return libc_einval(),
+        }
+    };
+    let mode = match mode {
+        crate::wire::FILE_MODE_READ => crate::protocol::FileMode::Read,
+        crate::wire::FILE_MODE_WRITE => crate::protocol::FileMode::Write,
+        crate::wire::FILE_MODE_READ_WRITE => crate::protocol::FileMode::ReadWrite,
+        _ => return libc_einval(),
+    };
+    match source.open(mode) {
+        Ok((fd, seekable)) => {
+            unsafe {
+                *out_fd = fd;
+                *out_seekable = u32::from(seekable);
+            }
+            0
+        }
+        Err(e) => e.raw_os_error().unwrap_or(libc_einval()),
+    }
+}
+
+/// EINVAL without pulling in libc: the value is stable across every
+/// platform kaya targets.
+fn libc_einval() -> i32 {
+    22
+}
+
+#[cfg(all(test, unix))]
+mod picked_tests {
+    use super::*;
+    use crate::protocol::{FileMode, PathSource};
+    use std::io::Read;
+
+    /// THE CENTRAL CLAIM OF THE FILE-DIALOG DESIGN, at unit level: a
+    /// handle redeems for a REAL descriptor, and the caller reads it
+    /// with its own file API while the core is nowhere in the data
+    /// path.
+    #[test]
+    fn a_handle_redeems_for_a_readable_descriptor() {
+        let dir = std::env::temp_dir().join(format!("kaya-picked-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.txt");
+        std::fs::write(&path, b"picked bytes").unwrap();
+
+        let handle = picked_register(std::sync::Arc::new(PathSource {
+            name: "note.txt".into(),
+            path: path.to_string_lossy().into_owned(),
+        }));
+
+        let mut fd = -1i32;
+        let mut seekable = 0u32;
+        assert_eq!(kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable), 0);
+        assert!(fd >= 0);
+        assert_eq!(seekable, 1, "a regular file seeks");
+
+        // The guest's own file API, from here on.
+        let mut file = unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+        let mut got = String::new();
+        file.read_to_string(&mut got).unwrap();
+        assert_eq!(got, "picked bytes");
+
+        // REDEEMABLE MORE THAN ONCE — that is what makes save-back work
+        // without pinning a writable descriptor from the moment of the
+        // pick (DESIGN.md, measurement 7).
+        let mut fd2 = -1i32;
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ_WRITE, &mut fd2, &mut seekable),
+            0
+        );
+        assert!(fd2 >= 0);
+        drop(unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd2) });
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A WRONG HANDLE IS A CLEAN ERROR, which is the whole reason the
+    /// table exists instead of handing the guest a pointer. With a
+    /// pointer this is undefined behaviour.
+    #[test]
+    fn a_bogus_handle_or_mode_fails_cleanly() {
+        let mut fd = -1i32;
+        let mut seekable = 0u32;
+        assert_ne!(
+            kaya_open_picked(u64::MAX, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable),
+            0,
+            "an unknown handle must not succeed"
+        );
+        assert_eq!(fd, -1, "a failed open writes no descriptor");
+
+        let handle = picked_register(std::sync::Arc::new(PathSource {
+            name: "x".into(),
+            path: "/nonexistent/kaya".into(),
+        }));
+        assert_ne!(
+            kaya_open_picked(handle.0, 99, &mut fd, &mut seekable),
+            0,
+            "an unknown mode must not succeed"
+        );
+        // And the platform's own failure reaches the caller unchanged:
+        // kaya surfaces the error, it does not stand between the guest
+        // and it.
+        let rc = kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable);
+        assert_ne!(rc, 0, "opening a missing path must fail");
+    }
+}
+
 static ALERT_LIVE: Mutex<Option<u64>> = Mutex::new(None);
 
 /// Scene side: a show_alert was applied. Panics if one is already
 /// live — a guest error (show the next alert from the first's result
 /// handler).
+/// The one-live-dialog slot, the alert's rule for the same reason: the
+/// platform floor allows one modal picker at a time, and the result
+/// that frees the slot arrives on the presentation side, so the slot
+/// lives here — the one state both ends share.
+static FILE_DIALOG_LIVE: Mutex<Option<u64>> = Mutex::new(None);
+
+/// Scene side: a show_file_dialog was applied.
+pub(crate) fn file_dialog_shown(dialog: crate::protocol::FileDialogId) {
+    let mut live = FILE_DIALOG_LIVE.lock().unwrap();
+    if let Some(id) = *live {
+        panic!(
+            "kaya: file dialog {id} is already live — one per process; \
+             show the next from the first's result handler"
+        );
+    }
+    *live = Some(dialog.0);
+}
+
+/// Validate the dialog id against the live slot and free it — the one
+/// retire gate for every backend, EMISSION being the caller's (the
+/// alert_retire split, for the same reason: a ring push from a
+/// rust-native backend would strand the result).
+pub(crate) fn file_dialog_retire(dialog: u64) {
+    let mut live = FILE_DIALOG_LIVE.lock().unwrap();
+    match *live {
+        Some(id) if id == dialog => *live = None,
+        Some(id) => panic!("kaya: file dialog result for {dialog} but {id} is the live one"),
+        None => panic!("kaya: file dialog result for {dialog} but none is live"),
+    }
+}
+
+/// Presentation side (interpreter platforms ONLY, exactly as
+/// alert_resolved): retire, then emit on the presentation sink.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+pub(crate) fn file_dialog_resolved(dialog: u64, files: Vec<crate::protocol::PickedFile>) {
+    file_dialog_retire(dialog);
+    let dialog = crate::protocol::FileDialogId(dialog);
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::FileDialogResult { dialog, files });
+        return;
+    }
+    state().ring.push_record(
+        ring::REC_FILE_DIALOG_RESULT,
+        &crate::wire::file_dialog_result_body(dialog, &files),
+    );
+}
+
 pub(crate) fn alert_shown(alert: crate::protocol::AlertId) {
     let mut live = ALERT_LIVE.lock().unwrap();
     if let Some(id) = *live {
@@ -1167,6 +1392,71 @@ pub(crate) fn alert_resolved(alert: u64, choice: crate::protocol::AlertChoice) {
 /// own core sink (alert_resolved is cfg'd out of existence there),
 /// so on GTK/WinUI hosts this entry has no caller by construction
 /// and panics loudly if one appears.
+/// Presentation side: the file picker's one answer. `paths` and `names`
+/// are parallel arrays of `count` NUL-terminated UTF-8 strings; an
+/// EMPTY count is cancel, which every platform reports the same way
+/// because none can confirm an empty selection.
+///
+/// THE CORE MINTS THE HANDLES, not the backend: it wraps each path in a
+/// source, registers it, and hands the guest integers. On the desktops
+/// a path IS the capability, so `PathSource` is the whole story. The
+/// phones will register a source holding the platform object instead —
+/// Android has no path at all, and iOS has one that EPERMs the moment
+/// the security scope drops (measured) — which is exactly why the
+/// registration seam is a trait and not a string.
+///
+/// # Safety
+/// `paths` and `names` must each point to `count` valid NUL-terminated
+/// UTF-8 strings that outlive the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_file_dialog_result(
+    dialog: u64,
+    paths: *const *const std::os::raw::c_char,
+    names: *const *const std::os::raw::c_char,
+    count: usize,
+) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let mut files = Vec::with_capacity(count);
+        for i in 0..count {
+            let read = |base: *const *const std::os::raw::c_char| -> String {
+                if base.is_null() {
+                    return String::new();
+                }
+                let p = unsafe { *base.add(i) };
+                if p.is_null() {
+                    return String::new();
+                }
+                unsafe { std::ffi::CStr::from_ptr(p) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let source = std::sync::Arc::new(crate::protocol::PathSource {
+                name: read(names),
+                path: read(paths),
+            });
+            let handle = picked_register(source.clone());
+            // Read the record back OFF the source, so the source stays
+            // the single answer to "what is this file called and can
+            // its name be re-opened".
+            files.push(crate::protocol::PickedFile {
+                handle,
+                name: crate::protocol::PickedSource::name(&*source).to_owned(),
+                local_path: crate::protocol::PickedSource::local_path(&*source).to_owned(),
+            });
+        }
+        file_dialog_resolved(dialog, files);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (dialog, paths, names, count);
+        panic!(
+            "kaya: kaya_emit_file_dialog_result is the interpreter platforms' \
+             entry — this host's backend answers on its own sink"
+        );
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_emit_alert_result(alert: u64, choice: u32) {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]

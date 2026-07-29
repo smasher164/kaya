@@ -372,7 +372,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xc1ceb0f03be1e512uL
+    private const val SPEC_HASH: ULong = 0x4d40b317286880f6uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -385,6 +385,7 @@ object KayaCompose {
     private const val APPLY_CREATE_WINDOW = 9
     private const val APPLY_DESTROY_WINDOW = 10
     private const val APPLY_PRESENT_ALERT = 11
+    private const val APPLY_PRESENT_FILE_DIALOG = 24
     private const val APPLY_PUSH_ENTRY = 12
     private const val APPLY_POP_ENTRY = 13
     private const val APPLY_SET_ENTRY_PROP = 14
@@ -742,6 +743,23 @@ object KayaCompose {
                 // this interpreter disagree — fail loudly.
                 APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
+                APPLY_PRESENT_FILE_DIALOG -> {
+                    // DEPTH SLICE: the mac SwiftUI arm lands first
+                    // (CLAUDE.md's sequencing), so this interpreter
+                    // decodes the record and refuses it loudly rather
+                    // than silently doing nothing. Android's real arm is
+                    // ActivityResultContracts.OpenDocument plus a
+                    // source holding the content:// URI — there is no
+                    // path to hand over here at all.
+                    b.long // window
+                    b.long // dialog
+                    b.int // multiple
+                    b.int // pad
+                    val filterValues = b.int
+                    b.int // pad
+                    repeat(filterValues) { readString(b) }
+                    error("kaya: file dialogs are not implemented on Compose yet")
+                }
                 APPLY_PRESENT_ALERT -> {
                     // The platform's REAL modal dialog (M3
                     // AlertDialog, rendered by KayaRoot off alertId);

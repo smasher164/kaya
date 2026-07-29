@@ -946,6 +946,13 @@ typedef struct KayaHostApi {
    */
   void (*emit_alert_result)(uint64_t, uint32_t);
   /**
+   * The picker's answer: parallel arrays of `count` NUL-terminated
+   * paths and names, or count 0 for cancel. Through the vtable like
+   * every other emission — a direct symbol dies on static-Rust and
+   * RTLD_LOCAL-Python hosts.
+   */
+  void (*emit_file_dialog_result)(uint64_t, const char*const *, const char*const *, uintptr_t);
+  /**
    * Navigation lifecycle emits: entry_popped after the user's back
    * affordance popped natively (the core's stack reconciles inside
    * this call), back_requested when the top entry's intercept_back
@@ -1123,6 +1130,23 @@ void kaya_emit_section_selected(uint64_t window, uint64_t section);
 void kaya_emit_back_requested(uint64_t entry);
 
 /**
+ * Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS
+ * SAFE FROM ANY THREAD, alongside kaya_wake.
+ *
+ * Returns 0 on success and writes `out_fd` plus `out_seekable`;
+ * returns the errno-shaped failure otherwise. The open is FALLIBLE in
+ * ways the pick is not: no picker on any platform lets you request
+ * write, so a read-only document refuses here rather than earlier, and
+ * that is the correct place — kaya surfaces the platform's answer and
+ * does not stand between the guest and the error.
+ *
+ * RESOLVE UNDER THE LOCK, RELEASE, THEN OPEN. The lock covers a map
+ * lookup; holding it across the open would serialize every concurrent
+ * open and undo the parallelism the guest created by spawning threads.
+ */
+int32_t kaya_open_picked(uint64_t handle, uint32_t mode, int32_t *out_fd, uint32_t *out_seekable);
+
+/**
  * Presentation side: the alert's one answer — an ALERT_CHOICE value
  * (an action index, or the cancel sentinel for every platform-native
  * dismissal). The alert id retires here. Exported on every platform
@@ -1132,7 +1156,28 @@ void kaya_emit_back_requested(uint64_t entry);
  * own core sink (alert_resolved is cfg'd out of existence there),
  * so on GTK/WinUI hosts this entry has no caller by construction
  * and panics loudly if one appears.
+ * Presentation side: the file picker's one answer. `paths` and `names`
+ * are parallel arrays of `count` NUL-terminated UTF-8 strings; an
+ * EMPTY count is cancel, which every platform reports the same way
+ * because none can confirm an empty selection.
+ *
+ * THE CORE MINTS THE HANDLES, not the backend: it wraps each path in a
+ * source, registers it, and hands the guest integers. On the desktops
+ * a path IS the capability, so `PathSource` is the whole story. The
+ * phones will register a source holding the platform object instead —
+ * Android has no path at all, and iOS has one that EPERMs the moment
+ * the security scope drops (measured) — which is exactly why the
+ * registration seam is a trait and not a string.
+ *
+ * # Safety
+ * `paths` and `names` must each point to `count` valid NUL-terminated
+ * UTF-8 strings that outlive the call.
  */
+void kaya_emit_file_dialog_result(uint64_t dialog,
+                                  const char *const *paths,
+                                  const char *const *names,
+                                  uintptr_t count);
+
 void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
 
 /**

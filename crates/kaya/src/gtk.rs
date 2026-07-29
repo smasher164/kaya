@@ -2581,6 +2581,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
 
+        ApplyOp::PresentFileDialog(_) => {
+            // DEPTH SLICE: the mac SwiftUI arm lands first (CLAUDE.md's
+            // sequencing). This backend compiles the vocabulary and
+            // refuses it loudly rather than silently doing nothing —
+            // check-stubs is what stops a runner wiring the scene's legs
+            // here while this stub stands.
+            panic!(
+                "kaya: file dialogs are not implemented on this backend yet — \
+                 the SwiftUI arm is the depth slice"
+            );
+        }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps
             // the vocabulary 1:1 (buttons in order, cancel-button

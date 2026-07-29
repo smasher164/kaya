@@ -679,6 +679,45 @@ pub fn decode_transaction_with_blobs(
                 }
                 TxOp::ShowAlert(AlertSpec { window, alert, title, message, actions, cancel })
             }
+            TX_SHOW_FILE_DIALOG => {
+                let window = WindowId(r.u64());
+                let dialog = crate::protocol::FileDialogId(r.u64());
+                let multiple = r.u32() != 0;
+                let _reserved = r.u32();
+                // Filters ride as one flat Values read IN PAIRS — label
+                // then extensions. Reading in groups is the whole
+                // encoding; a trailing half-pair is a broken binding, so
+                // it fails here rather than silently dropping a filter.
+                let flat = r.record();
+                assert!(
+                    flat.len() % 2 == 0,
+                    "kaya: show_file_dialog carries {} filter values (pairs of \
+                     label and extensions, so an even count)",
+                    flat.len()
+                );
+                let filters = flat
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let label = match &pair[0] {
+                            Value::Str(v) => v.clone(),
+                            other => panic!("kaya: filter label is {other:?}, wanted a string"),
+                        };
+                        let exts = match &pair[1] {
+                            Value::Str(v) => v.clone(),
+                            other => {
+                                panic!("kaya: filter extensions are {other:?}, wanted a string")
+                            }
+                        };
+                        (label, exts)
+                    })
+                    .collect();
+                TxOp::ShowFileDialog(crate::protocol::FileDialogSpec {
+                    window,
+                    dialog,
+                    multiple,
+                    filters,
+                })
+            }
             TX_PUSH_ENTRY => TxOp::PushEntry {
                 window: WindowId(r.u64()),
                 entry: WindowId(r.u64()),
@@ -806,6 +845,33 @@ pub(crate) fn alert_result_body(alert: AlertId, choice: AlertChoice) -> [u8; 16]
     let mut b = [0u8; 16];
     b[..8].copy_from_slice(&alert.0.to_le_bytes());
     b[8..12].copy_from_slice(&alert_choice_raw(choice).to_le_bytes());
+    b
+}
+
+/// The picker's answer on the wire: dialog id, count, reserved, then
+/// `count` files as THREE consecutive values each — I64 handle, Str
+/// name, Str local_path. The grouping IS the encoding; Values already
+/// carries "an entry's record", so no repeated-record field type is
+/// needed. Cancel is count zero.
+pub(crate) fn file_dialog_result_body(
+    dialog: crate::protocol::FileDialogId,
+    files: &[crate::protocol::PickedFile],
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&dialog.0.to_le_bytes());
+    b.extend_from_slice(&(files.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    // The Values encoding, written the production way (click_tag's
+    // shape): count, reserved, then each value. write_values is the
+    // guest-side encoder and is cfg(test) here, because in production
+    // the guest encodes and the core only decodes.
+    b.extend_from_slice(&((files.len() * 3) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for f in files {
+        write_value(&mut b, &Value::I64(f.handle.0 as i64), &mut Vec::new());
+        write_value(&mut b, &Value::Str(f.name.clone()), &mut Vec::new());
+        write_value(&mut b, &Value::Str(f.local_path.clone()), &mut Vec::new());
+    }
     b
 }
 
@@ -1071,6 +1137,20 @@ impl Writer {
                     write_value(b, &Value::Str(s), blobs);
                 }
             }),
+            ApplyOp::PresentFileDialog(spec) => {
+                self.record(APPLY_PRESENT_FILE_DIALOG, |b, blobs| {
+                    b.extend_from_slice(&spec.window.0.to_le_bytes());
+                    b.extend_from_slice(&spec.dialog.0.to_le_bytes());
+                    b.extend_from_slice(&u32::from(spec.multiple).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&((spec.filters.len() * 2) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for (label, exts) in &spec.filters {
+                        write_value(b, &Value::Str(label.clone()), blobs);
+                        write_value(b, &Value::Str(exts.clone()), blobs);
+                    }
+                })
+            }
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -1347,6 +1427,23 @@ impl Writer {
                 for s in alert_value_slots(spec) {
                     write_value(b, &Value::Str(s), blobs);
                 }
+            }),
+            TxOp::ShowFileDialog(spec) => self.record(TX_SHOW_FILE_DIALOG, |b, blobs| {
+                b.extend_from_slice(&spec.window.0.to_le_bytes());
+                b.extend_from_slice(&spec.dialog.0.to_le_bytes());
+                b.extend_from_slice(&u32::from(spec.multiple).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+                // Filters ride as alternating Str values, label then
+                // extensions — the Values encoding read in pairs, the
+                // same grouping trick the result uses in threes.
+                let flat: Vec<Value> = spec
+                    .filters
+                    .iter()
+                    .flat_map(|(label, exts)| {
+                        [Value::Str(label.clone()), Value::Str(exts.clone())]
+                    })
+                    .collect();
+                write_values(b, &flat, blobs);
             }),
             TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());

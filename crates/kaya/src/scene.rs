@@ -1087,6 +1087,28 @@ impl Scene {
                     crate::capi::alert_shown(spec.alert);
                     out.push(ApplyOp::PresentAlert(spec));
                 }
+                TxOp::ShowFileDialog(spec) => {
+                    assert!(
+                        spec.window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&spec.window),
+                        "kaya: show_file_dialog over unknown window {:?} — \
+                         create_window first (0 is the primary)",
+                        spec.window
+                    );
+                    for (label, _) in &spec.filters {
+                        assert!(
+                            !label.is_empty(),
+                            "kaya: show_file_dialog carries a filter with an \
+                             empty label — the label is what the picker shows"
+                        );
+                    }
+                    // Same liveness rule and the same reason as alerts:
+                    // process-global, freed by a result that arrives on
+                    // the presentation side, so the slot lives in capi's
+                    // singleton.
+                    crate::capi::file_dialog_shown(spec.dialog);
+                    out.push(ApplyOp::PresentFileDialog(spec));
+                }
                 TxOp::PushEntry { window, entry } => {
                     // No capability gate — every host materializes a
                     // serial stack natively (the deliberate contrast

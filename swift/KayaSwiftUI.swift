@@ -14,6 +14,7 @@
 // core concern.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants in
 // kaya.h (imported via the bridging header, but spelled here for use in
@@ -23,7 +24,7 @@ import SwiftUI
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xc1ceb0f03be1e512
+let kayaSpecHash: UInt64 = 0x4d40b317286880f6
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -36,6 +37,7 @@ private let applySetWindowProp: UInt16 = 8
 private let applyCreateWindow: UInt16 = 9
 private let applyDestroyWindow: UInt16 = 10
 private let applyPresentAlert: UInt16 = 11
+private let applyPresentFileDialog: UInt16 = 24
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -470,6 +472,76 @@ func kayaDiag(_ msg: String) {
             + "appWindows=[\(wins)]"
     }
 #endif
+/// Present the platform's real file picker and answer exactly once.
+///
+/// macOS is NSOpenPanel. `allowsMultiple` rides the request as a FLAG
+/// here; GTK and WinUI spell the same choice as a different METHOD and
+/// Android as a different CONTRACT — one field on the wire, four
+/// spellings under it.
+///
+/// THE ANSWER IS PATHS, and the core mints the handles from them. That
+/// works because a path IS the capability on this platform; iOS will
+/// hand over the security-scoped URL object instead, since its path
+/// EPERMs the moment the scope drops (measured — DESIGN.md, File
+/// dialogs). Cancel is an EMPTY list, faithfully: no platform can
+/// confirm an empty selection, so there is no sentinel to invent.
+func kayaPresentFileDialog(
+    window: UInt64, dialog: UInt64, allowsMultiple: Bool, extensions: [String]
+) {
+    #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = allowsMultiple
+        if !extensions.isEmpty {
+            // ADVISORY on every platform: the panel treats these as a
+            // default view, never a guarantee, so the guest still
+            // validates what it got.
+            panel.allowedContentTypes = extensions.compactMap {
+                UTType(filenameExtension: $0)
+            }
+        }
+        func answer(_ urls: [URL]) {
+            // strdup because the C side reads the strings during the
+            // call and nothing may outlive it; freed on the way out.
+            let pathBufs: [UnsafeMutablePointer<CChar>?] = urls.map { strdup($0.path) }
+            let nameBufs: [UnsafeMutablePointer<CChar>?] = urls.map {
+                strdup($0.lastPathComponent)
+            }
+            defer {
+                for b in pathBufs { free(b) }
+                for b in nameBufs { free(b) }
+            }
+            var paths: [UnsafePointer<CChar>?] = []
+            var names: [UnsafePointer<CChar>?] = []
+            for b in pathBufs { paths.append(b.map { UnsafePointer($0) }) }
+            for b in nameBufs { names.append(b.map { UnsafePointer($0) }) }
+            paths.withUnsafeBufferPointer { p in
+                names.withUnsafeBufferPointer { n in
+                    KayaHost.api.emit_file_dialog_result(
+                        dialog, p.baseAddress, n.baseAddress, UInt(urls.count))
+                }
+            }
+        }
+
+        if let host = kayaNSWindows[window] ?? NSApp.keyWindow {
+            panel.beginSheetModal(for: host) { response in
+                answer(response == .OK ? panel.urls : [])
+            }
+        } else {
+            panel.begin { response in
+                answer(response == .OK ? panel.urls : [])
+            }
+        }
+    #else
+        // iOS wants UIDocumentPickerViewController plus the
+        // security-scoped URL held object-side; that is the phone half
+        // of this milestone, not the depth slice.
+        _ = (window, allowsMultiple, extensions)
+        KayaHost.api.emit_file_dialog_result(dialog, nil, nil, 0)
+    #endif
+}
+
 
 /// Present an auxiliary surface AT-LEAST-ONCE. Belt, not the fix:
 /// the panels-java flake this was built for turned out to be the
@@ -911,6 +983,41 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaWindowDelegates.removeValue(forKey: wid)
                 #endif
                 kayaScene.windows.removeValue(forKey: wid)
+            case applyPresentFileDialog:
+                // The platform's REAL picker (NSOpenPanel), answered
+                // exactly once through kaya_emit_file_dialog_result —
+                // the chosen files, or an EMPTY list for cancel, which
+                // is how every platform reports it since none can
+                // confirm an empty selection.
+                let dialogWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let dialogId = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let allowsMultiple =
+                    raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self) != 0
+                let filterCount = Int(
+                    raw.loadUnaligned(fromByteOffset: body + 24, as: UInt32.self))
+                var fat = body + 32
+                func nextFilterStr() -> String {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: fat + 4, as: UInt32.self))
+                    let bytes = raw[(fat + 8)..<(fat + 8 + len)]
+                    fat += 8 + len
+                    if fat % 8 != 0 { fat += 8 - fat % 8 }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                // Read IN PAIRS: label then extensions. The grouping is
+                // the encoding.
+                var extensions: [String] = []
+                for _ in 0..<(filterCount / 2) {
+                    _ = nextFilterStr()  // the label, shown by the panel itself
+                    extensions.append(contentsOf:
+                        nextFilterStr().split(separator: " ").map {
+                            String($0).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                        })
+                }
+                kayaPresentFileDialog(
+                    window: dialogWindow,
+                    dialog: dialogId,
+                    allowsMultiple: allowsMultiple,
+                    extensions: extensions)
             case applyPresentAlert:
                 // The platform's REAL modal dialog (NSAlert sheet /
                 // UIAlertController), answered exactly once through

@@ -108,6 +108,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Occurrence::ButtonClicked { .. } | Occurrence::InstanceButtonClicked { .. } => {}
             Occurrence::AlertResult { .. }
+            | Occurrence::FileDialogResult { .. }
             | Occurrence::TextChanged { .. } | Occurrence::InstanceTextChanged { .. } => {}
             Occurrence::Toggled { .. } | Occurrence::InstanceToggled { .. } => {}
             Occurrence::ValueChanged { .. } | Occurrence::InstanceValueChanged { .. } => {}
