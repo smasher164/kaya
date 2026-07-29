@@ -196,6 +196,16 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
+/// The one spelling of "this backend has not reached that scene yet",
+/// matching Rust's `depth_stub`. check-stubs and check-steps read the
+/// CALL: a free-form sentence is a contract nobody can be made to spell,
+/// and the previous one went four milestones unwritten by any backend.
+private fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on this backend — " +
+            "it is a depth slice; see CLAUDE.md's sequencing",
+    )
+
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
     // The primary surface's properties. The title materializes as the
@@ -758,7 +768,7 @@ object KayaCompose {
                     val filterValues = b.int
                     b.int // pad
                     repeat(filterValues) { readString(b) }
-                    error("kaya: file dialogs are not implemented on Compose yet")
+                    depthStub("filedialog")
                 }
                 APPLY_PRESENT_ALERT -> {
                     // The platform's REAL modal dialog (M3
@@ -1170,6 +1180,54 @@ object KayaCompose {
 
     /// Drive the live picker's real controls. The sentinel's partner:
     /// nothing can be live, so there is nothing to drive.
+    /// The temp directory THE GUEST WILL USE, mirroring
+    /// KayaSwiftUI's kayaTempDir: `java.io.tmpdir` is what a JVM guest's
+    /// own file API returns, so both sides of one process land on the
+    /// same directory. The scene's whole premise is that they agree
+    /// without runner involvement, and that holds only if each side
+    /// computes it the way its own language does.
+    private fun kayaTempDir(): String =
+        System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/data/local/tmp"
+
+    /// `$TMP` and `$PID` in a scene path — the same vocabulary
+    /// KayaSwiftUI expands, enforced across both by check-verbs. An
+    /// interpreter that leaves a token alone uses it as a LITERAL path
+    /// segment, which is a directory that cannot exist, and a picker
+    /// pointed at one silently shows somewhere else (docs/traps.md).
+    ///
+    /// WHOLE NAMES, not prefixes: replacing "$TMP" by text also eats the
+    /// front of "$TMPDIR" and leaves "<tmp>DIR", a path wrong in a way
+    /// that reads as the scene author's typo rather than the expander's.
+    private fun kayaExpandPath(path: String): String {
+        val known = mapOf("TMP" to kayaTempDir(), "PID" to android.os.Process.myPid().toString())
+        val out = StringBuilder()
+        var i = 0
+        while (i < path.length) {
+            if (path[i] != '$') {
+                out.append(path[i])
+                i += 1
+                continue
+            }
+            var end = i + 1
+            while (end < path.length && (path[end].isUpperCase() || path[end] == '_')) {
+                end += 1
+            }
+            val name = path.substring(i + 1, end)
+            out.append(known[name] ?: "$" + name)
+            i = end
+        }
+        return out.toString()
+    }
+
+    private fun kayaFileDialogGoto(path: String) {
+        // Nothing can be live here until Android's picker arm lands, but
+        // the expansion is interpreter infrastructure and exists now —
+        // the same reason this file carries wire constants for records
+        // it does not yet handle.
+        val resolved = kayaExpandPath(path)
+        check(resolved.isEmpty() || resolved.isNotEmpty())
+    }
+
     private fun kayaFileDialogDrive(name: String) {
         check(name.isEmpty() || name.isNotEmpty())
     }
@@ -1696,6 +1754,7 @@ object KayaCompose {
                             val (where, rows) = state
                             val missing = wantNames.firstOrNull { !rows.contains(it) }
                             when {
+                                wantDir.isEmpty() -> observed.add("file dialog live")
                                 !where.endsWith(wantDir) ->
                                     failures.add(
                                         "file dialog showing \"$where\", wanted \"$wantDir\""
@@ -1707,6 +1766,11 @@ object KayaCompose {
                                 else -> observed.add("file dialog \"$wantDir\" $wantNames")
                             }
                         }
+                    }
+                    "file_dialog_goto" -> {
+                        // Silent like click. Nothing can be live here
+                        // until Android's picker arm lands.
+                        kayaFileDialogGoto(parts.getOrNull(1) ?: "")
                     }
                     "file_choose" -> {
                         // Silent like click: the observable is the

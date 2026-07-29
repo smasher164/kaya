@@ -1717,3 +1717,68 @@ a sourced library that had never been linted at all. And when writing
 that fix: a comment line STARTING with `# shellcheck` is parsed as a
 directive rather than prose, so a sentence that happens to begin with
 the tool's name fails the gate with a parse error about a missing `=`.
+
+## check-targets is blind to exactly one backend
+
+`gtk-sys` needs the distro's pkg-config world, so check-targets cannot
+cross-compile the GTK backend — only check-gtk (docker) compiles it, and
+CLAUDE.md therefore says to run check-gtk after any gtk.rs change. That
+is an instruction someone has to remember, and it failed the first time
+it mattered: the file-dialog slice added three `Stage` methods, mac and
+windows compiled, every fast gate went green, and the linux lane died on
+`not all trait items implemented, missing: goto_directory`. A whole
+matrix run to learn a one-word fact.
+
+check-targets now also reads the `Stage` trait and each backend's impl
+as TEXT and requires every method with no default body to appear.
+Weaker than compiling — it cannot see a wrong signature — and that is
+the trade: no docker, runs with the fast gates, catches the class that
+actually escaped. check-gtk still compiles the real thing.
+
+The general shape is worth keeping: when a gate is structurally unable
+to cover one member of a set it otherwise covers, the gap does not
+announce itself. Everything is green and one platform is simply not
+being asked. Give the uncovered member a cheaper check rather than an
+instruction in a document.
+
+## Two more vocabularies nobody was counting
+
+The file-dialog slice needed a `$TMP`/`$PID` expansion in scene paths,
+and it went into KayaSwiftUI.swift only. Nothing said so. Verbs and wire
+constants are checked across both interpreters by check-verbs precisely
+because that layer is where "landed everywhere except..." lives — but
+SUBSTITUTIONS were a third vocabulary on the same layer, and an
+interpreter that does not expand a token uses it as a literal path
+segment: a directory that cannot exist, which on macOS means the picker
+quietly shows its last-used location instead. Wiring the scene onto
+android would have shipped exactly that. check-verbs now reads every
+`$TOKEN` out of tools/scenes/*.steps and requires an expansion in both
+interpreters, the same way it requires the verbs.
+
+The second one is about the gate cache. tools/keyed.sh skips a gate
+whose declared inputs have not moved, so a file a gate READS but does
+not DECLARE is a false-PASS generator that misfires exactly when that
+file is what changed. check-steps was declared `["guests"]` from the day
+it was written; it later grew a rule reading all four backends, and
+removing a depth-stub declaration — the edit that makes its missing legs
+a real failure — would have re-run nothing. That was caught by hand,
+which is not a mechanism. check-keyed now reads each gate's script for
+repo paths it names in code and requires the declared set to cover them.
+
+TWO ROUNDS OF FALSE POSITIVES ON THE WAY, both the same mistake: prose
+mentioning a path is not a gate reading it. Comments citing CLAUDE.md
+for the reasoning behind a rule, then `echo` messages citing
+docs/traps.md the same way. The rule that separates them is that a
+quoted string with a SPACE in it is a message; a path in a read position
+is a bare word or a quoted string of just the path. It gives up paths
+built at runtime, which is the honest limit of reading a script rather
+than running it.
+
+And the general shape behind both: a gate that string-matches should say
+HOW MUCH it matched, and refuse a count that cannot be right. check-verbs
+prints "43 verbs, 73 constants"; check-sugar-surface bails if the kind
+list comes back empty. Auditing the rest after the check-stubs vacuity
+turned up no third case — check-abort builds and runs real artifacts,
+check-ambient-tx self-tests both directions — but check-stubs went four
+milestones on a convention no backend ever wrote, so the audit is worth
+repeating whenever a gate's verdict rests on finding a literal.

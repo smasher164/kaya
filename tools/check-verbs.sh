@@ -55,6 +55,33 @@ for verb in verbs:
         if f'"{verb}"' not in text:
             fail(f'verb "{verb}" missing from {name}')
 
+# --- Scene substitutions: the THIRD vocabulary. ----------------------
+# Verbs and wire constants are not the only thing the interpreters
+# mirror. A scene path may carry `$TMP` or `$PID`, and an interpreter
+# that does not expand a token uses it as a LITERAL PATH SEGMENT — a
+# directory that cannot exist, which on macOS means the picker quietly
+# falls back to its last-used location and the scene asserts against
+# whatever that was (docs/traps.md). Silent on every platform.
+#
+# When this was written the expansion lived in KayaSwiftUI.swift ALONE,
+# and nothing anywhere said so; wiring the filedialog scene onto android
+# would have shipped the literal. Same shape as the verbs above, same
+# reason: the interpreters are the historic miss layer.
+subs = sorted(
+    set(
+        tok
+        for f in pathlib.Path("tools/scenes").glob("*.steps")
+        for tok in re.findall(r"\$([A-Z_]+)", f.read_text())
+    )
+)
+for sub in subs:
+    for name, text in (("KayaSwiftUI.swift", swift), ("KayaCompose.kt", kotlin)):
+        if f'"{sub}"' not in text:
+            fail(
+                f'scene substitution "${sub}" has no expansion in {name} — '
+                f"it would be used as a literal path segment"
+            )
+
 # --- Wire constants the interpreters mirror privately. ---------------
 # APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
 # types reachable through the spec's PROPS PropKinds (the scene's prop

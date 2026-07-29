@@ -29,8 +29,14 @@ fi
 # carries legs for a scene, the runner's backend must not stub that
 # scene's feature.
 #
-# The stub string is the contract: spell depth-slice stubs as
-# "<scene> is not yet materialized" and this gate holds the line.
+# THE STUB IS A CALL, NOT A SENTENCE: `depth_stub("<scene>")` in Rust,
+# `depthStub("<scene>")` in Kotlin. It was a free-form string for four
+# milestones and NOT ONE BACKEND EVER SPELLED IT — so this gate could
+# only ever pass, and the filedialog depth slice sailed straight through
+# it with three backends refusing loudly in three different sentences. A
+# gate satisfiable without exercising the real thing is a bug in the gate
+# (CLAUDE.md, invariant 4). hand_rolled() below is what keeps it honest:
+# a stub the gate cannot see is now itself a failure.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -38,16 +44,26 @@ cd "$ROOT" || exit 1
 
 status=0
 
+# Does this backend declare a depth stub for this scene? Matched on the
+# SUFFIX of the name, because each language keeps its own casing and
+# prefix: `depth_stub` in Rust, `depthStub` in Kotlin, `kayaDepthStub`
+# in Swift (whose file-scope functions are all kaya-prefixed to keep
+# them out of the host's symbol space). check-steps greps the same way.
+stubbed() {
+    grep -qF -e "epth_stub(\"$1\")" -e "epthStub(\"$1\", on: \"$3\")" \
+        -e "epthStub(\"$1\")" "$2"
+}
+
 # check <runner> <leg-pattern-prefix> <backend file>: if the runner
 # wires legs for a scene, the backend must not stub it.
 check() {
-    local runner="$1" backend="$2" scene stub
+    local runner="$1" backend="$2" platform="${3:-}" scene stub
     for steps in tools/scenes/*.steps; do
         scene="$(basename "${steps%.steps}")"
-        stub="$scene is not yet materialized"
+        stub="depth_stub(\"$scene\")"
         if grep -qE "\b${scene}[-_](rust|python|go|csharp|java|swift|ocaml|haskell|compose|jvm|swiftui)" "$runner" \
-            && grep -q "$stub" "$backend"; then
-            echo "check-stubs: $runner wires '$scene' legs but $backend still stubs it (\"$stub\")" >&2
+            && stubbed "$scene" "$backend" "$platform"; then
+            echo "check-stubs: $runner wires '$scene' legs but $backend still stubs it ($stub)" >&2
             status=1
         fi
     done
@@ -55,8 +71,8 @@ check() {
 
 check tools/linux/run-suites.sh       crates/kaya/src/gtk.rs
 check tools/deploy-win.sh             crates/kaya/src/winui/mod.rs
-check tools/validate-mac.sh           swift/KayaSwiftUI.swift
-check tools/ios/run-sim.sh            swift/KayaSwiftUI.swift
+check tools/validate-mac.sh           swift/KayaSwiftUI.swift macos
+check tools/ios/run-sim.sh            swift/KayaSwiftUI.swift ios
 check tools/android/run-emulator.sh   android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt
 
 # The guard guards itself: a synthesized wired-and-stubbed pair must
@@ -67,14 +83,14 @@ self_test() {
     mkdir -p "$dir/tools/scenes"
     echo "settle 1" >"$dir/tools/scenes/fakescene.steps"
     echo "run fakescene-rust something" >"$dir/runner.sh"
-    echo 'unimplemented!("kaya: fakescene is not yet materialized on this backend")' >"$dir/backend.rs"
+    echo 'crate::depth_stub("fakescene");' >"$dir/backend.rs"
     local out
     out="$(cd "$dir" && bash -c '
         status=0
         for steps in tools/scenes/*.steps; do
             scene="$(basename "${steps%.steps}")"
-            stub="$scene is not yet materialized"
-            if grep -qE "\b${scene}[-_](rust|python)" runner.sh && grep -q "$stub" backend.rs; then
+            if grep -qE "\b${scene}[-_](rust|python)" runner.sh \
+                && grep -qF "depth_stub(\"$scene\")" backend.rs; then
                 status=1
             fi
         done
@@ -87,6 +103,14 @@ self_test() {
     fi
 }
 self_test
+
+# THE VACUITY GUARD. The rule above only sees stubs spelled as the call,
+# so a backend that refuses in its own words is invisible to it — which
+# is exactly what all three filedialog arms did. Any not-implemented
+# refusal in a backend must go through the helper.
+if ! python3 tools/lib/hand-rolled-stubs.py; then
+    status=1
+fi
 
 if [ "$status" -ne 0 ]; then
     exit 1

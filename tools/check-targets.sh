@@ -66,5 +66,18 @@ check ios --target aarch64-apple-ios
 check android --target aarch64-linux-android
 check windows --target aarch64-pc-windows-msvc
 
+# LINUX IS THE HOLE IN THE ABOVE. gtk-sys needs the distro's pkg-config
+# world, so this gate cannot cross-compile the GTK backend at all and
+# check-gtk (docker) is the only thing that compiles it — which makes
+# "run check-gtk after touching gtk.rs" an instruction someone has to
+# remember. It failed the first time it mattered: the file-dialog slice
+# added three Stage methods, mac and windows compiled, this gate went
+# green, and the linux lane died on `missing: goto_directory`. The text
+# check below cannot see a wrong signature, but it sees the class that
+# escaped, in a second, with no docker.
+if ! python3 tools/lib/stage-coverage.py; then
+    status=1
+fi
+
 if [ "$status" = 0 ]; then echo "check-targets: ALL OK"; else echo "check-targets: FAILURES ABOVE"; fi
 exit "$status"

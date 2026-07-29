@@ -73,7 +73,8 @@ pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind,
     MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId, TemplateNodeId,
-    Value, ValueType, WidgetId, WidgetKind, WindowId,
+    FileDialogId, FileMode, PickedFile, PickedId, Value, ValueType, WidgetId, WidgetKind,
+    WindowId,
 };
 
 #[cfg(target_os = "windows")]
@@ -102,6 +103,28 @@ pub(crate) mod backend {
     target_os = "ios",
     target_os = "android"
 ))]
+/// The one spelling of "this backend has not reached that scene yet".
+///
+/// Depth slices legitimately leave a backend behind (CLAUDE.md's
+/// sequencing: protocol + one backend + one binding, then fan out), and
+/// two gates read that state — check-stubs refuses a runner that wires a
+/// scene's legs while its backend is still here, and check-steps stops
+/// demanding those legs. BOTH READ THE CALL, not a sentence, because a
+/// sentence is a contract nobody can be made to spell: the convention
+/// was a free-form string for four milestones and not one backend ever
+/// wrote it, so check-stubs could only ever pass. A call names the scene
+/// in an argument the compiler already checks the shape of.
+// WHICH backends call this is a per-target question — gtk.rs only
+// compiles on linux, winui only on windows — so on any given build most
+// callers are cfg'd out and a live helper looks dead.
+#[allow(dead_code)]
+pub(crate) fn depth_stub(scene: &str) -> ! {
+    panic!(
+        "kaya: the {scene} scene is not yet materialized on this backend — \
+         it is a depth slice; see CLAUDE.md's sequencing"
+    )
+}
+
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
     
 

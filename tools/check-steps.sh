@@ -316,12 +316,46 @@ done
 # (iOS and Android stay name-level: their legs derive mechanically
 # from the scene list, so the name IS the wiring — except the scenes
 # each platform deliberately skips, carved out below.)
+#
+# EXCEPT where the backend says it has not got there yet. A depth slice
+# lands protocol + one backend + one binding first (CLAUDE.md's
+# sequencing), and the backends left behind declare it with
+# `depth_stub("<scene>")` — the same call check-stubs reads from the
+# other side. The two gates then state one rule between them: a scene's
+# legs are wired on a runner IF AND ONLY IF that runner's backend has
+# the feature. Neither half can be skipped, and the interim state of a
+# depth slice is expressible without turning either off. The exemption
+# costs a DECLARATION in the backend source, so the layout class this
+# gate was written for — green on mac, absent from every suite, nobody
+# having declared anything — is untouched.
 wired() {
-    local runner scene sig status=0
+    local runner scene sig backend platform=macos status=0
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
         for runner in tools/validate-mac.sh tools/linux/run-suites.sh \
             tools/deploy-win.sh tools/ios/run-sim.sh tools/android/run-emulator.sh; do
+            case "$runner" in
+                tools/linux/run-suites.sh) backend=crates/kaya/src/gtk.rs ;;
+                tools/deploy-win.sh) backend=crates/kaya/src/winui/mod.rs ;;
+                tools/android/run-emulator.sh)
+                    backend=android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt ;;
+                # One file, two platforms — hence the platform argument
+                # on the Swift declaration and nowhere else.
+                tools/ios/run-sim.sh) backend=swift/KayaSwiftUI.swift; platform=ios ;;
+                *) backend=swift/KayaSwiftUI.swift; platform=macos ;;
+            esac
+            # Suffix match: each language keeps its own casing and
+            # prefix (depth_stub / depthStub / kayaDepthStub).
+            # The three spellings: Rust's snake_case, Swift's
+            # platform-qualified one (this file serves mac AND iOS), and
+            # Kotlin's bare one. The bare pattern cannot match the
+            # qualified call — a comma follows the scene there, not a
+            # paren — so mac never reads iOS's declaration as its own.
+            if grep -qF -e "epth_stub(\"$scene\")" \
+                -e "epthStub(\"$scene\", on: \"$platform\")" \
+                -e "epthStub(\"$scene\")" "$backend"; then
+                continue
+            fi
             case "$runner" in
                 tools/validate-mac.sh) sig="run $scene-" ;;
                 tools/linux/run-suites.sh) sig="run \"\$proto\" $scene-" ;;

@@ -98,7 +98,11 @@ in docs/deferred.md.
    `tools/check-targets.sh` (cross-compiles every cfg'd backend, in BOTH
    feature configurations — it once reported "windows OK" while the
    windows lane failed to build the WinUI accessibility read, which
-   only the harness config compiles),
+   only the harness config compiles. LINUX IS ITS HOLE, since gtk-sys
+   needs the distro's pkg-config world, so it also text-checks that every
+   backend's Stage impl names every required trait method: a trait method
+   missed in gtk.rs alone used to survive every fast gate and die in the
+   matrix),
    `tools/check-sugar-surface.sh` (every widget kind has a live-zone
    constructor in all 8 bindings, AND every window prop has a sugar
    spelling in all 8 — the generic floor spells a prop without the
@@ -115,7 +119,16 @@ in docs/deferred.md.
    stamped-observation rule),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
-   only this cross-check sees the combination),
+   only this cross-check sees the combination. A DEPTH STUB IS A CALL,
+   `depth_stub("<scene>")` / `depthStub` / `kayaDepthStub(_:on:)`, never
+   a sentence: as a free-form string the convention went four milestones
+   unwritten by any backend, so the gate could only ever pass, and a
+   companion check now fails any backend that refuses in its own words.
+   check-steps reads the same call from the other side and stops
+   demanding those legs, so between them the two state one rule: a
+   scene's legs are wired on a runner IF AND ONLY IF that runner's
+   backend has the feature. The Swift declaration names its platform,
+   because that one file serves mac AND iOS),
    `tools/check-compose.sh` (KayaCompose.kt actually compiles — the
    swift-typecheck sibling; the emulator must never be the first
    compiler to see the Kotlin layer),

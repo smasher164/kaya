@@ -85,7 +85,12 @@ GATES = {
     "gen-header": ["crates", "Cargo.toml", "Cargo.lock"],
     "gen-bindings": ["crates", "bindings"],
     "gen-guests": ["crates", "bindings", "guests"],
-    "check-steps": ["guests"],
+    # The backends are inputs because check-steps stops demanding a
+    # runner's legs where that runner's backend declares a depth stub —
+    # so REMOVING a declaration is what makes the missing legs a failure,
+    # and a key that did not read the backends would hand back the stale
+    # PASS exactly then.
+    "check-steps": ["guests", "crates", "swift", "android"],
     "check-shell": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
     "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo"],

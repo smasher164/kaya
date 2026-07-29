@@ -121,6 +121,16 @@ for name in $wrapped; do
     fi
 done
 
+# A gate that READS a file it does not DECLARE is a false-PASS machine
+# under KAYA_FAST, and it misfires exactly when the undeclared file is
+# what changed. check-steps was declared ["guests"] from birth, then grew
+# a rule reading all four backends; removing a depth-stub declaration —
+# the edit that makes its missing legs a real failure — would have
+# re-run nothing. Caught by hand once, which is not a mechanism.
+if ! python3 tools/lib/keyed-inputs.py; then
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-keyed: OK ($(echo "$wrapped" | wc -w | tr -d ' ') gates keyed)"
 else
