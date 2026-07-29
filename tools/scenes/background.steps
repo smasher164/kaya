@@ -1,14 +1,20 @@
 # The background scene: work off the app thread, posted back
 # (DESIGN.md's threading model; docs/background-work-plan.md).
 #
-# THE DESIGN PRINCIPLE, and why the script looks like this: a wrong
-# implementation must DEADLOCK, not merely disagree. The worker parks
-# until a CLICK releases it, and only a live app thread can process a
-# click — so a binding that let background work occupy the app thread
-# cannot reach the end of this file at all. It could not even deliver
-# its own release. That is much stronger than reading back a different
-# value, and it is what stops the scene passing for an implementation
-# that simply blocked.
+# THE DESIGN PRINCIPLE, and why the script looks like this: the worker
+# parks until a CLICK releases it, and only a live app thread can
+# process a click — so a binding that let background work occupy the app
+# thread WEDGES, and every assertion below the park fails at once.
+#
+# IT DOES NOT DEADLOCK, which this comment claimed until someone built
+# that guest and ran it (2026-07-29). Every expect here is a bounded
+# retry with its own deadline, so the scene always reaches the end and
+# always reports; the wrong implementation exits 1 with six failures
+# rather than hanging. That is a better outcome than a hang — a precise
+# message in twenty seconds instead of a timeout — but it is not what
+# the words said, and a discriminator nobody has fired is a hope. The
+# CASCADE is the real signature: an implementation that is merely slow
+# fails one assertion, while a wedged app thread fails all of them.
 #
 # NO NEW VERBS, deliberately: `click` and `expect` carry all of it, and
 # every new verb costs an arm in BOTH interpreters.
