@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc1ceb0f03be1e512L
+let spec_hash = 0x4d40b317286880f6L
 
 let value_bool = 1
 let value_i64 = 2
@@ -80,6 +80,9 @@ let sections_presentation_sidebar = 2
 let alert_choice_action0 = 0
 let alert_choice_action1 = 1
 let alert_choice_cancel = 4294967295
+let file_mode_read = 0
+let file_mode_write = 1
+let file_mode_read_write = 2
 let align_start = 0
 let align_center = 1
 let align_end = 2
@@ -128,6 +131,7 @@ let tx_kind_menubar_append = 30
 let tx_kind_context_attach = 31
 let tx_kind_context_attach_node = 32
 let tx_kind_set_menu_prop = 33
+let tx_kind_show_file_dialog = 34
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -151,6 +155,7 @@ let apply_kind_menubar_append = 20
 let apply_kind_context_attach = 21
 let apply_kind_context_attach_node = 22
 let apply_kind_set_menu_prop = 23
+let apply_kind_present_file_dialog = 24
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -164,6 +169,7 @@ let occ_kind_section_selected = 10
 let occ_kind_menu_activated = 11
 let occ_kind_menu_toggled = 12
 let occ_kind_menu_value_changed = 13
+let occ_kind_file_dialog_result = 14
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -434,6 +440,15 @@ let tx_set_menu_prop item prop source =
       Buffer.add_int64_le b item;
       Buffer.add_int32_le b (Int32.of_int prop);
       Buffer.add_int32_le b (Int32.of_int source))
+
+(* Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. *)
+let tx_show_file_dialog window dialog multiple filters =
+  finish tx_kind_show_file_dialog (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b dialog;
+      Buffer.add_int32_le b (Int32.of_int multiple);
+      Buffer.add_int32_le b 0l;
+      encode_values b filters)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1150,7 +1165,7 @@ let parse_value byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

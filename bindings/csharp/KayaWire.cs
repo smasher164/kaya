@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc1ceb0f03be1e512;
+    public const ulong SpecHash = 0x4d40b317286880f6;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -77,6 +77,9 @@ static class KayaWire
     public const uint AlertChoiceAction0 = 0;
     public const uint AlertChoiceAction1 = 1;
     public const uint AlertChoiceCancel = 4294967295;
+    public const uint FileModeRead = 0;
+    public const uint FileModeWrite = 1;
+    public const uint FileModeReadWrite = 2;
     public const uint AlignStart = 0;
     public const uint AlignCenter = 1;
     public const uint AlignEnd = 2;
@@ -125,6 +128,7 @@ static class KayaWire
     public const ushort TxKindContextAttach = 31;
     public const ushort TxKindContextAttachNode = 32;
     public const ushort TxKindSetMenuProp = 33;
+    public const ushort TxKindShowFileDialog = 34;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -148,6 +152,7 @@ static class KayaWire
     public const ushort ApplyKindContextAttach = 21;
     public const ushort ApplyKindContextAttachNode = 22;
     public const ushort ApplyKindSetMenuProp = 23;
+    public const ushort ApplyKindPresentFileDialog = 24;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -161,6 +166,7 @@ static class KayaWire
     public const ushort OccKindMenuActivated = 11;
     public const ushort OccKindMenuToggled = 12;
     public const ushort OccKindMenuValueChanged = 13;
+    public const ushort OccKindFileDialogResult = 14;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -548,6 +554,18 @@ static class KayaWire
         w.Write(prop);
         w.Write(source);
         return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
+    public static byte[] TxShowFileDialog(ulong window, ulong dialog, uint multiple, object[] filters)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(dialog);
+        w.Write(multiple);
+        w.Write(0u);
+        EncodeValues(w, filters);
+        return Finish(stream, w, TxKindShowFileDialog);
     }
 
     /// set_property with a constant text value.
@@ -1227,7 +1245,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

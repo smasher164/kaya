@@ -58,6 +58,7 @@ pub const TX_MENUBAR_APPEND: u16 = 30;
 pub const TX_CONTEXT_ATTACH: u16 = 31;
 pub const TX_CONTEXT_ATTACH_NODE: u16 = 32;
 pub const TX_SET_MENU_PROP: u16 = 33;
+pub const TX_SHOW_FILE_DIALOG: u16 = 34;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -83,6 +84,7 @@ pub const APPLY_MENUBAR_APPEND: u16 = 20;
 pub const APPLY_CONTEXT_ATTACH: u16 = 21;
 pub const APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
 pub const APPLY_SET_MENU_PROP: u16 = 23;
+pub const APPLY_PRESENT_FILE_DIALOG: u16 = 24;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -176,6 +178,13 @@ pub const EPROP_INTERCEPT_BACK: u32 = 2;
 pub const ALERT_CHOICE_ACTION0: u32 = 0;
 pub const ALERT_CHOICE_ACTION1: u32 = 1;
 pub const ALERT_CHOICE_CANCEL: u32 = u32::MAX;
+
+/// What kaya_open_picked opens a handle for (spec enum "file_mode").
+/// Three modes cover every platform; writability is DISCOVERABLE but
+/// never REQUESTABLE, so the open is fallible in ways the pick is not.
+pub const FILE_MODE_READ: u32 = 0;
+pub const FILE_MODE_WRITE: u32 = 1;
+pub const FILE_MODE_READ_WRITE: u32 = 2;
 
 /// The align enum's wire values (spec enum "align").
 pub const ALIGN_START: u32 = 0;

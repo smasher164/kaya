@@ -38,6 +38,9 @@ pub const REC_SECTION_SELECTED: u16 = 10;
 pub const REC_MENU_ACTIVATED: u16 = 11;
 pub const REC_MENU_TOGGLED: u16 = 12;
 pub const REC_MENU_VALUE_CHANGED: u16 = 13;
+/// The picker's one answer: `count` files, each three consecutive
+/// values — I64 handle, Str name, Str local_path. Cancel is count zero.
+pub const REC_FILE_DIALOG_RESULT: u16 = 14;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

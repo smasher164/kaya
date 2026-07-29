@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xc1ceb0f03be1e512ULL
+#define KAYA_SPEC_HASH 0x4d40b317286880f6ULL
 
 
 /* Create a signal holding `initial`. */
@@ -421,6 +421,17 @@ static inline void kaya_tx_set_menu_prop(KayaTx *tx, uint64_t item, uint32_t pro
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, start);
+}
+
+/* Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
+static inline void kaya_tx_show_file_dialog(KayaTx *tx, uint64_t window, uint64_t dialog, uint32_t multiple, const KayaVal *filters, uint32_t filters_len) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_SHOW_FILE_DIALOG);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, dialog);
+    kaya_wire_u32(tx, multiple);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, filters, filters_len);
     kaya_wire_end(tx, start);
 }
 

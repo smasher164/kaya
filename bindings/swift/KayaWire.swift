@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xc1ceb0f03be1e512
+let kayaSpecHash: UInt64 = 0x4d40b317286880f6
 
 struct KayaTx {
     var bytes = Data()
@@ -371,6 +371,17 @@ struct KayaTx {
         self.u64(item)
         self.u32(prop)
         self.u32(source)
+        self.end(start)
+    }
+
+    /// Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
+    mutating func showFileDialog(_ window: UInt64, _ dialog: UInt64, _ multiple: UInt32, _ filters: [KayaValue]) {
+        let start = self.begin(UInt16(KAYA_TX_SHOW_FILE_DIALOG))
+        self.u64(window)
+        self.u64(dialog)
+        self.u32(multiple)
+        self.u32(0)
+        self.values(filters)
         self.end(start)
     }
 
@@ -1228,6 +1239,7 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_MENU_ACTIVATED)
             || kind == UInt16(KAYA_OCCURRENCE_MENU_TOGGLED)
             || kind == UInt16(KAYA_OCCURRENCE_MENU_VALUE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {

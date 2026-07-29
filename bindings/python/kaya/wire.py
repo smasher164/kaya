@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xc1ceb0f03be1e512
+SPEC_HASH = 0x4d40b317286880f6
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -75,6 +75,9 @@ SECTIONS_PRESENTATION_SIDEBAR = 2
 ALERT_CHOICE_ACTION0 = 0
 ALERT_CHOICE_ACTION1 = 1
 ALERT_CHOICE_CANCEL = 4294967295
+FILE_MODE_READ = 0
+FILE_MODE_WRITE = 1
+FILE_MODE_READ_WRITE = 2
 ALIGN_START = 0
 ALIGN_CENTER = 1
 ALIGN_END = 2
@@ -124,6 +127,7 @@ TX_MENUBAR_APPEND = 30
 TX_CONTEXT_ATTACH = 31
 TX_CONTEXT_ATTACH_NODE = 32
 TX_SET_MENU_PROP = 33
+TX_SHOW_FILE_DIALOG = 34
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -147,6 +151,7 @@ APPLY_MENUBAR_APPEND = 20
 APPLY_CONTEXT_ATTACH = 21
 APPLY_CONTEXT_ATTACH_NODE = 22
 APPLY_SET_MENU_PROP = 23
+APPLY_PRESENT_FILE_DIALOG = 24
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -160,6 +165,7 @@ OCC_SECTION_SELECTED = 10
 OCC_MENU_ACTIVATED = 11
 OCC_MENU_TOGGLED = 12
 OCC_MENU_VALUE_CHANGED = 13
+OCC_FILE_DIALOG_RESULT = 14
 
 
 def _pad(b):
@@ -340,6 +346,10 @@ def tx_context_attach_node(node, item):
 def tx_set_menu_prop(item, prop, source):
     """Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier."""
     return record(TX_SET_MENU_PROP, struct.pack("<Q", item) + struct.pack("<I", prop) + struct.pack("<I", source))
+
+def tx_show_file_dialog(window, dialog, multiple, filters):
+    """Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got."""
+    return record(TX_SHOW_FILE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", multiple) + struct.pack("<I", 0) + _enc.values(filters))
 
 
 def tx_set_text(widget_id, text):
@@ -778,7 +788,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).

@@ -735,6 +735,30 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   of a signal-bound value is validated on the COMPLETE \
                   coalesced value at the transaction barrier.",
         },
+        Record {
+            kind: 34,
+            name: "show_file_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("multiple", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("filters", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Request the platform's file picker over a live window \
+                  (0 = primary), on the alert's request/result grammar \
+                  (DESIGN.md, File dialogs). Dialog ids are guest-chosen; \
+                  one dialog may be live per process, and the id retires \
+                  when its result fires. `multiple` is 0 or 1 — every \
+                  backend supports both, spelled four ways (a flag on \
+                  SwiftUI and AppKit, a different METHOD on GTK and \
+                  WinUI, a different CONTRACT on Android). `filters` is \
+                  advisory and rides as alternating Str values, a label \
+                  then its space-separated extensions: every platform \
+                  treats them as a default view rather than a guarantee, \
+                  so the guest still validates what it got.",
+        },
     ],
     apply: &[
         Record {
@@ -976,6 +1000,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Set a menu property to an already-resolved value.",
         },
+        Record {
+            kind: 24,
+            name: "present_file_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("multiple", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("filters", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Present the platform's real file picker over the window \
+                  (SHOW_FILE_DIALOG, already validated by the core). The \
+                  presentation answers with kaya_emit_file_dialog_result \
+                  exactly once — the chosen files, or an EMPTY list for \
+                  cancel.",
+        },
     ],
     occurrence: &[
         Record {
@@ -1149,6 +1190,31 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   group. User picks only emit; a programmatic value write \
                   never echoes.",
         },
+        Record {
+            kind: 14,
+            name: "file_dialog_result",
+            fields: &[
+                f("dialog", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("files", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The picker's one answer: `count` files, each three \
+                  consecutive values in `files` — an I64 handle, a Str \
+                  display name, and a Str `local_path`. THE GROUPING IS \
+                  THE ENCODING: Values already carries \"an entry's \
+                  record\", so N files ride one flat list read in threes \
+                  rather than needing a repeated-record field type. \
+                  CANCEL IS COUNT ZERO, faithfully — no platform can \
+                  confirm an empty selection, so the empty list needs no \
+                  sentinel (contrast alert_choice, where dismissal is not \
+                  an action index). `local_path` is a RE-OPENABLE NAME, \
+                  empty unless re-opening it actually works — measured \
+                  EPERM on iOS once the security scope drops, so it is \
+                  empty on both phones. The handle is redeemed with \
+                  kaya_open_picked; the dialog id retires here.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -1258,6 +1324,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("action1", 1),
                 ("cancel", 4294967295),
             ],
+        },
+        EnumSpec {
+            // What kaya_open_picked opens a handle for. Three modes
+            // cover every platform: Android takes them as the mode
+            // string of openFileDescriptor, WinUI as FileAccessMode,
+            // iOS and the desktops as ordinary open flags. Writability
+            // is DISCOVERABLE but not REQUESTABLE — no open picker on
+            // any platform takes an access mode — so the open is
+            // fallible in ways the pick is not.
+            name: "file_mode",
+            variants: &[("read", 0), ("write", 1), ("read_write", 2)],
         },
         EnumSpec {
             name: "align",
@@ -1433,6 +1510,7 @@ mod tests {
             ("context_attach", wire::TX_CONTEXT_ATTACH),
             ("context_attach_node", wire::TX_CONTEXT_ATTACH_NODE),
             ("set_menu_prop", wire::TX_SET_MENU_PROP),
+            ("show_file_dialog", wire::TX_SHOW_FILE_DIALOG),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -1469,6 +1547,7 @@ mod tests {
                 ("context_attach", wire::APPLY_CONTEXT_ATTACH),
                 ("context_attach_node", wire::APPLY_CONTEXT_ATTACH_NODE),
                 ("set_menu_prop", wire::APPLY_SET_MENU_PROP),
+                ("present_file_dialog", wire::APPLY_PRESENT_FILE_DIALOG),
             ]
         );
         assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
@@ -1484,6 +1563,7 @@ mod tests {
         assert_eq!(SPEC.occurrence[10].kind, crate::ring::REC_MENU_ACTIVATED);
         assert_eq!(SPEC.occurrence[11].kind, crate::ring::REC_MENU_TOGGLED);
         assert_eq!(SPEC.occurrence[12].kind, crate::ring::REC_MENU_VALUE_CHANGED);
+        assert_eq!(SPEC.occurrence[13].kind, crate::ring::REC_FILE_DIALOG_RESULT);
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
@@ -1628,6 +1708,9 @@ mod tests {
                     ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
                     ("occurrence", "toggled") => crate::ring::REC_TOGGLED as u32,
                     ("occurrence", "value_changed") => crate::ring::REC_VALUE_CHANGED as u32,
+                    ("file_mode", "read") => wire::FILE_MODE_READ,
+                    ("file_mode", "write") => wire::FILE_MODE_WRITE,
+                    ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);

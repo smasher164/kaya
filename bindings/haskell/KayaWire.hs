@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc1ceb0f03be1e512
+specHash = 0x4d40b317286880f6
 
 valueBool :: Word32
 valueBool = 1
@@ -152,6 +152,12 @@ alertChoiceAction1 :: Word32
 alertChoiceAction1 = 1
 alertChoiceCancel :: Word32
 alertChoiceCancel = 4294967295
+fileModeRead :: Word32
+fileModeRead = 0
+fileModeWrite :: Word32
+fileModeWrite = 1
+fileModeReadWrite :: Word32
+fileModeReadWrite = 2
 alignStart :: Word32
 alignStart = 0
 alignCenter :: Word32
@@ -248,6 +254,8 @@ txKindContextAttachNode :: Word16
 txKindContextAttachNode = 32
 txKindSetMenuProp :: Word16
 txKindSetMenuProp = 33
+txKindShowFileDialog :: Word16
+txKindShowFileDialog = 34
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -294,6 +302,8 @@ applyKindContextAttachNode :: Word16
 applyKindContextAttachNode = 22
 applyKindSetMenuProp :: Word16
 applyKindSetMenuProp = 23
+applyKindPresentFileDialog :: Word16
+applyKindPresentFileDialog = 24
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -320,6 +330,8 @@ occKindMenuToggled :: Word16
 occKindMenuToggled = 12
 occKindMenuValueChanged :: Word16
 occKindMenuValueChanged = 13
+occKindFileDialogResult :: Word16
+occKindFileDialogResult = 14
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -483,6 +495,10 @@ txContextAttachNode node item = wireRecord txKindContextAttachNode (word64LE nod
 -- Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
 txSetMenuProp :: Word64 -> Word32 -> Word32 -> Builder
 txSetMenuProp item prop source = wireRecord txKindSetMenuProp (word64LE item <> word32LE prop <> word32LE source)
+
+-- Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
+txShowFileDialog :: Word64 -> Word64 -> Word32 -> [Value] -> Builder
+txShowFileDialog window dialog multiple filters = wireRecord txKindShowFileDialog (word64LE window <> word64LE dialog <> word32LE multiple <> word32LE 0 <> encodeValues filters)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1019,7 +1035,7 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc1ceb0f03be1e512
+	SpecHash uint64 = 0x4d40b317286880f6
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -79,6 +79,9 @@ const (
 	AlertChoiceAction0 = 0
 	AlertChoiceAction1 = 1
 	AlertChoiceCancel = 4294967295
+	FileModeRead = 0
+	FileModeWrite = 1
+	FileModeReadWrite = 2
 	AlignStart = 0
 	AlignCenter = 1
 	AlignEnd = 2
@@ -127,6 +130,7 @@ const (
 	txContextAttach = 31
 	txContextAttachNode = 32
 	txSetMenuProp = 33
+	txShowFileDialog = 34
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -150,6 +154,7 @@ const (
 	applyContextAttach = 21
 	applyContextAttachNode = 22
 	applySetMenuProp = 23
+	applyPresentFileDialog = 24
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -163,6 +168,7 @@ const (
 	occMenuActivated = 11
 	occMenuToggled = 12
 	occMenuValueChanged = 13
+	occFileDialogResult = 14
 )
 
 func pad8(b []byte) []byte {
@@ -524,6 +530,17 @@ func TxSetMenuProp(item uint64, prop uint32, source uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, item)
 	b = binary.LittleEndian.AppendUint32(b, prop)
 	b = binary.LittleEndian.AppendUint32(b, source)
+	return endRecord(b)
+}
+
+// TxShowFileDialog: Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
+func TxShowFileDialog(window uint64, dialog uint64, multiple uint32, filters []any) []byte {
+	b := beginRecord(txShowFileDialog)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, dialog)
+	b = binary.LittleEndian.AppendUint32(b, multiple)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValues(b, filters)
 	return endRecord(b)
 }
 
@@ -1365,7 +1382,7 @@ func TxSetMenuRole(item uint64, role string) []byte {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xc1ceb0f03be1e512L;
+    public static final long SPEC_HASH = 0x4d40b317286880f6L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -78,6 +78,9 @@ public final class KayaWire {
     public static final int ALERT_CHOICE_ACTION0 = 0;
     public static final int ALERT_CHOICE_ACTION1 = 1;
     public static final int ALERT_CHOICE_CANCEL = -1;
+    public static final int FILE_MODE_READ = 0;
+    public static final int FILE_MODE_WRITE = 1;
+    public static final int FILE_MODE_READ_WRITE = 2;
     public static final int ALIGN_START = 0;
     public static final int ALIGN_CENTER = 1;
     public static final int ALIGN_END = 2;
@@ -126,6 +129,7 @@ public final class KayaWire {
     public static final short TX_KIND_CONTEXT_ATTACH = 31;
     public static final short TX_KIND_CONTEXT_ATTACH_NODE = 32;
     public static final short TX_KIND_SET_MENU_PROP = 33;
+    public static final short TX_KIND_SHOW_FILE_DIALOG = 34;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -149,6 +153,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_CONTEXT_ATTACH = 21;
     public static final short APPLY_KIND_CONTEXT_ATTACH_NODE = 22;
     public static final short APPLY_KIND_SET_MENU_PROP = 23;
+    public static final short APPLY_KIND_PRESENT_FILE_DIALOG = 24;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -162,6 +167,7 @@ public final class KayaWire {
     public static final short OCC_KIND_MENU_ACTIVATED = 11;
     public static final short OCC_KIND_MENU_TOGGLED = 12;
     public static final short OCC_KIND_MENU_VALUE_CHANGED = 13;
+    public static final short OCC_KIND_FILE_DIALOG_RESULT = 14;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -497,6 +503,17 @@ public final class KayaWire {
         b.putLong(item);
         b.putInt(prop);
         b.putInt(source);
+        return finish(b);
+    }
+
+    /** Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
+    public static byte[] txShowFileDialog(long window, long dialog, int multiple, Object[] filters) {
+        ByteBuffer b = begin(TX_KIND_SHOW_FILE_DIALOG);
+        b.putLong(window);
+        b.putLong(dialog);
+        b.putInt(multiple);
+        b.putInt(0);
+        encodeValues(b, filters);
         return finish(b);
     }
 
@@ -1163,7 +1180,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT) {
             return null;
         }
         long id = b.getLong(8);

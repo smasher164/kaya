@@ -62,6 +62,12 @@ pub const KAYA_OCCURRENCE_SECTION_SELECTED: u16 = 10;
 pub const KAYA_OCCURRENCE_MENU_ACTIVATED: u16 = 11;
 pub const KAYA_OCCURRENCE_MENU_TOGGLED: u16 = 12;
 pub const KAYA_OCCURRENCE_MENU_VALUE_CHANGED: u16 = 13;
+
+/// The file picker's one answer (spec `file_dialog_result`): `count`
+/// files, each three consecutive values in the trailing list — an I64
+/// handle, a Str display name, and a Str `local_path`. Cancel is count
+/// zero. Redeem a handle with `kaya_open_picked`.
+pub const KAYA_OCCURRENCE_FILE_DIALOG_RESULT: u16 = 14;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -77,6 +83,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
         && KAYA_OCCURRENCE_MENU_VALUE_CHANGED == ring::REC_MENU_VALUE_CHANGED
+        && KAYA_OCCURRENCE_FILE_DIALOG_RESULT == ring::REC_FILE_DIALOG_RESULT
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -161,6 +168,11 @@ pub const KAYA_TX_MENUBAR_APPEND: u16 = 30;
 pub const KAYA_TX_CONTEXT_ATTACH: u16 = 31;
 pub const KAYA_TX_CONTEXT_ATTACH_NODE: u16 = 32;
 pub const KAYA_TX_SET_MENU_PROP: u16 = 33;
+
+/// Request the platform's file picker over a live window (0 = primary),
+/// on the alert's request/result grammar. Dialog ids are guest-chosen,
+/// one may be live per process, and the id retires with its result.
+pub const KAYA_TX_SHOW_FILE_DIALOG: u16 = 34;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -311,6 +323,11 @@ pub const KAYA_APPLY_MENUBAR_APPEND: u16 = 20;
 pub const KAYA_APPLY_CONTEXT_ATTACH: u16 = 21;
 pub const KAYA_APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
 pub const KAYA_APPLY_SET_MENU_PROP: u16 = 23;
+
+/// Present the platform's real file picker (SHOW_FILE_DIALOG, already
+/// validated by the core). Answered exactly once, with the chosen files
+/// or an EMPTY list for cancel.
+pub const KAYA_APPLY_PRESENT_FILE_DIALOG: u16 = 24;
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -559,7 +576,7 @@ const _: () = assert!(
 // thing to notice (the spacing-prop lesson, occurrence spelling). A
 // new spec occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 13,
+    crate::spec::SPEC.occurrence.len() == 14,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1437,6 +1454,7 @@ mod tests {
             ("context_attach", KAYA_TX_CONTEXT_ATTACH),
             ("context_attach_node", KAYA_TX_CONTEXT_ATTACH_NODE),
             ("set_menu_prop", KAYA_TX_SET_MENU_PROP),
+            ("show_file_dialog", KAYA_TX_SHOW_FILE_DIALOG),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -1462,6 +1480,7 @@ mod tests {
             ("context_attach", KAYA_APPLY_CONTEXT_ATTACH),
             ("context_attach_node", KAYA_APPLY_CONTEXT_ATTACH_NODE),
             ("set_menu_prop", KAYA_APPLY_SET_MENU_PROP),
+            ("present_file_dialog", KAYA_APPLY_PRESENT_FILE_DIALOG),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

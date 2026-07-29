@@ -36,6 +36,12 @@
 
 #define REC_MENU_VALUE_CHANGED 13
 
+/**
+ * The picker's one answer: `count` files, each three consecutive
+ * values — I64 handle, Str name, Str local_path. Cancel is count zero.
+ */
+#define REC_FILE_DIALOG_RESULT 14
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -104,6 +110,8 @@
 
 #define TX_SET_MENU_PROP 33
 
+#define TX_SHOW_FILE_DIALOG 34
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -149,6 +157,8 @@
 #define APPLY_CONTEXT_ATTACH_NODE 22
 
 #define APPLY_SET_MENU_PROP 23
+
+#define APPLY_PRESENT_FILE_DIALOG 24
 
 #define VALUE_BOOL 1
 
@@ -310,6 +320,17 @@
 #define ALERT_CHOICE_CANCEL UINT32_MAX
 
 /**
+ * What kaya_open_picked opens a handle for (spec enum "file_mode").
+ * Three modes cover every platform; writability is DISCOVERABLE but
+ * never REQUESTABLE, so the open is fallible in ways the pick is not.
+ */
+#define FILE_MODE_READ 0
+
+#define FILE_MODE_WRITE 1
+
+#define FILE_MODE_READ_WRITE 2
+
+/**
  * The align enum's wire values (spec enum "align").
  */
 #define ALIGN_START 0
@@ -374,6 +395,14 @@
 #define KAYA_OCCURRENCE_MENU_TOGGLED 12
 
 #define KAYA_OCCURRENCE_MENU_VALUE_CHANGED 13
+
+/**
+ * The file picker's one answer (spec `file_dialog_result`): `count`
+ * files, each three consecutive values in the trailing list — an I64
+ * handle, a Str display name, and a Str `local_path`. Cancel is count
+ * zero. Redeem a handle with `kaya_open_picked`.
+ */
+#define KAYA_OCCURRENCE_FILE_DIALOG_RESULT 14
 
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -499,6 +528,13 @@
 #define KAYA_TX_SET_MENU_PROP 33
 
 /**
+ * Request the platform's file picker over a live window (0 = primary),
+ * on the alert's request/result grammar. Dialog ids are guest-chosen,
+ * one may be live per process, and the id retires with its result.
+ */
+#define KAYA_TX_SHOW_FILE_DIALOG 34
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -594,6 +630,13 @@
 #define KAYA_APPLY_CONTEXT_ATTACH_NODE 22
 
 #define KAYA_APPLY_SET_MENU_PROP 23
+
+/**
+ * Present the platform's real file picker (SHOW_FILE_DIALOG, already
+ * validated by the core). Answered exactly once, with the chosen files
+ * or an EMPTY list for cancel.
+ */
+#define KAYA_APPLY_PRESENT_FILE_DIALOG 24
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
