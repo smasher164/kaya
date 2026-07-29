@@ -501,6 +501,13 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin background)"
     run "$proto" background-java env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The C floor, where queue-plus-wake is WRITTEN OUT rather than
+    # hidden in a binding: the guest owns the mutex-guarded work list,
+    # calls kaya_wake itself, and drains before every wait. It is also
+    # the only tier that has to spell each queued item's DESTINATION,
+    # since it queues data where the others queue closures.
+    run "$proto" background-c env KAYA_SELFTEST=background \
+        tools/linux/a11y-leg.sh /tmp/c-guests/background
     # The split scene: adaptive list-detail through
     # AdwNavigationSplitView, with resize_window driving the real
     # size-class transition. All eight languages.
