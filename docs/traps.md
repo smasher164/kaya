@@ -2398,6 +2398,39 @@ only holds if each computes the directory the way its own language does
 — an environment variable read directly is a guess about the platform,
 not a computation.
 
+## A generator edited and never rerun compiles perfectly
+
+Twice in one afternoon, adding the picker's decoder arm to a binding
+generator and then testing the guest without regenerating: the OCaml
+picker reported every result as cancel, then the Haskell one did. Both
+looked like a decode bug in the new arm. Neither had the arm at all —
+`bindings/*/kaya_wire.*` still held the previous generation, and nothing
+says so, because stale generated code COMPILES. The guest builds, the
+scene runs, the dialog opens, and the answer is silently empty.
+
+`tools/gen-bindings.sh --check` is the authoritative detector and every
+lane runs it. That is one run too late for someone iterating by hand,
+and a gate you have to remember is not a guard.
+
+So the BUILD refuses. `crates/kaya/build.rs` stamps and compares a hash
+of `tools/kaya-bindgen/src/*.rs` against `bindings/.generator-id`, which
+`gen-bindings.sh` writes on a real generation. Everything downstream
+compiles this crate first, so the refusal is the earliest possible
+answer and the one nobody can skip: `cargo build` fails naming the fix.
+
+TWO EXEMPTIONS, both necessary rather than convenient. A published
+dependency has no `tools/` and nothing to be out of date with. And
+`gen-bindings.sh` sets `KAYA_REGENERATING`, because the generator
+DEPENDS on the kaya crate — without it a generator edit would deadlock,
+the build of the tool that fixes the staleness being the thing the
+staleness stops. Negative-tested in all three directions: a moved
+generator fails the build, `gen-bindings.sh` still runs while it is
+failing, and the build passes again once it has.
+
+Content, not timestamps, on both sides — the shell hashes the sorted
+glob and build.rs hashes the sorted read, for the reason the neighbouring
+mtime-versus-hash entry gives.
+
 ## Two languages disagree with everyone else about where "temp" is
 
 The filedialog scene's premise is that the guest and the interpreter

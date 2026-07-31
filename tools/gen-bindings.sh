@@ -28,7 +28,36 @@ fi
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# The generator's source, hashed. Sorted so the shell's glob order
+# cannot change the answer, and content-only — a touched file with the
+# same bytes is not a different generator (the mtime-versus-hash lesson,
+# docs/traps.md).
+kaya_generator_id() {
+    cat "$1"/tools/kaya-bindgen/src/*.rs | shasum -a 256 | cut -c1-16
+}
 cd "$ROOT/tools/kaya-bindgen"
 
 # Exit codes propagate through set -e; compile errors stay on stderr.
-cargo run --quiet -- "$ROOT" "$@"
+#
+# KAYA_REGENERATING exempts this one build from the staleness refusal in
+# crates/kaya/build.rs. The generator DEPENDS on the kaya crate, so
+# without it a generator edit would deadlock: the build of the tool that
+# fixes the staleness would be the thing the staleness stops.
+KAYA_REGENERATING=1 cargo run --quiet -- "$ROOT" "$@"
+
+# THE GENERATOR'S OWN FINGERPRINT, stamped beside what it produced.
+#
+# `--check` above is the authoritative answer — it regenerates and
+# diffs — but it only answers when someone runs it, and a generator
+# edit that was never regenerated is invisible until then: the bindings
+# still compile, the guest still runs, and the arm you just wrote is
+# simply absent. That cost two debugging rounds in one afternoon
+# (docs/traps.md). The stamp makes the same question answerable in
+# milliseconds, so a cheap gate can ask it constantly.
+#
+# Written only on a real generation; --check must not move it, or the
+# stamp would certify the very staleness it exists to catch.
+if [ "${1:-}" != "--check" ]; then
+    kaya_generator_id "$ROOT" >"$ROOT/bindings/.generator-id"
+fi

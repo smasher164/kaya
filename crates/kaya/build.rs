@@ -59,4 +59,77 @@ fn main() {
         "kaya build.rs: build id must be 16 hex chars, got {id:?}"
     );
     println!("cargo::rustc-env=KAYA_BUILD_ID={id}");
+
+    refuse_a_stale_generator(&root);
+}
+
+/// Fail the BUILD when the binding generator has moved since the
+/// bindings it produced were written.
+///
+/// A gate you have to remember is not a guard. `gen-bindings.sh
+/// --check` is the authoritative answer and every lane runs it, but a
+/// generator edited and never rerun is invisible until someone does:
+/// the checked-in bindings still compile, the guest still runs, and the
+/// decoder arm just added is simply absent. That shape cost two
+/// debugging rounds in one afternoon (docs/traps.md) — an OCaml and
+/// then a Haskell picker decoding every result as cancel. Since
+/// EVERYTHING downstream builds this crate first, refusing here is the
+/// earliest possible answer and the one nobody can skip.
+///
+/// Two exemptions, both necessary rather than convenient:
+///   - no tools/ directory: kaya built as a published dependency, where
+///     there is no generator to be out of date with.
+///   - KAYA_REGENERATING: gen-bindings.sh sets it, because the
+///     generator DEPENDS on this crate — without the exemption a
+///     generator edit would deadlock, failing the build of the very
+///     tool that fixes it.
+fn refuse_a_stale_generator(root: &std::path::Path) {
+    if std::env::var_os("KAYA_REGENERATING").is_some() {
+        return;
+    }
+    let src = root.join("tools/kaya-bindgen/src");
+    let stamp = root.join("bindings/.generator-id");
+    if !src.is_dir() || !stamp.is_file() {
+        return;
+    }
+    println!("cargo::rerun-if-changed={}", src.display());
+    println!("cargo::rerun-if-changed={}", stamp.display());
+
+    let mut sources: Vec<_> = std::fs::read_dir(&src)
+        .expect("kaya build.rs: could not read the generator's sources")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    // Sorted, and by CONTENT: the shell glob that writes the stamp is
+    // sorted too, and a touched file with the same bytes is not a
+    // different generator (the mtime-versus-hash lesson, docs/traps.md).
+    sources.sort();
+    let mut joined = Vec::new();
+    for path in &sources {
+        joined.extend(std::fs::read(path).expect("kaya build.rs: unreadable generator source"));
+    }
+    let want = short_sha256(&joined);
+    let have = std::fs::read_to_string(&stamp).unwrap_or_default().trim().to_string();
+    assert!(
+        want == have,
+        "kaya build.rs: the binding generator has changed since the bindings \
+         were generated (generator {want}, bindings say {have}) — run \
+         tools/gen-bindings.sh. Every binding downstream is stale until you do."
+    );
+}
+
+/// The same 16 hex chars `shasum -a 256 | cut -c1-16` gives, so the
+/// stamp writer and this reader cannot disagree.
+fn short_sha256(bytes: &[u8]) -> String {
+    use std::process::Stdio;
+    let mut child = Command::new("shasum")
+        .args(["-a", "256"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("kaya build.rs: could not run shasum");
+    std::io::Write::write_all(child.stdin.as_mut().unwrap(), bytes)
+        .expect("kaya build.rs: could not feed shasum");
+    let out = child.wait_with_output().expect("kaya build.rs: shasum failed");
+    String::from_utf8_lossy(&out.stdout).chars().take(16).collect()
 }

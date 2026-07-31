@@ -56,10 +56,20 @@ in docs/deferred.md.
 2. **Sweep all bindings.** A change to any binding surface is assessed
    against every guest language with an explicit do/can't/defer verdict
    per language. Never scope silently to the languages a request names.
-3. **Failures become guards.** Every failure class found gets a
-   structural guard — types over generation over runtime checks — plus
-   a negative test. Never rely on remembering. If you fix a bug, ask
+3. **Failures become guards, ON A PATH NOBODY CAN AVOID.** Every
+   failure class found gets a structural guard — types over generation
+   over runtime checks — plus a negative test. If you fix a bug, ask
    what gate would have caught it and add that gate.
+   AND THEN ASK WHERE IT SITS. A guard you have to remember to run is
+   barely a guard: the session that needs it most is the one with no
+   context, and it will not think to run your gate. Put the wall where
+   someone walks into it by doing something BASIC — building, running
+   the scene, deploying — and make the error say what to do next. A
+   stale binding generator fails `cargo build` naming the fix
+   (crates/kaya/build.rs); an unexpanded `$PID` fails the verb that
+   reads it; a wrong scene name panics the guest. Prefer that to one
+   more entry in a gate list, and when only a gate will do, put it in
+   the set the lanes already run. Plan against your future self.
 4. **Validation scripts build and verify what they ship.** No stale
    artifacts, no bypassed mechanisms, no false PASS. A gate that can be
    satisfied without exercising the real thing is a bug in the gate.
