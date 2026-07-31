@@ -375,6 +375,18 @@ wired() {
 }
 wired || status=1
 
+# The Android per-leg setup has an ORDER, and every step's place is
+# load-bearing — enabling the accessibility service before the
+# force-stop kills it, and before the logcat clear erases the evidence
+# it ever started. None of that is visible at the call site: each line
+# is a plausible adb command in a plausible place, and the failure
+# surfaces much later as "the picker never appeared". This gate already
+# reads every runner, so it is where the order gets stated with its
+# reasons instead of living in a comment somebody moves a line past.
+if ! python3 tools/lib/android-leg-order.py; then
+    status=1
+fi
+
 # SCENES MEANS "THE LANGUAGE SWEEP LANDED". Each desktop runner derives
 # every mechanical per-scene surface from its SCENES variable — the go
 # guest build, the source scp, the taskkill list — so a rust-only scene

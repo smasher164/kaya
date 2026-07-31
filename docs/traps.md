@@ -2066,3 +2066,34 @@ because binding is asynchronous and sampling once reports every leg as
 broken. Negative-tested by pointing the setting at a class that does not
 exist: all 45 legs say "never bound" instead of failing later and
 elsewhere.
+
+## An ordering constraint nothing enforces is a comment waiting to rot
+
+The Android per-leg setup is five adb calls, and every one of them has a
+reason to be exactly where it is. Enabling the accessibility service
+before `am force-stop` kills it, because the validation app is what
+declares the service. Enabling it before `logcat -c` erases its
+connection message. Between them those two produced a service that was
+configured, dead, and undetectable — which reads exactly like a service
+that never started, and sent the search to the far end of the pipeline.
+
+What makes this class nasty is that nothing looks wrong at the call
+site. Each line is a plausible adb command in a plausible place, the
+lane stays green because the legs that do not need the service do not
+care, and the failure surfaces later and elsewhere. A comment saying
+"this must come after the force-stop" is exactly the kind of thing a
+future edit steps over without reading.
+
+So tools/lib/android-leg-order.py states the order as a rule with its
+reasons attached, and check-steps runs it. Move the enable back above
+the force-stop and the gate names the step, the step it must follow, and
+why — negative-tested that way. It reads the shell rather than running
+it, so it cannot see an order produced dynamically; that is the honest
+limit, and it still catches the thing that actually happened.
+
+The general shape is worth reaching for: when a sequence's correctness
+lives in the ADJACENCY of its steps rather than in any one of them,
+write the adjacency down somewhere executable. Every gate in this repo
+that pays for itself has that shape — check-stubs pairs a runner's legs
+against a backend's stub, paired-cfg pairs a unix item against a windows
+one, and this pairs a step against the step it must follow.
