@@ -67,6 +67,13 @@ for verb in verbs:
 # and nothing anywhere said so; wiring the filedialog scene onto android
 # would have shipped the literal. Same shape as the verbs above, same
 # reason: the interpreters are the historic miss layer.
+#
+# THREE SITES, NOT TWO. harness.rs is the third implementation of these
+# verbs — the one the GTK and WinUI backends run — and the first cut of
+# this rule checked only the two interpreter files, which is the very
+# hole it was written to close, one file over. Nothing else in this gate
+# looks at harness.rs as a MIRROR (it is the source the verbs are
+# extracted FROM), so the omission read as correct.
 subs = sorted(
     set(
         tok
@@ -75,7 +82,11 @@ subs = sorted(
     )
 )
 for sub in subs:
-    for name, text in (("KayaSwiftUI.swift", swift), ("KayaCompose.kt", kotlin)):
+    for name, text in (
+        ("KayaSwiftUI.swift", swift),
+        ("KayaCompose.kt", kotlin),
+        ("harness.rs", harness),
+    ):
         if f'"{sub}"' not in text:
             fail(
                 f'scene substitution "${sub}" has no expansion in {name} — '

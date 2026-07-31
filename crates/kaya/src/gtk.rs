@@ -529,6 +529,16 @@ struct CoreState {
     /// plus the REAL dialog object for the runner's reads. Shared with
     /// the choose callback, which clears it when the one result fires.
     live_alert: std::rc::Rc<RefCell<Option<GtkLiveAlert>>>,
+    /// The live file picker, and the directory the next one opens on.
+    ///
+    /// THE DIRECTORY IS ARMED, NOT SET: a dialog's initial folder is
+    /// read when it is PRESENTED, so the harness's file_dialog_goto
+    /// stores it here and the apply arm applies it. Setting it on a
+    /// dialog already on screen is silently ignored, and a picker aimed
+    /// at nothing falls back to its last-used location — the failure
+    /// that cost a session on macOS and is guarded the same way here.
+    live_file_dialog: std::rc::Rc<RefCell<Option<GtkLiveFileDialog>>>,
+    pending_dialog_dir: std::rc::Rc<RefCell<Option<String>>>,
     /// The command-catalog registry (DESIGN.md, Menus): items, bars,
     /// anchors. Rc'd so the GSimpleAction handlers reach the mirror
     /// without borrowing CORE (see the menus section comment).
@@ -594,6 +604,16 @@ fn drain_transactions() {
 /// The live alert's identity and its REAL dialog: title reads come
 /// from the AlertDialog object, and choose_alert finds the presented
 /// dialog window's actual button to activate.
+/// The live file dialog: what the harness needs to find it in the
+/// accessibility tree and to know one is up at all. The TITLE is the
+/// handle — GTK publishes the dialog as `role=dialog name=<title>` and
+/// sets no accessible-id on it, so the title is the only identity there
+/// is (measured, not assumed; see the GTK section of docs/traps.md).
+#[derive(Clone)]
+struct GtkLiveFileDialog {
+    title: String,
+}
+
 struct GtkLiveAlert {
     id: u64,
     window: u64,
@@ -2581,13 +2601,118 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
 
-        ApplyOp::PresentFileDialog(_) => {
-            // DEPTH SLICE: the mac SwiftUI arm lands first (CLAUDE.md's
-            // sequencing). This backend compiles the vocabulary and
-            // refuses it loudly rather than silently doing nothing. The
-            // call is what check-stubs and check-steps read — it names
-            // the scene, so neither gate has to recognise a sentence.
-            crate::depth_stub("filedialog");
+        ApplyOp::PresentFileDialog(spec) => {
+            // GNOME's own picker: gtk::FileDialog (4.10+), presented on
+            // the requesting window and answered exactly once through
+            // capi::file_dialog_resolved — the shared retire path.
+            //
+            // IN OUR PROCESS, measured: with no xdg-desktop-portal
+            // installed GTK presents its own chooser rather than handing
+            // off, so the harness reads it on the same a11y bus as every
+            // other widget. A portal-hosted picker would be a different
+            // application on that bus; the read walks from the desktop
+            // and would still find it, but nothing here depends on that.
+            let parent = gtk_window(core, spec.window.0);
+            let title = format!("kaya pick {}", spec.dialog.0);
+            let dialog = gtk4::FileDialog::builder()
+                .title(&title)
+                .modal(true)
+                .build();
+
+            // ADVISORY on every platform (DESIGN.md): a default view,
+            // never a guarantee, so a guest still validates what it got.
+            if !spec.filters.is_empty() {
+                let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+                for (label, suffix) in &spec.filters {
+                    let filter = gtk4::FileFilter::new();
+                    filter.set_name(Some(label));
+                    filter.add_suffix(suffix);
+                    filters.append(&filter);
+                }
+                dialog.set_filters(Some(&filters));
+            }
+
+            // The armed directory, applied HERE because that is the only
+            // moment it is read.
+            if let Some(dir) = core.pending_dialog_dir.borrow_mut().take() {
+                dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(&dir)));
+            }
+
+            *core.live_file_dialog.borrow_mut() = Some(GtkLiveFileDialog {
+                title: title.clone(),
+            });
+            let live = core.live_file_dialog.clone();
+            let sink = core.occurrences.clone();
+            let dialog_id = spec.dialog.0;
+
+            // Cancel is the EMPTY LIST, faithfully: GTK reports a
+            // dismissed picker as an error (DISMISSED), and no platform
+            // can confirm an empty selection, so there is no sentinel to
+            // invent (DESIGN.md, File dialogs).
+            let finish = move |files: Vec<(String, String)>| {
+                *live.borrow_mut() = None;
+                let picked = files
+                    .into_iter()
+                    .map(|(name, path)| {
+                        let handle = crate::capi::picked_register(std::sync::Arc::new(
+                            crate::protocol::PathSource {
+                                name: name.clone(),
+                                path: path.clone(),
+                            },
+                        ));
+                        crate::protocol::PickedFile {
+                            handle,
+                            name,
+                            local_path: path,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                crate::capi::file_dialog_retire(dialog_id);
+                sink.send(Occurrence::FileDialogResult {
+                    dialog: crate::protocol::FileDialogId(dialog_id),
+                    files: picked,
+                });
+            };
+
+            let named = |f: &gtk4::gio::File| {
+                let path = f.path().map(|p| p.to_string_lossy().into_owned())?;
+                let name = f.basename().map(|p| p.to_string_lossy().into_owned())?;
+                Some((name, path))
+            };
+
+            // NOT file_dialog_shown here: scene.rs marks the dialog
+            // live when the op is applied, for every backend at once.
+            // Calling it again is a second registration and the liveness
+            // guard says so — which is how this was caught.
+            if spec.multiple {
+                dialog.open_multiple(
+                    Some(&parent),
+                    None::<&gtk4::gio::Cancellable>,
+                    move |result| {
+                        let mut out = Vec::new();
+                        if let Ok(list) = result {
+                            for i in 0..list.n_items() {
+                                if let Some(f) = list
+                                    .item(i)
+                                    .and_then(|o| o.downcast::<gtk4::gio::File>().ok())
+                                {
+                                    out.extend(named(&f));
+                                }
+                            }
+                        }
+                        finish(out);
+                    },
+                );
+            } else {
+                dialog.open(
+                    Some(&parent),
+                    None::<&gtk4::gio::Cancellable>,
+                    move |result| {
+                        let out = result.ok().and_then(|f| named(&f)).into_iter().collect();
+                        finish(out);
+                    },
+                );
+            }
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: gtk::AlertDialog maps
@@ -3240,6 +3365,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     buttons
                 },
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
+                live_file_dialog: std::rc::Rc::new(RefCell::new(None)),
+                pending_dialog_dir: std::rc::Rc::new(RefCell::new(None)),
                 menus: Rc::new(RefCell::new(MenuRegistry::default())),
                 menu_models: HashMap::new(),
                 menu_strips: HashMap::new(),
@@ -4393,18 +4520,49 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
-        // DEPTH SLICE: the SwiftUI arm lands first, and this backend's
-        // apply arm refuses the record outright — so no picker can be
-        // live here and None is the honest answer, not a stub hiding a
-        // gap. check-stubs is what keeps a runner from wiring the
-        // scene's legs against this.
-        None
+        // The REAL chooser, read over the bus as an assistive client
+        // would — never this backend's own record of what it asked for.
+        // A dialog aimed at the wrong place, or filtered down to
+        // nothing, presents perfectly and is useless; only reading it
+        // back catches that.
+        //
+        // NOT on the GTK main thread: this is a dbus round trip, and the
+        // main loop is what has to keep answering it.
+        file_dialog_atspi(DialogOp::Read)
     }
 
-    fn choose_file(&self, _: Option<&str>) {}
+    fn choose_file(&self, name: Option<&str>) {
+        match name {
+            // SELECT, THEN PRESS, in two passes. The tree happens to put
+            // the list before the buttons, so one in-order pass would
+            // work today and break the first time GTK reorders it.
+            //
+            // Selection is not decoration here: with one row in the
+            // directory the chooser completes with it even when nothing
+            // is selected, so a scene whose directory held a single file
+            // would pass without any of this running. That is why the
+            // scene keeps a decoy that sorts first.
+            Some(file) => {
+                file_dialog_atspi(DialogOp::Select(file));
+                file_dialog_atspi(DialogOp::Press("Open"));
+            }
+            // Cancel is the empty list, faithfully — the guest's own
+            // reaction is the observable, so nothing is asserted here.
+            None => {
+                file_dialog_atspi(DialogOp::Press("Cancel"));
+            }
+        }
+    }
 
-    fn goto_directory(&self, _: &str) {
-        // Same depth slice: nothing can be aimed when nothing presents.
+    fn goto_directory(&self, path: &str) {
+        // ARMED, NOT SET. A chooser reads its initial folder when it is
+        // PRESENTED; pointing one already on screen is silently ignored.
+        // So this stores it and the apply arm applies it — the same
+        // shape the SwiftUI interpreter uses, for the same reason.
+        let path = path.to_owned();
+        Self::on_main(move |core| {
+            *core.pending_dialog_dir.borrow_mut() = Some(path.clone());
+        });
     }
 
     fn alert_count(&self) -> usize {
@@ -4674,6 +4832,215 @@ fn atspi_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
 /// own writes. Going over the bus is the only honest route, and it is
 /// why the harness (and this dependency) is feature-gated: a shipped
 /// app must never link a dbus client to serve a test verb.
+/// What to do with the live file chooser: read it back, or drive it.
+///
+/// One walk shape serves all three because the tree is the same; only
+/// the verb at the interesting node differs. Everything here was
+/// MEASURED against GTK 4.18 in the validation image rather than
+/// assumed — the probe and its findings are in docs/traps.md.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+enum DialogOp<'a> {
+    /// The directory it is showing and the names its list contains.
+    Read,
+    /// Select the row whose filename is this. A separate pass from the
+    /// press, so the two do not depend on the tree's child order.
+    Select(&'a str),
+    /// Press the button with this label ("Open" or "Cancel").
+    Press(&'a str),
+}
+
+/// Read or drive the live GTK file chooser over AT-SPI.
+///
+/// THE DIALOG IS IN OUR PROCESS and on the same bus as every other
+/// widget: with no xdg-desktop-portal installed GTK presents its own
+/// chooser rather than handing off. The walk starts at the desktop, so a
+/// portal-hosted one would still be found — it would simply be a
+/// different application node.
+///
+/// Three things the tree does NOT do the way the mac panel does, all
+/// measured:
+///
+/// - There is no "where" control. The current folder is the path bar's
+///   PRESSED toggle button — `checked` is false on all of them, so the
+///   state to read is Pressed, and the filter combo's own toggle button
+///   has to be excluded or it collides.
+/// - Rows carry the whole line as one name, "picked.txt 12 bytes Text
+///   01:00", so the filename is the first field.
+/// - The header row is a `table row` too. Data rows are the ones whose
+///   parent is the inner `list`; the header hangs off the `tree table`
+///   directly.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    use atspi::proxy::action::ActionProxy;
+    use atspi::proxy::selection::SelectionProxy;
+
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .ok()?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .ok()?
+            .path("/org/a11y/atspi/accessible/root")
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+
+        struct Found {
+            dir: String,
+            rows: Vec<String>,
+            acted: bool,
+            in_dialog: bool,
+        }
+
+        async fn walk(
+            node: AccessibleProxy<'_>,
+            out: &mut Found,
+            op: &DialogOp<'_>,
+            depth: usize,
+            parent_is_list: bool,
+            in_combo: bool,
+            in_dialog: bool,
+        ) {
+            if depth > 26 {
+                return;
+            }
+            let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) else {
+                return;
+            };
+            let in_dialog = in_dialog || role == atspi::Role::Dialog;
+            if in_dialog {
+                out.in_dialog = true;
+            }
+            let in_combo = in_combo || role == atspi::Role::ComboBox;
+
+            if in_dialog && role == atspi::Role::ToggleButton && !in_combo {
+                if let Ok(states) = node.get_state().await {
+                    if states.contains(atspi::State::Pressed) {
+                        out.dir = name.clone();
+                    }
+                }
+            }
+
+            if in_dialog && role == atspi::Role::TableRow && parent_is_list {
+                let file = name.split_whitespace().next().unwrap_or("").to_owned();
+                if !file.is_empty() {
+                    out.rows.push(file.clone());
+                }
+            }
+
+            if in_dialog && role == atspi::Role::Button {
+                if let DialogOp::Press(want) = op {
+                    if name == *want && !out.acted {
+                        if let Ok(action) = ActionProxy::builder(node.inner().connection())
+                            .destination(node.inner().destination().to_owned())
+                            .and_then(|b| b.path(node.inner().path().to_owned()))
+                        {
+                            if let Ok(action) = action.build().await {
+                                out.acted = action.do_action(0).await.unwrap_or(false);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            let is_list = role == atspi::Role::List;
+
+            // SELECTION IS THE PARENT'S JOB, and the rows themselves
+            // offer no click action at all — only `listitem.scroll-to`,
+            // measured. So the index within this list is what selects,
+            // and it must be taken here where the index exists.
+            if in_dialog && is_list {
+                if let DialogOp::Select(want) = op {
+                    for (index, child) in children.iter().enumerate() {
+                        let Some(dest) = child.name() else { continue };
+                        let Ok(builder) = AccessibleProxy::builder(node.inner().connection())
+                            .destination(dest.to_owned())
+                            .and_then(|b| b.path(child.path().to_owned()))
+                        else {
+                            continue;
+                        };
+                        let Ok(row) = builder.build().await else { continue };
+                        let Ok(row_name) = row.name().await else { continue };
+                        if row_name.split_whitespace().next() != Some(want) {
+                            continue;
+                        }
+                        if let Ok(selection) = SelectionProxy::builder(node.inner().connection())
+                            .destination(node.inner().destination().to_owned())
+                            .and_then(|b| b.path(node.inner().path().to_owned()))
+                        {
+                            if let Ok(selection) = selection.build().await {
+                                // CLEAR FIRST. In a multi-select chooser
+                                // select_child ADDS, and the list already
+                                // carries a selection — so choosing
+                                // "picked.txt" returned BOTH files with
+                                // the decoy first, which is exactly the
+                                // wrong answer the decoy exists to
+                                // expose. Measured on GTK 4.18.
+                                let _ = selection.clear_selection().await;
+                                out.acted =
+                                    selection.select_child(index as i32).await.unwrap_or(false);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(
+                        proxy, out, op, depth + 1, is_list, in_combo, in_dialog,
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        let mut found = Found {
+            dir: String::new(),
+            rows: Vec::new(),
+            acted: false,
+            in_dialog: false,
+        };
+        for app in root.get_children().await.ok()? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, &mut found, &op, 0, false, false, false)).await;
+        }
+
+        if !found.in_dialog {
+            return None;
+        }
+        match op {
+            DialogOp::Read => Some((found.dir, found.rows)),
+            _ if found.acted => Some((found.dir, found.rows)),
+            _ => None,
+        }
+    })
+}
+
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Option<String> {
     use atspi::proxy::accessible::AccessibleProxy;

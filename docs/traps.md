@@ -1831,3 +1831,58 @@ turned up no third case — check-abort builds and runs real artifacts,
 check-ambient-tx self-tests both directions — but check-stubs went four
 milestones on a convention no backend ever wrote, so the audit is worth
 repeating whenever a gate's verdict rests on finding a literal.
+
+## What GTK's file chooser publishes, and what it does not
+
+The mac panel was measured with tools/mac/paneldrive.swift before a line
+of the arm was written, and it overturned a carve-out already accepted
+into the plan. Same discipline for GTK, and the probe answered four
+questions the code would otherwise have guessed at.
+
+**It is in our process.** With no xdg-desktop-portal installed — the
+validation image has none — `gtk::FileDialog` presents its own chooser
+rather than handing off, so it sits on the same a11y bus as every other
+widget. This matters less than it would on mac: the AT-SPI walk starts
+at the DESKTOP, so a portal-hosted chooser in another process would
+still be reachable. It would simply be a different application node.
+
+**It publishes no accessible ids at all.** Not on the dialog, not on the
+buttons, not on the rows. Everything is found by role and name, which is
+why the arm titles the dialog itself — that title is the only identity
+there is.
+
+**There is no "where" control.** mac has a popup naming the directory;
+GTK has a path bar of toggle buttons, one per component, and the current
+folder is the one whose state is PRESSED. Not CHECKED — checked is false
+on every one of them. The filter combo's own toggle button is in the
+same tree and has to be excluded or it collides.
+
+**Rows are one string.** `picked.txt 12 bytes Text 01:00`, so the
+filename is the first field. The column header is a `table row` too; the
+data rows are the ones parented to the inner `list`, while the header
+hangs off the `tree table` directly.
+
+**Rows cannot be clicked.** Their only action is `listitem.scroll-to`,
+and `grab_focus` fails outright. Selection is the parent list's job,
+through the Selection interface and an index.
+
+Three findings cost a run each and are worth knowing before the next
+platform:
+
+**Pressing Open with nothing selected still returns a file.** With one
+row in the directory the chooser completes with that row, so
+`file_choose picked.txt` would have passed on a backend that never
+selected anything. The scene now keeps a DECOY that sorts before the
+target and holds different bytes, so skipping selection returns the
+wrong file and fails both the name and the byte assertion. That hole was
+open on mac too.
+
+**select_child ADDS in a multi-select chooser.** Choosing "picked.txt"
+returned BOTH files, decoy first, because the list already carried a
+selection. Clear it first.
+
+**A second picker inherits nothing.** NSOpenPanel happens to reopen
+where it last was; GTK opens on Recent, which has no path bar at all. A
+scene that armed the directory once and relied on the platform
+remembering reads a directory nobody chose on one platform and an empty
+one on the other. The scene arms before every pick.

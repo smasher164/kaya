@@ -1510,9 +1510,29 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             }
             Step::FileDialogGoto(path) => {
                 // An action, silent like click: expect_file_dialog is
-                // what says whether it landed.
-                stage.goto_directory(path);
-                None
+                // what says whether it landed — EXCEPT for the two scene
+                // bugs below, which are silent everywhere else and cost a
+                // debugging session each (docs/traps.md).
+                let resolved = expand_path(path);
+                if resolved.contains('$') {
+                    Some(Err(format!(
+                        "file_dialog_goto {path}: unexpanded substitution in \
+                         {resolved} — only $TMP and $PID exist"
+                    )))
+                } else if !std::path::Path::new(&resolved).is_dir() {
+                    // A picker aimed at a directory that does not exist
+                    // does not fail — it silently shows somewhere else,
+                    // and the scene then asserts against a directory
+                    // nobody chose.
+                    Some(Err(format!(
+                        "file_dialog_goto {path}: {resolved} does not exist — the \
+                         picker would silently fall back to its last-used \
+                         location and the scene would compare against that"
+                    )))
+                } else {
+                    stage.goto_directory(&resolved);
+                    None
+                }
             }
             Step::FileChoose(name) => {
                 // An action, silent like click: the observable is the
@@ -1525,6 +1545,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     let Some(dir) = dir else {
                         return Ok("file dialog live".to_string());
                     };
+                    // Expanded like the goto's argument, so a scene names
+                    // the same directory both places and the pid stays
+                    // out of the script.
+                    let dir = expand_path(dir);
                     if !where_.ends_with(dir.as_str()) {
                         return Err(format!("file dialog showing {where_:?}, wanted {dir:?}"));
                     }
@@ -2016,6 +2040,84 @@ pub fn shares(extents: &[f64]) -> String {
 /// (try_resolve; the interpreters were already total).
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 pub const POLL_DEADLINE: Duration = Duration::from_secs(5);
+
+/// `$TMP` and `$PID` in a scene path.
+///
+/// THE THIRD SITE. KayaSwiftUI.swift and KayaCompose.kt each carry their
+/// own copy for the platforms they interpret, and this is the one the
+/// Rust backends (GTK, WinUI) use — so the substitution vocabulary lives
+/// in three places, not the two that check-verbs used to police. An
+/// interpreter that leaves a token alone uses it as a LITERAL path
+/// segment, which is a directory that cannot exist, and a picker aimed
+/// at one silently shows somewhere else (docs/traps.md).
+///
+/// `$TMP` is `std::env::temp_dir`, which is what a Rust guest's own file
+/// API returns — both sides of one process must compute it the way their
+/// own language does, or they disagree about where the file is. That
+/// exact divergence cost a session on macOS, where Foundation ignores
+/// `$TMPDIR` and `std::env::temp_dir` honors it.
+///
+/// WHOLE NAMES, not prefixes: replacing `$TMP` by text also eats the
+/// front of `$TMPDIR` and leaves `<tmp>DIR`, a path wrong in a way that
+/// reads as the scene author's typo rather than the expander's.
+fn expand_path(path: &str) -> String {
+    let tmp = std::env::temp_dir();
+    let tmp = tmp.to_string_lossy();
+    let pid = std::process::id().to_string();
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(at) = rest.find('$') {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let end = after
+            .find(|c: char| !c.is_ascii_uppercase() && c != '_')
+            .unwrap_or(after.len());
+        match &after[..end] {
+            "TMP" => out.push_str(tmp.trim_end_matches('/')),
+            "PID" => out.push_str(&pid),
+            other => {
+                out.push('$');
+                out.push_str(other);
+            }
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(test)]
+mod expand_tests {
+    use super::expand_path;
+
+    #[test]
+    fn whole_names_only() {
+        // The prefix trap: $TMPDIR is not $TMP followed by DIR. An
+        // unknown name survives INTACT so the caller's check can name
+        // the token that is actually wrong.
+        assert_eq!(expand_path("$TMPDIR/x"), "$TMPDIR/x");
+        assert_eq!(expand_path("$NOPE"), "$NOPE");
+        assert!(!expand_path("$TMP/a").contains('$'));
+    }
+
+    #[test]
+    fn expands_mid_segment() {
+        // $PID is not its own path segment — it is a suffix on one, which
+        // a split-on-slash expander gets wrong.
+        let got = expand_path("$TMP/kaya-picked-$PID");
+        assert!(got.contains(&format!("kaya-picked-{}", std::process::id())));
+        assert!(!got.contains('$'));
+    }
+
+    #[test]
+    fn agrees_with_the_guest() {
+        // The scene's premise: guest and harness are one process and
+        // compute the same path with no runner involvement.
+        assert!(expand_path("$TMP").starts_with(
+            std::env::temp_dir().to_string_lossy().trim_end_matches('/')
+        ));
+    }
+}
 
 fn poll(mut eval: impl FnMut() -> Result<String, String>) -> Result<String, String> {
     let deadline = Instant::now() + POLL_DEADLINE;

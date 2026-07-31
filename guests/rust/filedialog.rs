@@ -68,10 +68,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         Release,
     }
 
-    // The file the scene will pick, written before anything is shown.
+    // The files the scene will choose between, written before anything
+    // is shown. THE DECOY IS LOAD-BEARING: with one file in the
+    // directory, pressing Open with nothing selected returns that file,
+    // so `file_choose picked.txt` would pass on a backend that ignored
+    // the name entirely. Measured on GTK, where the dialog completes
+    // with the only row when none is selected. "decoy" sorts before
+    // "picked" alphabetically, so a backend that skips selection gets
+    // the WRONG file, and its five bytes fail the byte assertion as well
+    // as the name.
     let dir = picked_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
     std::fs::write(dir.join("picked.txt"), b"picked bytes").expect("failed to write the file");
+    std::fs::write(dir.join("decoy.txt"), b"decoy").expect("failed to write the decoy");
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {

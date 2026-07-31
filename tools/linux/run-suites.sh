@@ -41,7 +41,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES=""
+DEPTH_SCENES="filedialog"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -489,6 +489,15 @@ for proto in x11 wayland; do
     # the closing expect_ax, which on GTK is an AT-SPI read.
     run "$proto" background-rust env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
+
+    # The filedialog scene: GNOME's own picker, driven for real. DEPTH
+    # TIER — rust only until the sweep lands the other seven. Through
+    # a11y-leg.sh because EVERY read here is an AT-SPI read, not just the
+    # closing expect_ax: the chooser publishes no accessible ids at all,
+    # so the directory is the path bar's pressed toggle button and the
+    # rows are the list's table rows (measured; docs/traps.md).
+    run "$proto" filedialog-rust env KAYA_SELFTEST=filedialog \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/filedialog"
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-go env KAYA_SELFTEST=background \

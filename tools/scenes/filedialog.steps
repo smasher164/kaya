@@ -30,12 +30,19 @@ expect label#0 "no file"
 file_dialog_goto $TMP/kaya-picked-$PID
 click button#0
 
+# TWO FILES, and the one that sorts FIRST is not the one to pick. A
+# dialog completes with the only row when nothing is selected, so a
+# single-file directory lets `file_choose` pass without selecting
+# anything at all — measured on GTK. The decoy is what makes the choice
+# have to be made, and its contents differ so a wrong pick fails the
+# byte assertion too.
+#
 # THE PANEL IS REAL AND CORRECTLY AIMED, both read back from the
 # platform rather than stamped: the "where" popup names the directory it
 # is actually showing, and the list really contains the file. A panel
 # pointed somewhere else, or filtered down to nothing, presents
 # perfectly and is useless — these two reads are what catch that.
-expect_file_dialog kaya-picked-$PID picked.txt
+expect_file_dialog kaya-picked-$PID decoy.txt picked.txt
 
 # Select the row and press Open, for real: AX selection and a real
 # press of the panel's own OK button, so the panel's own completion
@@ -62,8 +69,15 @@ expect label#0 "1 picked bytes"
 # CANCEL IS THE EMPTY LIST, faithfully — no platform can confirm an
 # empty selection, so there is no sentinel. This also proves the dialog
 # id RETIRED: a second show would panic if the first were still live.
+#
+# ARMED AGAIN, because a second picker inherits nothing. NSOpenPanel
+# happens to reopen where it last was and GTK opens on Recent, which has
+# no path bar at all — so a scene that armed once and relied on the
+# platform remembering would read a directory nobody chose on one
+# platform and an empty one on another. Say it both times.
+file_dialog_goto $TMP/kaya-picked-$PID
 click button#1
-expect_file_dialog kaya-picked-$PID picked.txt
+expect_file_dialog kaya-picked-$PID decoy.txt picked.txt
 file_choose cancel
 expect label#0 "cancelled"
 
