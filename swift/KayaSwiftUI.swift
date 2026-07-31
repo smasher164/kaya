@@ -578,6 +578,32 @@ func kayaExpandPath(_ path: String) -> String {
 
     /// What the live panel is REALLY showing: its directory, and the
     /// file names its list holds. nil when no panel is live.
+    /// Why the panel could not be read, in the caller's words.
+    ///
+    /// "no file dialog live" is true and useless: it is the same answer
+    /// for "the guest never asked", "the panel is up but the tree has
+    /// not materialized", and the one that cost half an hour — ANOTHER
+    /// APPLICATION IS FULLSCREEN, so this app cannot become frontmost,
+    /// and NSOpenPanel is XPC-hosted and has to be key before it will
+    /// present. An in-process NSAlert sheet presents anyway, which is
+    /// why the confirm scene stays green and only this one fails; every
+    /// downstream step then fails too, and the undismissed dialog trips
+    /// the one-per-process guard, whose abort takes the failure list
+    /// with it. Nothing in that names the cause.
+    func kayaOpenPanelWhyNot() -> String {
+        if kayaLiveOpenPanel == nil {
+            return "no panel was requested"
+        }
+        if !NSApplication.shared.isActive {
+            return
+                "a panel is up but this app is not frontmost — another application "
+                + "is probably fullscreen, and NSOpenPanel is XPC-hosted and must "
+                + "become key before it presents (an in-process alert sheet would "
+                + "not care, which is why only the file dialog legs fail)"
+        }
+        return "a panel is up but its accessibility tree has no \(kayaPanelListId)"
+    }
+
     func kayaOpenPanelState() -> (String, [String])? {
         guard kayaLiveOpenPanel != nil else { return nil }
         let app = kayaPanelAxApp()
@@ -585,8 +611,27 @@ func kayaExpandPath(_ path: String) -> String {
         let where_ =
             kayaAxFind(app, kayaPanelWhereId)
             .flatMap { kayaAxCopy($0, kAXValueAttribute) as? String } ?? ""
+        // THE COLUMN HEADER IS A ROW TOO, and an identical one: role
+        // AXRow and subrole AXOutlineRow, exactly like a file. So the
+        // list came back as ["Name", "decoy.txt", "picked.txt", "Name"]
+        // and every assertion about the panel's contents was reading
+        // column titles as filenames. The subset check hid it for weeks;
+        // the file_choose guard printed the list and showed it.
+        //
+        // AXDisclosureLevel is what separates them — 0 on the header, 1
+        // on the files — measured, because kAXHeader is present but
+        // points at the header VIEW and equals no row, and kAXRows
+        // returns the header along with the rest. A row that publishes
+        // no level at all is kept: an empty list would be a confusing
+        // way to say "Apple changed this".
         var names: [String] = []
-        for row in (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
+        let rows =
+            (kayaAxCopy(list, kAXRowsAttribute) as? [AXUIElement])
+            ?? (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+        for row in rows {
+            if let level = kayaAxCopy(row, "AXDisclosureLevel") as? Int, level == 0 {
+                continue
+            }
             if let first = kayaPanelTexts(row).first { names.append(first) }
         }
         return (where_, names)
@@ -2861,7 +2906,12 @@ private func kayaRunScript(_ script: String) {
                         observed.append("file dialog \"\(wantDir)\" \(wantNames)")
                     }
                 } else {
-                    failures.append("no file dialog live, wanted \"\(wantDir)\"")
+                    #if os(macOS)
+                        failures.append(
+                            "no file dialog live, wanted \"\(wantDir)\" — \(kayaOpenPanelWhyNot())")
+                    #else
+                        failures.append("no file dialog live, wanted \"\(wantDir)\"")
+                    #endif
                 }
             case "file_dialog_goto":
                 // Silent like click; the expect that follows is what
@@ -2907,7 +2957,35 @@ private func kayaRunScript(_ script: String) {
                 // Open, or press Cancel. Not a synthesized completion —
                 // the panel's own handler runs because its own button
                 // was pressed. Silent, like click.
+                //
+                // EXCEPT that the row must be THERE, the same rule
+                // harness.rs applies for the Rust backends: a name that
+                // matches nothing skips the selection and presses Open
+                // anyway, and the panel then completes with whatever was
+                // already selected — a silent wrong file. Measured on
+                // GTK, where an unselected panel returns a file happily.
                 let arg = parts.count > 1 ? String(parts[1]) : ""
+                if arg != "cancel", !arg.isEmpty {
+                    #if os(macOS)
+                        let rows = DispatchQueue.main.sync { kayaOpenPanelState()?.1 }
+                        guard let rows else {
+                            failures.append("file_choose \(arg): no file dialog is live")
+                            break
+                        }
+                        if !rows.contains(arg) {
+                            failures.append(
+                                "file_choose \(arg): the dialog lists \(rows) — selecting "
+                                    + "nothing and pressing Open anyway returns a file, so "
+                                    + "this would pick the wrong one silently")
+                            // Dismiss it anyway: refusing alone leaves the
+                            // panel up, the next show trips the
+                            // one-per-process guard, and the abort takes
+                            // this failure list with it.
+                            DispatchQueue.main.sync { kayaOpenPanelDrive("cancel") }
+                            break
+                        }
+                    #endif
+                }
                 DispatchQueue.main.sync {
                     #if os(macOS)
                         kayaOpenPanelDrive(arg)

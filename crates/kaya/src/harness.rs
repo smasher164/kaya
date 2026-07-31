@@ -1537,8 +1537,50 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
             Step::FileChoose(name) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result.
-                stage.choose_file(name.as_deref());
-                None
+                //
+                // EXCEPT that the row must be THERE. A backend selects
+                // the named row and then presses the dialog's own Open,
+                // and if the name matched nothing the selection is
+                // simply skipped while the press goes ahead — the
+                // chooser then completes with whatever was already
+                // selected, or with the only row it has. A silent wrong
+                // file, indistinguishable from a right one downstream.
+                // Measured on GTK, where pressing Open with nothing
+                // selected returns a file quite happily.
+                //
+                // Uniform and backend-independent on purpose: every
+                // backend reads its list back the same way, so no
+                // backend has to be trusted to check its own work.
+                match name {
+                    Some(want) => match stage.file_dialog_state() {
+                        Some((_, rows)) if rows.iter().any(|r| r == want) => {
+                            stage.choose_file(Some(want));
+                            None
+                        }
+                        Some((_, rows)) => {
+                            // DISMISS IT ANYWAY. Refusing alone leaves the
+                            // picker up, the next show trips the
+                            // one-per-process guard, and the abort takes
+                            // the failure list with it — so the run dies
+                            // naming the wrong cause. Cancel is the
+                            // honest "we did not choose", and the failure
+                            // below is already recorded.
+                            stage.choose_file(None);
+                            Some(Err(format!(
+                                "file_choose {want:?}: the dialog lists {rows:?} — \
+                                 selecting nothing and pressing Open anyway returns \
+                                 a file, so this would pick the wrong one silently"
+                            )))
+                        }
+                        None => Some(Err(format!(
+                            "file_choose {want:?}: no file dialog is live"
+                        ))),
+                    },
+                    None => {
+                        stage.choose_file(None);
+                        None
+                    }
+                }
             }
             Step::ExpectFileDialog(dir, names) => Some(poll(|| match stage.file_dialog_state() {
                 Some((where_, rows)) => {

@@ -1886,3 +1886,38 @@ where it last was; GTK opens on Recent, which has no path bar at all. A
 scene that armed the directory once and relied on the platform
 remembering reads a directory nobody chose on one platform and an empty
 one on the other. The scene arms before every pick.
+
+## The mac file-dialog legs need the app to reach the front
+
+Half an hour went into a filedialog regression that was not a
+regression: the committed tree failed too, on a machine where every
+other mac leg passed. The cause was that ANOTHER APPLICATION WAS
+FULLSCREEN. NSOpenPanel is hosted in a shared XPC service
+(com.apple.appkit.xpc.openAndSavePanelService) and has to become key
+before it presents, so an app that cannot come to the front never gets a
+panel. An in-process NSAlert sheet does not care, which is why the
+confirm scene stayed green and pointed the search away from the
+environment.
+
+The failure said "no file dialog live", which is true and useless — the
+same words serve "the guest never asked", "the tree has not
+materialized" and this. Worse, every step after it failed too, and the
+undismissed dialog then tripped the one-per-process guard, whose abort
+took the failure list with it. The run died naming a cause three
+removes from the real one.
+
+`kayaOpenPanelWhyNot()` answers the question instead: no panel
+requested, or a panel up but the app not frontmost, or a panel up whose
+tree has no list. The first run with it printed the middle answer and
+ended the search.
+
+TWO GENERAL LESSONS. A failure message that cannot distinguish between
+"you did not ask", "not ready yet" and "the environment forbids it" is
+one message doing three jobs, and it will send someone to the wrong one.
+And when a whole class of leg fails while its siblings pass, ask what
+the class needs that the siblings do not — here, being frontmost — before
+bisecting code that has not changed.
+
+Stale `openAndSavePanelService` processes from earlier aborted runs are
+a red herring, checked and cleared during that search: killing them
+changes nothing, and the system relaunches on demand.

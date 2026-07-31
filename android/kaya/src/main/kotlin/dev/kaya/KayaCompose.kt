@@ -1775,7 +1775,31 @@ object KayaCompose {
                     "file_choose" -> {
                         // Silent like click: the observable is the
                         // guest's reaction to the result.
-                        kayaFileDialogDrive(parts.getOrNull(1) ?: "")
+                        //
+                        // EXCEPT that the row must be THERE, the same
+                        // rule harness.rs and KayaSwiftUI apply: a name
+                        // matching nothing skips the selection and
+                        // presses Open anyway, and the picker completes
+                        // with whatever was already selected — a silent
+                        // wrong file. Measured on GTK.
+                        val want = parts.getOrNull(1) ?: ""
+                        val rows = kayaFileDialogState()?.second
+                        if (want.isNotEmpty() && want != "cancel" && rows != null &&
+                            !rows.contains(want)
+                        ) {
+                            failures.add(
+                                "file_choose $want: the dialog lists $rows — selecting " +
+                                    "nothing and pressing Open anyway returns a file, so " +
+                                    "this would pick the wrong one silently",
+                            )
+                            // Dismiss it anyway: refusing alone leaves the
+                            // picker up and the next show trips the
+                            // one-per-process guard, whose abort takes
+                            // this failure list with it.
+                            kayaFileDialogDrive("cancel")
+                        } else {
+                            kayaFileDialogDrive(want)
+                        }
                     }
                     "alert_choose" -> {
                         // Drive the SAME answer path the dialog's
