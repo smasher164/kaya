@@ -65,13 +65,11 @@ pub struct PickedFile {
 /// place the answer exists — an Android provider may hand back a pipe,
 /// and nothing short of opening reveals it. FALSE means a stream: `mmap`
 /// and random access are unavailable, sequential reads are fine.
-#[cfg(unix)]
 pub struct PickedOpen {
     pub file: std::fs::File,
     pub seekable: bool,
 }
 
-#[cfg(unix)]
 impl PickedFile {
     /// Redeem the handle for a real descriptor. BLOCKS, and may block
     /// for a long time — a cloud provider can download the file first —
@@ -83,23 +81,21 @@ impl PickedFile {
     /// the correct place — kaya surfaces the platform's answer and does
     /// not stand between the guest and the error.
     pub fn open(&self, mode: FileMode) -> std::io::Result<PickedOpen> {
-        use std::os::fd::FromRawFd;
         let raw = match mode {
             FileMode::Read => crate::wire::FILE_MODE_READ,
             FileMode::Write => crate::wire::FILE_MODE_WRITE,
             FileMode::ReadWrite => crate::wire::FILE_MODE_READ_WRITE,
         };
-        let mut fd = -1i32;
+        let mut handle = -1i64;
         let mut seekable = 0u32;
-        let rc = crate::capi::kaya_open_picked(self.handle.0, raw, &mut fd, &mut seekable);
+        let rc = crate::capi::kaya_open_picked(self.handle.0, raw, &mut handle, &mut seekable);
         if rc != 0 {
-            return Err(std::io::Error::from_raw_os_error(rc));
+            return Err(std::io::Error::from_raw_os_error(rc as i32));
         }
         Ok(PickedOpen {
-            // The descriptor is the guest's from here: File closes it on
-            // drop, with the guest's own file API in between. Windows is
-            // the open divergence DESIGN names — a HANDLE, not an fd.
-            file: unsafe { std::fs::File::from_raw_fd(fd) },
+            // The handle is the guest's from here: File closes it on
+            // drop, with the guest's own file API in between.
+            file: unsafe { file_from_raw(handle) },
             seekable: seekable != 0,
         })
     }
@@ -116,7 +112,18 @@ pub trait PickedSource: Send + Sync {
     /// Open in `mode`, returning the descriptor and whether it seeks.
     /// Seekability is only knowable by opening (Android may hand back a
     /// pipe), which is why it rides the open and not the pick.
-    fn open(&self, mode: FileMode) -> std::io::Result<(i32, bool)>;
+    /// The open file as the OS's own handle: a DESCRIPTOR on POSIX, a
+    /// HANDLE on Windows. One integer, two spellings — the semantics
+    /// ("you are holding an open file the OS knows about") is uniform
+    /// and only the platform's name for it differs, which is the
+    /// carve-out shape the binding conventions allow.
+    ///
+    /// NOT a CRT file descriptor on Windows, which would have kept the
+    /// ABI byte-identical and been a trap: `_open_osfhandle` mints an
+    /// fd that is only valid inside the CRT that minted it, and Python,
+    /// Go and the JVM each bring their own. It would have worked for the
+    /// Rust and C guests and quietly broken the rest.
+    fn open(&self, mode: FileMode) -> std::io::Result<(i64, bool)>;
     fn name(&self) -> &str;
     /// Empty unless re-opening this name actually works.
     fn local_path(&self) -> &str;
@@ -131,16 +138,45 @@ pub trait PickedSource: Send + Sync {
 /// The phones do NOT use this: Android has no path at all, and iOS has
 /// one that EPERMs once the security scope drops (measured). Their
 /// sources hold the platform object instead.
+/// The other half of the divergence: build a File back from the OS
+/// integer the C ABI carried. Unsafe for the usual reason — it takes
+/// ownership of a handle it did not open, and closing it twice is on
+/// the caller.
 #[cfg(unix)]
+pub(crate) unsafe fn file_from_raw(handle: i64) -> std::fs::File {
+    use std::os::fd::FromRawFd;
+    unsafe { std::fs::File::from_raw_fd(handle as i32) }
+}
+
+#[cfg(windows)]
+pub(crate) unsafe fn file_from_raw(handle: i64) -> std::fs::File {
+    use std::os::windows::io::FromRawHandle;
+    unsafe { std::fs::File::from_raw_handle(handle as *mut std::ffi::c_void) }
+}
+
+/// The open file as the OS's own integer, and the ONE place the
+/// platforms differ: `IntoRawFd` on POSIX, `IntoRawHandle` on Windows.
+/// Both give up ownership — the caller owns the handle now, which is
+/// what handing over a capability means.
+#[cfg(unix)]
+fn raw_handle(file: std::fs::File) -> i64 {
+    use std::os::fd::IntoRawFd;
+    i64::from(file.into_raw_fd())
+}
+
+#[cfg(windows)]
+fn raw_handle(file: std::fs::File) -> i64 {
+    use std::os::windows::io::IntoRawHandle;
+    file.into_raw_handle() as i64
+}
+
 pub struct PathSource {
     pub name: String,
     pub path: String,
 }
 
-#[cfg(unix)]
 impl PickedSource for PathSource {
-    fn open(&self, mode: FileMode) -> std::io::Result<(i32, bool)> {
-        use std::os::fd::IntoRawFd;
+    fn open(&self, mode: FileMode) -> std::io::Result<(i64, bool)> {
         let mut opts = std::fs::OpenOptions::new();
         match mode {
             FileMode::Read => opts.read(true),
@@ -152,7 +188,7 @@ impl PickedSource for PathSource {
         // picked, a device) does not. The phones answer this from the
         // descriptor they were handed, which is why it rides the OPEN.
         let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
-        Ok((file.into_raw_fd(), seekable))
+        Ok((raw_handle(file), seekable))
     }
 
     fn name(&self) -> &str {

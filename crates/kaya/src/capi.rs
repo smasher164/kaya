@@ -1164,10 +1164,10 @@ pub(crate) fn picked_register(
 pub extern "C" fn kaya_open_picked(
     handle: u64,
     mode: u32,
-    out_fd: *mut i32,
+    out_handle: *mut i64,
     out_seekable: *mut u32,
 ) -> i32 {
-    if out_fd.is_null() || out_seekable.is_null() {
+    if out_handle.is_null() || out_seekable.is_null() {
         return libc_einval();
     }
     let source = {
@@ -1184,9 +1184,9 @@ pub extern "C" fn kaya_open_picked(
         _ => return libc_einval(),
     };
     match source.open(mode) {
-        Ok((fd, seekable)) => {
+        Ok((raw, seekable)) => {
             unsafe {
-                *out_fd = fd;
+                *out_handle = raw;
                 *out_seekable = u32::from(seekable);
             }
             0
@@ -1223,14 +1223,14 @@ mod picked_tests {
             path: path.to_string_lossy().into_owned(),
         }));
 
-        let mut fd = -1i32;
+        let mut fd = -1i64;
         let mut seekable = 0u32;
         assert_eq!(kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable), 0);
         assert!(fd >= 0);
         assert_eq!(seekable, 1, "a regular file seeks");
 
         // The guest's own file API, from here on.
-        let mut file = unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd) };
+        let mut file = unsafe { crate::protocol::file_from_raw(fd) };
         let mut got = String::new();
         file.read_to_string(&mut got).unwrap();
         assert_eq!(got, "picked bytes");
@@ -1238,13 +1238,13 @@ mod picked_tests {
         // REDEEMABLE MORE THAN ONCE — that is what makes save-back work
         // without pinning a writable descriptor from the moment of the
         // pick (DESIGN.md, measurement 7).
-        let mut fd2 = -1i32;
+        let mut fd2 = -1i64;
         assert_eq!(
             kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ_WRITE, &mut fd2, &mut seekable),
             0
         );
         assert!(fd2 >= 0);
-        drop(unsafe { <std::fs::File as std::os::fd::FromRawFd>::from_raw_fd(fd2) });
+        drop(unsafe { crate::protocol::file_from_raw(fd2) });
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1254,7 +1254,7 @@ mod picked_tests {
     /// pointer this is undefined behaviour.
     #[test]
     fn a_bogus_handle_or_mode_fails_cleanly() {
-        let mut fd = -1i32;
+        let mut fd = -1i64;
         let mut seekable = 0u32;
         assert_ne!(
             kaya_open_picked(u64::MAX, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable),

@@ -1957,3 +1957,36 @@ probe that leaves its dialog up keeps the task RUNNING, so the next
 PREVIOUS run's. Twice that looked like a code change having no effect.
 End the task before re-running, and check `schtasks /query` for Status
 when output looks impossibly stale.
+
+## The capability that had no Windows expression
+
+The picked-file redemption path shipped `#[cfg(unix)]` end to end:
+PathSource, PickedOpen, PickedFile::open, and a PickedSource::open
+returning a POSIX descriptor, with `kaya_open_picked` taking an
+`int32_t *out_fd`. On Windows there was no way to redeem a picked handle
+at all — the design's whole claim, that kaya hands over a capability the
+guest opens with its own file API, had no Windows expression.
+
+IT PASSED EVERY GATE, and the reason is worth keeping. check-targets
+cross-compiles the WinUI backend in both feature configurations and was
+perfectly happy, because the only thing that would have referenced
+PathSource on Windows was the file-dialog apply arm — and that arm was a
+depth stub. A cfg'd-out surface whose only cfg'd-in consumer is also
+cfg'd out is invisible to a compiler. Nothing is missing until something
+asks for it, and the thing that would have asked had not been written.
+
+The handle is now an i64 that means a DESCRIPTOR on POSIX and a HANDLE
+on Windows: one integer, two spellings, uniform semantics — the
+carve-out shape the binding conventions allow. The rejected alternative
+was minting a CRT file descriptor with `_open_osfhandle`, which keeps
+the ABI byte-identical and is a trap: a CRT fd is valid only inside the
+CRT that minted it, and Python, Go and the JVM each bring their own, so
+it would have worked for the Rust and C guests and quietly broken the
+other six.
+
+tools/lib/paired-cfg.py is the structural guard: in the core, an item
+gated to one platform must have a counterpart gated to the other. The
+counterpart may be a stub that returns an error; what it may not be is
+absent, because absent reads as fine right up until a backend needs it.
+The backends themselves are exempt — gtk.rs IS linux and winui/mod.rs IS
+windows, so a one-sided gate there states a fact.

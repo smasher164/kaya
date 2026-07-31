@@ -79,5 +79,16 @@ if ! python3 tools/lib/stage-coverage.py; then
     status=1
 fi
 
+# The other thing cross-compiling cannot see: a CORE surface that exists
+# on one platform only. Every target above compiled happily while the
+# picked-file redemption path was #[cfg(unix)] end to end and Windows
+# had no way to redeem a handle at all — because the only thing that
+# would have referenced it there was a depth-stubbed apply arm. A
+# cfg'd-out surface whose only consumer is also cfg'd out is invisible
+# to a compiler: nothing is missing until something asks.
+if ! python3 tools/lib/paired-cfg.py; then
+    status=1
+fi
+
 if [ "$status" = 0 ]; then echo "check-targets: ALL OK"; else echo "check-targets: FAILURES ABOVE"; fi
 exit "$status"

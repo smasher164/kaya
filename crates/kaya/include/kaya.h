@@ -1144,7 +1144,10 @@ void kaya_emit_back_requested(uint64_t entry);
  * lookup; holding it across the open would serialize every concurrent
  * open and undo the parallelism the guest created by spawning threads.
  */
-int32_t kaya_open_picked(uint64_t handle, uint32_t mode, int32_t *out_fd, uint32_t *out_seekable);
+int32_t kaya_open_picked(uint64_t handle,
+                         uint32_t mode,
+                         int64_t *out_handle,
+                         uint32_t *out_seekable);
 
 /**
  * Presentation side: the alert's one answer — an ALERT_CHOICE value
