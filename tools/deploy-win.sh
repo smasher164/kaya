@@ -249,6 +249,30 @@ scp -q "$ROOT"/tools/scenes/*.steps "$HOST:C:/kaya/scenes/"
 # Set once for the machine rather than in forty checked-in .cmd files:
 # every leg runs through schtasks, which inherits the user environment.
 run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul' 
+
+# EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
+# with HideFileExt=1, so the file picker's rows publish "picked" where
+# mac and GTK publish "picked.txt" — and tools/scenes/*.steps are
+# compared BYTE-FOR-BYTE across every platform (CLAUDE.md, invariant 6).
+# A fresh VM with the default would fail the filedialog leg looking
+# exactly like a backend bug.
+#
+# Set every deploy rather than once at --provision: it is a per-user
+# registry value that any Explorer settings change can put back, and a
+# silent revert would cost the same debugging round twice. Verified
+# after setting, because a setx-style write that did not take is the
+# kind of thing that reads as success.
+run_ssh 'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f >nul'
+hide_ext="$(run_ssh 'reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt' 2>/dev/null | tr -d '\r')"
+case "$hide_ext" in
+    *0x0*) ;;
+    *)
+        echo "deploy-win: HideFileExt is not 0 on the guest — the picker would" >&2
+        echo "  publish rows without extensions and the filedialog leg would fail" >&2
+        echo "  as though the backend were wrong. Got: $hide_ext" >&2
+        exit 1
+        ;;
+esac
 for guest in $SCENES; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum

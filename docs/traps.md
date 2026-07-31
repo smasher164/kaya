@@ -1921,3 +1921,39 @@ bisecting code that has not changed.
 Stale `openAndSavePanelService` processes from earlier aborted runs are
 a red herring, checked and cleared during that search: killing them
 changes nothing, and the system relaunches on demand.
+
+## What the Windows file dialog publishes, and the setting that changes it
+
+Measured before writing the arm, like mac and GTK. The shell's common
+item dialog is far more legible to UI Automation than either: a
+`#32770` window named "Open", the file list under a `List` named "Items
+View", the directory in a pane with AutomationId `1001` whose name is
+"Address: <full path>", and Open and Cancel as the classic control ids
+`1` and `2` — IDOK and IDCANCEL, exposed as ControlType.Pane with class
+Button, which is worth knowing before looking for a Button. Rows support
+SelectionItem and Invoke patterns, so unlike GTK's they can be selected
+directly.
+
+THE ONE THAT WOULD HAVE COST A DAY: rows publish "picked", not
+"picked.txt". No UIA property recovers the extension — the Name column
+cell reads "picked" too. It is not a property of the platform, it is
+Explorer's HideFileExt, which ships as 1, and .txt is a "known type".
+With HideFileExt=0 the same rows publish "picked.txt" and match what mac
+and GTK publish, which is what tools/scenes/*.steps being compared
+byte-for-byte across platforms requires (CLAUDE.md, invariant 6).
+
+So the deploy sets it and then VERIFIES it, every run rather than once at
+--provision: it is a per-user registry value any Explorer settings change
+can put back, and a silent revert would spend the same debugging round
+twice. A fresh VM with the default fails the filedialog leg looking
+exactly like a backend bug.
+
+Two things about probing Windows interactively, both of which ate a
+cycle here. An SSH session has NO DESKTOP, so the dialog never appears
+and the probe reports an empty tree rather than an error — every
+interactive probe goes through `schtasks /it` like the legs do. And a
+probe that leaves its dialog up keeps the task RUNNING, so the next
+`schtasks /run` is a silent no-op and the output file read back is the
+PREVIOUS run's. Twice that looked like a code change having no effect.
+End the task before re-running, and check `schtasks /query` for Status
+when output looks impossibly stale.
