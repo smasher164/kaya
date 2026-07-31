@@ -1007,10 +1007,35 @@ them stops this.
 
 What would settle it, for whoever picks it up: the fault is inside
 Windows' own UIA client machinery talking to a dead provider, so the
-routes worth trying are ones that never hold a provider connection
-across the dismissal at all — driving the dialog from OUTSIDE the guest
-process (a helper the runner starts, the way iOS's simdrive works), or
-replacing the UIA read with a pure Win32 one (the dialog is a #32770
-with classic control ids; the rows are a SysListView32, readable with
-LVM_GETITEMTEXT across processes). The second is the smaller change and
-would remove the only UIA in the backend.
+routes worth trying are ones that hold no provider connection across
+the dismissal at all.
+
+An earlier version of this entry asserted the rows are a SysListView32
+readable with LVM_GETITEMTEXT. THAT WAS NEVER MEASURED AND IT IS WRONG
+— true of the old GetOpenFileName dialog, not of this one.
+tools/win/dialogprobe now measures it, and the real shape is:
+
+  - The file list is SHELLDLL_DefView (id 1121) wrapping a DirectUIHWND,
+    which answers LVM_GETITEMCOUNT with 0. The rows are DirectUI items
+    and NOT windows, so no SendMessage reads them. The only
+    SysTreeView32 in the dialog is the navigation sidebar (id 100).
+  - The address bar IS a plain window: ToolbarWindow32, control id 1001,
+    whose window text is "Address: <full path>". GetWindowTextW answers
+    the current directory outright, no COM involved.
+  - The file-name box is an Edit inside a ComboBoxEx32, both control id
+    1148. Open and Cancel are Buttons with the classic ids 1 and 2.
+
+So Win32 can fully DRIVE the dialog and cannot READ its row list. That
+splits the problem in a useful way, because the fault fires on
+DISMISSAL: choosing a file needs no row read at all — WM_SETTEXT the
+name into 1148 and BM_CLICK 1 — which would leave UIA holding nothing
+at the moment the dialog goes away. The row-list assertion
+(`expect_file_dialog` naming both files, the one thing that proves the
+picker is really showing that directory) would keep its UIA read, but
+it runs while the dialog is stably up and can drop every proxy before
+anything is pressed.
+
+Worth trying in that order: move select/confirm/cancel to pure Win32
+first and re-run the java leg. If the fault survives even that, the
+remaining route is driving the dialog from OUTSIDE the guest process,
+the way iOS's simdrive works.
