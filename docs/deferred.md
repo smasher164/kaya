@@ -980,3 +980,37 @@ own the state (see the undo note in this file).
 - Arena offset+length form (row batches, audio) — returns when the row
   window and audio land; the blob table is its v1 realization.
 - Attach/embedding tooling rework (parked at milestone 0).
+
+## The filedialog scene has no java leg on Windows
+
+Measured 2026-07-31. The JAVA BINDING'S PICKER IS FINE — the same guest
+and the same surface are green on mac and on linux, both protocols. What
+does not work is DRIVING the Shell's dialog over UI Automation from
+inside a JVM process.
+
+Dismissing the dialog makes uiautomationcore fault its RPC to the
+provider that just went away: RPC_E_DISCONNECTED (0x80010108), raised as
+a STRUCTURED EXCEPTION rather than returned as a failed HRESULT, on a
+COM worker thread, ASYNCHRONOUSLY — after the harness has already moved
+on to later steps. Four language legs never notice it. The JVM installs
+a process-wide exception handler, turns it into a fatal error report,
+and kills a run whose every assertion had passed.
+
+Five fixes were measured and rejected, recorded so they are not retried:
+touching no UIA after the press; asking the window manager rather than
+re-reading the UIA tree for the gone-check; releasing every UIA proxy
+before the click that kills the dialog; balancing CoUninitialize so the
+apartment does not outlive the walk; `-Xrs`; and an STA client
+apartment. THREE OF THOSE WERE REAL IMPROVEMENTS AND STAYED — the
+ordering and the balanced apartment are correct regardless — but none of
+them stops this.
+
+What would settle it, for whoever picks it up: the fault is inside
+Windows' own UIA client machinery talking to a dead provider, so the
+routes worth trying are ones that never hold a provider connection
+across the dismissal at all — driving the dialog from OUTSIDE the guest
+process (a helper the runner starts, the way iOS's simdrive works), or
+replacing the UIA read with a pure Win32 one (the dialog is a #32770
+with classic control ids; the rows are a SysListView32, readable with
+LVM_GETITEMTEXT across processes). The second is the smaller change and
+would remove the only UIA in the backend.

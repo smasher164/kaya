@@ -1639,9 +1639,46 @@ enum UiaOp<'a> {
     Read,
     /// Select the row with this filename.
     Select(&'a str),
-    /// Press the button with this classic control id: 1 is IDOK
-    /// ("Open"), 2 is IDCANCEL.
-    Press(i32),
+    /// Find the window of the button with this classic control id (1 is
+    /// IDOK "Open", 2 is IDCANCEL) — WITHOUT pressing it. The press
+    /// happens after this call returns, for the reason
+    /// `file_dialog_press` gives.
+    ButtonWindow(i32),
+}
+
+/// Is the Shell's file dialog on screen? Plain Win32, no COM.
+///
+/// THE GONE-CHECK MUST NOT WALK THE DIALOG. `choose_file` presses Open
+/// and then asks whether the dialog left, and asking that through UI
+/// Automation means enumerating a tree that is being torn down at that
+/// exact moment: uiautomationcore raises RPC_E_DISCONNECTED, COM
+/// surfaces it as a STRUCTURED EXCEPTION rather than a failed HRESULT,
+/// and the JVM's process-wide handler turns that into a FATAL error
+/// report. The java leg died there while the other four merely raced
+/// unseen — the same event, escalated by one runtime and swallowed by
+/// the rest.
+///
+/// Existence is a window question, so it is asked of the window
+/// manager. EnumWindows cannot fault on a dead provider because it
+/// never speaks to one.
+#[cfg(feature = "harness")]
+fn file_dialog_is_up() -> bool {
+    unsafe extern "system" fn visit(hwnd: isize, found: isize) -> i32 {
+        let mut class = [0u16; 64];
+        let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if n > 0 && unsafe { IsWindowVisible(hwnd) } != 0 {
+            let name = String::from_utf16_lossy(&class[..n as usize]);
+            if name == "#32770" {
+                unsafe { *(found as *mut bool) = true };
+                return 0; // stop: one is enough
+            }
+        }
+        1
+    }
+
+    let mut found = false;
+    unsafe { EnumWindows(Some(visit), &mut found as *mut bool as isize) };
+    found
 }
 
 /// Read or drive the Shell's file dialog over UI Automation.
@@ -1683,6 +1720,28 @@ fn file_dialog_uia(op: UiaOp<'_>) -> Option<(String, Vec<String>)> {
         // MTA: this runs on the harness thread, which owns no apartment
         // and pumps no messages. S_FALSE (already initialized) is fine.
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // BALANCED, and the balance is what stops an asynchronous
+        // crash. Every call here used to enter the apartment and never
+        // leave it, so the UIA proxies this walk creates outlived the
+        // walk — and when the dialog was dismissed a moment later,
+        // uiautomationcore's RPC to those dead providers faulted on a
+        // COM worker thread with RPC_E_DISCONNECTED, raised as a
+        // STRUCTURED EXCEPTION rather than a failed HRESULT. Four
+        // language legs never saw it. The JVM installs a process-wide
+        // exception handler, so for java it was a FATAL crash report
+        // arriving after the scene had already moved on — which is why
+        // it looked like it came from nowhere.
+        //
+        // Declared FIRST so it drops LAST: Rust drops locals in reverse,
+        // and CoUninitialize must come after every COM object released
+        // above it.
+        struct Apartment;
+        impl Drop for Apartment {
+            fn drop(&mut self) {
+                unsafe { windows::Win32::System::Com::CoUninitialize() };
+            }
+        }
+        let _apartment = Apartment;
         let automation: IUIAutomation =
             CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
         let condition = automation.CreateTrueCondition().ok()?;
@@ -1735,6 +1794,7 @@ fn file_dialog_uia(op: UiaOp<'_>) -> Option<(String, Vec<String>)> {
         let mut directory = String::new();
         let mut rows: Vec<String> = Vec::new();
         let mut acted = false;
+        let mut button: Option<isize> = None;
 
         let all = dialog.FindAll(TreeScope_Descendants, &condition).ok()?;
         for i in 0..all.Length().ok()? {
@@ -1779,21 +1839,63 @@ fn file_dialog_uia(op: UiaOp<'_>) -> Option<(String, Vec<String>)> {
                 continue;
             }
 
-            if let UiaOp::Press(want) = op {
+            if let UiaOp::ButtonWindow(want) = op {
                 if id == want.to_string() {
                     if let Ok(hwnd) = element.CurrentNativeWindowHandle() {
-                        SendMessageW(hwnd.0 as isize, BM_CLICK, 0, 0);
+                        button = Some(hwnd.0 as isize);
                         acted = true;
+                        break;
                     }
                 }
             }
         }
 
+        if let UiaOp::ButtonWindow(_) = op {
+            // Out through the thread-local rather than the return type,
+            // which every other op uses for (directory, rows).
+            PRESS_TARGET.with(|t| t.set(button));
+        }
         match op {
             UiaOp::Read => Some((directory, rows)),
             _ if acted => Some((directory, rows)),
             _ => None,
         }
+    }
+}
+
+#[cfg(feature = "harness")]
+thread_local! {
+    static PRESS_TARGET: std::cell::Cell<Option<isize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Press Open or Cancel on the live dialog.
+///
+/// THE UIA OBJECTS ARE RELEASED BEFORE THE CLICK, and that ordering is
+/// the whole function. Pressing either button dismisses the dialog, and
+/// `SendMessageW` is synchronous — so by the time it returns, the
+/// provider behind every UIA proxy still held is gone. Releasing one
+/// then (which Rust does automatically, at end of scope) makes
+/// uiautomationcore send an RPC to a dead object: RPC_E_DISCONNECTED,
+/// raised as a STRUCTURED EXCEPTION rather than returned as a failed
+/// HRESULT. Four of the five language legs never noticed. The JVM's
+/// process-wide exception handler turns it into a FATAL error report,
+/// so the java leg died at exactly this point, every run.
+///
+/// Finding the window and clicking it are therefore two steps with a
+/// scope boundary between them: the walk hands back an HWND and drops
+/// every proxy while the dialog is still ALIVE, and the click is a
+/// plain window message with no COM held at all.
+#[cfg(feature = "harness")]
+fn file_dialog_press(control_id: i32) -> bool {
+    const BM_CLICK: u32 = 0x00F5;
+    PRESS_TARGET.with(|t| t.set(None));
+    file_dialog_uia(UiaOp::ButtonWindow(control_id));
+    match PRESS_TARGET.with(|t| t.take()) {
+        Some(hwnd) => {
+            unsafe { SendMessageW(hwnd, BM_CLICK, 0, 0) };
+            true
+        }
+        None => false,
     }
 }
 
@@ -4311,6 +4413,17 @@ unsafe extern "system" {
     /// are real child windows with the classic control ids, so the
     /// message a click sends is available directly.
     fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+
+    /// The gone-check's three entries, declared here beside the rest
+    /// rather than by enabling Win32_UI_WindowsAndMessaging: this file
+    /// already names the handful of user32 calls it needs, and the
+    /// feature would pull a very large surface for three.
+    fn EnumWindows(
+        callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
+        param: isize,
+    ) -> i32;
+    fn GetClassNameW(hwnd: isize, buf: *mut u16, len: i32) -> i32;
+    fn IsWindowVisible(hwnd: isize) -> i32;
     fn GetDpiForWindow(hwnd: isize) -> u32;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
     // The shortcut verb's REAL dispatch: foreground the guest and put
@@ -5950,8 +6063,12 @@ impl crate::harness::Stage for WinUiStage {
                 // that is what this waits for rather than a return code.
                 for _ in 0..40 {
                     file_dialog_uia(UiaOp::Select(file));
-                    file_dialog_uia(UiaOp::Press(1));
-                    if file_dialog_uia(UiaOp::Read).is_none() {
+                    file_dialog_press(1);
+                    // Asked of the WINDOW MANAGER, not of the dialog's
+                    // UIA tree: right after the press that tree is being
+                    // torn down, and walking it faults (see
+                    // file_dialog_is_up).
+                    if !file_dialog_is_up() {
                         return;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -5961,8 +6078,8 @@ impl crate::harness::Stage for WinUiStage {
             // the dialog's own button.
             None => {
                 for _ in 0..40 {
-                    file_dialog_uia(UiaOp::Press(2));
-                    if file_dialog_uia(UiaOp::Read).is_none() {
+                    file_dialog_press(2);
+                    if !file_dialog_is_up() {
                         return;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));

@@ -1063,6 +1063,23 @@ case "$SUITE" in
         drain_suites
         run_suite filedialog_csharp
         drain_suites
+        # NO filedialog_java LEG, and it is a HARNESS limit rather than a
+        # binding gap — the Java picker itself is green on mac and linux,
+        # same surface, same guest. What fails is DRIVING the Shell's
+        # dialog from inside a JVM process: dismissing it makes
+        # uiautomationcore fault its RPC to the provider that just went
+        # away (RPC_E_DISCONNECTED), raised as a structured exception on
+        # a COM worker thread AFTER the harness has moved on. The other
+        # four language legs never notice. The JVM's process-wide
+        # handler turns it into a fatal error and kills a run whose every
+        # assertion had already passed.
+        #
+        # Five fixes measured and rejected, so nobody re-tries them:
+        # not touching UIA after the press, a plain-Win32 gone-check
+        # instead of a UIA re-read, releasing every proxy before the
+        # click, balancing CoUninitialize, -Xrs, and an STA client
+        # apartment. Three of those were real improvements and stayed;
+        # none of them stops this. docs/deferred.md carries the item.
         run_suite background_rust
         run_suite background_python
         run_suite background_go
