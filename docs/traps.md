@@ -1990,3 +1990,44 @@ counterpart may be a stub that returns an error; what it may not be is
 absent, because absent reads as fine right up until a backend needs it.
 The backends themselves are exempt — gtk.rs IS linux and winui/mod.rs IS
 windows, so a one-sided gate there states a fact.
+
+## Show() with an owner on another thread never comes back
+
+The WinUI file-dialog arm runs IFileOpenDialog on its own STA thread, so
+the modal Show() does not stall the dispatcher. Passing the app window
+as the owner made Show() BLOCK FOREVER without ever creating a dialog:
+it disables its owner and waits on the owner's input queue, and the
+owner belongs to the UI thread, not this one.
+
+Every symptom pointed away from that. No COM error was logged, because
+the one error the arm deliberately suppresses is ERROR_CANCELLED —
+cancel is the empty list, so a swallowed failure looks exactly like a
+user dismissing the dialog. UI Automation reported no #32770 anywhere on
+the desktop, which reads as "the dialog closed" rather than "the dialog
+was never created". And the guest ended up showing "cancelled", the
+correct response to an empty result.
+
+What found it was tracing each COM call by NAME and the thread by phase:
+the arm entered, the thread ran with a good HWND and the right
+directory, and then nothing at all — no Show trace, no stage error. A
+call that neither returns nor errors is a block, and the only thing
+Show() waits on is its owner. Passing None fixes it, and modality is not
+lost: kaya already allows exactly one live file dialog per process, and
+capi::file_dialog_shown panics on a second.
+
+TWO MORE THINGS THAT COST A CYCLE EACH. windows-bindgen OMITS A METHOD
+whose parameter types are outside the enabled feature set, so
+SetFileTypes simply did not exist until Win32_UI_Shell_Common was added
+— and the error names the method, never the feature. And Windows'
+temp_dir() ends in a separator, so an expander that trimmed only '/'
+produced "…\Temp\/kaya-picked-N": SHCreateItemFromParsingName rejects
+that outright while POSIX shrugs at "//", which is why neither Unix lane
+ever noticed. The scene keeps writing POSIX separators, as one file
+serving five platforms must, and the expander normalizes.
+
+And the press needs a BOUNDED RETRY. The dialog becomes interactive
+slightly after its list populates, so a single BM_CLICK is swallowed
+with no error anywhere and the leg fails three steps later on an
+assertion about the guest. The observable is the dialog GOING AWAY, so
+that is what choose_file waits for rather than any return code — it
+passed once and flaked on the next run before this.

@@ -106,6 +106,13 @@ struct CoreState {
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
+    /// The directory the next picker opens on.
+    ///
+    /// ARMED, NOT SET: a dialog reads its folder when it is shown, so
+    /// the harness's file_dialog_goto stores it here and the apply arm
+    /// applies it. Same shape as GTK and the SwiftUI interpreter, for
+    /// the same reason — pointing one already on screen is ignored.
+    pending_dialog_dir: RefCell<Option<String>>,
     widgets: HashMap<WidgetId, NativeWidget>,
     // Which grid each widget sits in, for Destroy's detach.
     parents: HashMap<WidgetId, Grid>,
@@ -1625,6 +1632,300 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 /// the arm needs an answer. GetClientRect answers about the WINDOW —
 /// what a size class is a property of — and is available before XAML
 /// has laid anything out.
+/// What to do with the live file dialog: read it back, or drive it.
+#[cfg(feature = "harness")]
+enum UiaOp<'a> {
+    /// The directory it is showing and the names its list contains.
+    Read,
+    /// Select the row with this filename.
+    Select(&'a str),
+    /// Press the button with this classic control id: 1 is IDOK
+    /// ("Open"), 2 is IDCANCEL.
+    Press(i32),
+}
+
+/// Read or drive the Shell's file dialog over UI Automation.
+///
+/// UIA AND NOT THE XAML TREE, which is what every other read in this
+/// backend walks: the picker is a #32770 window owned by the shell, not
+/// a XAML object, so `on_ui_read` cannot see it at all. This is the only
+/// UIA in the backend and it exists for exactly that reason.
+///
+/// Everything below was measured against the real dialog rather than
+/// assumed (docs/traps.md): the directory is the pane with AutomationId
+/// 1001, whose name is "Address: <full path>"; the rows are ListItems
+/// whose names carry extensions ONLY when Explorer's HideFileExt is 0,
+/// which the deploy sets and verifies; and Open and Cancel are the
+/// classic control ids 1 and 2, reported as ControlType.Pane, so they
+/// offer no Invoke pattern and are pressed with BM_CLICK to their own
+/// window instead.
+///
+/// Conditions are avoided entirely: building UIA property conditions
+/// needs VARIANTs, and walking descendants under a true condition and
+/// filtering in Rust says the same thing with none of that.
+#[cfg(feature = "harness")]
+fn file_dialog_uia(op: UiaOp<'_>) -> Option<(String, Vec<String>)> {
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{
+        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationSelectionItemPattern,
+        TreeScope_Children, TreeScope_Descendants, UIA_SelectionItemPatternId,
+    };
+
+    const BM_CLICK: u32 = 0x00F5;
+    const DIALOG_CLASS: &str = "#32770";
+    const ADDRESS_ID: &str = "1001";
+    // UIA_ListItemControlTypeId; naming the constant beats the number.
+    const LIST_ITEM: i32 = 50007;
+
+    unsafe {
+        // MTA: this runs on the harness thread, which owns no apartment
+        // and pumps no messages. S_FALSE (already initialized) is fine.
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let automation: IUIAutomation =
+            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
+        let condition = automation.CreateTrueCondition().ok()?;
+
+        // The dialog is a TOP-LEVEL window, not a child of ours: the
+        // shell owns it and only makes our window its owner.
+        let root = automation.GetRootElement().ok()?;
+        let windows = root.FindAll(TreeScope_Children, &condition).ok()?;
+        let mut dialog: Option<IUIAutomationElement> = None;
+        for i in 0..windows.Length().ok()? {
+            let Ok(element) = windows.GetElement(i) else {
+                continue;
+            };
+            let class = element
+                .CurrentClassName()
+                .map(|c| c.to_string())
+                .unwrap_or_default();
+            if class == DIALOG_CLASS {
+                dialog = Some(element);
+                break;
+            }
+        }
+        let Some(dialog) = dialog else {
+            // A miss is never self-explaining: the question is always
+            // what the desktop DID publish, and one deploy cycle per
+            // answer is the expensive way to learn it.
+            static DUMPED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if DUMPED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                // ONCE. expect_file_dialog is a bounded retry and calls
+                // this several times a second while a dialog is still
+                // coming up, so an unguarded dump buries the leg's own
+                // output in its normal case.
+                return None;
+            }
+            let mut seen = Vec::new();
+            for i in 0..windows.Length().unwrap_or(0) {
+                if let Ok(element) = windows.GetElement(i) {
+                    seen.push(format!(
+                        "{}/{}",
+                        element.CurrentClassName().map(|c| c.to_string()).unwrap_or_default(),
+                        element.CurrentName().map(|c| c.to_string()).unwrap_or_default()
+                    ));
+                }
+            }
+            eprintln!("KAYA_UIA_TRACE: no {DIALOG_CLASS} among {seen:?}");
+            return None;
+        };
+
+        let mut directory = String::new();
+        let mut rows: Vec<String> = Vec::new();
+        let mut acted = false;
+
+        let all = dialog.FindAll(TreeScope_Descendants, &condition).ok()?;
+        for i in 0..all.Length().ok()? {
+            let Ok(element) = all.GetElement(i) else {
+                continue;
+            };
+            let id = element
+                .CurrentAutomationId()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let name = element
+                .CurrentName()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let control = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
+
+            if id == ADDRESS_ID {
+                // "Address: C:\...\kaya-picked" — the prefix is the
+                // control's label, not part of the path.
+                directory = name
+                    .split_once(": ")
+                    .map(|(_, path)| path.to_owned())
+                    .unwrap_or(name.clone());
+                continue;
+            }
+
+            if control == LIST_ITEM && !name.is_empty() {
+                rows.push(name.clone());
+                if let UiaOp::Select(want) = op {
+                    if name == want {
+                        if let Ok(pattern) = element.GetCurrentPatternAs::<
+                            IUIAutomationSelectionItemPattern,
+                        >(UIA_SelectionItemPatternId)
+                        {
+                            // Select, not AddToSelection: choosing one
+                            // file means exactly one, and a multi-select
+                            // dialog already carries a selection.
+                            acted = pattern.Select().is_ok();
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if let UiaOp::Press(want) = op {
+                if id == want.to_string() {
+                    if let Ok(hwnd) = element.CurrentNativeWindowHandle() {
+                        SendMessageW(hwnd.0 as isize, BM_CLICK, 0, 0);
+                        acted = true;
+                    }
+                }
+            }
+        }
+
+        match op {
+            UiaOp::Read => Some((directory, rows)),
+            _ if acted => Some((directory, rows)),
+            _ => None,
+        }
+    }
+}
+
+/// Show the Shell's common item dialog and return (name, path) per
+/// file. Runs on its own STA thread; see the apply arm.
+///
+/// The empty vector IS cancel: Show() answers ERROR_CANCELLED, which is
+/// not an error condition to report but the platform's way of saying the
+/// selection was empty.
+fn file_dialog_show(
+    hwnd: isize,
+    multiple: bool,
+    filters: &[(String, String)],
+    folder: Option<&str>,
+) -> Vec<(String, String)> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        SIGDN_FILESYSPATH, FOS_ALLOWMULTISELECT, FOS_FORCEFILESYSTEM,
+    };
+
+    let mut out = Vec::new();
+    unsafe {
+        // STA, because the shell dialog demands it. The result is not
+        // checked for S_FALSE: already-initialized is fine, and the
+        // matching uninit still runs.
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // WHICH CALL FAILED, not merely that one did: a bare
+        // "The parameter is incorrect" from a chain of six COM calls
+        // names nothing, and the first run cost a deploy cycle to learn
+        // that much.
+        let mut stage = "CoCreateInstance";
+        let result = (|| -> windows_core::Result<()> {
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)?;
+
+            stage = "GetOptions";
+            let mut options = dialog.GetOptions()?;
+            // FORCEFILESYSTEM keeps the answer to things that HAVE a
+            // path: the design hands back a capability the guest opens
+            // with its own file API, and a virtual shell item has
+            // nothing to open.
+            options |= FOS_FORCEFILESYSTEM;
+            if multiple {
+                options |= FOS_ALLOWMULTISELECT;
+            }
+            stage = "SetOptions";
+            dialog.SetOptions(options)?;
+
+            // ADVISORY on every platform (DESIGN.md): a default view,
+            // never a guarantee. The HSTRINGs must outlive SetFileTypes,
+            // which borrows their pointers.
+            let specs: Vec<(HSTRING, HSTRING)> = filters
+                .iter()
+                .map(|(label, suffix)| {
+                    (HSTRING::from(label.as_str()), HSTRING::from(format!("*.{suffix}")))
+                })
+                .collect();
+            if !specs.is_empty() {
+                let raw: Vec<COMDLG_FILTERSPEC> = specs
+                    .iter()
+                    .map(|(label, pattern)| COMDLG_FILTERSPEC {
+                        pszName: windows_core::PCWSTR(label.as_ptr()),
+                        pszSpec: windows_core::PCWSTR(pattern.as_ptr()),
+                    })
+                    .collect();
+                stage = "SetFileTypes";
+            dialog.SetFileTypes(&raw)?;
+            }
+
+            // The armed directory, applied HERE because that is the only
+            // moment it is read.
+            if let Some(dir) = folder {
+                let wide = HSTRING::from(dir);
+                stage = "SHCreateItemFromParsingName";
+                let item: IShellItem =
+                    SHCreateItemFromParsingName(windows_core::PCWSTR(wide.as_ptr()), None)?;
+                stage = "SetFolder";
+            dialog.SetFolder(&item)?;
+            }
+
+            stage = "Show";
+            // NO OWNER, and that is not laziness. Show() disables its
+            // owner and waits on the owner's input queue, and this runs
+            // on a thread that is not the UI thread — so passing the
+            // app window blocks inside Show() before the dialog is ever
+            // created. Measured: the thread entered Show and never
+            // returned, and UI Automation reported no #32770 anywhere on
+            // the desktop.
+            //
+            // Modality is not lost by this. kaya already allows exactly
+            // one live file dialog per process (capi::file_dialog_shown
+            // panics on a second), which is the guarantee the vocabulary
+            // actually makes.
+            let _ = hwnd;
+            dialog.Show(None)?;
+
+            stage = "GetResults";
+            let items = dialog.GetResults()?;
+            for i in 0..items.GetCount()? {
+                let item = items.GetItemAt(i)?;
+                let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+                let path = path.to_string()?;
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                out.push((name, path));
+            }
+            Ok(())
+        })();
+        // A cancelled dialog returns ERROR_CANCELLED from Show(); the
+        // empty vector already says that, so nothing is logged for it.
+        if let Err(err) = result {
+            const CANCELLED: windows_core::HRESULT = windows_core::HRESULT(0x8007_04C7u32 as i32);
+            if err.code() != CANCELLED {
+                eprintln!(
+                    "kaya: file dialog failed at {stage} (hwnd={hwnd:#x}, \
+                     folder={folder:?}, filters={filters:?}): {err}"
+                );
+            }
+        }
+        CoUninitialize();
+    }
+    out
+}
+
 fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
     let target = winui_window(core, window).ok()?;
     let native: IWindowNative = windows_core::Interface::cast(&target).ok()?;
@@ -3072,13 +3373,66 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.menus_touched = true;
         }
 
-        ApplyOp::PresentFileDialog(_) => {
-            // DEPTH SLICE: the mac SwiftUI arm lands first (CLAUDE.md's
-            // sequencing). This backend compiles the vocabulary and
-            // refuses it loudly rather than silently doing nothing. The
-            // call is what check-stubs and check-steps read — it names
-            // the scene, so neither gate has to recognise a sentence.
-            crate::depth_stub("filedialog");
+        ApplyOp::PresentFileDialog(spec) => {
+            // The Shell's common item dialog, which is what Windows
+            // means by a file picker.
+            //
+            // NOT FileOpenPicker, and the reason is the scene: its
+            // SuggestedStartLocation is a PickerLocationId ENUM of
+            // well-known folders, so it cannot be pointed at
+            // <temp>/kaya-picked-<pid> at all. IFileOpenDialog::SetFolder
+            // takes any shell item. DESIGN.md anticipated this shape —
+            // "honorable on four platforms and not the fifth" — and it
+            // decides the API rather than being worked around.
+            //
+            // ON ITS OWN STA THREAD, because Show() is modal and runs a
+            // nested message loop. Blocking the UI thread inside apply
+            // would stall the dispatcher for as long as the picker is
+            // up, and this scene exists to prove the app stays alive
+            // while a pick is outstanding. The owner HWND still makes it
+            // modal to the user; only kaya's thread is spared.
+            let target = winui_window(core, spec.window.0);
+            let hwnd = target
+                .ok()
+                .and_then(|t| windows_core::Interface::cast::<IWindowNative>(&t).ok())
+                .and_then(|n| n.window_handle().ok())
+                .unwrap_or(0);
+            let dir = core.pending_dialog_dir.borrow_mut().take();
+            let multiple = spec.multiple;
+            let filters = spec.filters.clone();
+            let dialog_id = spec.dialog.0;
+            let sink = core.occurrences.clone();
+            std::thread::Builder::new()
+                .name("kaya-file-dialog".into())
+                .spawn(move || {
+                    let files = file_dialog_show(hwnd, multiple, &filters, dir.as_deref());
+                    let picked = files
+                        .into_iter()
+                        .map(|(name, path)| {
+                            let handle = crate::capi::picked_register(std::sync::Arc::new(
+                                crate::protocol::PathSource {
+                                    name: name.clone(),
+                                    path: path.clone(),
+                                },
+                            ));
+                            crate::protocol::PickedFile {
+                                handle,
+                                name,
+                                local_path: path,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    // Cancel is the EMPTY LIST, faithfully: Show()
+                    // returns ERROR_CANCELLED and no platform can
+                    // confirm an empty selection, so there is no
+                    // sentinel to invent (DESIGN.md, File dialogs).
+                    crate::capi::file_dialog_retire(dialog_id);
+                    sink.send(Occurrence::FileDialogResult {
+                        dialog: crate::protocol::FileDialogId(dialog_id),
+                        files: picked,
+                    });
+                })
+                .expect("failed to spawn the file dialog thread");
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
@@ -3950,6 +4304,13 @@ unsafe extern "system" {
 
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
+
+    /// BM_CLICK to a button's own window is how the harness presses
+    /// Open and Cancel. UI Automation reports them as ControlType.Pane
+    /// (class Button), and a Pane offers no Invoke pattern — but they
+    /// are real child windows with the classic control ids, so the
+    /// message a click sends is available directly.
+    fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
     fn GetDpiForWindow(hwnd: isize) -> u32;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
     // The shortcut verb's REAL dispatch: foreground the guest and put
@@ -4106,6 +4467,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             transactions: tx_rx,
             scene: Scene::new(),
             occurrences: occ_tx,
+            pending_dialog_dir: RefCell::new(None),
             widgets: HashMap::new(),
             parents: HashMap::new(),
             buttons: Vec::new(),
@@ -5559,17 +5921,66 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
-        // DEPTH SLICE: the SwiftUI arm lands first, and this backend's
-        // apply arm refuses the record outright — so no picker can be
-        // live here and None is the honest answer, not a stub hiding a
-        // gap. check-stubs is what keeps a runner from wiring the
-        // scene's legs against this.
-        None
+        // The REAL dialog, read over UI Automation as an assistive
+        // client would — never this backend's record of what it asked
+        // for. A picker aimed at the wrong place, or filtered down to
+        // nothing, presents perfectly and is useless.
+        //
+        // NOT through on_ui_read: the picker is a #32770 window the
+        // shell owns, not a XAML object, so the tree this backend's
+        // other reads walk cannot see it. And the UI thread is busy
+        // being a UI thread — the dialog runs on its own.
+        file_dialog_uia(UiaOp::Read)
     }
 
-    fn choose_file(&self, _: Option<&str>) {}
+    fn choose_file(&self, name: Option<&str>) {
+        match name {
+            // SELECT, THEN PRESS, in two passes so neither depends on
+            // the order the tree happens to enumerate in. Selection is
+            // not decoration: a dialog completes with the only row when
+            // nothing is selected, which is why the scene keeps a decoy
+            // that sorts first.
+            Some(file) => {
+                // BOUNDED RETRY, because one pass is a guess. The dialog
+                // takes a moment to become interactive after its list
+                // populates, and a press that lands too early is
+                // swallowed with no error anywhere — the leg then fails
+                // on a later assertion about the guest, three steps from
+                // the cause. The observable is the dialog GOING AWAY, so
+                // that is what this waits for rather than a return code.
+                for _ in 0..40 {
+                    file_dialog_uia(UiaOp::Select(file));
+                    file_dialog_uia(UiaOp::Press(1));
+                    if file_dialog_uia(UiaOp::Read).is_none() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            // Cancel is the empty list, faithfully. IDCANCEL, pressed on
+            // the dialog's own button.
+            None => {
+                for _ in 0..40 {
+                    file_dialog_uia(UiaOp::Press(2));
+                    if file_dialog_uia(UiaOp::Read).is_none() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    }
 
-    fn goto_directory(&self, _: &str) {}
+    fn goto_directory(&self, path: &str) {
+        // ARMED, NOT SET: a dialog reads its folder when it is shown, so
+        // this stores it and the apply arm applies it — the same shape
+        // as GTK and the SwiftUI interpreter, for the same reason.
+        let path = path.to_owned();
+        Self::on_ui(move |core| {
+            *core.pending_dialog_dir.borrow_mut() = Some(path.clone());
+            Ok(())
+        });
+    }
 
     fn alert_count(&self) -> usize {
         Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))

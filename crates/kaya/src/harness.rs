@@ -2115,7 +2115,13 @@ fn expand_path(path: &str) -> String {
             .find(|c: char| !c.is_ascii_uppercase() && c != '_')
             .unwrap_or(after.len());
         match &after[..end] {
-            "TMP" => out.push_str(tmp.trim_end_matches('/')),
+            // BOTH separators: Windows' temp_dir ends in a BACKSLASH,
+            // so trimming only '/' left "…\\Temp\\" and the scene's own
+            // '/' made "…\\Temp\\/kaya-picked-N".
+            // SHCreateItemFromParsingName rejects that outright, while
+            // POSIX shrugs at "//" — which is why neither Unix lane ever
+            // noticed.
+            "TMP" => out.push_str(tmp.trim_end_matches(['/', '\\'])),
             "PID" => out.push_str(&pid),
             other => {
                 out.push('$');
@@ -2125,6 +2131,12 @@ fn expand_path(path: &str) -> String {
         rest = &after[end..];
     }
     out.push_str(rest);
+    // The SCENE writes POSIX separators, because tools/scenes/*.steps is
+    // one file serving five platforms (CLAUDE.md, invariant 6). Each
+    // platform resolves it its own way, and the shell's parsing-name
+    // wants backslashes.
+    #[cfg(windows)]
+    let out = out.replace('/', "\\");
     out
 }
 
@@ -2149,6 +2161,16 @@ mod expand_tests {
         let got = expand_path("$TMP/kaya-picked-$PID");
         assert!(got.contains(&format!("kaya-picked-{}", std::process::id())));
         assert!(!got.contains('$'));
+    }
+
+    #[test]
+    fn no_doubled_separator_after_tmp() {
+        // The one that broke Windows: temp_dir ends in a separator
+        // there, so a naive join produces "…\\Temp\\/name".
+        let got = expand_path("$TMP/kaya-picked-1");
+        assert!(!got.contains("//"), "{got}");
+        assert!(!got.contains("\\/"), "{got}");
+        assert!(got.ends_with("kaya-picked-1"), "{got}");
     }
 
     #[test]

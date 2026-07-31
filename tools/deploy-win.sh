@@ -176,7 +176,7 @@ SCENES="background milestone2 entry gallery todos reorder feed grow layout align
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-filedialog}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -1010,6 +1010,10 @@ case "$SUITE" in
         # assertion. The deadlock IS the gate
         # (docs/background-work-plan.md §5) — read a timeout here as
         # that, not as VM load, before blaming the lane.
+        # The filedialog scene: the Shell's own dialog, driven for
+        # real over UI Automation. DEPTH TIER — rust only until the
+        # sweep lands the other seven.
+        run_suite filedialog_rust
         run_suite background_rust
         run_suite background_python
         run_suite background_go

@@ -36,7 +36,26 @@ windows-core = "0.62"
 # ItemCollection's default interface (ComboBox.Items) — the pinned
 # windows-collections 0.3 ships only the plain vector types, so the
 # bindgen post-fix re-points the observable ones here.
-windows = { version = "0.62", features = ["Foundation_Collections"] }
+# Foundation_Collections: see above. The file-dialog arm adds the Win32
+# COM surface, and none of it needs the winmd bindgen — these are Win32
+# namespaces the crate already carries, unlike the Microsoft.UI.* types
+# in winui/bindings.rs.
+#
+# Win32_UI_Shell is IFileOpenDialog, the Shell's common item dialog.
+# Shell_Common carries COMDLG_FILTERSPEC, and it is NOT optional even
+# though only the filter uses it: windows-bindgen omits a method whose
+# parameter types are outside the enabled feature set, so without it
+# SetFileTypes does not exist and the error names the method rather than
+# the missing feature. Win32_UI_Accessibility is UI Automation, which
+# this backend needs because a #32770 dialog is not in the XAML object
+# tree its other reads walk.
+windows = { version = "0.62", features = [
+    "Foundation_Collections",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+] }
 windows-numerics = "0.3"
 windows-collections = "0.3"
 # TextBox's metadata reaches IAsyncOperation (windows-bindgen emits
