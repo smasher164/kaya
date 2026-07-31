@@ -93,7 +93,7 @@ for arg in "$@"; do
         sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
-        filedialog_rust|filedialog_python) SUITE="$arg" ;;
+        filedialog_rust|filedialog_python|filedialog_go|filedialog_csharp|filedialog_java) SUITE="$arg" ;;  # java: diagnostic only, see the block below
         commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -169,7 +169,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -177,7 +177,7 @@ SCENES="background milestone2 entry gallery todos reorder feed grow layout align
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-filedialog}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -194,15 +194,8 @@ for s in $DEPTH_SCENES; do
     SCENE_EXES+=("$TARGET/examples/$s.exe")
     BUILD_EXAMPLES+=(--example "$s")
 done
-# MID-SWEEP scenes: a depth scene whose python half HAS landed while the
-# other languages' have not. Named one by one rather than globbed for
-# whatever exists — a glob would silently stop shipping a guest that got
-# deleted or renamed, and "the leg did not run" is the one outcome this
-# lane must never report as success.
-DEPTH_SCENE_PYS="${KAYA_WIN_DEPTH_SCENE_PYS:-filedialog}"
-for s in $DEPTH_SCENE_PYS; do
-    SCENE_PYS+=("$ROOT/guests/python/$s.py")
-done
+# (No mid-sweep list any more: filedialog joined SCENES when its eighth
+# guest landed, so its per-language surfaces glob with everyone else's.)
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --locked --features harness --release --target aarch64-pc-windows-msvc --lib \
@@ -1050,9 +1043,7 @@ case "$SUITE" in
         # (docs/background-work-plan.md §5) — read a timeout here as
         # that, not as VM load, before blaming the lane.
         # The filedialog scene: the Shell's own dialog, driven for
-        # real over UI Automation. The language sweep is mid-flight, so
-        # the legs here are the languages whose picker surface has
-        # landed.
+        # real over UI Automation, in every language this lane carries.
         # SERIAL, BETWEEN DRAINS, like the menus legs and for a sibling
         # reason. A file dialog is OS-GLOBAL chrome: it is modal, it
         # must hold the FOREGROUND to be driven, and the harness finds
@@ -1067,6 +1058,10 @@ case "$SUITE" in
         run_suite filedialog_rust
         drain_suites
         run_suite filedialog_python
+        drain_suites
+        run_suite filedialog_go
+        drain_suites
+        run_suite filedialog_csharp
         drain_suites
         run_suite background_rust
         run_suite background_python

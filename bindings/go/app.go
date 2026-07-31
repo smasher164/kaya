@@ -80,7 +80,7 @@ func assertRoot(c Collection) {
 }
 
 type counters struct {
-	signal, widget, collection, node, alert, menuItem uint64
+	signal, widget, collection, node, alert, menuItem, fileDialog uint64
 }
 
 // Entry is one key/value pair of a collection instance, in insertion
@@ -115,6 +115,7 @@ type App struct {
 	backRequested  map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
+	fileDialogs    map[uint64]func(*Tx, []PickedFile)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	// Menu dispatch tables, keyed by MENU ITEM id — their own id
 	// space, separate from every widget/node table ("two tables,
@@ -165,6 +166,7 @@ func NewApp() *App {
 	return &App{
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
+		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
@@ -1370,6 +1372,79 @@ func (r AlertRef) Show() uint64 {
 	return r.id
 }
 
+// PickFiles asks the platform for files. THE PICK, NOT THE OPEN — the
+// result carries handles you redeem later, so the name says Pick
+// (DESIGN.md, File dialogs).
+//
+// A chain that ends in Show, like ShowAlert:
+// tx.PickFiles().Filter("Text", "txt").OnResult(func(tx *kaya.Tx, files
+// []kaya.PickedFile) { … }).Show(). One dialog may be live per process;
+// show the next from the first's result handler.
+func (tx *Tx) PickFiles() FileDialogRef {
+	tx.app.c.fileDialog++
+	return FileDialogRef{tx: tx, id: tx.app.c.fileDialog, multiple: true}
+}
+
+// PickFile is the single-file spelling. The floor always returns a
+// LIST; this only asks the platform for one, so the handler receives
+// zero or one file.
+func (tx *Tx) PickFile() FileDialogRef {
+	r := tx.PickFiles()
+	r.multiple = false
+	return r
+}
+
+// FileDialogRef accumulates the one atomic SHOW_FILE_DIALOG record;
+// nothing is sent until Show (a request has a send moment, unlike a
+// window declaration).
+type FileDialogRef struct {
+	tx       *Tx
+	id       uint64
+	window   uint64
+	multiple bool
+	filters  []string
+	onResult func(*Tx, []PickedFile)
+}
+
+// In targets an auxiliary window (0 = primary).
+func (r FileDialogRef) In(window uint64) FileDialogRef {
+	r.window = window
+	return r
+}
+
+// Filter adds one advisory (label, extensions) pair — extensions
+// space-separated. ADVISORY on every platform: they set a default view
+// rather than a guarantee, so the guest still validates what it got.
+func (r FileDialogRef) Filter(label, extensions string) FileDialogRef {
+	r.filters = append(r.filters, label, extensions)
+	return r
+}
+
+// OnResult binds the one-shot result handler to THIS request. The
+// registration retires with the answer; CANCEL IS THE EMPTY LIST.
+func (r FileDialogRef) OnResult(fn func(*Tx, []PickedFile)) FileDialogRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id; the one answer arrives at
+// the OnResult handler.
+func (r FileDialogRef) Show() uint64 {
+	if r.onResult != nil {
+		r.tx.app.fileDialogs[r.id] = r.onResult
+	}
+	multiple := uint32(0)
+	if r.multiple {
+		multiple = 1
+	}
+	values := make([]any, 0, len(r.filters))
+	for _, f := range r.filters {
+		values = append(values, f)
+	}
+	r.tx.emit(TxShowFileDialog(r.window, r.id, multiple, values))
+	return r.id
+}
+
 // WindowRef chains window props, the construction-sugar tier.
 type WindowRef struct {
 	tx *Tx
@@ -2033,6 +2108,7 @@ func (a *App) Run() int {
 			checked, _ := payload.(bool)
 			value, _ := payload.(float64)
 			choice, _ := payload.(uint32)
+			files, _ := payload.([]PickedFile)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -2099,6 +2175,14 @@ func (a *App) Run() int {
 				if fn := a.alerts[id]; fn != nil {
 					delete(a.alerts, id)
 					a.dispatch(func(tx *Tx) { fn(tx, choice) })
+				}
+			case kind == occFileDialogResult:
+				// One-shot like the alert, and the id retires with it.
+				// EMPTY IS CANCEL — no platform can confirm an empty
+				// selection, so there is no sentinel to invent.
+				if fn := a.fileDialogs[id]; fn != nil {
+					delete(a.fileDialogs, id)
+					a.dispatch(func(tx *Tx) { fn(tx, files) })
 				}
 			// Menu occurrences key the menu-item tables — their own
 			// id space, so neither widget nor node ids can collide

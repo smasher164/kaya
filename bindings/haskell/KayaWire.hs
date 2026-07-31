@@ -1044,6 +1044,18 @@ parseOccurrence rec = do
           -- The alert's one answer: id + u32 choice (alertChoice*).
           choice <- peekByteOff rec 16 :: IO Word32
           return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))
+      else if kind == occKindFileDialogResult
+        then do
+          -- id, a count, then three Values per file (handle,
+          -- name, localPath), FLATTENED into the values slot;
+          -- the app layer regroups them. EMPTY IS CANCEL.
+          count <- peekByteOff rec 16 :: IO Word32
+          let readValues 0 _ acc = return (reverse acc)
+              readValues n at acc = do
+                (v, next) <- parseValue rec at
+                readValues (n - 1 :: Int) next (v : acc)
+          vals <- readValues (fromIntegral count * 3) 32 []
+          return (Just (kind, ident, vals, Nothing))
         -- Surface lifecycle records carry the surface id alone
         -- (derived from the record shapes).
         else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested

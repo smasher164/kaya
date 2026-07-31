@@ -11,7 +11,7 @@
 -- while C blocks; the -threaded runtime is required. Link against
 -- libkaya at build time; kaya_run must own the process main thread, and
 -- GHC's main runs bound to it.
-module KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, waitOccurrences, wake, registerBlob) where
+module KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, waitOccurrences, wake, registerBlob, openPicked) where
 
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
@@ -19,12 +19,14 @@ import Data.ByteString.Builder (Builder, toLazyByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Int (Int32)
+import Data.Int (Int32, Int64)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CSize (..))
-import Foreign.Marshal.Alloc (mallocBytes)
+import Foreign.Marshal.Alloc (alloca, mallocBytes)
 import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import Foreign.Storable (peekByteOff)
+import Foreign.Storable (peek, peekByteOff)
+import GHC.IO.Handle.FD (fdToHandle)
+import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
 
 import KayaWire (Value, parseOccurrence, specHash)
@@ -37,6 +39,15 @@ foreign import ccall safe "kaya_wake"
 
 foreign import ccall unsafe "kaya_occurrence_ring"
   c_kaya_occurrence_ring :: Ptr () -> IO ()
+
+-- | Redeem a picked handle: the OS handle lands in the first out-param
+-- and seekability in the second; 0 is success.
+--
+-- SAFE, not unsafe: it BLOCKS, and may block for a long time — a cloud
+-- provider can download the file before it answers — so the RTS must
+-- keep running other threads while it does.
+foreign import ccall safe "kaya_open_picked"
+  c_kaya_open_picked :: Word64 -> Word32 -> Ptr Int64 -> Ptr Word32 -> IO Int32
 
 foreign import ccall safe "kaya_wait_occurrences"
   c_kaya_wait_occurrences :: IO CBool
@@ -169,3 +180,28 @@ pollOccurrence = do
               Just occ -> return (Just occ)
               Nothing -> loop hh'
   loop h
+
+-- | Redeem a picked handle for a real 'Handle', plus whether it seeks.
+--
+-- BLOCKS, and may block for a long time, so call it from a thread you
+-- chose and post the result back (DESIGN.md, File dialogs).
+--
+-- THE DESCRIPTOR BECOMES GHC'S: 'fdToHandle' takes it over, so
+-- 'hClose' closes it exactly once and the core keeps no claim.
+--
+-- Seekable rides the OPEN rather than the pick because that is the only
+-- place the answer exists: an Android provider may hand back a pipe,
+-- and nothing short of opening reveals it.
+openPicked :: Word64 -> Word32 -> IO (Handle, Bool)
+openPicked handle mode =
+  alloca $ \rawPtr -> alloca $ \seekPtr -> do
+    rc <- c_kaya_open_picked handle mode rawPtr seekPtr
+    if rc /= 0
+      then
+        ioError
+          (userError ("kaya: opening the picked file failed (code " ++ show rc ++ ")"))
+      else do
+        raw <- peek rawPtr
+        seekable <- peek seekPtr
+        h <- fdToHandle (fromIntegral raw)
+        return (h, seekable /= 0)

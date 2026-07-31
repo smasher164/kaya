@@ -681,5 +681,46 @@ out="$(ios_picker)" || {
     status=1
 }
 
+# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. tools/gen-bindings.sh
+# stamps a hash of tools/kaya-bindgen/src/*.rs beside the bindings it
+# wrote; if the generator has moved since, the checked-in bindings are
+# stale and everything downstream is a lie that COMPILES: the guest
+# builds, the scene runs, and the decoder arm you just added is simply
+# not there. Measured twice in one afternoon (docs/traps.md) — an OCaml
+# and then a Haskell picker decoded every result as cancel, because the
+# generator was edited and never rerun.
+#
+# `gen-bindings.sh --check` is the authoritative answer and regenerates
+# to get it. This is the cheap one, so it can be asked constantly.
+generator_stamp() {
+    local root="${1:-.}"
+    local want have
+    want=$(cat "$root"/tools/kaya-bindgen/src/*.rs | shasum -a 256 | cut -c1-16)
+    have=$(cat "$root/bindings/.generator-id" 2>/dev/null || echo "")
+    if [ "$want" != "$have" ]; then
+        echo "the binding generator has changed since the bindings were" \
+            "generated (generator $want, bindings say ${have:-<no stamp>}) —" \
+            "run tools/gen-bindings.sh"
+        return 1
+    fi
+}
+
+# The guard guards itself: a moved generator must be caught.
+sample="$(mktemp -d)"
+mkdir -p "$sample/tools/kaya-bindgen/src" "$sample/bindings"
+echo "// a generator that moved" >"$sample/tools/kaya-bindgen/src/main.rs"
+echo "0000000000000000" >"$sample/bindings/.generator-id"
+if generator_stamp "$sample" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a stale generator stamp passed)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+rm -rf "$sample"
+
+out="$(generator_stamp "$ROOT")" || {
+    echo "check-steps: $out" >&2
+    status=1
+}
+
 [ "$status" = 0 ] && echo "check-steps: OK"
 exit "$status"

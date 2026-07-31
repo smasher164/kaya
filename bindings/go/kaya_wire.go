@@ -1390,6 +1390,33 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		// The alert's one answer: id + u32 choice (AlertChoice*).
 		return kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true
 	}
+	if kind == occFileDialogResult {
+		// The picker's answer: id, a count, then three Values
+		// per file (handle, name, local_path). EMPTY IS CANCEL.
+		count := int(binary.LittleEndian.Uint32(rec[16:]))
+		at := 32 // past id, count, pad, values count, reserved
+		files := make([]PickedFile, 0, count)
+		for i := 0; i < count; i++ {
+			vals := [3]any{}
+			for j := 0; j < 3; j++ {
+				vtype := binary.LittleEndian.Uint32(rec[at:])
+				vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
+				body := rec[at+8 : at+8+vlen]
+				if vtype == ValueI64 {
+					vals[j] = int64(binary.LittleEndian.Uint64(body))
+				} else {
+					vals[j] = string(body)
+				}
+				at += 8 + (vlen+7)&^7
+			}
+			handle, _ := vals[0].(int64)
+			name, _ := vals[1].(string)
+			localPath, _ := vals[2].(string)
+			files = append(files, PickedFile{
+				Handle: uint64(handle), Name: name, LocalPath: localPath})
+		}
+		return kind, id, nil, files, true
+	}
 	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested {
 		// Surface lifecycle records carry the surface id alone —
 		// no key path, no payload (derived from the record shapes).

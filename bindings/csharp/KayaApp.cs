@@ -305,7 +305,9 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
     internal ulong nextAlert;
+    internal ulong nextFileDialog;
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -595,6 +597,17 @@ sealed class KayaApp
                 // payload is the parsed u32 choice.
                 if (alerts.Remove(id, out var fn))
                     Dispatch(tx => fn(tx, payload is uint c ? c : 0));
+            }
+            else if (kind == KayaWire.OccKindFileDialogResult)
+            {
+                // One-shot like the alert, and the id retires with it.
+                // EMPTY IS CANCEL — no platform can confirm an empty
+                // selection, so there is no sentinel to invent.
+                if (fileDialogs.Remove(id, out var fn))
+                {
+                    var files = payload as List<PickedFile> ?? new List<PickedFile>();
+                    Dispatch(tx => fn(tx, files));
+                }
             }
             // Menu occurrences key the menu-item tables — their own
             // id space, so neither widget nor node ids can collide
@@ -1492,6 +1505,53 @@ sealed class Tx
         Records.Add(KayaWire.TxShowAlert(
             window, id, actions, title, message,
             action0 ?? "", action1 ?? "", cancel));
+        return id;
+    }
+
+    /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
+    /// carries handles you redeem later, so the name says Pick
+    /// (DESIGN.md, File dialogs).
+    ///
+    /// `filters` is advisory on every platform: a default view rather
+    /// than a guarantee, so the guest still validates what it got. Each
+    /// entry is (label, space-separated extensions).
+    ///
+    /// onResult fires exactly once and the registration retires with
+    /// it. CANCEL IS THE EMPTY LIST, faithfully: no platform can
+    /// confirm an empty selection. One dialog may be live per process;
+    /// show the next from the handler.
+    public ulong PickFiles(
+        (string Label, string Extensions)[]? filters = null,
+        Action<Tx, List<PickedFile>>? onResult = null,
+        ulong window = 0)
+        => Pick(true, filters, onResult, window);
+
+    /// The single-file spelling. The floor always returns a LIST; this
+    /// only asks the platform for one, so the handler receives zero or
+    /// one file.
+    public ulong PickFile(
+        (string Label, string Extensions)[]? filters = null,
+        Action<Tx, List<PickedFile>>? onResult = null,
+        ulong window = 0)
+        => Pick(false, filters, onResult, window);
+
+    ulong Pick(
+        bool multiple,
+        (string Label, string Extensions)[]? filters,
+        Action<Tx, List<PickedFile>>? onResult,
+        ulong window)
+    {
+        ulong id = ++App.nextFileDialog;
+        if (onResult != null)
+            App.fileDialogs[id] = onResult;
+        var values = new List<object>();
+        foreach (var f in filters ?? Array.Empty<(string, string)>())
+        {
+            values.Add(f.Label);
+            values.Add(f.Extensions);
+        }
+        Records.Add(KayaWire.TxShowFileDialog(
+            window, id, multiple ? 1u : 0u, values.ToArray()));
         return id;
     }
 

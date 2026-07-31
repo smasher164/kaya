@@ -73,6 +73,10 @@ module KayaApp
     WindowAttr (..),
     AlertAttr (..),
     showAlert,
+    PickedFile (..),
+    openPicked,
+    pickFiles,
+    pickFile,
     clearWidget,
     focusWidget,
     bindText,
@@ -199,6 +203,8 @@ import Control.Exception (SomeException, catch, evaluate)
 import System.IO (hPutStrLn, stderr)
 
 import KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, registerBlob, wake, waitOccurrences)
+import qualified KayaRuntime as R
+import System.IO (Handle)
 import qualified KayaWire as W
 
 newtype Signal = Signal Word64
@@ -225,12 +231,32 @@ assertRoot :: Collection -> Word64
 assertRoot (Collection cid []) = cid
 assertRoot _ = error "kaya: forEach binds the collection itself, not an instance — drop the at"
 
+-- | One file the picker answered with: a handle to redeem, a display
+-- name, and a re-openable name — EMPTY unless re-opening it actually
+-- works, which measurement puts at the three desktops and neither
+-- phone (DESIGN.md, File dialogs).
+data PickedFile = PickedFile
+  { pickedHandle :: !Word64,
+    pickedName :: !String,
+    pickedLocalPath :: !String
+  }
+
+-- | Redeem the handle for a real 'Handle', plus whether it seeks.
+--
+-- BLOCKS, and may block for a long time — a cloud provider can download
+-- the file before it answers — so call it from a thread you chose and
+-- post the result back. kaya is not in the data path: what comes back
+-- is an ordinary handle.
+openPicked :: PickedFile -> Word32 -> IO (Handle, Bool)
+openPicked f = R.openPicked (pickedHandle f)
+
 data Counters = Counters
   { cSignal :: !Word64,
     cWidget :: !Word64,
     cCollection :: !Word64,
     cNode :: !Word64,
     cAlert :: !Word64,
+    cFileDialog :: !Word64,
     cMenuItem :: !Word64
   }
 
@@ -285,6 +311,7 @@ data BuildState = BuildState
 data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (Word32 -> IO ())
+  | PFileDialog !Word64 ([PickedFile] -> IO ())
   | PEntryPopped !Word64 (IO ())
   | PSectionSelected !Word64 (IO ())
   | PBackRequested !Word64 (IO ())
@@ -1048,6 +1075,42 @@ showAlert attrs handler = do
                 (W.VStr (concat (take 1 (drop 1 actions))))
                 (W.VStr (concat (take 1 cancels)))
             )
+
+-- | Ask the platform for files. THE PICK, NOT THE OPEN — the result
+-- carries handles you redeem later, so the name says @pick@
+-- (DESIGN.md, File dialogs).
+--
+-- The filters are (label, space-separated extensions) pairs, ADVISORY
+-- on every platform: a default view rather than a guarantee, so the
+-- guest still validates what it got.
+--
+-- The handler fires exactly once and retires with its answer. CANCEL
+-- IS THE EMPTY LIST, faithfully: no platform can confirm an empty
+-- selection. One dialog may be live per process; show the next from
+-- the handler.
+pickFiles :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFiles = pick True
+
+-- | The single-file spelling. The floor always returns a LIST; this
+-- only asks the platform for one, so the handler receives zero or one.
+pickFile :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pickFile = pick False
+
+pick :: Bool -> [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
+pick multiple filters handler = do
+  n <- Build $ \s ->
+    let c = bCounters s
+        next = cFileDialog c + 1
+     in (next, s {bCounters = c {cFileDialog = next}})
+  pendB (PFileDialog n handler)
+  emitB
+    ( W.txShowFileDialog
+        0
+        n
+        (if multiple then 1 else 0)
+        (concatMap (\(label, exts) -> [W.VStr label, W.VStr exts]) filters)
+    )
+
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
@@ -1909,6 +1972,7 @@ data App = App
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64,
+    appFileDialogHandlers :: IORef (Map.Map Word64 ([PickedFile] -> IO ())),
     -- Menu dispatch tables, keyed by MENU ITEM id — their own id
     -- space, separate from every widget/node table ("two tables,
     -- always" — now N tables, still always). The node flavors receive
@@ -1960,6 +2024,8 @@ register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
+  PFileDialog n handler ->
+    modifyIORef' (appFileDialogHandlers app) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
   PSectionSelected n handler -> modifyIORef' (appSectionSelected app) (Map.insert n handler)
   PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
@@ -2028,7 +2094,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar []
-    <*> newIORef (Counters 0 0 0 0 0 0)
+    <*> newIORef (Counters 0 0 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -2045,6 +2111,7 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef 0
+    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -2181,6 +2248,19 @@ dispatchLoop app = do
           -- selectSection never lands here (the echo doctrine).
           handlers <- readIORef (appSectionSelected app)
           dispatch (mapM_ id (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindFileDialogResult -> do
+          -- One-shot like the alert, and the id retires with it. The
+          -- parser flattens three values per file into the values slot
+          -- (no single Value can carry a list), so they are regrouped
+          -- in threes here. EMPTY IS CANCEL.
+          let regroup (W.VI64 h : W.VStr n : W.VStr p : rest) =
+                PickedFile (fromIntegral h) n p : regroup rest
+              regroup _ = []
+              files = regroup keys
+          handlers <- readIORef (appFileDialogHandlers app)
+          writeIORef (appFileDialogHandlers app) (Map.delete ident handlers)
+          dispatch (mapM_ ($ files) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindAlertResult -> do
           -- The parser boxes the u32 choice as VI64. One-shot: the

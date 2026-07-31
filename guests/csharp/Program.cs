@@ -38,6 +38,7 @@ static class Program
             case "menus": MenusScene.Run(); break;
             case "commands": CommandsScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
+            case "filedialog": FileDialogScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;

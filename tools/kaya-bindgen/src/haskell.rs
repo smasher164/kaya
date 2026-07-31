@@ -377,6 +377,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
     c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))");
+    // The picker's answer is a LIST OF RECORDS, and no single Value
+    // can carry one — so the three values per file ride the VALUES
+    // slot, flattened, and KayaApp regroups them in threes. The
+    // generic tail would read that slot as a key path and take the
+    // file count as its length, starting eight bytes early.
+    c.line("      else if kind == occKindFileDialogResult");
+    c.line("        then do");
+    c.line("          -- id, a count, then three Values per file (handle,");
+    c.line("          -- name, localPath), FLATTENED into the values slot;");
+    c.line("          -- the app layer regroups them. EMPTY IS CANCEL.");
+    c.line("          count <- peekByteOff rec 16 :: IO Word32");
+    c.line("          let readValues 0 _ acc = return (reverse acc)");
+    c.line("              readValues n at acc = do");
+    c.line("                (v, next) <- parseValue rec at");
+    c.line("                readValues (n - 1 :: Int) next (v : acc)");
+    c.line("          vals <- readValues (fromIntegral count * 3) 32 []");
+    c.line("          return (Just (kind, ident, vals, Nothing))");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))

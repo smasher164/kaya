@@ -70,6 +70,39 @@ let kaya_blob_register =
   foreign ~from:lib "kaya_blob_register"
     (string @-> size_t @-> returning uint64_t)
 
+let kaya_open_picked =
+  foreign ~from:lib ~release_runtime_lock:true "kaya_open_picked"
+    (uint64_t @-> uint32_t @-> ptr int64_t @-> ptr uint32_t @-> returning int32_t)
+
+(* Redeem a picked handle for a real Unix.file_descr, plus whether it
+   seeks.
+
+   BLOCKS, and may block for a long time — a cloud provider can
+   download the file before it answers — so call it from a thread you
+   chose and post the result back (DESIGN.md, File dialogs). The
+   runtime lock is released for the duration, so the rest of the
+   program keeps running.
+
+   THE DESCRIPTOR BECOMES OCAML'S: [Unix.file_descr] IS the integer on
+   POSIX, so this is a representation change and not a copy, and
+   [Unix.close] closes it exactly once. The core keeps no claim. *)
+let open_picked handle mode =
+  let raw = Ctypes.allocate Ctypes.int64_t 0L in
+  let seekable = Ctypes.allocate Ctypes.uint32_t Unsigned.UInt32.zero in
+  let rc =
+    kaya_open_picked
+      (Unsigned.UInt64.of_int64 handle)
+      (Unsigned.UInt32.of_int mode)
+      raw seekable
+  in
+  if rc <> 0l then
+    failwith
+      (Printf.sprintf "kaya: opening the picked file failed (code %ld)" rc);
+  let fd : Unix.file_descr =
+    Obj.magic (Int64.to_int (Ctypes.( !@ ) raw))
+  in
+  (fd, Unsigned.UInt32.to_int (Ctypes.( !@ ) seekable) <> 0)
+
 (* The ordered cursor accesses; see kaya_ml_stubs.c. *)
 external load_acquire_u32 : nativeint -> int = "kaya_ml_load_acquire_u32"
   [@@noalloc]

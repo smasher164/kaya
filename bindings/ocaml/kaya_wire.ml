@@ -1173,6 +1173,21 @@ let parse_occurrence byte =
     then
       (* The alert's one answer: id + u32 choice (the alert_choice values). *)
       Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))
+    else if kind = occ_kind_file_dialog_result
+    then begin
+      (* id, a count, then three Values per file (handle, name,
+         local_path), FLATTENED into the values slot; the app
+         layer regroups them. EMPTY IS CANCEL. *)
+      let count = u32_at byte 16 in
+      let at = ref 32 in
+      let out = ref [] in
+      for _ = 1 to count * 3 do
+        let v, next = parse_value byte !at in
+        out := v :: !out;
+        at := next
+      done;
+      Some (kind, Int64.of_int id, List.rev !out, None)
+    end
     (* Surface lifecycle records carry the surface id alone
        ( derived from the record shapes ). *)
     else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested

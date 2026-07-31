@@ -1254,6 +1254,33 @@ static class KayaWire
             payload = BitConverter.ToUInt32(rec, 16);
             return true;
         }
+        if (kind == OccKindFileDialogResult)
+        {
+            // id, a count, then three Values per file
+            // (handle, name, local_path). EMPTY IS CANCEL.
+            int count = (int)BitConverter.ToUInt32(rec, 16);
+            int fileAt = 32; // past id, count, pad, values count, reserved
+            var files = new List<PickedFile>(count);
+            for (int i = 0; i < count; i++)
+            {
+                object?[] parts = new object?[3];
+                for (int j = 0; j < 3; j++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, fileAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, fileAt + 4);
+                    parts[j] = vtype == ValueI64
+                        ? (object)BitConverter.ToInt64(rec, fileAt + 8)
+                        : Encoding.UTF8.GetString(rec, fileAt + 8, vlen);
+                    fileAt += 8 + ((vlen + 7) & ~7);
+                }
+                files.Add(new PickedFile(
+                    (ulong)(long)(parts[0] ?? 0L),
+                    (string)(parts[1] ?? ""),
+                    (string)(parts[2] ?? "")));
+            }
+            payload = files;
+            return true;
+        }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
         if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested)

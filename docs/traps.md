@@ -2397,3 +2397,33 @@ premise is that both halves agree WITHOUT runner involvement, and that
 only holds if each computes the directory the way its own language does
 — an environment variable read directly is a guess about the platform,
 not a computation.
+
+## Two languages disagree with everyone else about where "temp" is
+
+The filedialog scene's premise is that the guest and the interpreter
+land on the same directory WITHOUT runner involvement — each computes it
+the way its own language does, and they agree because every language
+agrees. Two do not.
+
+`std::env::temp_dir` (Rust, which is what the interpreter uses),
+`tempfile.gettempdir()`, `os.TempDir()`, `Path.GetTempPath()`,
+`Filename.get_temp_dir_name` and `getTemporaryDirectory` all honour the
+TMPDIR environment variable. **Java's `java.io.tmpdir` and Swift's
+`NSTemporaryDirectory()` do not** — on macOS both answer with the
+per-user Darwin temp directory and ignore TMPDIR entirely. Inside the
+nix dev shell, which sets TMPDIR, that puts the guest's files somewhere
+the picker was never aimed. Both guests therefore read TMPDIR first and
+fall back to the platform answer, which is also correct on Windows,
+where there is no TMPDIR and `java.io.tmpdir` is right.
+
+A third variant of the same bug, from the Python port: reading
+`os.environ["TMPDIR"]` DIRECTLY is not a computation, it is a guess
+about the platform — there is no TMPDIR on Windows, so it fell back to a
+literal "/tmp" and wrote to the root of the current drive.
+
+The rule that survives all three: ask the language for its temp
+directory, and consult TMPDIR only to correct a language that is known
+to ignore it. Every one of these was caught on the first run by
+`file_dialog_goto`'s "does not exist" refusal rather than by a confusing
+comparison three steps later, which is the whole reason that guard
+checks the directory before aiming at it.

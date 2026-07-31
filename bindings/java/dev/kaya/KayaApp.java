@@ -82,9 +82,12 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> backRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
+    private final java.util.Map<Long, BiConsumer<Tx, java.util.List<PickedFile>>> fileDialogs =
+            new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, Integer>> alerts =
             new java.util.HashMap<>();
     private long nextAlert;
+    private long nextFileDialog;
     final java.util.Map<Long, Consumer<Tx>> windowClosed = new java.util.HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
@@ -282,6 +285,85 @@ public final class KayaApp {
             tx.records.add(KayaWire.txShowAlert(
                     window, id, actions.size(), title, message,
                     action0, action1, cancel));
+            return id;
+        }
+    }
+
+    /**
+     * One file the picker answered with: a handle to redeem, a display
+     * name, and localPath — a RE-OPENABLE NAME, empty unless
+     * re-opening it actually works, which measurement puts at the
+     * three desktops and neither phone (DESIGN.md, File dialogs).
+     */
+    public record PickedFile(long handle, String name, String localPath) {
+        /**
+         * Redeem the handle for a real stream, plus whether it seeks.
+         *
+         * BLOCKS, and may block for a long time — a cloud provider can
+         * download the file first — so call it from a thread you chose
+         * and post the result back. kaya is not in the data path: what
+         * comes back is an ordinary FileInputStream.
+         *
+         * Seekable RIDES THE OPEN rather than the pick because that is
+         * the only place the answer exists: an Android provider may
+         * hand back a pipe, and nothing short of opening reveals it.
+         */
+        public Opened open(int mode) throws java.io.IOException {
+            int[] seekable = new int[1];
+            java.io.FileDescriptor fd = KayaRing.openPicked(handle, mode, seekable);
+            return new Opened(new java.io.FileInputStream(fd), seekable[0] != 0);
+        }
+    }
+
+    /** An opened picked file: the stream, and whether it seeks. */
+    public record Opened(java.io.FileInputStream stream, boolean seekable) {}
+
+    /** Accumulates the one atomic SHOW_FILE_DIALOG record; nothing is
+     * sent until show (a request has a send moment). */
+    public static final class FileDialogRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private final boolean multiple;
+        private long window;
+        private final java.util.List<Object> filters = new java.util.ArrayList<>();
+        private BiConsumer<Tx, java.util.List<PickedFile>> onResult;
+
+        FileDialogRef(Tx tx, KayaApp app, long id, boolean multiple) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+            this.multiple = multiple;
+        }
+
+        /** Target an auxiliary window (0 = primary). */
+        public FileDialogRef in(long window) {
+            this.window = window;
+            return this;
+        }
+
+        /** One advisory (label, space-separated extensions) pair.
+         * ADVISORY on every platform: a default view rather than a
+         * guarantee, so the guest still validates what it got. */
+        public FileDialogRef filter(String label, String extensions) {
+            filters.add(label);
+            filters.add(extensions);
+            return this;
+        }
+
+        /** Bind the one-shot result handler to THIS request. */
+        public FileDialogRef onResult(BiConsumer<Tx, java.util.List<PickedFile>> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        /** Send the request, returning its id. */
+        public long show() {
+            if (onResult != null) {
+                app.fileDialogs.put(id, onResult);
+            }
+            tx.records.add(KayaWire.txShowFileDialog(
+                    window, id, multiple ? 1 : 0, filters.toArray()));
             return id;
         }
     }
@@ -1934,6 +2016,26 @@ public final class KayaApp {
             return new AlertRef(this, KayaApp.this, ++nextAlert);
         }
 
+        /**
+         * Ask the platform for files. THE PICK, NOT THE OPEN — the
+         * result carries handles you redeem later, so the name says
+         * pick (DESIGN.md, File dialogs).
+         *
+         * A chain that ends in show, like showAlert:
+         * tx.pickFiles().filter("Text", "txt").onResult((tx, files) ->
+         * { … }).show(). CANCEL IS THE EMPTY LIST. One dialog may be
+         * live per process; show the next from the handler.
+         */
+        public FileDialogRef pickFiles() {
+            return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, true);
+        }
+
+        /** The single-file spelling: the floor always returns a LIST,
+         * this only asks the platform for one. */
+        public FileDialogRef pickFile() {
+            return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, false);
+        }
+
         public WindowRef createWindow(long id) {
             records.add(KayaWire.txCreateWindow(id));
             return new WindowRef(this, KayaApp.this, id);
@@ -2634,6 +2736,18 @@ public final class KayaApp {
                 BiConsumer<Tx, Integer> handler = alerts.remove(occ.id);
                 if (handler != null) {
                     dispatch(tx -> handler.accept(tx, (Integer) occ.payload));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
+                // One-shot like the alert, and the id retires with it.
+                // EMPTY IS CANCEL — no platform can confirm an empty
+                // selection, so there is no sentinel to invent.
+                BiConsumer<Tx, java.util.List<PickedFile>> handler =
+                        fileDialogs.remove(occ.id);
+                if (handler != null) {
+                    @SuppressWarnings("unchecked")
+                    java.util.List<PickedFile> files =
+                            (java.util.List<PickedFile>) occ.payload;
+                    dispatch(tx -> handler.accept(tx, files));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED && occ.keys.isEmpty()) {
                 // Menu occurrences key the menu-item tables — their

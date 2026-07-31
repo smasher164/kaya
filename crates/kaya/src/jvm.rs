@@ -79,6 +79,10 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "([B)V".into(),
                 fn_ptr: ring_submit as *mut _,
             },
+            // Shared, not desktop-only: the JVM guest tier is ONE tier,
+            // and a picked file is redeemable from either JVM. On
+            // Android this lands on the source that opens through the
+            // ContentResolver; on the desktops, on the path source.
         ],
     )
 }
@@ -156,11 +160,18 @@ fn register_desktop_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaRing")?;
     env.register_native_methods(
         &class,
-        &[NativeMethod {
-            name: "run".into(),
-            sig: "()I".into(),
-            fn_ptr: ring_run as *mut _,
-        }],
+        &[
+            NativeMethod {
+                name: "run".into(),
+                sig: "()I".into(),
+                fn_ptr: ring_run as *mut _,
+            },
+            NativeMethod {
+                name: "openPicked".into(),
+                sig: "(JI[I)Ljava/io/FileDescriptor;".into(),
+                fn_ptr: ring_open_picked as *mut _,
+            },
+        ],
     )
 }
 
@@ -169,4 +180,65 @@ fn register_desktop_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
 #[cfg(not(target_os = "android"))]
 extern "system" fn ring_run(_env: JNIEnv, _class: JClass) -> jint {
     crate::capi::kaya_run()
+}
+
+/// KayaRing.openPicked: redeem a picked handle and hand Java a
+/// FileDescriptor it owns.
+///
+/// THE FIELD IS SET FROM NATIVE CODE BECAUSE JAVA CANNOT. There is no
+/// public API for wrapping a descriptor, and reflection into
+/// `java.io.FileDescriptor`'s private `fd` throws
+/// InaccessibleObjectException on JDK 17 — java.base is not open, so
+/// the reflective route would force every kaya application to launch
+/// with `--add-opens java.base/java.io=ALL-UNNAMED`. JNI is not subject
+/// to that check (measured; docs/file-dialogs-plan.md §6f), so the
+/// descriptor is built here through the class's public no-arg
+/// constructor and populated with SetIntField.
+///
+/// NO CLEANER IS REGISTERED, deliberately. The JDK attaches one
+/// separately from setting the descriptor, and attaching it here would
+/// let the collector close a descriptor the GUEST owns — the opposite
+/// of what handing over a capability means. The guest closes it, once,
+/// with its own stream.
+extern "system" fn ring_open_picked(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    mode: jint,
+    seekable_out: jni::objects::JIntArray,
+) -> jni::sys::jobject {
+    let mut raw: i64 = 0;
+    let mut seekable: u32 = 0;
+    let rc = crate::capi::kaya_open_picked(handle as u64, mode as u32, &mut raw, &mut seekable);
+    if rc != 0 {
+        let _ = env.throw_new(
+            "java/io/IOException",
+            format!("kaya: opening the picked file failed (code {rc})"),
+        );
+        return std::ptr::null_mut();
+    }
+    let _ = env.set_int_array_region(&seekable_out, 0, &[seekable as jint]);
+    let build = |env: &mut JNIEnv| -> jni::errors::Result<jni::sys::jobject> {
+        let class = env.find_class("java/io/FileDescriptor")?;
+        let fd = env.new_object(&class, "()V", &[])?;
+        // Unix (and sockets on Windows) carry the int `fd`; Windows
+        // regular files carry the long `handle` instead. Both fields
+        // exist on every platform's FileDescriptor; only one is live.
+        if cfg!(windows) {
+            env.set_field(&fd, "handle", "J", jni::objects::JValue::Long(raw))?;
+        } else {
+            env.set_field(&fd, "fd", "I", jni::objects::JValue::Int(raw as jint))?;
+        }
+        Ok(fd.into_raw())
+    };
+    match build(&mut env) {
+        Ok(obj) => obj,
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/io/IOException",
+                format!("kaya: building the FileDescriptor failed: {e}"),
+            );
+            std::ptr::null_mut()
+        }
+    }
 }

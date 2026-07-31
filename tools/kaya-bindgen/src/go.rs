@@ -469,6 +469,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t// The alert's one answer: id + u32 choice (AlertChoice*).");
     c.line("\t\treturn kind, id, nil, binary.LittleEndian.Uint32(rec[16:]), true");
     c.line("\t}");
+    // The picker's answer: the one occurrence whose payload is a LIST
+    // OF RECORDS. The generic tail reads a KEY PATH, which would take
+    // the file count as a path length and start eight bytes early.
+    c.line("\tif kind == occFileDialogResult {");
+    c.line("\t\t// The picker's answer: id, a count, then three Values");
+    c.line("\t\t// per file (handle, name, local_path). EMPTY IS CANCEL.");
+    c.line("\t\tcount := int(binary.LittleEndian.Uint32(rec[16:]))");
+    c.line("\t\tat := 32 // past id, count, pad, values count, reserved");
+    c.line("\t\tfiles := make([]PickedFile, 0, count)");
+    c.line("\t\tfor i := 0; i < count; i++ {");
+    c.line("\t\t\tvals := [3]any{}");
+    c.line("\t\t\tfor j := 0; j < 3; j++ {");
+    c.line("\t\t\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
+    c.line("\t\t\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
+    c.line("\t\t\t\tbody := rec[at+8 : at+8+vlen]");
+    c.line("\t\t\t\tif vtype == ValueI64 {");
+    c.line("\t\t\t\t\tvals[j] = int64(binary.LittleEndian.Uint64(body))");
+    c.line("\t\t\t\t} else {");
+    c.line("\t\t\t\t\tvals[j] = string(body)");
+    c.line("\t\t\t\t}");
+    c.line("\t\t\t\tat += 8 + (vlen+7)&^7");
+    c.line("\t\t\t}");
+    c.line("\t\t\thandle, _ := vals[0].(int64)");
+    c.line("\t\t\tname, _ := vals[1].(string)");
+    c.line("\t\t\tlocalPath, _ := vals[2].(string)");
+    c.line("\t\t\tfiles = append(files, PickedFile{");
+    c.line("\t\t\t\tHandle: uint64(handle), Name: name, LocalPath: localPath})");
+    c.line("\t\t}");
+    c.line("\t\treturn kind, id, nil, files, true");
+    c.line("\t}");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occ{}", camel(n)))

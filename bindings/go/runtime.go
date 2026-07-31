@@ -21,6 +21,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"sync/atomic"
 	"unsafe"
 )
@@ -129,4 +130,41 @@ func WaitOccurrences() bool {
 // goroutine; the binding calls it from Post, and guests do not name it.
 func Wake() {
 	C.kaya_wake()
+}
+
+// PickedFile is one file the picker answered with: a handle to redeem,
+// a display name, and LocalPath — a RE-OPENABLE NAME, empty unless
+// re-opening it actually works, which measurement puts at the three
+// desktops and neither phone (DESIGN.md, File dialogs).
+type PickedFile struct {
+	Handle    uint64
+	Name      string
+	LocalPath string
+}
+
+// Open redeems the handle for a real *os.File, plus whether it seeks.
+//
+// BLOCKS, and may block for a long time — a cloud provider can download
+// the file before it answers — so call it from a goroutine you chose
+// and post the result back (DESIGN.md, File dialogs).
+//
+// THE FILE BECOMES GO'S. os.NewFile takes the descriptor over, so
+// closing the returned *os.File closes it exactly once and the core
+// keeps no claim. On Windows the core hands back a HANDLE rather than a
+// CRT descriptor — deliberately, since every runtime brings its own CRT
+// — and os.NewFile takes a HANDLE there, so the same line is right on
+// both.
+//
+// Seekable RIDES THE OPEN rather than the pick because that is the only
+// place the answer exists: an Android provider may hand back a pipe,
+// and nothing short of opening reveals it. Go's io/fs.File is satisfied
+// either way; only io.Seeker depends on this.
+func (f PickedFile) Open(mode uint32) (file *os.File, seekable bool, err error) {
+	var raw C.int64_t
+	var seeks C.uint32_t
+	rc := C.kaya_open_picked(C.uint64_t(f.Handle), C.uint32_t(mode), &raw, &seeks)
+	if rc != 0 {
+		return nil, false, fmt.Errorf("kaya: opening the picked file failed (code %d)", int(rc))
+	}
+	return os.NewFile(uintptr(raw), f.Name), seeks != 0, nil
 }

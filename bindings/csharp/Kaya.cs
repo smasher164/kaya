@@ -9,8 +9,29 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Threading;
+
+/// One file the picker answered with: a handle to redeem, a display
+/// name, and LocalPath — a RE-OPENABLE NAME, empty unless re-opening it
+/// actually works, which measurement puts at the three desktops and
+/// neither phone (DESIGN.md, File dialogs).
+public readonly record struct PickedFile(ulong Handle, string Name, string LocalPath)
+{
+    /// Redeem the handle for a real FileStream, plus whether it seeks.
+    ///
+    /// BLOCKS, and may block for a long time, so call it from a thread
+    /// you chose and post the result back. kaya is not in the data
+    /// path: the stream returned is a real file.
+    ///
+    /// Seekable RIDES THE OPEN rather than the pick because that is the
+    /// only place the answer exists — an Android provider may hand back
+    /// a pipe, and nothing short of opening reveals it.
+    public (FileStream File, bool Seekable) Open(uint mode = 0)
+        => Kaya.OpenPicked(Handle, mode);
+}
 
 static class Kaya
 {
@@ -52,6 +73,38 @@ static class Kaya
 
     [DllImport("kaya")]
     static extern ulong kaya_blob_register(byte[] bytes, nuint len);
+
+    [DllImport("kaya")]
+    static extern int kaya_open_picked(
+        ulong handle, uint mode, out long raw, out uint seekable);
+
+    /// Redeem a picked handle for a real FileStream, plus whether it
+    /// seeks. BLOCKS, and may block for a long time — a cloud provider
+    /// can download the file before it answers — so call it from a
+    /// thread you chose and post the result back (DESIGN.md, File
+    /// dialogs).
+    ///
+    /// THE HANDLE BECOMES .NET'S. SafeFileHandle is constructed with
+    /// ownsHandle: true, so disposing the stream closes it exactly once
+    /// and the core keeps no claim. The core hands back the OS's own
+    /// handle — a descriptor on POSIX, a HANDLE on Windows — precisely
+    /// so each runtime converts it with its own file API rather than
+    /// through a CRT descriptor only the minting CRT would accept, and
+    /// SafeFileHandle takes both.
+    public static (FileStream File, bool Seekable) OpenPicked(ulong handle, uint mode)
+    {
+        int rc = kaya_open_picked(handle, mode, out long raw, out uint seekable);
+        if (rc != 0)
+            throw new IOException($"kaya: opening the picked file failed (code {rc})");
+        var access = mode switch
+        {
+            0 => FileAccess.Read,
+            1 => FileAccess.Write,
+            _ => FileAccess.ReadWrite,
+        };
+        var safe = new SafeFileHandle((IntPtr)raw, ownsHandle: true);
+        return (new FileStream(safe, access), seekable != 0);
+    }
 
     static RingInfo ring;
 

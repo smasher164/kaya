@@ -38,10 +38,10 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES="filedialog"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -501,9 +501,8 @@ for proto in x11 wayland; do
     run "$proto" background-rust env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
 
-    # The filedialog scene: GNOME's own picker, driven for real. The
-    # language sweep is mid-flight, so the legs here are the languages
-    # whose picker surface has landed. Through a11y-leg.sh because EVERY
+    # The filedialog scene: GNOME's own picker, driven for real, in
+    # every language. Through a11y-leg.sh because EVERY
     # read here is an AT-SPI read, not just the closing expect_ax: the
     # chooser publishes no accessible ids at all, so the directory is
     # the path bar's pressed toggle button and the rows are the list's
@@ -512,6 +511,16 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/filedialog"
     run "$proto" filedialog-python env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/filedialog.py
+    run "$proto" filedialog-go env KAYA_SELFTEST=filedialog \
+        tools/linux/a11y-leg.sh /tmp/go-guests/filedialog
+    run "$proto" filedialog-csharp env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" filedialog-ocaml env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/filedialog.exe
+    run "$proto" filedialog-haskell env KAYA_SELFTEST=filedialog \
+        tools/linux/a11y-leg.sh "$(hs_bin filedialog)"
+    run "$proto" filedialog-java env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-go env KAYA_SELFTEST=background \

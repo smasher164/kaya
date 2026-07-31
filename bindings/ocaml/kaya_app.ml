@@ -71,6 +71,12 @@ type instance = {
   entries : (Kaya_wire.value * (int * Kaya_wire.value list)) list;
 }
 
+(* One file the picker answered with: a handle to redeem, a display
+   name, and [local_path] — a RE-OPENABLE NAME, empty unless
+   re-opening it actually works, which measurement puts at the three
+   desktops and neither phone (DESIGN.md, File dialogs). *)
+type picked_file = { handle : int64; name : string; local_path : string }
+
 type app = {
   (* Work handed over by other threads, waiting to run as transactions
      on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
@@ -106,6 +112,8 @@ type app = {
   section_selected : (int64, unit -> unit) Hashtbl.t;
   alert_handlers : (int64, int -> unit) Hashtbl.t;
   mutable next_alert : int64;
+  file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
+  mutable next_file_dialog : int64;
   window_closed : (int64, unit -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
@@ -183,6 +191,8 @@ let create () =
     section_selected = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     next_alert = 0L;
+    file_dialog_handlers = Hashtbl.create 4;
+    next_file_dialog = 0L;
     window_closed = Hashtbl.create 8;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
@@ -1118,6 +1128,41 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
 
 (* The alert_choice cancel sentinel, for handlers: the wire u32
    0xFFFFFFFF as an OCaml int32 (-1l). Deliberately not an index. *)
+let pick ?(window = 0L) ?(filters = []) ~multiple ?on_result () =
+  let tx = the_tx () in
+  let app = tx.app in
+  app.next_file_dialog <- Int64.add app.next_file_dialog 1L;
+  let id = app.next_file_dialog in
+  Option.iter (fun f -> Hashtbl.replace app.file_dialog_handlers id f) on_result;
+  let values =
+    List.concat_map
+      (fun (label, exts) -> [ Kaya_wire.Str label; Kaya_wire.Str exts ])
+      filters
+  in
+  emit tx
+    (Kaya_wire.tx_show_file_dialog window id (if multiple then 1 else 0) values);
+  id
+
+(* Ask the platform for files. THE PICK, NOT THE OPEN — the result
+   carries handles you redeem later, so the name says [pick]
+   (DESIGN.md, File dialogs).
+
+   [filters] is a list of (label, space-separated extensions),
+   ADVISORY on every platform: a default view rather than a guarantee,
+   so the guest still validates what it got.
+
+   [on_result] fires exactly once and retires with its answer. CANCEL
+   IS THE EMPTY LIST, faithfully: no platform can confirm an empty
+   selection. One dialog may be live per process; show the next from
+   the handler. *)
+let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
+  pick ~window ~filters ~multiple:true ?on_result ()
+
+(* The single-file spelling. The floor always returns a LIST; this only
+   asks the platform for one, so the handler receives zero or one. *)
+let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
+  pick ~window ~filters ~multiple:false ?on_result ()
+
 let alert_cancel = Kaya_wire.alert_choice_cancel
 
 
@@ -1800,6 +1845,23 @@ let dispatch_loop app =
                Hashtbl.remove app.alert_handlers id;
                dispatch app (fun () -> handler (Int64.to_int c))
            | _ -> ())
+         else if kind = Kaya_wire.occ_kind_file_dialog_result then
+           (* One-shot like the alert, and the id retires with it. The
+              parser flattens three values per file into the values
+              slot (no single [value] can carry a list), so they are
+              regrouped in threes here. EMPTY IS CANCEL. *)
+           (match Hashtbl.find_opt app.file_dialog_handlers id with
+           | Some handler ->
+               let rec regroup = function
+                 | Kaya_wire.I64 h :: Kaya_wire.Str name
+                   :: Kaya_wire.Str local_path :: rest ->
+                     { handle = h; name; local_path } :: regroup rest
+                 | _ -> []
+               in
+               let files = regroup keys in
+               Hashtbl.remove app.file_dialog_handlers id;
+               dispatch app (fun () -> handler files)
+           | None -> ())
          else if kind = Kaya_wire.occ_kind_menu_activated then
            (* Menu occurrences key the menu-item tables — their own id
               space, so neither widget nor node ids can collide with

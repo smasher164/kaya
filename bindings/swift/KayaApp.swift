@@ -255,6 +255,44 @@ extension Double: KayaMenuIndex {}
 
 extension KayaSignal: KayaMenuIndex {}
 
+/// One file the picker answered with: a handle to redeem, a display
+/// name, and `localPath` — a RE-OPENABLE NAME, empty unless re-opening
+/// it actually works, which measurement puts at the three desktops and
+/// neither phone (DESIGN.md, File dialogs).
+struct KayaPickedFile {
+    let handle: UInt64
+    let name: String
+    let localPath: String
+
+    /// Redeem the handle for a real FileHandle, plus whether it seeks.
+    ///
+    /// BLOCKS, and may block for a long time — a cloud provider can
+    /// download the file before it answers — so call it from a thread
+    /// you chose and post the result back. kaya is not in the data
+    /// path: what comes back is an ordinary FileHandle.
+    ///
+    /// THE DESCRIPTOR BECOMES SWIFT'S: closeOnDealloc is true, so it
+    /// closes exactly once and the core keeps no claim.
+    ///
+    /// `seekable` RIDES THE OPEN rather than the pick because that is
+    /// the only place the answer exists — an Android provider may hand
+    /// back a pipe, and nothing short of opening reveals it.
+    func open(_ mode: UInt32 = UInt32(FILE_MODE_READ))
+        throws -> (file: FileHandle, seekable: Bool)
+    {
+        var raw: Int64 = 0
+        var seekable: UInt32 = 0
+        let rc = kaya_open_picked(handle, mode, &raw, &seekable)
+        guard rc == 0 else {
+            throw NSError(
+                domain: "kaya", code: Int(rc),
+                userInfo: [NSLocalizedDescriptionKey:
+                    "kaya: opening the picked file failed (code \(rc))"])
+        }
+        return (FileHandle(fileDescriptor: Int32(raw), closeOnDealloc: true), seekable != 0)
+    }
+}
+
 final class KayaApp {
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
@@ -279,7 +317,9 @@ final class KayaApp {
     private var backRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
+    private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
     private var nextAlert: UInt64 = 0
+    private var nextFileDialog: UInt64 = 0
     private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
     // Menu dispatch tables, keyed by MENU ITEM id — their own id
@@ -626,6 +666,20 @@ final class KayaApp {
         return nextAlert
     }
 
+    /// Bind the picker's one-shot result handler (internal: the Tx
+    /// sugar registers at show time and the registration retires with
+    /// the result).
+    func onFileDialog(
+        _ dialog: UInt64, _ handler: @escaping (KayaAppTx, [KayaPickedFile]) throws -> Void
+    ) {
+        fileDialogs[dialog] = handler
+    }
+
+    func allocFileDialog() -> UInt64 {
+        nextFileDialog += 1
+        return nextFileDialog
+    }
+
     func onWindowClosed(_ window: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
         windowClosed[window] = handler
     }
@@ -665,7 +719,8 @@ final class KayaApp {
                 // re-dispatch, and the bug this branch prevents.
                 continue
             }
-            guard let (kind, id, keys, payload) = kayaParseOccurrence(buf) else { continue }
+            guard let (kind, id, keys, payload, files) = kayaParseOccurrence(buf)
+            else { continue }
             var text: String?
             var checked = false
             var value = 0.0
@@ -740,6 +795,13 @@ final class KayaApp {
                 // One-shot: the registration retires with the result.
                 if let handler = alerts.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT), _):
+                // One-shot like the alert, and the id retires with it.
+                // EMPTY IS CANCEL — no platform can confirm an empty
+                // selection, so there is no sentinel to invent.
+                if let handler = fileDialogs.removeValue(forKey: id) {
+                    dispatch { try build { tx in try handler(tx, files) } }
                 }
             // Menu occurrences key the menu-item tables — their own id
             // space, so neither widget nor node ids can collide with
@@ -1554,6 +1616,52 @@ final class KayaAppTx {
             window, id, UInt32(actions.count), .str(title), .str(message),
             .str(actions.count >= 1 ? actions[0] : ""),
             .str(actions.count == 2 ? actions[1] : ""), .str(cancel))
+        return id
+    }
+
+    /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
+    /// carries handles you redeem later, so the name says `pick`
+    /// (DESIGN.md, File dialogs).
+    ///
+    /// `filters` is advisory on every platform: a default view rather
+    /// than a guarantee, so the guest still validates what it got. Each
+    /// pair is (label, space-separated extensions).
+    ///
+    /// `onResult` fires exactly once and retires with its answer.
+    /// CANCEL IS THE EMPTY LIST, faithfully: no platform can confirm an
+    /// empty selection. One dialog may be live per process; show the
+    /// next from the handler.
+    @discardableResult
+    func pickFiles(
+        filters: [(String, String)] = [], window: UInt64 = 0,
+        onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)? = nil
+    ) -> UInt64 {
+        pick(multiple: true, filters: filters, window: window, onResult: onResult)
+    }
+
+    /// The single-file spelling. The floor always returns a LIST; this
+    /// only asks the platform for one, so the handler receives zero or
+    /// one file.
+    @discardableResult
+    func pickFile(
+        filters: [(String, String)] = [], window: UInt64 = 0,
+        onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)? = nil
+    ) -> UInt64 {
+        pick(multiple: false, filters: filters, window: window, onResult: onResult)
+    }
+
+    private func pick(
+        multiple: Bool, filters: [(String, String)], window: UInt64,
+        onResult: ((KayaAppTx, [KayaPickedFile]) throws -> Void)?
+    ) -> UInt64 {
+        let id = app.allocFileDialog()
+        if let onResult { app.onFileDialog(id, onResult) }
+        var values: [KayaValue] = []
+        for (label, extensions) in filters {
+            values.append(.str(label))
+            values.append(.str(extensions))
+        }
+        tx.showFileDialog(window, id, multiple ? 1 : 0, values)
         return id
     }
 

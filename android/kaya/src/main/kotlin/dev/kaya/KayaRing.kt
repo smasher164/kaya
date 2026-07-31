@@ -38,4 +38,23 @@ object KayaRing {
      * submit from this guest, referenced or not, and the caller's
      * array is free the moment this returns. */
     @JvmStatic external fun blobRegister(data: ByteArray): Long
+
+    /**
+     * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
+     * with `seekable[0]` set to 1 when it supports random access.
+     *
+     * NATIVE BECAUSE JAVA HAS NO OTHER WAY — there is no public API for
+     * wrapping a descriptor, and reflecting into FileDescriptor's
+     * private field throws on a modern JDK. The same entry the desktop
+     * JVM carries, because the JVM guest tier is one tier; on Android
+     * it lands on the source that opens through the ContentResolver.
+     *
+     * BLOCKS, possibly for a long time — a provider may download the
+     * file before it answers — so call it from a thread you chose.
+     */
+    @JvmStatic external fun openPicked(
+        handle: Long,
+        mode: Int,
+        seekable: IntArray,
+    ): java.io.FileDescriptor
 }

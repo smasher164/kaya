@@ -1189,6 +1189,32 @@ public final class KayaWire {
             // the cancel sentinel being -1 in java-int terms).
             return new Occ(kind, id, java.util.List.of(), b.getInt(16));
         }
+        if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
+            // id, a count, then three Values per file
+            // (handle, name, local_path). EMPTY IS CANCEL.
+            int count = b.getInt(16);
+            int at = 32; // past id, count, pad, values count, reserved
+            java.util.List<KayaApp.PickedFile> files = new java.util.ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                Object[] parts = new Object[3];
+                for (int j = 0; j < 3; j++) {
+                    int vtype = b.getInt(at);
+                    int vlen = b.getInt(at + 4);
+                    if (vtype == VALUE_I64) {
+                        parts[j] = b.getLong(at + 8);
+                    } else {
+                        byte[] raw = new byte[vlen];
+                        b.position(at + 8);
+                        b.get(raw);
+                        parts[j] = new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+                    }
+                    at += 8 + ((vlen + 7) & ~7);
+                }
+                files.add(new KayaApp.PickedFile(
+                        (Long) parts[0], (String) parts[1], (String) parts[2]));
+            }
+            return new Occ(kind, id, java.util.List.of(), files);
+        }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
         if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED) {

@@ -48,14 +48,14 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y"
+SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. (Empty since the menus sweep
 # landed its guests on mac+linux; deploy-win/run-sim/run-emulator
 # still carry menus rust-only until the next phase registers their
 # language legs.)
-DEPTH_SCENES="filedialog"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -795,15 +795,22 @@ run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The filedialog scene: the picker's request/result grammar and the
-# capability it hands back. Every backend has a real arm now; the
-# LANGUAGE sweep is mid-flight, so the legs here are the languages whose
-# picker surface has landed. It drives REAL NSOpenPanel chrome over
-# accessibility, so it needs the same logged-in GUI session the alert
-# legs do.
+# capability it hands back, in every language. It drives REAL NSOpenPanel
+# chrome over accessibility, so it needs the same logged-in GUI session
+# the alert legs do.
 KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
 export KAYA_SELFTEST_SCRIPT
 run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog target/debug/examples/filedialog
 run filedialog-python-swiftui env KAYA_SELFTEST=filedialog python3 guests/python/filedialog.py
+run filedialog-go-swiftui env KAYA_SELFTEST=filedialog target/go-guests/filedialog
+run filedialog-csharp-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run filedialog-ocaml-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/filedialog.exe
+run filedialog-haskell-swiftui env KAYA_SELFTEST=filedialog "$(hs_bin filedialog)"
+run filedialog-swift-swiftui env KAYA_SELFTEST=filedialog target/swift-guests/filedialog
+run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

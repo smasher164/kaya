@@ -397,6 +397,26 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
     c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))");
+    // The picker's answer is a LIST OF RECORDS, and no single `value`
+    // can carry one — so the three values per file ride the VALUES
+    // slot, flattened, and kaya_app regroups them in threes. The
+    // generic tail below would read that slot as a key path and take
+    // the file count as its length, starting eight bytes early.
+    c.line("    else if kind = occ_kind_file_dialog_result");
+    c.line("    then begin");
+    c.line("      (* id, a count, then three Values per file (handle, name,");
+    c.line("         local_path), FLATTENED into the values slot; the app");
+    c.line("         layer regroups them. EMPTY IS CANCEL. *)");
+    c.line("      let count = u32_at byte 16 in");
+    c.line("      let at = ref 32 in");
+    c.line("      let out = ref [] in");
+    c.line("      for _ = 1 to count * 3 do");
+    c.line("        let v, next = parse_value byte !at in");
+    c.line("        out := v :: !out;");
+    c.line("        at := next");
+    c.line("      done;");
+    c.line("      Some (kind, Int64.of_int id, List.rev !out, None)");
+    c.line("    end");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))

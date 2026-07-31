@@ -16,7 +16,12 @@ scene names only the BASENAME so one script serves every lane.
 
 THE READ RUNS OFF THE APP THREAD, which is what `open` tells every
 caller to do: it blocks, and a cloud provider may download the whole
-file before it returns. Reading inline would contradict the API's own
+file before it returns.
+
+The parking is a plain `threading.Event`, and the worker is a plain
+daemon thread. kaya supplies no waiting primitive and should not: the
+point is that a guest uses its own language's concurrency and hands
+back only the result. Reading inline would contradict the API's own
 documentation and would leave the property this scene uniquely proves
 untested — that the CAPABILITY SURVIVES THE THREAD HOP, which is the
 platform-sensitive part (a security-scoped URL on iOS, a content:// URI
@@ -62,10 +67,10 @@ picked_dir.mkdir(parents=True, exist_ok=True)
 (picked_dir / "picked.txt").write_text("picked bytes")
 (picked_dir / "decoy.txt").write_text("decoy")
 
-# The release channel: the app thread sends, the worker receives. A
+# The release gate: the app thread sends, the worker receives. A
 # handler that blocked handing this over would fail the very claim being
 # tested, so the send must not wait for the receiver.
-release = threading.Event()
+released = threading.Event()
 
 
 def picked(files):
@@ -93,7 +98,7 @@ def picked(files):
         # release click could never be processed and the whole scene
         # would deadlock — the point, and much stronger than reading
         # back a different value.
-        release.wait()
+        released.wait()
         app.post(lambda: status.set(f"{count} {text}"))
 
     threading.Thread(target=worker, name="filedialog-reader",
@@ -120,6 +125,6 @@ with app.window(title="filedialog"):
         kaya.label(bind=status).a11y_id("status")  # label#0
         kaya.button("open", on_click=ask)  # button#0
         kaya.button("open one", on_click=ask_one)  # button#1
-        kaya.button("release", on_click=release.set)  # button#2
+        kaya.button("release", on_click=released.set)  # button#2
 
 sys.exit(app.run())

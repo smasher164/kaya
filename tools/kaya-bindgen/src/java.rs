@@ -464,6 +464,35 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            // the cancel sentinel being -1 in java-int terms).");
     c.line("            return new Occ(kind, id, java.util.List.of(), b.getInt(16));");
     c.line("        }");
+    // The picker's answer: the one occurrence whose payload is a LIST
+    // OF RECORDS. The generic tail reads a KEY PATH, which would take
+    // the file count as a path length and start eight bytes early.
+    c.line("        if (kind == OCC_KIND_FILE_DIALOG_RESULT) {");
+    c.line("            // id, a count, then three Values per file");
+    c.line("            // (handle, name, local_path). EMPTY IS CANCEL.");
+    c.line("            int count = b.getInt(16);");
+    c.line("            int at = 32; // past id, count, pad, values count, reserved");
+    c.line("            java.util.List<KayaApp.PickedFile> files = new java.util.ArrayList<>(count);");
+    c.line("            for (int i = 0; i < count; i++) {");
+    c.line("                Object[] parts = new Object[3];");
+    c.line("                for (int j = 0; j < 3; j++) {");
+    c.line("                    int vtype = b.getInt(at);");
+    c.line("                    int vlen = b.getInt(at + 4);");
+    c.line("                    if (vtype == VALUE_I64) {");
+    c.line("                        parts[j] = b.getLong(at + 8);");
+    c.line("                    } else {");
+    c.line("                        byte[] raw = new byte[vlen];");
+    c.line("                        b.position(at + 8);");
+    c.line("                        b.get(raw);");
+    c.line("                        parts[j] = new String(raw, java.nio.charset.StandardCharsets.UTF_8);");
+    c.line("                    }");
+    c.line("                    at += 8 + ((vlen + 7) & ~7);");
+    c.line("                }");
+    c.line("                files.add(new KayaApp.PickedFile(");
+    c.line("                        (Long) parts[0], (String) parts[1], (String) parts[2]));");
+    c.line("            }");
+    c.line("            return new Occ(kind, id, java.util.List.of(), files);");
+    c.line("        }");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))

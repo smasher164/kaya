@@ -65,6 +65,9 @@ public final class Main {
             case "confirm":
                 app = Confirm::app;
                 break;
+            case "filedialog":
+                app = FileDialog::app;
+                break;
             case "nav":
                 app = Nav::app;
                 break;

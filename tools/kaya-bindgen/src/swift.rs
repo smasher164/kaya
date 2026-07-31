@@ -421,7 +421,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// checkbox's new state for TOGGLED, the slider's new value for");
     c.line("/// VALUE_CHANGED, nil for clicks.");
     c.line("func kayaParseOccurrence(_ rec: [UInt8])");
-    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?");
+    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile])?");
     c.line("{");
     c.line("    rec.withUnsafeBytes { raw in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
@@ -438,7 +438,39 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
-    c.line("            return (kind, id, [], .i64(Int64(choice)))");
+    c.line("            return (kind, id, [], .i64(Int64(choice)), [])");
+    c.line("        }");
+    // The picker's answer: the one occurrence whose payload is a LIST
+    // OF RECORDS, which no single KayaValue can carry — hence the
+    // tuple's `files` member. The generic tail reads a KEY PATH, and
+    // would take the file count as a path length and start eight bytes
+    // early.
+    c.line("        if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {");
+    c.line("            // id, a count, then three Values per file");
+    c.line("            // (handle, name, local_path). EMPTY IS CANCEL.");
+    c.line("            let count = Int(raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self))");
+    c.line("            var at = 32  // past id, count, pad, values count, reserved");
+    c.line("            var files: [KayaPickedFile] = []");
+    c.line("            for _ in 0..<count {");
+    c.line("                var parts: [KayaValue] = []");
+    c.line("                for _ in 0..<3 {");
+    c.line("                    let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+    c.line("                    let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
+    c.line("                    if vtype == UInt32(KAYA_VALUE_I64) {");
+    c.line("                        parts.append(.i64(raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))");
+    c.line("                    } else {");
+    c.line("                        let bytes = (0..<vlen).map { raw[at + 8 + $0] }");
+    c.line("                        parts.append(.str(String(decoding: bytes, as: UTF8.self)))");
+    c.line("                    }");
+    c.line("                    at += 8 + (vlen + 7) & ~7");
+    c.line("                }");
+    c.line("                guard case .i64(let handle) = parts[0],");
+    c.line("                      case .str(let name) = parts[1],");
+    c.line("                      case .str(let localPath) = parts[2] else { continue }");
+    c.line("                files.append(KayaPickedFile(");
+    c.line("                    handle: UInt64(handle), name: name, localPath: localPath))");
+    c.line("            }");
+    c.line("            return (kind, id, [], nil, files)");
     c.line("        }");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
@@ -451,7 +483,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("            || {cond}"));
     }
     c.line("        {");
-    c.line("            return (kind, id, [], nil)");
+    c.line("            return (kind, id, [], nil, [])");
     c.line("        }");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
@@ -466,7 +498,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
         c.line("        {");
         c.line("            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)");
-        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)))");
+        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [])");
         c.line("        }");
     }
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -517,7 +549,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))");
     c.line("            }");
     c.line("        }");
-    c.line("        return (kind, id, keys, payload)");
+    c.line("        return (kind, id, keys, payload, [])");
     c.line("    }");
     c.line("}");
     c.out

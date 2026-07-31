@@ -1222,7 +1222,7 @@ func kayaCanonicalizeShortcut(_ spelling: String) -> String {
 /// checkbox's new state for TOGGLED, the slider's new value for
 /// VALUE_CHANGED, nil for clicks.
 func kayaParseOccurrence(_ rec: [UInt8])
-    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?)?
+    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile])?
 {
     rec.withUnsafeBytes { raw in
         let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
@@ -1245,7 +1245,34 @@ func kayaParseOccurrence(_ rec: [UInt8])
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
             // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
             let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
-            return (kind, id, [], .i64(Int64(choice)))
+            return (kind, id, [], .i64(Int64(choice)), [])
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
+            // id, a count, then three Values per file
+            // (handle, name, local_path). EMPTY IS CANCEL.
+            let count = Int(raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self))
+            var at = 32  // past id, count, pad, values count, reserved
+            var files: [KayaPickedFile] = []
+            for _ in 0..<count {
+                var parts: [KayaValue] = []
+                for _ in 0..<3 {
+                    let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                    let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                    if vtype == UInt32(KAYA_VALUE_I64) {
+                        parts.append(.i64(raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))
+                    } else {
+                        let bytes = (0..<vlen).map { raw[at + 8 + $0] }
+                        parts.append(.str(String(decoding: bytes, as: UTF8.self)))
+                    }
+                    at += 8 + (vlen + 7) & ~7
+                }
+                guard case .i64(let handle) = parts[0],
+                      case .str(let name) = parts[1],
+                      case .str(let localPath) = parts[2] else { continue }
+                files.append(KayaPickedFile(
+                    handle: UInt64(handle), name: name, localPath: localPath))
+            }
+            return (kind, id, [], nil, files)
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
@@ -1254,14 +1281,14 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         {
-            return (kind, id, [], nil)
+            return (kind, id, [], nil, [])
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
         if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
-            return (kind, section, [], .i64(Int64(bitPattern: id)))
+            return (kind, section, [], .i64(Int64(bitPattern: id)), [])
         }
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []
@@ -1306,6 +1333,6 @@ func kayaParseOccurrence(_ rec: [UInt8])
                 payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))
             }
         }
-        return (kind, id, keys, payload)
+        return (kind, id, keys, payload, [])
     }
 }

@@ -27,6 +27,31 @@ public final class KayaRing {
     /** kaya_run: the calling thread becomes the UI loop. */
     public static native int run();
 
+    /**
+     * Redeem a picked file: returns a {@link java.io.FileDescriptor}
+     * the caller owns, with {@code seekable[0]} set to 1 when it
+     * supports random access.
+     *
+     * NATIVE BECAUSE JAVA HAS NO OTHER WAY. There is no public API for
+     * wrapping a descriptor, and the obvious route is closed: reflecting
+     * into {@code FileDescriptor}'s private {@code fd} throws
+     * {@code InaccessibleObjectException} on JDK 17, since java.base is
+     * not open. Reaching it would force every kaya application to launch
+     * with {@code --add-opens java.base/java.io=ALL-UNNAMED} — a demand
+     * a binding has no business making of its users.
+     *
+     * JNI has no such restriction, and this is measured rather than
+     * assumed (docs/file-dialogs-plan.md §6f): the native side builds
+     * the descriptor through the public no-arg constructor and sets the
+     * field with SetIntField, with NO flags of any kind.
+     *
+     * BLOCKS, possibly for a long time — a cloud provider may download
+     * the file before it answers — so call it from a thread you chose
+     * and post the result back.
+     */
+    public static native java.io.FileDescriptor openPicked(
+            long handle, int mode, int[] seekable);
+
     /** One transaction as encoded records — kaya_submit's spelling. */
     public static native void submit(byte[] tx);
 

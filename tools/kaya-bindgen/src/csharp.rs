@@ -464,6 +464,36 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            payload = BitConverter.ToUInt32(rec, 16);");
     c.line("            return true;");
     c.line("        }");
+    // The picker's answer: the one occurrence whose payload is a LIST
+    // OF RECORDS. The generic tail reads a KEY PATH, which would take
+    // the file count as a path length and start eight bytes early.
+    c.line("        if (kind == OccKindFileDialogResult)");
+    c.line("        {");
+    c.line("            // id, a count, then three Values per file");
+    c.line("            // (handle, name, local_path). EMPTY IS CANCEL.");
+    c.line("            int count = (int)BitConverter.ToUInt32(rec, 16);");
+    c.line("            int fileAt = 32; // past id, count, pad, values count, reserved");
+    c.line("            var files = new List<PickedFile>(count);");
+    c.line("            for (int i = 0; i < count; i++)");
+    c.line("            {");
+    c.line("                object?[] parts = new object?[3];");
+    c.line("                for (int j = 0; j < 3; j++)");
+    c.line("                {");
+    c.line("                    uint vtype = BitConverter.ToUInt32(rec, fileAt);");
+    c.line("                    int vlen = (int)BitConverter.ToUInt32(rec, fileAt + 4);");
+    c.line("                    parts[j] = vtype == ValueI64");
+    c.line("                        ? (object)BitConverter.ToInt64(rec, fileAt + 8)");
+    c.line("                        : Encoding.UTF8.GetString(rec, fileAt + 8, vlen);");
+    c.line("                    fileAt += 8 + ((vlen + 7) & ~7);");
+    c.line("                }");
+    c.line("                files.Add(new PickedFile(");
+    c.line("                    (ulong)(long)(parts[0] ?? 0L),");
+    c.line("                    (string)(parts[1] ?? \"\"),");
+    c.line("                    (string)(parts[2] ?? \"\")));");
+    c.line("            }");
+    c.line("            payload = files;");
+    c.line("            return true;");
+    c.line("        }");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OccKind{}", pascal(n)))
