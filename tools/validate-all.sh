@@ -41,6 +41,14 @@ for arg in "$@"; do
 done
 
 LANES_DIR="$(mktemp -d)"
+# A FAILING LANE'S LOG OUTLIVES THE RUN, because the run is where the
+# evidence is and a matrix that goes red once is the case you most need
+# it for. It used to live only in $LANES_DIR, printed to stdout and
+# then deleted with it: a run where three lanes failed and the
+# immediate re-run passed left NOTHING to diagnose from (2026-07-31),
+# and a transient nobody can look at is indistinguishable from a bug
+# nobody found. Passing lanes leave nothing behind.
+KEEP_DIR="$ROOT/target/validate-failures"
 trap 'rm -rf "$LANES_DIR"' EXIT
 
 lane_names=()
@@ -90,6 +98,9 @@ if [ "$MODE" = parallel ]; then
         if [ "$verdict" != PASS ]; then
             echo "== $name (log) =="
             cat "$LANES_DIR/$name.log"
+            mkdir -p "$KEEP_DIR"
+            cp "$LANES_DIR/$name.log" "$KEEP_DIR/$name.log"
+            echo "== $name log kept at target/validate-failures/$name.log =="
             status=1
         fi
         legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null)
