@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Required by the platform for any accessibility service. Only the
+         validation apps declare this service; a user's app never sees it. -->
+    <string name="kaya_harness_a11y_description">kaya scene harness (validation only)</string>
+</resources>

@@ -2031,3 +2031,38 @@ with no error anywhere and the leg fails three steps later on an
 assertion about the guest. The observable is the dialog GOING AWAY, so
 that is what choose_file waits for rather than any return code — it
 passed once and flaked on the next run before this.
+
+## Android's picker is another app, and the service that reaches it
+
+Every other platform's file picker is reachable from inside the process:
+GTK's chooser is our own widget, the Shell's dialog is COM in our
+address space, and NSOpenPanel is XPC but still our application as far
+as the accessibility API is concerned. Android's is not — ACTION_OPEN_
+DOCUMENT hands off to DocumentsUI, a separate APK, and the platform
+deliberately stops one app from reading or touching another's UI.
+
+UI Automator crosses that line but is INSTRUMENTATION: it runs under
+AndroidJUnitRunner, while this lane launches the app with `am start` and
+reads verdicts from logcat. An accessibility service crosses the same
+line without restructuring the lane — it sees every window on the device
+and can act on them, which is what a screen reader does. It is declared
+ONLY by the validation apps, never by the kaya library, so no user's app
+carries an accessibility service it did not ask for, and the runner
+enables it over adb.
+
+THE ORDER IS THE WHOLE TRICK, and getting it wrong cost two runs.
+`am force-stop` kills every component of the package — including this
+service, because the validation app is what declares it — and
+`logcat -c` wipes the connection message that proves it came up. Enable
+first and the service is killed and its one piece of evidence erased,
+which reads exactly like a service that never started. Enable AFTER both.
+
+And writing the setting is not the same as the system binding the
+service. An unbound service fails exactly like a picker that never
+appeared: the scene sees no windows and reports a missing dialog, three
+removes from the cause. `dumpsys accessibility` is the only place that
+distinguishes them, so the runner asks it there — with a BOUNDED WAIT,
+because binding is asynchronous and sampling once reports every leg as
+broken. Negative-tested by pointing the setting at a class that does not
+exist: all 45 legs say "never bound" instead of failing later and
+elsewhere.

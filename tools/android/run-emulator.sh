@@ -314,9 +314,54 @@ run_apk_on() {
     shift 5
     local failed=0
     adb -s "$serial" install -r "$apk" >/dev/null
+    # THE HARNESS'S EYES OUTSIDE THIS APP. Android's file picker is
+    # DocumentsUI, a separate APK, and the platform stops one app from
+    # reading another's UI — so the scene needs an accessibility service,
+    # which only the user (or adb) can enable. Enabled per leg rather
+    # than once for the AVD: `install -r` on the app that owns the
+    # service can drop it, and a silently-disabled service looks exactly
+    # like a picker that never appeared.
+    #
+    # Declared only by the validation apps, never by the kaya library, so
+    # this reaches no user's app.
     adb -s "$serial" shell am force-stop "${component%%:*}" >/dev/null 2>&1 || true
     adb -s "$serial" shell am force-stop "${component%%/*}"
     adb -s "$serial" logcat -c
+    # ENABLED HERE, AFTER force-stop AND logcat -c, and the order is the
+    # whole trick. force-stop kills every component of the package —
+    # including this service, because the validation app is what declares
+    # it — and logcat -c wipes the connection message that proves it came
+    # up. Enabling first meant the service was killed and its one piece
+    # of evidence erased, which reads exactly like a service that never
+    # started.
+    local a11y="${component%%/*}/dev.kaya.KayaHarnessAccessibility"
+    adb -s "$serial" shell settings put secure enabled_accessibility_services "$a11y" >/dev/null
+    adb -s "$serial" shell settings put secure accessibility_enabled 1 >/dev/null
+    # AND IT MUST ACTUALLY BE BOUND. Writing the setting is not the same
+    # as the system binding the service, and an unbound one fails exactly
+    # like a picker that never appeared — the scene sees no windows and
+    # says the dialog is missing, three removes from the cause. dumpsys
+    # is the only place that distinguishes them, so ask it here rather
+    # than debugging it from the far end.
+    # BOUNDED WAIT, because binding is asynchronous: the setting returns
+    # long before the system has started the service, and sampling once
+    # reports every leg as broken.
+    local bound=0 tries=0
+    while [ "$tries" -lt 50 ]; do
+        if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
+            | tr -d '\r' | grep -q "Bound services:.*kaya"; then
+            bound=1
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 0.2
+    done
+    if [ "$bound" != 1 ]; then
+        echo "run-emulator: the harness accessibility service never bound on $serial" >&2
+        echo "  (enabled_accessibility_services was set to $a11y, but the system" >&2
+        echo "   did not bind it — the scene would report a picker that never came up)" >&2
+        return 1
+    fi
     # Recording mode (KAYA_RECORD=1): the emulator display is its own
     # isolated surface; screenrecord runs on-device, stopped with
     # SIGINT so the file finalizes, then pulled and mined for stills at
