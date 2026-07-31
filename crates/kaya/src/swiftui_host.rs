@@ -17,6 +17,93 @@ use crate::capi::{
     kaya_emit_value_changed, kaya_next_commands,
 };
 
+/// Redeem a picked file: the locator the backend answered the pick
+/// with, the mode, and out-parameters for seekability. Returns the
+/// descriptor the guest now owns, or -1 with `out_error` filled.
+///
+/// The backend keeps the platform object the locator names — on iOS a
+/// security-scoped URL, which is the only durable capability there —
+/// and starts the scope, opens, and stops it INSIDE this call. That is
+/// not a workaround: the scope is a kernel-tracked resource with a
+/// concurrency limit that leaks if held, and the descriptor outlives it
+/// (DESIGN.md, measurements 2 and 3).
+pub type PickedOpener = unsafe extern "C" fn(
+    locator: *const c_char,
+    mode: u32,
+    out_seekable: *mut u32,
+    out_error: *mut *const c_char,
+) -> i64;
+
+/// Set when the loaded backend exports an opener. Read by the phones'
+/// `PickedSource` when a guest redeems a handle.
+pub(crate) static PICKED_OPENER: std::sync::OnceLock<PickedOpener> = std::sync::OnceLock::new();
+
+/// A picked file on iOS: the locator the backend answered with, which it
+/// can still redeem, opened through the backend on every redemption.
+///
+/// THE SAME SHAPE AS ANDROID'S `UriSource`, and for the same reason. iOS
+/// has a perfectly good-looking POSIX path for a picked file and it is a
+/// TRAP: re-opening it once the security scope drops fails with EPERM
+/// (DESIGN.md, measurement 4), so a `PathSource` here would work in the
+/// simulator — which enforces no sandbox at all — and fail on a device.
+/// What survives is the URL OBJECT, which re-acquires its scope
+/// (measurement 5), and only the backend can hold one.
+#[cfg(target_os = "ios")]
+pub(crate) struct UrlSource {
+    pub name: String,
+    pub locator: String,
+}
+
+#[cfg(target_os = "ios")]
+impl crate::protocol::PickedSource for UrlSource {
+    fn open(&self, mode: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
+        let opener = PICKED_OPENER.get().ok_or_else(|| {
+            std::io::Error::other(
+                "kaya: this SwiftUI backend exports no picked-file opener — rebuild it",
+            )
+        })?;
+        let locator = CString::new(self.locator.as_str())
+            .map_err(|e| std::io::Error::other(format!("kaya: the locator would not cross: {e}")))?;
+        let mut seekable: u32 = 0;
+        let mut error: *const c_char = std::ptr::null();
+        let handle = unsafe {
+            opener(
+                locator.as_ptr(),
+                crate::protocol::picked_mode_code(mode),
+                &mut seekable,
+                &mut error,
+            )
+        };
+        if handle < 0 {
+            // The backend's own sentence, which names the platform's
+            // reason (a dropped scope, a file that moved, a mode the
+            // document does not allow); a bare code would send the
+            // guest looking in the wrong place.
+            let why = if error.is_null() {
+                "the backend refused the open and gave no reason".to_owned()
+            } else {
+                unsafe { std::ffi::CStr::from_ptr(error) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            return Err(std::io::Error::other(format!("kaya: {why}")));
+        }
+        Ok((handle, seekable != 0))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// EMPTY, and measured rather than assumed: iOS HAS a path for the
+    /// picked file and re-opening it after the scope drops is DENIED, so
+    /// publishing it would hand the guest something that looks usable
+    /// and is not — the one thing `local_path` exists to refuse.
+    fn local_path(&self) -> &str {
+        ""
+    }
+}
+
 /// The presentation-side functions handed to a guest-language backend.
 /// emit_clicked takes the click-tag bytes delivered with a widget's
 /// CREATE record, verbatim. next_commands blocks until a transaction is
@@ -104,6 +191,23 @@ pub(crate) fn run() -> i32 {
         !symbol.is_null(),
         "kaya_swiftui_run not exported by {path:?}"
     );
+    // THE ONE CALL THAT RUNS THE OTHER WAY, and it is resolved the same
+    // way `run` is rather than through the vtable: the vtable carries
+    // functions the BACKEND calls on the core, and this is the core
+    // calling the backend. A picked file on the phones is a
+    // security-scoped URL the backend has to keep — the path EPERMs the
+    // moment the scope drops (DESIGN.md, measurement 4) — so redeeming
+    // a handle means asking the backend, exactly as Android's source
+    // asks the JVM.
+    //
+    // OPTIONAL BY DESIGN: a backend built before this existed still
+    // runs, and only a guest that opens a picked file meets the
+    // absence, which then says so.
+    let opener = unsafe { dlsym(handle, c"kaya_swiftui_open_picked".as_ptr()) };
+    if !opener.is_null() {
+        let opener: PickedOpener = unsafe { std::mem::transmute(opener) };
+        let _ = PICKED_OPENER.set(opener);
+    }
     let api = KayaHostApi {
         emit_clicked: kaya_emit_clicked,
         next_commands: kaya_next_commands,

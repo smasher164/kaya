@@ -33,6 +33,16 @@
 import UIKit
 import UniformTypeIdentifiers
 
+/// Which shape of the question this run asks. The scene needs BOTH:
+/// `pick_files()` asks for many and `pick_file()` for one, and they are
+/// different interactions — with many, a tap SELECTS and a confirm
+/// button appears; with one, the tap IS the answer.
+///
+/// From the environment because `simctl launch --args` reaches the app
+/// as argv while SIMCTL_CHILD_* reaches it as the environment, and the
+/// lane already speaks the latter.
+let variant = ProcessInfo.processInfo.environment["KAYA_PROBE_VARIANT"] ?? "single"
+
 func say(_ s: String) {
     NSLog("PROBE %@", s)
     print("PROBE \(s)")
@@ -80,7 +90,7 @@ final class VC: UIViewController, UIDocumentPickerDelegate {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        say("==== begin, ios \(UIDevice.current.systemVersion)")
+        say("==== begin, ios \(UIDevice.current.systemVersion), variant \(variant)")
 
         // Q2: the candidate directories, and whether this process can
         // fill them. The app's Documents dir is the interesting one —
@@ -120,7 +130,12 @@ final class VC: UIViewController, UIDocumentPickerDelegate {
         // this is the iOS spelling of the same idea, and whether it is
         // honoured at all is the question.
         p.directoryURL = dir
-        p.allowsMultipleSelection = false
+        // MULTI-SELECT IS A DIFFERENT INTERACTION, and the scene uses
+        // both: pick_files() asks for many, pick_file() for one. With
+        // many, a tap SELECTS rather than answering, and a confirm
+        // button appears — which is why this is a variant rather than
+        // an assumption.
+        p.allowsMultipleSelection = (variant == "multi")
         picker = p
         say("Q3 presenting, aimed at \(dir.path)")
         present(p, animated: true) {

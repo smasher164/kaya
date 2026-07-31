@@ -75,6 +75,12 @@ cd "$ROOT"
 tools/gen-header.sh --check
 tools/gen-bindings.sh --check
 
+# The host-side picker driver, built ONCE per run and before any leg.
+# Only the filedialog leg uses it, but building it here means a break in
+# it fails the run at the top rather than inside one leg's watcher,
+# where the symptom would be a scene timing out with no reason given.
+SIMDRIVE=$(tools/ios/simdrive/build.sh)
+
 make_bundle() {
     local name="$1" bundle_id="$2" executable_path="$3"
     local app="$BUNDLES/$name.app"
@@ -492,6 +498,49 @@ rec_finish() {
     printf '%s\n' "$1" >"$REC_DIR/leg.log"
 }
 
+# Answer the guest's simdrive requests for the life of one leg.
+#
+# The protocol is deliberately two files and nothing else: the guest
+# writes `kaya-simdrive-request` holding one verb, this writes
+# `kaya-simdrive-response` whose FIRST LINE is ok/err and whose trailing
+# newline is the commit — written last, so a guest that reads mid-write
+# sees an incomplete file and keeps waiting rather than acting on half
+# an answer.
+#
+# The app's pid is resolved per request rather than once: simdrive needs
+# it to tell the picker's process from the app's, and the app is
+# launched after this starts.
+simdrive_watch() { # udid bundle_id documents_dir
+    local udid="$1" bundle_id="$2" dir="$3"
+    local request="$dir/kaya-simdrive-request" response="$dir/kaya-simdrive-response"
+    mkdir -p "$dir"
+    rm -f "$request" "$response"
+    while :; do
+        if [ -f "$request" ]; then
+            local verb
+            verb=$(cat "$request" 2>/dev/null)
+            rm -f "$request"
+            local pid body rc
+            pid=$(xcrun simctl spawn "$udid" launchctl list 2>/dev/null \
+                | grep -F "$bundle_id" | head -1 | cut -f1)
+            # shellcheck disable=SC2086
+            body=$("$SIMDRIVE" "$udid" "${pid:-0}" $verb 2>&1)
+            rc=$?
+            # Written aside and RENAMED: rename is atomic, so the
+            # guest either sees no response or a whole one. Polling a
+            # file being written is exactly how a harness reads half an
+            # answer and acts on it.
+            if [ "$rc" -eq 0 ]; then
+                printf 'ok\n%s\n' "$body" >"$response.part"
+            else
+                printf 'err\n%s\n' "$body" >"$response.part"
+            fi
+            mv -f "$response.part" "$response"
+        fi
+        sleep 0.05
+    done
+}
+
 # Rust entrypoint + SwiftUI backend legs: install the bundle (with the
 # embedded dylib) on the claimed simulator and launch with the scene
 # script from the environment.
@@ -511,11 +560,30 @@ run_swiftui_on() {
     script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
     [ -n "$extra" ] && script="$script
 $extra"
+    # THE HARNESS'S EYES OUTSIDE THIS APP, for the one scene that needs
+    # them. iOS's document picker is a remote view controller whose UI
+    # belongs to another process and which publishes nothing in-process,
+    # so its verbs are answered on the HOST by tools/ios/simdrive; the
+    # two sides meet through files in the app's own data container
+    # (docs/traps.md). Started per leg and killed with it — a watcher
+    # outliving its leg would answer the NEXT one's requests against a
+    # dead app.
+    local watcher_pid=""
+    if [ "$scene" = filedialog ]; then
+        local data_container
+        data_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
+        simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
+        watcher_pid=$!
+    fi
     local out
     out=$(SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
+    if [ -n "$watcher_pid" ]; then
+        kill "$watcher_pid" 2>/dev/null || true
+        wait "$watcher_pid" 2>/dev/null || true
+    fi
     printf '%s\n' "$out"
     rec_finish "$out"
     # (NO PER-LEG SCREENSHOT. There used to be a `simctl io screenshot`
@@ -841,6 +909,17 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle scrollrs-swiftui dev.kaya.scrollswiftui "$TARGET_DIR/examples/scroll")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on scroll-swiftui "$APP" dev.kaya.scrollswiftui scroll-swiftui scroll scroll
+
+    # The filedialog scene. THE ONE LEG WITH EYES ON THE HOST: iOS's
+    # picker is a remote view controller, so expect_file_dialog and
+    # file_choose are answered by tools/ios/simdrive over the container
+    # bridge rather than in-process (run_swiftui_on starts the watcher
+    # for this scene, docs/traps.md).
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example filedialog
+    APP=$(make_bundle filedialogrs-swiftui dev.kaya.filedialogswiftui "$TARGET_DIR/examples/filedialog")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on filedialog-swiftui "$APP" dev.kaya.filedialogswiftui \
+        filedialog-swiftui filedialog filedialog
 
     # The a11y scene: every widget kind's role and name read back out of
     # UIKit's OWN accessibility tree. iOS is the one platform where that

@@ -28,6 +28,19 @@
         <integer>1</integer>
         <integer>2</integer>
     </array>
+    <!-- WITHOUT THESE TWO THE PICKER CANNOT SEE THIS APP'S FILES.
+         The document picker browses document PROVIDERS, and an app's
+         container is not one of them until it says so: UIFileSharingEnabled
+         publishes Documents/, and LSSupportsOpeningDocumentsInPlace makes it
+         browsable in place rather than through a copy. The filedialog scene
+         writes its two files there and aims the picker at them, so without
+         the keys the picker opens somewhere else entirely — silently, which
+         is the failure shape this whole milestone keeps meeting. Measured
+         with tools/ios/pickerprobe. -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
 </dict>

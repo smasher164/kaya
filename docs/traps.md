@@ -2289,3 +2289,49 @@ simdrive matches rows on the STEM. The scene still proves the right file
 was chosen, because it reads the file's BYTES and the decoy's differ —
 which is exactly why the decoy carries different contents rather than
 just a different name.
+
+## Three ways the iOS picker is not the picker you measured
+
+The host-side driver worked on the first app it was pointed at and then
+failed on the real leg, three times over, each for a different reason.
+All three share a shape worth naming: a picker measured in ONE
+configuration is not the picker the scene drives.
+
+**An unretired accessibility token stops the taps, not the reads.**
+Every response from `sendAccessibilityRequestAsync:` has to be handed
+back through `_resetBridgeTokensForResponse:bridgeDelegateToken:`.
+Forget it and nothing looks wrong: the reads keep working, run after
+run, and the next TAP is silently ignored. Measured exactly that way —
+a tap with no reads before it lands, and the same tap after a tree walk
+does not, so the bug hides behind the very call that proves the
+transport works. idb pops each request's token for this reason; simdrive
+now does it in the bridge callback, where it cannot be forgotten per
+call site.
+
+**Multi-selection is a different interaction.** With
+`allowsMultipleSelection` false the tap IS the answer and the picker
+leaves. With it true — which is what `pick_files()` asks for, and the
+scene's first pick — the tap SELECTS, a Select All / Deselect All bar
+appears at the foot, and an `Open` button replaces `Cancel` in the
+navigation strip. So the drive taps the row, and if the picker is still
+up, presses the confirm. Which is the desktops' shape all along; iOS
+single-selection is the odd one out, and measuring only that taught the
+wrong lesson.
+
+**The Cancel button is not always there.** A picker aimed into a
+subdirectory shows a BACK chevron where Cancel would be, and only the
+provider's root carries Cancel — while a multi-selection picker carries
+it throughout. The scene cancels its SECOND picker, which is
+single-selection and aimed, so it meets the case with no Cancel at all.
+simdrive walks back until the dismissal exists and then presses it, the
+way a person would. The back control is identified BY POSITION, as the
+leftmost thing in the strip: its accessibility label is the presenting
+app's name, so keying on a word would have bound the driver to whichever
+bundle was under test.
+
+A fourth, smaller: an early reading claimed a single-selection picker
+DID have Cancel. It came from a hit test landing on the app's own
+`DOCRemoteBarButtonTrackingView`, which is in the HOST app's process and
+carries that label while the picker's chrome does not. Hit tests answer
+with whatever owns the point, across processes — so an element found
+that way is only evidence about the picker if its pid says so.

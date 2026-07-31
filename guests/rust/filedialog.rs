@@ -76,7 +76,20 @@ fn scene_root() -> std::path::PathBuf {
     std::path::PathBuf::from(root).join("Documents")
 }
 
-#[cfg(not(target_os = "android"))]
+/// iOS is the same story as Android with a different spelling: the app's
+/// temp directory is inside its container, and the document picker
+/// browses providers that cannot see it. The app's own Documents
+/// directory IS reachable — but only because the bundle declares
+/// `UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`
+/// (tools/ios/Info.plist.in). `HOME` is the container in every iOS
+/// process, which is how a guest with no platform bindings finds it.
+#[cfg(target_os = "ios")]
+fn scene_root() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::path::PathBuf::from(home).join("Documents")
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn scene_root() -> std::path::PathBuf {
     std::env::temp_dir()
 }

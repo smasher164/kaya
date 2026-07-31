@@ -183,6 +183,21 @@ pub(crate) fn raw_handle(file: std::fs::File) -> i64 {
 /// Not cfg'd to Android: a rule this easy to get wrong is worth a test
 /// that runs on every platform's `cargo test`, not only the one that
 /// cannot run it.
+/// `FileMode` as the number that crosses the C ABI to a backend that
+/// redeems a picked file (iOS's `kaya_swiftui_open_picked`).
+///
+/// Spelled out here rather than cast from the enum's discriminant so the
+/// two sides of the ABI agree by a written rule instead of by a layout
+/// nobody stated. The Swift side names the same three values.
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub(crate) fn picked_mode_code(mode: FileMode) -> u32 {
+    match mode {
+        FileMode::Read => 0,
+        FileMode::Write => 1,
+        FileMode::ReadWrite => 2,
+    }
+}
+
 /// Dead everywhere but Android BY DESIGN — the test is the point, and it
 /// runs on the platform that cannot run the code. Narrowed to
 /// not-android so Android still fails if its own caller goes away.
@@ -1459,6 +1474,18 @@ mod tests {
             "a bare `w` does not truncate through a ContentResolver, and \
              PathSource's Write does"
         );
+    }
+
+    /// The mode numbers that cross to a backend redeeming a picked file
+    /// are a WRITTEN rule, not the enum's layout: the Swift side names
+    /// the same three values, and nothing but this test holds the two
+    /// spellings together. Reordering `FileMode` would otherwise turn
+    /// every guest's Read into the backend's Write, silently.
+    #[test]
+    fn picked_mode_codes_are_pinned() {
+        assert_eq!(picked_mode_code(FileMode::Read), 0);
+        assert_eq!(picked_mode_code(FileMode::Write), 1);
+        assert_eq!(picked_mode_code(FileMode::ReadWrite), 2);
     }
 
     /// Content is not identity: the blob arm of the key gate has its

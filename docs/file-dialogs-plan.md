@@ -548,10 +548,18 @@ idb's own source records that the HID client has RELOCATED between Xcode
 versions. simdrive looks it up by name and fails loudly with the name it
 could not find, which is the most a consumer of that surface can do.
 
-WHAT REMAINS for §6e: the apply arm, a source holding the
-security-scoped URL (measurements 4-7 in DESIGN.md already say the path
-EPERMs and the URL re-acquires), a bridge so the in-process verbs can
-ask the host to look and act, and the runner leg.
+§6e IS DONE. The apply arm presents the picker and aims it, the source
+holds the security-scoped URL and starts/opens/stops on every redemption
+(the path is never published, because it EPERMs once the scope drops),
+the in-process verbs ask the host through a two-file bridge in the app's
+own container, and the leg runs in the lane. The iOS lane is green, 42
+legs.
+
+Three things the first working driver did not survive, all now in
+docs/traps.md: an unretired accessibility token stops the TAPS while the
+reads keep working; multi-selection is select-then-confirm rather than
+tap-to-answer; and a picker aimed into a subdirectory has no Cancel at
+all, so the drive walks back to where one exists.
 
 ## What is already done and needs no re-litigating
 

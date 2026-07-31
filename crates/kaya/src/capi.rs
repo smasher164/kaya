@@ -1437,13 +1437,23 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
                     .to_string_lossy()
                     .into_owned()
             };
+            // ONE SOURCE PER PLATFORM, decided here because the locator
+            // means something different on each: a path on macOS, a
+            // `content://` URI on Android, and on iOS a name only the
+            // backend can redeem (the path EPERMs once the scope drops).
             #[cfg(target_os = "android")]
             let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
                 std::sync::Arc::new(crate::android::UriSource {
                     name: read(names),
                     uri: read(locators),
                 });
-            #[cfg(not(target_os = "android"))]
+            #[cfg(target_os = "ios")]
+            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+                std::sync::Arc::new(crate::swiftui_host::UrlSource {
+                    name: read(names),
+                    locator: read(locators),
+                });
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
                 std::sync::Arc::new(crate::protocol::PathSource {
                     name: read(names),

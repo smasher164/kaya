@@ -484,9 +484,25 @@ func kayaDiag(_ msg: String) {
 /// does not exist, so NSOpenPanel silently fell back to the last
 /// location it had used and the scene compared the wrong directory.
 func kayaTempDir() -> String {
-    ProcessInfo.processInfo.environment["TMPDIR"].map {
-        ($0 as NSString).standardizingPath
-    } ?? "/tmp"
+    #if os(iOS)
+        // NOT the temp directory on iOS, and this is the same shape
+        // Android hit. The app's `TMPDIR` is inside its container, and
+        // the document picker browses PROVIDERS — it cannot see another
+        // app's private storage, so a picker aimed there opens
+        // somewhere else entirely with no error anywhere. The app's own
+        // Documents directory IS browsable, but only because the bundle
+        // declares UIFileSharingEnabled and
+        // LSSupportsOpeningDocumentsInPlace (tools/ios/Info.plist.in);
+        // without those two keys this is invisible again.
+        //
+        // The guest computes the same place from `HOME`, which iOS sets
+        // to the app's container in every process.
+        return (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
+    #else
+        return ProcessInfo.processInfo.environment["TMPDIR"].map {
+            ($0 as NSString).standardizingPath
+        } ?? "/tmp"
+    #endif
 }
 
 /// $TMP and $PID in a scene path. General substitutions, not
@@ -745,19 +761,229 @@ func kayaPresentFileDialog(
             }
         }
     #else
-        // iOS wants UIDocumentPickerViewController plus the
-        // security-scoped URL held object-side; that is the phone half
-        // of this milestone, not the depth slice.
-        //
-        // IT USED TO EMIT AN EMPTY RESULT HERE, which is a LIE the shape
-        // of a real answer: the empty list IS cancel, so a phone leg
-        // would have watched a picker that never appeared and passed the
-        // cancel assertion. Refuse instead, through the call both
-        // check-stubs and check-steps read.
-        _ = (window, allowsMultiple, extensions, dialog)
-        kayaDepthStub("filedialog", on: "ios")
+        // UIDocumentPickerViewController, which hands off to a REMOTE
+        // view controller — the picker's UI lives in another process,
+        // which is why the harness reaches it from the host instead of
+        // from here (tools/ios/simdrive, docs/traps.md).
+        _ = window
+        let types: [UTType] =
+            extensions.isEmpty
+            ? [UTType.item]
+            : extensions.compactMap { UTType(filenameExtension: $0) }
+        let panel = UIDocumentPickerViewController(
+            forOpeningContentTypes: types.isEmpty ? [UTType.item] : types)
+        panel.allowsMultipleSelection = allowsMultiple
+        // Armed by file_dialog_goto and applied HERE, the same rule
+        // NSOpenPanel needs: the initial location is honoured at
+        // presentation and nowhere else.
+        if let pending = kayaPendingPanelDirectory {
+            panel.directoryURL = URL(fileURLWithPath: pending)
+        }
+        let delegate = KayaPickerDelegate(dialog: dialog)
+        panel.delegate = delegate
+        kayaLivePickerDelegate = delegate
+        kayaLiveDocumentPicker = panel
+        let scenes = UIApplication.shared.connectedScenes
+        let ws = scenes.compactMap { $0 as? UIWindowScene }.first
+        ws?.windows.first?.rootViewController?.present(panel, animated: false)
     #endif
 }
+
+#if !os(macOS)
+    /// THE HARNESS'S REACH OUT TO THE HOST.
+    ///
+    /// Every other backend reads and drives its picker in-process. iOS
+    /// cannot: `UIDocumentPickerViewController` is a remote view
+    /// controller whose UI belongs to another process, it publishes zero
+    /// accessibility elements here, and iOS has no accessibility service
+    /// an app may install (docs/traps.md). The eyes live on the host
+    /// instead, in tools/ios/simdrive, and the two sides meet through
+    /// the app's own container — which the simulator's host can read and
+    /// write directly, so no socket and no port is needed.
+    ///
+    /// The protocol is a file each way: this side writes `request`, the
+    /// runner's watcher answers with `response`, first line `ok` or
+    /// `err`. Both are removed by whoever consumed them, so a stale file
+    /// cannot be mistaken for an answer.
+    enum KayaSimdrive {
+        static var directory: String { kayaTempDir() }
+        static var requestPath: String {
+            (directory as NSString).appendingPathComponent("kaya-simdrive-request")
+        }
+        static var responsePath: String {
+            (directory as NSString).appendingPathComponent("kaya-simdrive-response")
+        }
+
+        /// Ask the host for something and wait for its answer. Returns
+        /// (ok, lines). A timeout is a FAILURE with a sentence, never a
+        /// silent empty read: the whole class of bug this milestone kept
+        /// meeting is a harness that reports the guest's state when the
+        /// harness itself is what broke.
+        static func ask(_ verb: String, timeout: TimeInterval = 60) -> (Bool, [String]) {
+            let fm = FileManager.default
+            try? fm.removeItem(atPath: responsePath)
+            guard fm.createFile(atPath: requestPath, contents: Data(verb.utf8)) else {
+                return (false, ["could not write the simdrive request to \(requestPath)"])
+            }
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline {
+                if let data = fm.contents(atPath: responsePath),
+                    let text = String(data: data, encoding: .utf8), text.hasSuffix("\n")
+                {
+                    // The trailing newline is the COMMIT: the watcher
+                    // writes the body and then the newline, so a partial
+                    // read cannot be mistaken for a complete answer.
+                    try? fm.removeItem(atPath: responsePath)
+                    var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+                        .map(String.init)
+                    if lines.last == "" { lines.removeLast() }
+                    let ok = lines.first == "ok"
+                    return (ok, Array(lines.dropFirst()))
+                }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            try? fm.removeItem(atPath: requestPath)
+            return (false, ["the simdrive watcher did not answer \(verb) within \(Int(timeout))s"])
+        }
+    }
+
+    /// What the live picker is really showing, read on the host: the
+    /// directory and the row names. Nil when no picker is up, which
+    /// FAILS every expect_file_dialog rather than passing quietly.
+    func kayaSimdriveState() -> (String, [String])? {
+        let (ok, lines) = KayaSimdrive.ask("state")
+        guard ok, let directory = lines.first, !directory.isEmpty else { return nil }
+        return (directory, Array(lines.dropFirst()))
+    }
+
+    /// Choose a row or cancel. Nil on success, the failure's sentence
+    /// otherwise — simdrive refuses a name the picker does not list and
+    /// says what it DID list, and it requires the picker to be gone
+    /// afterwards, so both guards live on the host with the eyes.
+    func kayaSimdriveDrive(_ argument: String) -> String? {
+        let verb = argument == "cancel" ? "cancel" : "choose \(argument)"
+        let (ok, lines) = KayaSimdrive.ask(verb)
+        return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
+    }
+
+    /// The live picker and the delegate that answers it. Held because a
+    /// UIDocumentPickerViewController's delegate is UNOWNED — dropped on
+    /// the floor it is deallocated before the user picks anything, and
+    /// the result silently never arrives.
+    var kayaLiveDocumentPicker: UIDocumentPickerViewController?
+    var kayaLivePickerDelegate: KayaPickerDelegate?
+
+    /// The picked URLs, by the locator handed to the core.
+    ///
+    /// THE OBJECT IS THE CAPABILITY on this platform: the picked file's
+    /// path EPERMs the moment its security scope drops (DESIGN.md,
+    /// measurement 4), and only the URL can re-acquire that scope
+    /// (measurement 5). So the backend keeps them and the core redeems
+    /// them by name through kaya_swiftui_open_picked.
+    var kayaPickedURLs: [String: URL] = [:]
+
+    /// The last open's failure, kept alive for the length of the call
+    /// that reports it — the core copies the string inside that call.
+    var kayaPickedOpenError: [CChar] = []
+
+    final class KayaPickerDelegate: NSObject, UIDocumentPickerDelegate {
+        let dialog: UInt64
+        init(dialog: UInt64) {
+            self.dialog = dialog
+            super.init()
+        }
+
+        func documentPicker(
+            _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
+        ) {
+            answer(urls)
+        }
+
+        /// Cancel is the EMPTY LIST, faithfully — no platform can
+        /// confirm an empty selection, so there is no sentinel.
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            answer([])
+        }
+
+        private func answer(_ urls: [URL]) {
+            kayaLiveDocumentPicker = nil
+            kayaLivePickerDelegate = nil
+            // The locator is the URL's own string, and the object is
+            // retained beside it — handing the core a PATH would work in
+            // the simulator, which enforces no sandbox, and fail on a
+            // device (docs/traps.md).
+            var locators: [String] = []
+            var names: [String] = []
+            for url in urls {
+                let key = url.absoluteString
+                kayaPickedURLs[key] = url
+                locators.append(key)
+                names.append(url.lastPathComponent)
+            }
+            let locatorBufs = locators.map { strdup($0) }
+            let nameBufs = names.map { strdup($0) }
+            defer {
+                for b in locatorBufs { free(b) }
+                for b in nameBufs { free(b) }
+            }
+            let lp: [UnsafePointer<CChar>?] = locatorBufs.map { $0.map { UnsafePointer($0) } }
+            let np: [UnsafePointer<CChar>?] = nameBufs.map { $0.map { UnsafePointer($0) } }
+            lp.withUnsafeBufferPointer { l in
+                np.withUnsafeBufferPointer { n in
+                    KayaHost.api.emit_file_dialog_result(
+                        dialog, l.baseAddress, n.baseAddress, UInt(urls.count))
+                }
+            }
+        }
+    }
+
+    /// Redeem a picked file. The core calls this — the one entry that
+    /// runs that way — from whatever thread the guest opened on.
+    ///
+    /// START, OPEN, STOP, all inside this call. The scope is a
+    /// kernel-tracked capability with a concurrency limit that leaks if
+    /// held, and the descriptor OUTLIVES it: measured on hardware
+    /// (DESIGN.md, measurements 2 and 3), which is the whole reason the
+    /// handle can be redeemed lazily and more than once.
+    @_cdecl("kaya_swiftui_open_picked")
+    public func kayaSwiftUIOpenPicked(
+        _ locator: UnsafePointer<CChar>,
+        _ mode: UInt32,
+        _ outSeekable: UnsafeMutablePointer<UInt32>,
+        _ outError: UnsafeMutablePointer<UnsafePointer<CChar>?>
+    ) -> Int64 {
+        func refuse(_ why: String) -> Int64 {
+            kayaPickedOpenError = Array(why.utf8CString)
+            kayaPickedOpenError.withUnsafeBufferPointer { outError.pointee = $0.baseAddress }
+            return -1
+        }
+        let key = String(cString: locator)
+        guard let url = kayaPickedURLs[key] ?? URL(string: key) else {
+            return refuse("no picked file named \(key)")
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        // The three values protocol.rs's picked_mode_code names. Write
+        // truncates, exactly as PathSource's does on the desktops.
+        let flags: Int32
+        switch mode {
+        case 0: flags = O_RDONLY
+        case 1: flags = O_WRONLY | O_CREAT | O_TRUNC
+        case 2: flags = O_RDWR
+        default: return refuse("unknown open mode \(mode)")
+        }
+        let fd = open(url.path, flags, 0o644)
+        if fd < 0 {
+            return refuse("opening \(url.lastPathComponent) failed: \(String(cString: strerror(errno)))")
+        }
+        // Seekability rides the OPEN because only the descriptor knows —
+        // a provider may hand back a pipe where the same name gave a
+        // regular file before.
+        var info = stat()
+        outSeekable.pointee = (fstat(fd, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG) ? 1 : 0
+        return Int64(fd)
+    }
+#endif
 
 
 /// Present an auxiliary surface AT-LEAST-ONCE. Belt, not the fix:
@@ -805,6 +1031,19 @@ struct KayaLiveAlert {
     let actions: Int
 }
 var kayaLiveAlert: KayaLiveAlert?
+
+/// Where the NEXT picker opens. Armed by file_dialog_goto and applied
+/// AT PRESENTATION on both Apple platforms, because that is the only
+/// moment either picker honors its initial location — set on a panel
+/// that is already up it is ignored, and NSOpenPanel then restores
+/// whatever location it used last. Measured: a run inherited a
+/// directory left behind by an unrelated probe binary.
+///
+/// NOT macOS-ONLY, though it was: `UIDocumentPickerViewController`
+/// takes the same `directoryURL` and honours it (measured on the
+/// simulator), so both arms read this one variable.
+var kayaPendingPanelDirectory: String?
+
 #if !os(macOS)
     var kayaLiveAlertController: UIAlertController?
     /// UIKit exposes no public button-press for UIAlertController, so
@@ -822,13 +1061,6 @@ var kayaTearingDown: Set<UInt64> = []
     /// The live picker, held so the harness verbs can read and drive
     /// the REAL panel rather than a copy of the request.
     var kayaLiveOpenPanel: NSOpenPanel?
-    /// Where the NEXT picker opens. Armed by file_dialog_goto and
-    /// applied at presentation, because that is the only moment
-    /// NSOpenPanel honors `directoryURL` — setting it on a panel that
-    /// is already up is ignored, and the panel then restores whatever
-    /// location it used last. Measured: a run inherited a directory
-    /// left behind by an unrelated probe binary.
-    var kayaPendingPanelDirectory: String?
     var kayaNSWindows: [UInt64: NSWindow] = [:]
     /// Parked waiters for window materialization, keyed by surface id
     /// (main-thread state like the registry): registration signals
@@ -2892,16 +3124,16 @@ private func kayaRunScript(_ script: String) {
                         "expect_file_dialog \(wantDir): unexpanded substitution — "
                             + "only $TMP and $PID exist")
                 }
-                let state = DispatchQueue.main.sync { () -> (String, [String])? in
-                    #if os(macOS)
-                        return kayaOpenPanelState()
-                    #else
-                        // UIDocumentPickerViewController is the phone
-                        // arm and is not built yet; None fails the
-                        // expect loudly rather than passing it.
-                        return nil
-                    #endif
-                }
+                #if os(macOS)
+                    let state = DispatchQueue.main.sync { kayaOpenPanelState() }
+                #else
+                    // OFF the main thread, deliberately: the read goes
+                    // out to the host and back, and the app must keep
+                    // servicing its run loop while it does — the picker
+                    // is a remote view controller and a blocked main
+                    // thread stalls the very UI being read.
+                    let state = kayaSimdriveState()
+                #endif
                 if let (where_, rows) = state {
                     if wantDir.isEmpty {
                         // Bare: the wait a scene needs before it can
@@ -2911,7 +3143,24 @@ private func kayaRunScript(_ script: String) {
                     } else if !where_.hasSuffix(wantDir) {
                         failures.append(
                             "file dialog showing \"\(where_)\", wanted \"\(wantDir)\"")
-                    } else if let missing = wantNames.first(where: { !rows.contains($0) }) {
+                    } else if let missing = wantNames.first(where: { wanted in
+                        #if os(macOS)
+                            return !rows.contains(wanted)
+                        #else
+                            // THE PICKER PUBLISHES DISPLAY NAMES, and
+                            // iOS's omit the extension: the row for
+                            // picked.txt reads "picked". The URL the
+                            // pick finally answers with carries the
+                            // extension in full, so this is a property
+                            // of the accessibility label and not of the
+                            // file. Compared on the stem, therefore —
+                            // and the scene still proves the RIGHT file
+                            // was chosen, because it reads the bytes
+                            // and the decoy's differ.
+                            let stems = Set(rows.map { ($0 as NSString).deletingPathExtension })
+                            return !stems.contains((wanted as NSString).deletingPathExtension)
+                        #endif
+                    }) {
                         failures.append(
                             "file dialog list has \(rows), missing \"\(missing)\"")
                     } else {
@@ -2962,7 +3211,23 @@ private func kayaRunScript(_ script: String) {
                         DispatchQueue.main.sync { kayaOpenPanelGoto(dir) }
                     }
                 #else
-                    _ = dir
+                    // The SAME two guards, because the failure they
+                    // catch is the platform's, not AppKit's: a picker
+                    // aimed at a directory that does not exist opens
+                    // somewhere else without saying so on iOS too.
+                    let resolved = kayaExpandPath(dir)
+                    if resolved.contains("$") {
+                        failures.append(
+                            "file_dialog_goto \(dir): unexpanded substitution in "
+                                + "\(resolved) — only $TMP and $PID exist")
+                    } else if !FileManager.default.fileExists(atPath: resolved) {
+                        failures.append(
+                            "file_dialog_goto \(dir): \(resolved) does not exist — "
+                                + "the picker would silently open somewhere else and "
+                                + "the scene would compare against that")
+                    } else {
+                        kayaPendingPanelDirectory = resolved
+                    }
                 #endif
             case "file_choose":
                 // Drive the REAL controls: select the row and press
@@ -2998,13 +3263,18 @@ private func kayaRunScript(_ script: String) {
                         }
                     #endif
                 }
-                DispatchQueue.main.sync {
-                    #if os(macOS)
-                        kayaOpenPanelDrive(arg)
-                    #else
-                        _ = arg
-                    #endif
-                }
+                #if !os(macOS)
+                    // simdrive does the same refusal on the host and
+                    // names what the picker DID list, so the check is
+                    // not repeated here — the failure text arrives with
+                    // the answer.
+                    if let why = kayaSimdriveDrive(arg) {
+                        failures.append("file_choose \(arg): \(why)")
+                    }
+                #endif
+                #if os(macOS)
+                    DispatchQueue.main.sync { kayaOpenPanelDrive(arg) }
+                #endif
                 #if os(macOS)
                     // AND THE PANEL MUST BE GONE, the same postcondition
                     // harness.rs applies for the Rust backends. A press

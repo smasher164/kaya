@@ -57,9 +57,15 @@ func fail(_ s: String) -> Never {
     exit(1)
 }
 
-let developerDir = ProcessInfo.processInfo.environment["KAYA_SIMDRIVE_DEVELOPER_DIR"] ?? ""
+// Either name: the runner already exports DEVELOPER_DIR to reach simctl,
+// and a caller outside it can say KAYA_SIMDRIVE_DEVELOPER_DIR instead.
+// Both resolve to the same Xcode; requiring the private one would make
+// this fail inside the lane for no reason.
+let environment = ProcessInfo.processInfo.environment
+let developerDir = environment["KAYA_SIMDRIVE_DEVELOPER_DIR"]
+    ?? environment["DEVELOPER_DIR"] ?? ""
 guard !developerDir.isEmpty else {
-    fail("KAYA_SIMDRIVE_DEVELOPER_DIR is unset — tools/lib/swift-toolchain.sh resolves it")
+    fail("neither KAYA_SIMDRIVE_DEVELOPER_DIR nor DEVELOPER_DIR is set — no Xcode to reach")
 }
 guard dlopen("/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", RTLD_NOW) != nil
 else { fail("CoreSimulator would not load") }
@@ -104,11 +110,13 @@ func lookUpDevice(_ udid: String) -> NSObject {
 /// SYNCHRONOUS by contract, so it blocks on the async send.
 final class Bridge: NSObject {
     let device: NSObject
+    /// Set once the translator exists; the reset below needs it.
+    weak var translator: NSObject?
     init(device: NSObject) { self.device = device }
 
     @objc(accessibilityTranslationDelegateBridgeCallbackWithToken:)
     func callback(withToken token: String) -> (@convention(block) (AnyObject) -> AnyObject?) {
-        { [device] request in
+        { [device, weak self] request in
             let sema = DispatchSemaphore(value: 0)
             var out: AnyObject?
             unsafeBitCast(device, to: SimDeviceAccessibility.self)
@@ -116,6 +124,18 @@ final class Bridge: NSObject {
                     request, completionQueue: DispatchQueue.global(),
                     completionHandler: { out = $0; sema.signal() })
             _ = sema.wait(timeout: .now() + 20)
+            // EVERY RESPONSE MUST BE RETIRED, and forgetting costs
+            // something that looks nothing like a leak: the reads keep
+            // working, and the next TAP is ignored. Measured — a tap
+            // with no reads before it lands, the same tap after a tree
+            // walk does not. idb pops each request's token for the same
+            // reason; this is that pop.
+            if let out, let translator = self?.translator {
+                let reset = NSSelectorFromString("_resetBridgeTokensForResponse:bridgeDelegateToken:")
+                if translator.responds(to: reset) {
+                    _ = translator.perform(reset, with: out, with: token)
+                }
+            }
             return out
         }
     }
@@ -169,6 +189,7 @@ final class Simulator {
         }
         guard let iOSTranslator = concrete else { fail("no iOS translator instance") }
         translator = iOSTranslator
+        bridge.translator = iOSTranslator
         guard let elementClass = NSClassFromString("AXPMacPlatformElement") else {
             fail("no AXPMacPlatformElement")
         }
@@ -311,9 +332,13 @@ func stem(_ name: String) -> String {
 func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
     var found: [(String, CGPoint)] = []
     var seen = Set<String>()
-    let xs = stride(from: 20.0, through: screen.width - 20, by: 24.0)
+    let xs = stride(from: 12.0, through: screen.width - 12, by: 20.0)
+    // 40..170: the whole chrome band. The strip's controls sit at ~92,
+    // but a single-select picker lays its dismissal out differently from
+    // a multi-select one, and a sweep pinned to one row finds only the
+    // shape it was written against.
     for x in xs {
-        for y in stride(from: 60.0, through: 110.0, by: 16.0) {
+        for y in stride(from: 40.0, through: 170.0, by: 14.0) {
             let point = CGPoint(x: x, y: y)
             guard let hit = sim.objectAtPoint(point), let element = sim.element(for: hit)
             else { continue }
@@ -468,6 +493,15 @@ func waitForPickerGone(_ tries: Int = 20) -> Bool {
 }
 
 switch verb {
+case "navstrip":
+    // Diagnosis: what the navigation strip offers right now. The strip
+    // is where Cancel and the multi-select confirm live, and neither is
+    // reachable by walking the tree.
+    guard waitForPicker() != nil else { print("no picker"); exit(0) }
+    for (description, centre) in navigationStrip(sim, screen: screen) {
+        print("\(description)\t\(NSStringFromPoint(centre))")
+    }
+
 case "describe":
     guard let nodes = waitForPicker() else { print("no picker"); exit(0) }
     for node in nodes {
@@ -490,21 +524,75 @@ case "choose":
         let listed = nodes.compactMap { rowName($0) }
         fail("no row named \(wanted); the picker lists \(listed)")
     }
-    Tapper(device: sim.device).tap(at: CGPoint(x: row.frame.midX, y: row.frame.midY), screen: screen)
+    let centre = CGPoint(x: row.frame.midX, y: row.frame.midY)
+    let tapper = Tapper(device: sim.device)
+    tapper.tap(at: centre, screen: screen)
+
+    // TWO INTERACTIONS, not one, and the scene needs both: with
+    // `pick_file()` the tap IS the answer and the picker leaves; with
+    // `pick_files()` the tap SELECTS and a confirm appears in the
+    // navigation strip (measured: "Open" replaces "Cancel", and a
+    // Select All / Deselect All bar appears at the foot). So the picker
+    // going away is what tells the two apart, rather than a flag this
+    // side would have to be told.
+    if !waitForPickerGone(6) {
+        let strip = navigationStrip(sim, screen: screen)
+        if let (_, confirm) = strip.first(where: {
+            $0.0.hasPrefix("Open") || $0.0.hasPrefix("Done")
+        }) {
+            tapper.tap(at: confirm, screen: screen)
+        }
+    }
+
     // THE PICKER BEING GONE IS THE PROOF the tap landed. A tap that
     // arrives before the list is interactive is swallowed with no error
     // anywhere — the same rule every other backend needed.
-    if !waitForPickerGone() { fail("the picker was still up after choosing \(wanted)") }
+    //
+    // SELF-DIAGNOSING when it does not: a miss and a swallowed press
+    // look identical from here, and the numbers are the only way to
+    // tell them apart — so they go in the message rather than into a
+    // debugging session.
+    if !waitForPickerGone() {
+        let after = pickerNodes()?.compactMap { rowName($0) } ?? []
+        let strip = navigationStrip(sim, screen: screen).map { $0.0 }
+        fail(
+            "the picker was still up after choosing \(wanted): tapped \(centre) "
+                + "(row frame \(row.frame)) of a \(screen) screen; it now lists \(after) "
+                + "and offers \(strip)")
+    }
 
 case "cancel":
     guard waitForPicker() != nil else { fail("no picker is up to cancel") }
-    // Cancel lives in the navigation strip, which the tree does not
-    // reach — the same shallowness that hides the directory name.
-    let strip = navigationStrip(sim, screen: screen)
-    guard let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) else {
-        fail("no Cancel in the navigation strip; it offers \(strip.map { $0.0 })")
+    let tapper = Tapper(device: sim.device)
+    // NO CANCEL BUTTON WHEN THE PICKER IS AIMED INTO A SUBDIRECTORY.
+    // Measured: a single-selection picker opened at a directory shows a
+    // BACK chevron where a Cancel would be, and only the provider's
+    // root carries Cancel. (A multi-selection picker carries it
+    // throughout, which is why this looked like it worked.) So walk
+    // back until the dismissal exists, the way a person would, and
+    // press it.
+    //
+    // The back control's accessibility label is the PRESENTING APP'S
+    // NAME, not "Back" — so it is identified by position, as the
+    // leftmost thing in the strip, rather than by a word that changes
+    // with whatever bundle is under test.
+    var cancelled = false
+    for _ in 0..<5 {
+        let strip = navigationStrip(sim, screen: screen)
+        if let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) {
+            tapper.tap(at: centre, screen: screen)
+            cancelled = true
+            break
+        }
+        guard let back = strip.filter({ $0.1.y < 120 }).min(by: { $0.1.x < $1.1.x })
+        else { break }
+        tapper.tap(at: back.1, screen: screen)
+        usleep(600_000)
     }
-    Tapper(device: sim.device).tap(at: centre, screen: screen)
+    if !cancelled {
+        let strip = navigationStrip(sim, screen: screen).map { $0.0 }
+        fail("no Cancel reachable from the picker; it offers \(strip)")
+    }
     if !waitForPickerGone() { fail("the picker was still up after cancelling") }
 
 default:
