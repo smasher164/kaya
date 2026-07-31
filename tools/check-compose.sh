@@ -27,8 +27,18 @@ fi
 # up: they carry per-scene registration (each MainActivity's scene
 # arm) and the hardware-chord override that forwards to the
 # interpreter's dispatch table. That code is Kotlin no other gate
-# sees, and the milestone2kt module drags in every Java guest as
-# well, so this also type-checks them on the mac.
+# sees.
+#
+# AND THE JAVA TASK EXPLICITLY, because compileDebugKotlin does not
+# imply it: milestone2kt drags in every Java guest, but those are
+# javac's to compile, under a different gradle task. This gate claimed
+# to cover them for four milestones while running only the Kotlin
+# half. What it missed is the whole reason to compile them HERE rather
+# than trust java-typecheck: that gate uses the desktop JDK, and the
+# Android SDK is a DIFFERENT java.lang. A guest reaching for
+# ProcessHandle (Java 9, absent from Android at any API level this
+# repo targets) type-checks clean on the mac, passes every fast gate,
+# and fails minutes into the emulator lane. Measured 2026-07-31.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,6 +51,13 @@ gradle --console=plain -q :kaya:compileDebugKotlin || {
 gradle --console=plain -q :milestone2:compileDebugKotlin \
     :milestone2kt:compileDebugKotlin || {
     echo "check-compose: FAIL (an Android app module does not compile)" >&2
+    exit 1
+}
+# The Java half of the same two modules — the guests, against the
+# ANDROID java.lang rather than the desktop one. See the note above.
+gradle --console=plain -q :milestone2:compileDebugJavaWithJavac \
+    :milestone2kt:compileDebugJavaWithJavac || {
+    echo "check-compose: FAIL (a Java guest does not compile for Android)" >&2
     exit 1
 }
 echo "check-compose: OK"
