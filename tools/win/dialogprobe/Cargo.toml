@@ -1,0 +1,21 @@
+# See src/main.rs for what this measures and why it exists.
+#
+# Standalone and excluded from the workspace, the way
+# tools/winui-bindgen is: a probe must not be able to move the
+# library's dependency graph. The `windows` version tracks
+# crates/kaya's so the probe measures what the backend would see.
+[package]
+name = "dialogprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
