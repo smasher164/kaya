@@ -69,6 +69,19 @@ if ! kaya_swiftc -typecheck \
     exit 1
 fi
 
+# AND THE HOST-SIDE iOS DRIVER, which is Swift no other mac-side gate
+# compiles. tools/ios/simdrive is the only thing that can read or drive
+# the iOS document picker — a remote view controller with nothing
+# in-process to talk to — so it is reached for under debugging pressure,
+# and until now the first compiler to see an edit was the iOS lane,
+# minutes into a run. That is the same shape as the interpreter passes
+# below and above this one, for the same reason. It builds with no
+# special flags (tools/ios/simdrive/build.sh), so a typecheck is cheap.
+if ! kaya_swiftc -typecheck tools/ios/simdrive/main.swift; then
+    echo "swift-typecheck: FAIL (tools/ios/simdrive, the iOS lane's driver)"
+    exit 1
+fi
+
 # AND FOR iOS. One file serves both Apple platforms, so half of it lives
 # behind `#if os(macOS)` / `#else` and a host-target typecheck compiles
 # only ONE of those halves. The iOS half is therefore invisible to the

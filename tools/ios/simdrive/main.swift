@@ -484,6 +484,34 @@ func waitForPicker(_ tries: Int = 20) -> [Node]? {
     return nil
 }
 
+/// The picker EXISTING is not the picker being READABLE. It is a remote
+/// view controller: it publishes its chrome — the nav strip, the
+/// directory title, a container for the rows — as soon as it presents,
+/// and fills in the row elements a moment later. waitForPicker's
+/// `count > 1` is satisfied by the chrome alone, so a read that lands in
+/// that window returns the right directory and NO ROWS, and the verb
+/// reports an empty list for a picker that is showing two files.
+///
+/// It survived the first read only because presenting for the first
+/// time is slow enough to hide it. The scene's SECOND presentation
+/// reuses the already-warm service, and the race is wide open — which
+/// is how the iOS lane went red on `expect_file_dialog` with every
+/// assertion in the scene passing (2026-07-31).
+///
+/// So the row read waits for a ROW. A directory with none costs the
+/// full budget and then answers honestly; every real one answers as
+/// soon as the rows arrive.
+func waitForRows(_ tries: Int = 20) -> [Node]? {
+    var last: [Node]? = nil
+    for _ in 0..<tries {
+        guard let nodes = waitForPicker() else { return last }
+        last = nodes
+        if nodes.contains(where: { rowName($0) != nil }) { return nodes }
+        usleep(300_000)
+    }
+    return last
+}
+
 func waitForPickerGone(_ tries: Int = 20) -> Bool {
     for _ in 0..<tries {
         if pickerRoot(sim, appPid: appPid, screen: screen) == nil { return true }
@@ -512,14 +540,17 @@ case "state":
     // `<directory>` then one row name per line — what expect_file_dialog
     // reads. Empty output means no picker is up, which must FAIL that
     // verb rather than pass it quietly.
-    guard let nodes = waitForPicker() else { exit(0) }
+    guard let nodes = waitForRows() else { exit(0) }
     print(currentDirectory(sim, screen: screen))
     for node in nodes { if let name = rowName(node) { print(name) } }
 
 case "choose":
     guard arguments.count >= 5 else { fail("choose needs a name") }
     let wanted = stem(arguments[4])
-    guard let nodes = waitForPicker() else { fail("no picker is up to choose \(wanted) from") }
+    // waitForRows and not waitForPicker, for the reason spelled out
+    // there: the chrome arrives before the rows, and looking for a
+    // named row in that window fails with "the picker lists []".
+    guard let nodes = waitForRows() else { fail("no picker is up to choose \(wanted) from") }
     guard let row = nodes.first(where: { rowName($0).map { stem($0) == wanted } ?? false }) else {
         let listed = nodes.compactMap { rowName($0) }
         fail("no row named \(wanted); the picker lists \(listed)")
