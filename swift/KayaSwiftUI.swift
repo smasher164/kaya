@@ -2993,6 +2993,28 @@ private func kayaRunScript(_ script: String) {
                         _ = arg
                     #endif
                 }
+                #if os(macOS)
+                    // AND THE PANEL MUST BE GONE, the same postcondition
+                    // harness.rs applies for the Rust backends. A press
+                    // that lands before the panel is interactive is
+                    // swallowed with no error anywhere, so the leg fails
+                    // three steps later on an assertion about the GUEST
+                    // — where nobody looks for a harness problem.
+                    // Measured on Windows; the rule is uniform because
+                    // the failure mode is.
+                    let gone = Date().addingTimeInterval(5)
+                    while Date() < gone {
+                        if DispatchQueue.main.sync(execute: { kayaOpenPanelState() }) == nil {
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    if let still = DispatchQueue.main.sync(execute: { kayaOpenPanelState() }) {
+                        failures.append(
+                            "file_choose \(arg): the panel is still up (listing \(still.1)) "
+                                + "— the press was swallowed, which the panel cannot tell you")
+                    }
+                #endif
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's
                 // messageText / the UIAlertController's title), never

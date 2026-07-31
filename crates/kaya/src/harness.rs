@@ -1555,7 +1555,30 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     Some(want) => match stage.file_dialog_state() {
                         Some((_, rows)) if rows.iter().any(|r| r == want) => {
                             stage.choose_file(Some(want));
-                            None
+                            // AND THE DIALOG MUST BE GONE. A press that
+                            // lands before the dialog is interactive is
+                            // swallowed with no error anywhere, so the
+                            // leg fails three steps later on an
+                            // assertion about the GUEST — which is where
+                            // nobody looks for a harness problem.
+                            // Measured on Windows, where it passed once
+                            // and flaked on the next run.
+                            //
+                            // Silent on success, like every other
+                            // action; this only ever speaks up when the
+                            // press did not take.
+                            match poll(|| match stage.file_dialog_state() {
+                                None => Ok(String::new()),
+                                Some((_, rows)) => Err(format!(
+                                    "file_choose {want:?}: the dialog is still up \
+                                     (listing {rows:?}) — the press was swallowed, \
+                                     which a backend cannot tell you because \
+                                     nothing returns an error for it"
+                                )),
+                            }) {
+                                Ok(_) => None,
+                                Err(why) => Some(Err(why)),
+                            }
                         }
                         Some((_, rows)) => {
                             // DISMISS IT ANYWAY. Refusing alone leaves the
@@ -1578,7 +1601,18 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     },
                     None => {
                         stage.choose_file(None);
-                        None
+                        // Cancel has the same postcondition: the dialog
+                        // is gone, or the press did not take.
+                        match poll(|| match stage.file_dialog_state() {
+                            None => Ok(String::new()),
+                            Some((_, rows)) => Err(format!(
+                                "file_choose cancel: the dialog is still up \
+                                 (listing {rows:?}) — the press was swallowed"
+                            )),
+                        }) {
+                            Ok(_) => None,
+                            Err(why) => Some(Err(why)),
+                        }
                     }
                 }
             }
