@@ -605,5 +605,63 @@ out="$(android_scenes tools/android/run-emulator.sh guests/rust/milestone2_andro
     status=1
 }
 
+# THE iOS PICKER'S THREE SILENT WIRINGS. Each of these fails in a way
+# that looks like a backend bug rather than a harness one, which is what
+# earns them a gate rather than a comment.
+ios_picker() {
+    python3 -c '
+import pathlib
+import sys
+
+bad = []
+
+# 1. THE ACCESSIBILITY TOKEN MUST BE RETIRED. Every response from
+#    sendAccessibilityRequestAsync: goes back through
+#    _resetBridgeTokensForResponse:. Drop it and NOTHING looks wrong:
+#    the reads keep working and the next TAP is silently ignored, so the
+#    call that proves the transport works is the one that hides the bug.
+#    Measured 2026-07-31 (docs/traps.md).
+simdrive = pathlib.Path("tools/ios/simdrive/main.swift").read_text()
+if "sendAccessibilityRequestAsync" in simdrive \
+        and "_resetBridgeTokensForResponse" not in simdrive:
+    bad.append("tools/ios/simdrive/main.swift reads accessibility but never retires the "
+               "token (_resetBridgeTokensForResponse:) — the reads would keep working and "
+               "every tap would be silently ignored")
+
+# 2. THE BUNDLE MUST PUBLISH ITS DOCUMENTS. Without both keys the
+#    document picker cannot see the app own files at all, and a picker
+#    aimed at them opens somewhere else with no error anywhere.
+plist = pathlib.Path("tools/ios/Info.plist.in").read_text()
+for key in ("UIFileSharingEnabled", "LSSupportsOpeningDocumentsInPlace"):
+    if key not in plist:
+        bad.append(f"tools/ios/Info.plist.in is missing {key} — the picker could not browse "
+                   f"the app own Documents and the filedialog leg would fail as though the "
+                   f"backend were wrong")
+
+# 3. THE OPEN MODES MUST AGREE ACROSS THE ABI. protocol.rs::picked_mode_code
+#    names 0/1/2 and a Rust test pins it; the Swift side of that same ABI
+#    hardcodes the three cases, and nothing but this holds the two
+#    spellings together. Reordering FileMode would turn every guest Read
+#    into the backend Write, silently.
+swift = pathlib.Path("swift/KayaSwiftUI.swift").read_text()
+if "kaya_swiftui_open_picked" in swift:
+    for case, flag in (("case 0", "O_RDONLY"), ("case 1", "O_WRONLY"), ("case 2", "O_RDWR")):
+        window = swift[swift.index("kaya_swiftui_open_picked"):]
+        if case not in window or flag not in window:
+            bad.append(f"swift/KayaSwiftUI.swift open_picked does not map {case} to {flag} — "
+                       f"the mode numbers protocol.rs pins would not survive the ABI")
+
+for line in bad:
+    print(line)
+sys.exit(1 if bad else 0)
+'
+}
+
+out="$(ios_picker)" || {
+    echo "check-steps: the iOS picker wiring has a silent hole:" >&2
+    echo "$out" >&2
+    status=1
+}
+
 [ "$status" = 0 ] && echo "check-steps: OK"
 exit "$status"
