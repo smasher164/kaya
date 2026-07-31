@@ -367,6 +367,25 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("        alert, choice = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("        return kind, alert, [], choice");
+    // The picker's answer is the one occurrence whose payload is a
+    // LIST OF RECORDS rather than a scalar: dialog id, a count, then
+    // three Values per file (handle, name, local_path). The generic
+    // tail below reads a KEY PATH, which would take the count as a
+    // path length and start reading eight bytes early — decoding a
+    // handle as a key and losing the rest. Hence its own arm.
+    //
+    // EMPTY IS CANCEL, and it arrives here as count 0, so the arm has
+    // nothing special to say about it.
+    c.line("    if kind == OCC_FILE_DIALOG_RESULT:");
+    c.line("        dialog, count = struct.unpack_from(\"<QI\", buf, 8)");
+    c.line("        at = 32  # past dialog, count, pad, values count, reserved");
+    c.line("        files = []");
+    c.line("        for _ in range(count):");
+    c.line("            handle, at = parse_value(buf, at)");
+    c.line("            name, at = parse_value(buf, at)");
+    c.line("            local_path, at = parse_value(buf, at)");
+    c.line("            files.append((handle, name, local_path))");
+    c.line("        return kind, dialog, [], files");
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

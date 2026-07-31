@@ -93,6 +93,7 @@ for arg in "$@"; do
         sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
+        filedialog_rust|filedialog_python) SUITE="$arg" ;;
         commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -192,6 +193,15 @@ done
 for s in $DEPTH_SCENES; do
     SCENE_EXES+=("$TARGET/examples/$s.exe")
     BUILD_EXAMPLES+=(--example "$s")
+done
+# MID-SWEEP scenes: a depth scene whose python half HAS landed while the
+# other languages' have not. Named one by one rather than globbed for
+# whatever exists — a glob would silently stop shipping a guest that got
+# deleted or renamed, and "the leg did not run" is the one outcome this
+# lane must never report as success.
+DEPTH_SCENE_PYS="${KAYA_WIN_DEPTH_SCENE_PYS:-filedialog}"
+for s in $DEPTH_SCENE_PYS; do
+    SCENE_PYS+=("$ROOT/guests/python/$s.py")
 done
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
@@ -1040,9 +1050,24 @@ case "$SUITE" in
         # (docs/background-work-plan.md §5) — read a timeout here as
         # that, not as VM load, before blaming the lane.
         # The filedialog scene: the Shell's own dialog, driven for
-        # real over UI Automation. DEPTH TIER — rust only until the
-        # sweep lands the other seven.
+        # real over UI Automation. The language sweep is mid-flight, so
+        # the legs here are the languages whose picker surface has
+        # landed.
+        # SERIAL, BETWEEN DRAINS, like the menus legs and for a sibling
+        # reason. A file dialog is OS-GLOBAL chrome: it is modal, it
+        # must hold the FOREGROUND to be driven, and the harness finds
+        # it by searching the desktop. Two of them up at once on one
+        # desktop means one is in the background with its presses
+        # swallowed — and BOTH legs fail, which reads as a backend bug
+        # rather than a scheduling one. Measured 2026-07-31: the rust
+        # leg had been green for weeks and started failing the moment a
+        # python leg joined it in the four-wide pool, with two dialogs
+        # visible on the VM at once.
+        drain_suites
         run_suite filedialog_rust
+        drain_suites
+        run_suite filedialog_python
+        drain_suites
         run_suite background_rust
         run_suite background_python
         run_suite background_go

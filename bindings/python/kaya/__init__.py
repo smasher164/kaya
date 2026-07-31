@@ -1051,6 +1051,81 @@ def show_alert(title="", message="", actions=(), cancel=None,
     return alert_id
 
 
+class PickedFile:
+    """One picked file: a handle to redeem, a display name, and
+    `local_path` — a RE-OPENABLE NAME, empty unless re-opening it
+    actually works, which measurement puts at the three desktops and
+    neither phone (DESIGN.md, File dialogs)."""
+
+    __slots__ = ("handle", "name", "local_path")
+
+    def __init__(self, handle, name, local_path):
+        self.handle = handle
+        self.name = name
+        self.local_path = local_path
+
+    def open(self, mode=wire.FILE_MODE_READ):
+        """Redeem the handle: returns `(file, seekable)` — an ordinary
+        Python file object, and whether it supports random access.
+
+        BLOCKS, and may block for a long time (a cloud provider can
+        download the file first), so call it from a thread you chose
+        and post the result back. kaya is not in the data path: the
+        object returned is a real file and `read`, `mmap` and the rest
+        are the ones you already know.
+
+        `seekable` RIDES THE OPEN rather than the pick because that is
+        the only place the answer exists — an Android provider may hand
+        back a pipe, and nothing short of opening reveals it.
+        """
+        return runtime.open_picked(self.handle, mode)
+
+    def __repr__(self):
+        return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
+
+
+def pick_files(filters=(), on_result=None, window=0):
+    """Ask the platform for files. THE PICK, NOT THE OPEN — the result
+    carries handles you redeem later, so the name says `pick`.
+
+    `filters` is a sequence of `(label, extensions)` pairs, advisory on
+    every platform: they set a default view rather than a guarantee, so
+    the guest still validates what it got. `extensions` may be a string
+    or a sequence.
+
+    on_result(files) fires exactly once with a list of PickedFile, and
+    the registration retires with it — the same request/result grammar
+    show_alert uses. CANCEL IS THE EMPTY LIST, faithfully: no platform
+    can confirm an empty selection, so there is no sentinel to invent.
+
+    One dialog may be live per process; show the next from the first's
+    handler."""
+    return _pick(True, filters, on_result, window)
+
+
+def pick_file(filters=(), on_result=None, window=0):
+    """The single-file spelling. The floor always returns a LIST; this
+    only asks the platform for one, so the handler receives zero or one
+    file."""
+    return _pick(False, filters, on_result, window)
+
+
+def _pick(multiple, filters, on_result, window):
+    flat = []
+    for label, exts in filters:
+        if not isinstance(exts, str):
+            exts = " ".join(exts)
+        flat.append(str(label))
+        flat.append(exts)
+    app = _app
+    dialog_id = app._next("file_dialog")
+    if on_result is not None:
+        app._file_dialog_handlers[dialog_id] = on_result
+    _records().append(wire.tx_show_file_dialog(
+        int(window), dialog_id, 1 if multiple else 0, flat))
+    return dialog_id
+
+
 # --- Menus: the command vocabulary (DESIGN.md, Menus) --------------
 #
 # One item vocabulary, two anchors. The window bar rides the window
@@ -1918,11 +1993,12 @@ class App:
     def __init__(self):
         global _app
         self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0,
-                          "alert": 0, "menu_item": 0}
+                          "alert": 0, "menu_item": 0, "file_dialog": 0}
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
+        self._file_dialog_handlers = {}
         # Menu items are their own id space — their own table ("two
         # tables, always" — now N tables, still always), keyed by
         # (occurrence kind, item id).
@@ -2212,6 +2288,15 @@ class App:
                 if handler is not None:
                     # payload is the parsed u32 choice.
                     self._dispatch(handler, payload)
+                continue
+            if kind == wire.OCC_FILE_DIALOG_RESULT:
+                # One-shot like the alert, and the id retires with it.
+                # payload is the decoder's list of (handle, name,
+                # local_path) triples; EMPTY IS CANCEL.
+                handler = self._file_dialog_handlers.pop(ident, None)
+                if handler is not None:
+                    self._dispatch(handler, [
+                        PickedFile(h, n, p) for (h, n, p) in payload])
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):

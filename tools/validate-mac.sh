@@ -795,14 +795,15 @@ run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The filedialog scene: the picker's request/result grammar and the
-# capability it hands back. DEPTH TIER — rust only until the sweep lands
-# the other seven, and mac-only until §6 gives GTK/WinUI/Compose real
-# arms (check-steps stays red on the other four runners until then, by
-# design). It drives REAL NSOpenPanel chrome over accessibility, so it
-# needs the same logged-in GUI session the alert legs do.
+# capability it hands back. Every backend has a real arm now; the
+# LANGUAGE sweep is mid-flight, so the legs here are the languages whose
+# picker surface has landed. It drives REAL NSOpenPanel chrome over
+# accessibility, so it needs the same logged-in GUI session the alert
+# legs do.
 KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
 export KAYA_SELFTEST_SCRIPT
 run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog target/debug/examples/filedialog
+run filedialog-python-swiftui env KAYA_SELFTEST=filedialog python3 guests/python/filedialog.py
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

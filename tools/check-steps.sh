@@ -510,14 +510,25 @@ launchers() {
 }
 launchers || status=1
 
-# The staged WinUI menus ruling (docs/traps.md): shortcut injection is
-# OS-global — the harness foregrounds the guest and puts the real
-# chord on the system input queue — so deploy-win must run every menu
-# leg ALONE, between drains. Pinned structurally: each `run_suite
-# menus_*` call in deploy-win.sh must have `drain_suites` as its
-# nearest significant neighbor on BOTH sides, so a parallelizing
-# refactor (or a sweep adding menus_python beside it) cannot silently
-# re-pool the injection legs.
+# The staged WinUI ruling (docs/traps.md), now covering TWO scene
+# families that share one cause: the leg needs the DESKTOP to itself.
+#
+#   menus_*      shortcut injection is OS-global — the harness
+#                foregrounds the guest and puts the real chord on the
+#                system input queue.
+#   filedialog_* a file dialog is modal, must hold the FOREGROUND to be
+#                driven, and the harness finds it by searching the
+#                desktop. Two up at once means one sits in the
+#                background with its presses swallowed, and BOTH legs
+#                fail. Measured 2026-07-31: the rust leg had been green
+#                for weeks and broke the moment a python leg joined it
+#                in the pool.
+#
+# So deploy-win must run each of these ALONE, between drains. Pinned
+# structurally: every such `run_suite` call must have `drain_suites` as
+# its nearest significant neighbor on BOTH sides, so a parallelizing
+# refactor — or a sweep adding one more language beside it — cannot
+# silently re-pool them.
 menu_serial() {
     python3 -c '
 import re
@@ -532,7 +543,7 @@ def significant(seq):
 bad = []
 seen = 0
 for n, line in enumerate(lines):
-    if not re.match(r"run_suite\s+menus_", line):
+    if not re.match(r"run_suite\s+(menus|filedialog)_", line):
         continue
     seen += 1
     before = significant(lines[:n])
@@ -540,7 +551,8 @@ for n, line in enumerate(lines):
     if not before or before[-1] != "drain_suites" or not after or after[0] != "drain_suites":
         bad.append(f"{path}:{n + 1}: {line} lacks the drain/run/drain barrier")
 if seen == 0:
-    bad.append(f"{path}: no run_suite menus_* leg found (the menus scene must stay wired)")
+    bad.append(f"{path}: no run_suite menus_*/filedialog_* leg found "
+               "(both scenes must stay wired)")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 ' "$1"
@@ -551,9 +563,15 @@ if printf 'run_suite layout_java\nrun_suite menus_rust\ndrain_suites\n' | menu_s
     echo "check-steps: SELF-TEST FAIL (pooled menus leg passed)" >&2
     exit 1
 fi
+# ...and the filedialog family, the second one this rule now covers.
+if printf 'run_suite layout_java\nrun_suite filedialog_python\ndrain_suites\n' \
+    | menu_serial - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (pooled filedialog leg passed)" >&2
+    exit 1
+fi
 
 out="$(menu_serial tools/deploy-win.sh)" || {
-    echo "check-steps: deploy-win.sh menu legs must run serially between drain_suites calls (docs/traps.md, OS-global shortcut injection):" >&2
+    echo "check-steps: deploy-win.sh menus/filedialog legs must run serially between drain_suites calls (docs/traps.md — each needs the desktop to itself):" >&2
     echo "$out" >&2
     status=1
 }

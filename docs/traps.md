@@ -2335,3 +2335,65 @@ DID have Cancel. It came from a hit test landing on the app's own
 carries that label while the picker's chrome does not. Hit tests answer
 with whatever owns the point, across processes — so an element found
 that way is only evidence about the picker if its pid says so.
+
+## A freshness check by mtime, against a build system that hashes
+
+The linux lane went red on a run where every leg passed, twice in a row,
+reporting `guest build FAILED: ocaml` above the words `stale ocaml
+artifact ...; forcing a full rebuild`. The forced rebuild ran, did
+nothing, and the check failed anyway.
+
+The check compared each built exe's MTIME against the newest binding
+source's. Dune keys targets on source HASHES. Those two rules disagree
+in one direction that matters: a source rewritten with IDENTICAL BYTES —
+which is what `tools/gen-bindings.sh` does to every generated file on
+every run — moves the mtime and not the hash. Dune correctly rebuilds
+nothing, the exe keeps its old timestamp, and the check declares it
+stale forever. Measured 2026-07-31: `bindings/ocaml/kaya_wire.ml`
+byte-identical to `HEAD`, exes two days older, lane red on both runs.
+
+A guard that cannot be satisfied is as broken as one that cannot fail,
+and worse in one respect: it trains the reader to skip a red lane. The
+check now stamps the sources' CONTENT into the build dir and compares
+that, which is what dune itself tracks — so it fires when the sources
+really moved and stays quiet when only a timestamp did. The leg-time
+per-guest spec-hash guard remains the backstop for a link that really is
+stale.
+
+The general shape: when a check and the tool it polices disagree about
+what "changed" means, the check is the one that is wrong. Ask what the
+build system keys on, and key on the same thing.
+
+## Two file dialogs on one desktop take each other down
+
+The windows lane's `filedialog_rust` leg had been green for weeks. It
+started failing the moment a `filedialog_python` leg joined it — and the
+python leg failed too, so the evidence pointed at the newly added
+language rather than at the pair. Watching the VM is what settled it:
+BOTH dialogs were on screen at once, one showing the scene's two files
+and the other showing a directory full of folders.
+
+A file dialog needs the desktop to itself. It is modal, it must hold the
+FOREGROUND to be driven, and the harness finds it by searching for a
+dialog window. Two of them up together means one is in the background
+with its presses swallowed, and the leg then fails three steps later on
+an assertion about the GUEST — which is where nobody looks for a
+scheduling problem.
+
+That is the same ruling the menus legs already carry for OS-global
+shortcut injection, so check-steps' barrier gate now covers both
+families rather than one: every `run_suite menus_*` and `run_suite
+filedialog_*` must have `drain_suites` as its nearest significant
+neighbour on both sides. Negative-tested in both directions.
+
+THE SECOND DIALOG WAS A SECOND BUG, found only because the first was
+being looked at. The python guest computed its scene directory from
+`os.environ["TMPDIR"]`, which is a POSIX spelling with no Windows
+equivalent — so it fell back to a literal "/tmp", wrote its files to the
+root of the current drive, and the picker opened on the real temp
+directory with none of them in it. `tempfile.gettempdir()` is Python's
+own answer and matches what the interpreter computes. The scene's
+premise is that both halves agree WITHOUT runner involvement, and that
+only holds if each computes the directory the way its own language does
+— an environment variable read directly is a guess about the platform,
+not a computation.

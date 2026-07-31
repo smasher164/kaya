@@ -292,20 +292,31 @@ build_ocaml() {
     # through the virtiofs mount raced the host lane's concurrent
     # builds. The per-guest spec-hash guard caught it at LEG time;
     # this moves the catch to build time and self-heals with one
-    # forced rebuild). An exe older than the newest binding source is
-    # stale by definition.
-    local newest exe fresh_exe
-    newest=$(ls -t bindings/ocaml/*.ml | head -1)
-    for exe in _build-linux/default/guests/ocaml/*.exe; do
-        if [ ! "$exe" -nt "$newest" ]; then
-            echo "stale ocaml artifact ($exe); forcing a full rebuild" >&2
-            dune build --force --build-dir=_build-linux || return 1
-            for fresh_exe in _build-linux/default/guests/ocaml/*.exe; do
-                [ "$fresh_exe" -nt "$newest" ] || return 1
-            done
-            return 0
-        fi
-    done
+    # forced rebuild).
+    #
+    # BY CONTENT, NOT BY MTIME, and the difference is the whole
+    # correctness of this check. It used to compare each exe against
+    # the newest binding source's TIMESTAMP, which is a rule dune can
+    # never satisfy: dune keys targets on source HASHES, so a source
+    # that is rewritten with identical bytes — every `gen-bindings.sh`
+    # run does exactly that — produces no new artifact and therefore no
+    # new mtime. The check then reported "stale" forever, forced a
+    # rebuild that correctly did nothing, and failed the lane on a run
+    # where every leg passed. Measured 2026-07-31: kaya_wire.ml
+    # byte-identical to HEAD, exes two days old, lane red twice running.
+    #
+    # A stamp of the sources' CONTENT tracks what dune tracks, so it
+    # fires when the sources really moved and stays quiet when they did
+    # not.
+    local stamp_file=_build-linux/.kaya-ocaml-sources stamp had=""
+    stamp=$(cat bindings/ocaml/*.ml guests/ocaml/*.ml \
+        | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')
+    [ -f "$stamp_file" ] && had=$(cat "$stamp_file")
+    if [ "$stamp" != "$had" ]; then
+        echo "ocaml sources moved since the last verified build; forcing a full rebuild" >&2
+        dune build --force --build-dir=_build-linux || return 1
+        printf '%s\n' "$stamp" >"$stamp_file"
+    fi
 }
 run_build ocaml build_ocaml
 
@@ -490,14 +501,17 @@ for proto in x11 wayland; do
     run "$proto" background-rust env KAYA_SELFTEST=background \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/background"
 
-    # The filedialog scene: GNOME's own picker, driven for real. DEPTH
-    # TIER — rust only until the sweep lands the other seven. Through
-    # a11y-leg.sh because EVERY read here is an AT-SPI read, not just the
-    # closing expect_ax: the chooser publishes no accessible ids at all,
-    # so the directory is the path bar's pressed toggle button and the
-    # rows are the list's table rows (measured; docs/traps.md).
+    # The filedialog scene: GNOME's own picker, driven for real. The
+    # language sweep is mid-flight, so the legs here are the languages
+    # whose picker surface has landed. Through a11y-leg.sh because EVERY
+    # read here is an AT-SPI read, not just the closing expect_ax: the
+    # chooser publishes no accessible ids at all, so the directory is
+    # the path bar's pressed toggle button and the rows are the list's
+    # table rows (measured; docs/traps.md).
     run "$proto" filedialog-rust env KAYA_SELFTEST=filedialog \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/filedialog"
+    run "$proto" filedialog-python env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/filedialog.py
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-go env KAYA_SELFTEST=background \

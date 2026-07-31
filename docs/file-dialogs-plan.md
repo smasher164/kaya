@@ -561,6 +561,60 @@ reads keep working; multi-selection is select-then-confirm rather than
 tap-to-answer; and a picker aimed into a subdirectory has no Cancel at
 all, so the drive walks back to where one exists.
 
+## §6f — the seven remaining guest languages, with verdicts
+
+The wire records are generated for every binding already, so what each
+language owes is three things: the request sugar (`pick_files` /
+`pick_file` / `filter` / `show`), the result binding (`on_files`), and
+`PickedFile.open(mode)` on top of `kaya_open_picked`, which is exported
+and unit-tested today.
+
+ONLY THE THIRD IS REALLY PER-LANGUAGE, and it is per-language BY DESIGN:
+the opened handle is the OS's own integer — a descriptor on POSIX, a
+HANDLE on Windows — precisely so each runtime converts it with its own
+file API rather than through a CRT fd that only the CRT that minted it
+would accept (DESIGN.md).
+
+| language | how it takes the handle | verdict |
+| --- | --- | --- |
+| Python  | `os.fdopen`; `msvcrt.open_osfhandle` on Windows | do |
+| Go      | `os.NewFile`, which takes a HANDLE on Windows    | do |
+| C#      | `new FileStream(new SafeFileHandle(...))`        | do |
+| Swift   | `FileHandle(fileDescriptor:closeOnDealloc:)`     | do |
+| OCaml   | `Unix.file_descr`                                | do |
+| Haskell | `System.Posix.IO.fdToHandle`, Windows branch     | do |
+| Java    | a JNI-built `java.io.FileDescriptor`             | do |
+
+JAVA WAS THE ONE IN DOUBT, and it is a `do` — measured 2026-07-31
+rather than argued. Java has no public API for wrapping a descriptor,
+and the obvious route is dead: reflecting into `java.io.FileDescriptor`'s
+private `fd` throws `InaccessibleObjectException` on JDK 17, because
+`java.base` is not open. Reaching it would mean every kaya Java app
+launching with `--add-opens java.base/java.io=ALL-UNNAMED`, which is a
+requirement a binding has no business imposing on its users.
+
+JNI HAS NO SUCH RESTRICTION. A probe built for this — a native method
+that constructs a `FileDescriptor` through its public no-arg constructor
+and sets the private field with `SetIntField` — populated it with NO
+flags of any kind, `valid()` answered true, and an ordinary
+`new FileInputStream(fd)` read the file. That is the route kaya already
+owns: the JVM tier's natives are registered from Rust
+(`jvm.rs::register_ring_natives`), so this is one more entry on a
+surface that exists, not a new mechanism. Android has an even shorter
+path if wanted — `ParcelFileDescriptor.adoptFd` — but the JNI route is
+one implementation for both JVMs.
+
+Two details the JDK source settles, so they are not rediscovered:
+`FileDescriptor` carries BOTH an `int fd` (Unix, and sockets on Windows)
+and a `long handle` (Windows regular files), so the Windows arm sets the
+other field; and the cleaner is registered SEPARATELY from setting the
+descriptor — so leaving it unregistered is correct here, because the
+guest owns the descriptor and closes it, and a JDK cleaner would close
+it behind the guest's back.
+
+The probe is not kept: unlike the platform probes, its question is about
+the JDK rather than a device, and the answer above is the whole of it.
+
 ## What is already done and needs no re-litigating
 
 The vocabulary, the deferred open with its measured 256-descriptor

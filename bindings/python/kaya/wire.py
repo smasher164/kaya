@@ -794,6 +794,16 @@ def parse_occurrence(buf):
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
         alert, choice = struct.unpack_from("<QI", buf, 8)
         return kind, alert, [], choice
+    if kind == OCC_FILE_DIALOG_RESULT:
+        dialog, count = struct.unpack_from("<QI", buf, 8)
+        at = 32  # past dialog, count, pad, values count, reserved
+        files = []
+        for _ in range(count):
+            handle, at = parse_value(buf, at)
+            name, at = parse_value(buf, at)
+            local_path, at = parse_value(buf, at)
+            files.append((handle, name, local_path))
+        return kind, dialog, [], files
     if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
         # Surface lifecycle records carry the surface id alone —
         # no key path, no payload (derived from the record shapes).

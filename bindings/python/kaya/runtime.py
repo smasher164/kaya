@@ -49,6 +49,15 @@ _lib.kaya_submit.restype = None
 _lib.kaya_blob_register.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_blob_register.restype = ctypes.c_uint64
 _lib.kaya_run.restype = ctypes.c_int32
+# Redeeming a picked file: the handle, the mode, and out-params for the
+# OS handle and seekability. Returns 0 on success (KAYA_OK).
+_lib.kaya_open_picked.argtypes = [
+    ctypes.c_uint64,
+    ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_int64),
+    ctypes.POINTER(ctypes.c_uint32),
+]
+_lib.kaya_open_picked.restype = ctypes.c_int32
 
 _occ_buf = ctypes.create_string_buffer(256)
 
@@ -121,3 +130,35 @@ def run():
     """Enter the core on the calling thread (must be the process main
     thread); returns the exit code when the app ends."""
     return _lib.kaya_run()
+
+
+def open_picked(handle, mode):
+    """Redeem a picked handle for a real file object, plus whether it
+    seeks: `(file, seekable)`.
+
+    BLOCKS, possibly for a long time — a cloud provider may download
+    the file before it answers — so call it from a thread you chose
+    and post the result back (DESIGN.md, File dialogs).
+
+    THE DESCRIPTOR BECOMES PYTHON'S. `os.fdopen` takes ownership, so
+    closing the returned object closes it exactly once; the core keeps
+    no claim on it. On Windows the core hands back a HANDLE rather
+    than a CRT descriptor — deliberately, since every runtime brings
+    its own CRT — so it is converted here, by THIS interpreter's
+    msvcrt, which is the only one entitled to.
+    """
+    raw = ctypes.c_int64(0)
+    seekable = ctypes.c_uint32(0)
+    rc = _lib.kaya_open_picked(
+        ctypes.c_uint64(handle), ctypes.c_uint32(mode),
+        ctypes.byref(raw), ctypes.byref(seekable))
+    if rc != 0:
+        raise OSError(f"kaya: opening the picked file failed (code {rc})")
+    if sys.platform == "win32":
+        import msvcrt
+        flags = os.O_RDONLY if mode == 0 else os.O_RDWR
+        fd = msvcrt.open_osfhandle(raw.value, flags)
+    else:
+        fd = raw.value
+    modes = {0: "rb", 1: "wb", 2: "r+b"}
+    return os.fdopen(fd, modes[mode]), bool(seekable.value)
