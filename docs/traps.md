@@ -2225,3 +2225,67 @@ say it — toasts at all, the notification centre's master switch, and the
 The general shape, worth carrying to any GUI lane: a machine that shows
 the user things is a machine that can interrupt the harness, and the
 interruption does not look like one from inside the test.
+
+## The iOS picker is another app too, and the eyes have to go on the host
+
+`UIDocumentPickerViewController` is a REMOTE view controller. Measured
+2026-07-31 in the simulator, from inside the app: its view subtree is six
+empty `UIView`s plus one `DOCRemoteBarButtonTrackingView`, it publishes
+ZERO accessibility elements, none of the process's views mentions a file
+the picker is plainly showing, and `accessibilityActivate()` on that one
+in-process affordance returns false and dismisses nothing. There is no
+in-app route to this picker, and iOS has no accessibility service an app
+can install the way Android does.
+
+Ordinary macOS `AXUIElement` against `Simulator.app` does not help
+either: it exposes the simulator's chrome always and SpringBoard's icons
+when a device is the presented one, but never an app's content — with
+`ApplicationAccessibilityEnabled` set on the device, with the window
+raised and activated, either way. And only one device window is bridged
+at a time, so it would force the lane serial even if it worked.
+
+WHAT DOES WORK is the simulator's own frameworks, from the host — the
+same private surface `simctl` talks to, shipped inside Xcode.
+tools/ios/simdrive owns it: read through
+`-[SimDevice sendAccessibilityRequestAsync:completionQueue:completionHandler:]`
+with an `AXPTranslator` bridge delegate, drive through
+`SimulatorKit.SimDeviceLegacyHIDClient` with an Indigo digitizer message.
+Both proved end to end: the picker's rows read out of DocumentsUI's own
+process, and a tap composed on macOS landed on a row so that the app's
+delegate fired with `["picked.txt"]`.
+
+Five things on that path look exactly like failure and are not:
+
+1. **`frontmostApplication` returns THE APP**, whose `AXChildren` are
+   empty — the picker is a different process sitting on top of it. The
+   app is not the thing to read. Hit-test a point to learn the picker's
+   pid, then `translationApplicationObjectForPid:`.
+2. **Translated elements expose no `AXParent`**, so a hit test cannot be
+   climbed out of. Entering by pid is the only way in.
+3. **`AXPMacPlatformElement` is a LEGACY element.** It answers
+   `-accessibilityAttributeValue:`; the modern `accessibilityLabel` /
+   `accessibilityChildren` properties return nothing and read as an
+   empty tree. This one cost a round on its own.
+4. **The bridge delegate must go on EVERY `AXPTranslator` singleton.**
+   With it on one, the first fetch succeeds and every attribute read
+   afterwards silently returns nothing — the worst possible shape, since
+   the thing that proves the transport works is the thing that then
+   stops working.
+5. **The picker's element tree is SHALLOW**: file rows and the tab bar,
+   and nothing else. The navigation strip that carries the directory
+   name and the Cancel button is not a child of anything reachable, but
+   it answers a hit test perfectly well. simdrive sweeps that strip
+   rather than walking it.
+
+And one that is not a failure: `AXPress` IS advertised on a row and does
+nothing. Only the HID tap actually picks.
+
+Finally, a naming trap with a Windows twin. The row's accessibility
+description omits the extension — "picked, Text file, 12 bytes" — while
+the URL the picker finally answers with carries it in full,
+"picked.txt". Windows had the same divergence and could be fixed with a
+setting (`HideFileExt`); this is the accessibility label itself, so
+simdrive matches rows on the STEM. The scene still proves the right file
+was chosen, because it reads the file's BYTES and the decoy's differ —
+which is exactly why the decoy carries different contents rather than
+just a different name.

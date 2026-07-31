@@ -509,6 +509,50 @@ question, because the picker is modal and one run answers one.
     MIME types: `MimeTypeMap` maps `txt` to `text/plain`, and the rows
     still list.
 
+## §6e — iOS, and the eyes that had to go on the host
+
+MEASURED FIRST, and the first measurement killed the obvious plan:
+`UIDocumentPickerViewController` is a remote view controller and
+publishes nothing in-process, so the harness cannot read or drive it
+from inside the app the way every other backend does. iOS has no
+accessibility service to install either. Full detail in docs/traps.md.
+
+NO CARVE-OUT WAS NEEDED, which is the point worth recording. The
+simulator's own frameworks — private, shipped inside Xcode, the same
+surface `simctl` uses — expose both halves from the HOST:
+
+- **Reading**: `-[SimDevice sendAccessibilityRequestAsync:...]` with an
+  `AXPTranslator` bridge delegate. Hit-test a point to learn the
+  picker's pid, `translationApplicationObjectForPid:` for its root, and
+  `AXPMacPlatformElement` to read the tree through the legacy
+  `accessibilityAttributeValue:` API.
+- **Driving**: `IndigoHIDMessageForMouseNSEvent` sources a digitizer
+  payload, re-enveloped as a single-touch message and delivered by
+  `SimulatorKit.SimDeviceLegacyHIDClient`.
+
+That is the iOS analogue of Android's accessibility service: a
+validation-only capability that reaches outside the app, never shipped
+to a user. It lives in tools/ios/simdrive, whose three verbs — `state`,
+`choose <name>`, `cancel` — are proved against a throwaway app
+(tools/ios/pickerprobe): the rows read out of DocumentsUI's process, and
+both drives answered the picker for real.
+
+Also measured, and both decide the arm: `directoryURL` DOES aim the
+picker, and the app's own Documents directory is browsable by it when
+the bundle declares `UIFileSharingEnabled` and
+`LSSupportsOpeningDocumentsInPlace` — so the guest writes the scene's
+files there with ordinary file I/O, as it does everywhere else.
+
+THE RISK, stated rather than discovered later: this is private API, and
+idb's own source records that the HID client has RELOCATED between Xcode
+versions. simdrive looks it up by name and fails loudly with the name it
+could not find, which is the most a consumer of that surface can do.
+
+WHAT REMAINS for §6e: the apply arm, a source holding the
+security-scoped URL (measurements 4-7 in DESIGN.md already say the path
+EPERMs and the URL re-acquires), a bridge so the in-process verbs can
+ask the host to look and act, and the runner leg.
+
 ## What is already done and needs no re-litigating
 
 The vocabulary, the deferred open with its measured 256-descriptor
