@@ -55,8 +55,34 @@ use std::io::Read;
 use std::sync::mpsc;
 
 /// Both sides compute this identically; see the module note.
+///
+/// ANDROID IS NOT THE TEMP DIRECTORY, and the reason is the picker, not
+/// the guest: `std::env::temp_dir` and the interpreter's
+/// `java.io.tmpdir` really do agree there (Android sets `TMPDIR` in
+/// every app process, to the same app-private cache dir), but
+/// DocumentsUI browses document PROVIDERS and none of them exposes
+/// another app's private storage. A picker aimed at the cache dir opens
+/// on Recent instead, silently. The shared Documents collection is the
+/// one directory both halves can have: an app may create and fill
+/// directories under it with ordinary file I/O and no permission, and
+/// the ExternalStorage provider publishes exactly it.
+#[cfg(target_os = "android")]
+fn scene_root() -> std::path::PathBuf {
+    // Android sets EXTERNAL_STORAGE in every app process, so the guest
+    // finds the shared root the way its own language reads any
+    // environment — no JNI, and no /storage/emulated/0 written out here
+    // to rot the first time a device numbers its users differently.
+    let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
+    std::path::PathBuf::from(root).join("Documents")
+}
+
+#[cfg(not(target_os = "android"))]
+fn scene_root() -> std::path::PathBuf {
+    std::env::temp_dir()
+}
+
 pub(crate) fn picked_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("kaya-picked-{}", std::process::id()))
+    scene_root().join(format!("kaya-picked-{}", std::process::id()))
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {

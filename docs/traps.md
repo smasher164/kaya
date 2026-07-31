@@ -2097,3 +2097,131 @@ write the adjacency down somewhere executable. Every gate in this repo
 that pays for itself has that shape — check-stubs pairs a runner's legs
 against a backend's stub, paired-cfg pairs a unix item against a windows
 one, and this pairs a step against the step it must follow.
+
+## What DocumentsUI publishes, and the directory it cannot reach
+
+The Compose picker arm was measured before it was written
+(tools/android/pickerprobe, a throwaway app with its own copy of the
+accessibility service). Four assumptions did not survive.
+
+**The picker's package has two spellings.** AOSP images carry
+`com.android.documentsui`; the google_apis images run-emulator creates
+carry `com.google.android.documentsui`. The constant landed with the
+AOSP one alone, which names a package that is not on the device the lane
+runs. Both are in the list now, and a read that finds neither reports
+which packages DO own windows rather than saying the picker is missing.
+
+**The temp directory is the right answer to the wrong question.**
+`java.io.tmpdir` and the `TMPDIR` environment variable are the same
+string on Android — the app's cache dir — so a Rust guest and the Kotlin
+interpreter really do agree on it with no runner involvement, which is
+what the scene's premise needs. It is still unusable: DocumentsUI
+browses document PROVIDERS, and none of them publishes another app's
+private storage. A picker aimed at the cache dir opens on Recent
+instead, with no error anywhere. The scene's directory lives under the
+shared Documents collection instead, which an app targeting 35 may
+create and fill with ordinary file I/O and NO storage permission
+(measured with the permission removed from the probe's manifest, since a
+probe whose manifest differs from the app's is measuring a different
+app).
+
+The same silence swallows a bad aim: `EXTRA_INITIAL_URI` pointed at
+`Android/data/...`, which the platform hides, is accepted and lands on
+Recent. Nothing reports it. `expect_file_dialog` reading the breadcrumb
+back is the only thing that catches it, which is the general lesson —
+a picker that opens somewhere else looks exactly like a picker working.
+
+**There is no Open button and no Cancel button.** The click on a row IS
+the answer, and with `EXTRA_ALLOW_MULTIPLE` set a single click still
+answers through `data.data` with an empty clipData. Dismissal is the
+system back gesture, and ONE BACK IS NOT ENOUGH: the first backs walk UP
+the directory tree the picker was aimed into, and only the one taken at
+the root dismisses — three, from the depth the scene aims at. So it is a
+bounded loop whose proof is the picker being gone, never the action's
+return value.
+
+**The drive must not run on the main thread.** `getWindows()` is
+refreshed on the accessibility service's main looper, which is the app's
+own, so a caller that blocks main watches a FROZEN window list and
+concludes the picker is still up when it has already gone. The same
+cancel loop reported `backs=8 gone=false` on the main thread and
+`backs=3 gone=true` off it. The service asserts the thread now rather
+than commenting on it, because the symptom is a timeout nobody would
+trace back here.
+
+Two more, from the same session. `openFileDescriptor` in mode `w` does
+NOT truncate — the provider maps it to O_WRONLY without O_TRUNC, and
+`PathSource` truncates, so the same `FileMode` would have meant two
+things on two platforms; Android asks for `wt`, and a unit test that
+runs on every platform holds it. And `FindClass` on a thread attached
+with AttachCurrentThread resolves through the SYSTEM class loader, which
+knows the framework and nothing of the app: the by-name spelling of
+`dev/kaya/KayaPresent` works on the Activity's thread and fails on the
+guest's — which is precisely the thread hop the filedialog scene exists
+to exercise. The class is held as a global reference taken at attach.
+
+## A probe that leaves its dialog up measures the run before it
+
+Three separate ways an Android probe rerun silently reports the previous
+run's answer, all met while measuring the picker:
+
+- **The task is still alive.** `am start -n <component>` carries
+  FLAG_ACTIVITY_NEW_TASK, and an existing task whose root is that
+  component is simply brought forward — onCreate never runs again. Three
+  probe variants produced NO output at all and read as clean runs. The
+  same shape reaches the lane: a leg that failed with DocumentsUI still
+  up leaves it on top of the app's task, and the next leg's `am start`
+  brings that task forward instead of starting the activity. run-emulator
+  force-stops the picker's package now, which the app's own force-stop
+  does not cover — it is a different package.
+- **`am start -S` fixes that and breaks something else.** It force-stops
+  the package first, and the accessibility service lives in the app's
+  process, so `-S` kills the service that `dumpsys` just confirmed bound
+  and brings the activity up in a fresh process where `live` is null.
+  The probe reported "NO SERVICE" immediately after the bind check
+  passed. The lane's order — force-stop, then enable, then start without
+  `-S` — is the one that works, which is why it is a rule
+  (tools/lib/android-leg-order.py).
+- **The scene selector has a fallthrough.** One APK hosts every scene on
+  Android and the leg names one through `--es KAYA_SELFTEST`; an
+  unrecognized name used to run the milestone-2 scene. The leg launches,
+  a scene runs, it draws, and every step fails against labels from a
+  scene nobody selected — the verdict named eight unrelated widgets and
+  read like a broken interpreter. The guest panics on an unknown name
+  now, and check-steps pairs every selector in the runner against an arm
+  in the guest so it is a two-second answer rather than an emulator boot.
+
+## A shell toast holds the foreground, and ten legs die of it
+
+The windows lane came back with exactly ten failures — `menus_*` and
+`commands_*`, one of each per language — all panicking with "could not
+foreground the guest window for shortcut injection after 3s". The other
+121 legs passed. Nothing in the tree had touched WinUI, and the lane had
+been green the day before.
+
+The cause was a **notification toast**: "Turn off notifications from
+OneDrive?", a SUGGESTION the shell raised on its own, sitting on the
+desktop. A toast is a foreground window owned by the shell, and while
+one is up `SetForegroundWindow` fails for everything else — so every leg
+that injects a real keyboard chord cannot raise the guest first. ESC and
+the ALT foreground-lock release, which the backend already tries, do not
+touch it.
+
+What made this expensive is that it is INVISIBLE FROM THE LANE. `query
+session` says the console is Active and unlocked; `Get-Process` over ssh
+lists no window titles, because the toast has none. The only thing that
+answered was a screenshot of the console session, taken through the same
+`schtasks /it` route the legs themselves run under. When a Windows leg
+fails in a way that implicates the DESKTOP rather than the app, take the
+picture first — it is two minutes and it ends the search.
+
+deploy-win now turns toasts off and verifies it, beside the HideFileExt
+write and for the same reason: an OS default that fails a leg looking
+exactly like a backend bug, on a per-user registry value any settings
+visit can put back. Three values, because the shell has three places to
+say it — toasts at all, the notification centre's master switch, and the
+"suggestions" channel that raised this one unprompted.
+
+The general shape, worth carrying to any GUI lane: a machine that shows
+the user things is a machine that can interrupt the harness, and the
+interruption does not look like one from inside the test.

@@ -64,6 +64,8 @@ mod menus;
 mod commands;
 #[path = "a11y.rs"]
 mod a11y;
+#[path = "filedialog.rs"]
+mod filedialog;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -100,7 +102,22 @@ fn app(ctx: kaya::AppCtx) {
         Ok("menus") => menus::app(ctx),
         Ok("commands") => commands::app(ctx),
         Ok("a11y") => a11y::app(ctx),
-        _ => milestone2::app(ctx),
+        Ok("filedialog") => filedialog::app(ctx),
+        // The milestone-2 scene is the DEFAULT and says so: its leg
+        // passes "1" (the selftest flag's original spelling, from
+        // before the value doubled as a scene selector), and a build
+        // with no selector at all is the app a person launches by hand.
+        Ok("1") | Err(_) => milestone2::app(ctx),
+        // ANY OTHER NAME IS A WIRING BUG, and it used to run
+        // milestone2 instead. That is a silent wrong scene: the leg
+        // launches, the milestone-2 scene runs happily, and every step
+        // of the script the runner asked for fails against labels from
+        // a scene nobody selected. Cost a debugging round when the
+        // filedialog leg was first wired without its arm here.
+        Ok(other) => panic!(
+            "kaya: no scene named {other:?} in this APK — the runner asked for a leg \
+             the guest does not carry"
+        ),
     }
 }
 

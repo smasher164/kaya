@@ -18,6 +18,13 @@ __pycache__/
 /android/**/build/
 /android/*/src/main/jniLibs/
 /android/.kotlin/
+# The picker probe is a SEPARATE gradle build (tools/android/pickerprobe),
+# deliberately outside /android so it can never affect what the lane
+# ships — which also puts it outside the four rules above. Its outputs
+# are 480-odd files and they nearly went into a commit.
+/tools/android/pickerprobe/.gradle/
+/tools/android/pickerprobe/**/build/
+/tools/android/pickerprobe/.kotlin/
 guests/csharp/bin/
 guests/csharp/obj/
 tools/kaya-csgen/bin/

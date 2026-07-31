@@ -159,15 +159,40 @@ pub(crate) unsafe fn file_from_raw(handle: i64) -> std::fs::File {
 /// Both give up ownership — the caller owns the handle now, which is
 /// what handing over a capability means.
 #[cfg(unix)]
-fn raw_handle(file: std::fs::File) -> i64 {
+pub(crate) fn raw_handle(file: std::fs::File) -> i64 {
     use std::os::fd::IntoRawFd;
     i64::from(file.into_raw_fd())
 }
 
 #[cfg(windows)]
-fn raw_handle(file: std::fs::File) -> i64 {
+pub(crate) fn raw_handle(file: std::fs::File) -> i64 {
     use std::os::windows::io::IntoRawHandle;
     file.into_raw_handle() as i64
+}
+
+/// `FileMode` as ContentResolver.openFileDescriptor spells it.
+///
+/// `wt` AND NOT `w` FOR WRITE, which is the whole reason this is a named
+/// function with a test rather than a match inside the Android source:
+/// `PathSource` opens Write with `.truncate(true)`, and the provider maps
+/// a bare `w` to O_WRONLY WITHOUT O_TRUNC. Measured — a 12-byte file
+/// opened `w`, written short, and still 12 bytes. Same `FileMode`, two
+/// meanings, which is exactly the divergence the binding conventions
+/// forbid; the `t` is what makes them one.
+///
+/// Not cfg'd to Android: a rule this easy to get wrong is worth a test
+/// that runs on every platform's `cargo test`, not only the one that
+/// cannot run it.
+/// Dead everywhere but Android BY DESIGN — the test is the point, and it
+/// runs on the platform that cannot run the code. Narrowed to
+/// not-android so Android still fails if its own caller goes away.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn android_open_mode(mode: FileMode) -> &'static str {
+    match mode {
+        FileMode::Read => "r",
+        FileMode::Write => "wt",
+        FileMode::ReadWrite => "rw",
+    }
 }
 
 pub struct PathSource {
@@ -1417,6 +1442,24 @@ impl OccSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The negative for the mode divergence: Android's Write must ask
+    /// for TRUNCATION EXPLICITLY, because the provider's bare `w` is
+    /// O_WRONLY without O_TRUNC and `PathSource` truncates. Measured on
+    /// the emulator (docs/file-dialogs-plan.md §6d, measurement 11) —
+    /// a file opened Write and written short kept its old tail, so the
+    /// same `FileMode` meant two things on two platforms.
+    #[test]
+    fn android_write_truncates_like_every_other_platform() {
+        assert_eq!(android_open_mode(FileMode::Read), "r");
+        assert_eq!(android_open_mode(FileMode::ReadWrite), "rw");
+        assert_eq!(
+            android_open_mode(FileMode::Write),
+            "wt",
+            "a bare `w` does not truncate through a ContentResolver, and \
+             PathSource's Write does"
+        );
+    }
 
     /// Content is not identity: the blob arm of the key gate has its
     /// own sentence, because "must be I64 or Str" would leave an

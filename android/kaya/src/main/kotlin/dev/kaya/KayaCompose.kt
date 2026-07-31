@@ -1,9 +1,17 @@
 package dev.kaya
 
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.KeyEvent
+import android.webkit.MimeTypeMap
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
@@ -196,15 +204,14 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
-/// The one spelling of "this backend has not reached that scene yet",
-/// matching Rust's `depth_stub`. check-stubs and check-steps read the
-/// CALL: a free-form sentence is a contract nobody can be made to spell,
-/// and the previous one went four milestones unwritten by any backend.
-private fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on this backend — " +
-            "it is a depth slice; see CLAUDE.md's sequencing",
-    )
+// NO depthStub HERE ANY MORE, and its absence is the statement: the
+// Compose backend materializes every scene in tools/scenes, so the
+// helper had no caller left and dead code kept "for later" is exactly
+// what check-detekt exists to reject. The convention itself is not
+// gone — tools/lib/hand-rolled-stubs.py fails any refusal written in a
+// backend's own words and names the call to write instead, and
+// KayaSwiftUI still carries a live one for iOS. Re-add it here the day
+// this backend has to refuse something.
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -754,21 +761,29 @@ object KayaCompose {
                 APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_PRESENT_FILE_DIALOG -> {
-                    // DEPTH SLICE: the mac SwiftUI arm lands first
-                    // (CLAUDE.md's sequencing), so this interpreter
-                    // decodes the record and refuses it loudly rather
-                    // than silently doing nothing. Android's real arm is
-                    // ActivityResultContracts.OpenDocument plus a
-                    // source holding the content:// URI — there is no
-                    // path to hand over here at all.
-                    b.long // window
-                    b.long // dialog
-                    b.int // multiple
+                    b.long // window: 0, the one surface on this host
+                    val dialog = b.long
+                    val multiple = b.int != 0
                     b.int // pad
                     val filterValues = b.int
                     b.int // pad
-                    repeat(filterValues) { readString(b) }
-                    depthStub("filedialog")
+                    // Read IN PAIRS: label then extensions, the grouping
+                    // IS the encoding (KayaSwiftUI decodes it the same
+                    // way). The label is the panel's own affordance and
+                    // an intent has nowhere to put it; the extensions
+                    // are space-separated and may carry dots. ADVISORY
+                    // on every platform — a default view, never a
+                    // guarantee, so the guest still validates what it
+                    // got.
+                    val extensions = mutableListOf<String>()
+                    repeat(filterValues / 2) {
+                        readString(b) // the label
+                        readString(b).split(" ").forEach { ext ->
+                            val trimmed = ext.trim('.')
+                            if (trimmed.isNotEmpty()) extensions.add(trimmed)
+                        }
+                    }
+                    kayaPresentFileDialog(dialog, multiple, extensions)
                 }
                 APPLY_PRESENT_ALERT -> {
                     // The platform's REAL modal dialog (M3
@@ -1169,25 +1184,42 @@ object KayaCompose {
      * does (a kind that names a different registry is the
      * false-verdict class the [target] helper guards).
      */
-    /// What the live picker is REALLY showing, or null when none is.
+    /// What the live picker is REALLY showing, or null when none is —
+    /// read out of DocumentsUI's own tree through the harness
+    /// accessibility service, because the picker is ANOTHER APP and
+    /// there is nothing in this process to ask.
     ///
-    /// A NOT-IMPLEMENTED SENTINEL until Android's arm lands: its real
-    /// picker is ActivityResultContracts.OpenDocument, and reading it
-    /// means UiAutomator, the way the mac arm reads through AX. Null
-    /// FAILS every expect_file_dialog, so no leg can pass here by
-    /// accident — the work stays visible.
-    private fun kayaFileDialogState(): Pair<String, List<String>>? = null
+    /// Null when the service is not enabled, which fails every
+    /// expect_file_dialog rather than passing quietly: a leg the runner
+    /// forgot to arm must look like a failure, not like a picker that
+    /// never appeared.
+    private fun kayaFileDialogState(): Pair<String, List<String>>? =
+        KayaHarnessAccessibility.live?.pickerState()
 
-    /// Drive the live picker's real controls. The sentinel's partner:
-    /// nothing can be live, so there is nothing to drive.
-    /// The temp directory THE GUEST WILL USE, mirroring
-    /// KayaSwiftUI's kayaTempDir: `java.io.tmpdir` is what a JVM guest's
-    /// own file API returns, so both sides of one process land on the
-    /// same directory. The scene's whole premise is that they agree
-    /// without runner involvement, and that holds only if each side
-    /// computes it the way its own language does.
+    /// The directory THE GUEST WILL USE — and on Android that is NOT the
+    /// temp directory, which is the one thing this had to get right.
+    ///
+    /// `java.io.tmpdir` and the `TMPDIR` environment variable are the
+    /// same string here (the app's cache dir), so a JVM guest and a Rust
+    /// guest really do agree on it without runner involvement — the old
+    /// comment was correct. It is still the wrong answer: DocumentsUI
+    /// browses document PROVIDERS, and no provider exposes another app's
+    /// private storage, so a picker aimed at the cache dir is aimed at
+    /// somewhere it cannot go and lands on Recent instead — silently,
+    /// with no error anywhere (measured).
+    ///
+    /// The shared Documents collection is the directory that satisfies
+    /// both halves: an app targeting 35 can create and fill directories
+    /// under it with ordinary file I/O and no storage permission
+    /// (measured), and it is exactly what the ExternalStorage provider
+    /// publishes. The guest computes the same place from the
+    /// `EXTERNAL_STORAGE` environment variable, which Android sets in
+    /// every app process.
     private fun kayaTempDir(): String =
-        System.getProperty("java.io.tmpdir")?.trimEnd('/') ?: "/data/local/tmp"
+        android.os.Environment
+            .getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS)
+            .path
+            .trimEnd('/')
 
     /// `$TMP` and `$PID` in a scene path — the same vocabulary
     /// KayaSwiftUI expands, enforced across both by check-verbs. An
@@ -1219,18 +1251,185 @@ object KayaCompose {
         return out.toString()
     }
 
+    /// Where the NEXT picker opens. Armed by file_dialog_goto and
+    /// applied at presentation, exactly as the mac arm does it: the
+    /// initial location rides the INTENT, so it can only be said while
+    /// the intent is being built.
+    private var kayaPendingPickerDirectory: String? = null
+
+    /// The live picker's dialog id, held so a second present can be
+    /// refused and so the launcher can be released once. Null when none
+    /// is up.
+    private var kayaLivePickerDialog: Long? = null
+    private var kayaLivePickerLauncher: ActivityResultLauncher<Intent>? = null
+
+    /// Point the next picker at a directory. The harness placing the app
+    /// where a user would have navigated — set_text's tier, not a stamp:
+    /// expect_file_dialog reads the breadcrumb back, so a directory that
+    /// did not take effect fails the scene.
     private fun kayaFileDialogGoto(path: String) {
-        // Nothing can be live here until Android's picker arm lands, but
-        // the expansion is interpreter infrastructure and exists now —
-        // the same reason this file carries wire constants for records
-        // it does not yet handle.
-        val resolved = kayaExpandPath(path)
-        check(resolved.isEmpty() || resolved.isNotEmpty())
+        kayaPendingPickerDirectory = kayaExpandPath(path)
     }
 
-    private fun kayaFileDialogDrive(name: String) {
-        check(name.isEmpty() || name.isNotEmpty())
+    /// Choose the named row, or dismiss. Returns null on success and the
+    /// failure's sentence otherwise, because both halves of this are
+    /// silent-by-design and only their absence is observable.
+    ///
+    /// RUNS OFF THE MAIN THREAD, which the service asserts: it reads
+    /// getWindows(), refreshed on the main looper, so a drive that
+    /// blocked main would watch a frozen list. The scene's verbs already
+    /// run on the harness thread — this is the one place it matters.
+    private fun kayaFileDialogDrive(name: String): String? {
+        val svc = KayaHarnessAccessibility.live
+            ?: return "no harness accessibility service — the runner did not enable it"
+        if (name == "cancel") {
+            return if (svc.dismiss()) null
+            else "the picker would not dismiss; windows are ${svc.windowPackages()}"
+        }
+        if (!svc.choose(name)) {
+            return "no row named \"$name\"; the picker is showing ${svc.pickerState()?.second}"
+        }
+        // THE CLICK IS THE ANSWER on this platform, so the picker being
+        // gone is the proof it landed. A click that arrives before the
+        // list is interactive is swallowed with no error anywhere.
+        return if (svc.waitForPickerGone()) null
+        else "the picker was still up after clicking \"$name\" — the click was swallowed"
     }
+
+    /**
+     * Present the platform's REAL picker and answer exactly once.
+     *
+     * ACTION_OPEN_DOCUMENT, which hands off to DocumentsUI — a separate
+     * app, which is why the harness needs an accessibility service to
+     * see it at all. The answer is `content://` URIs and NOT paths: the
+     * document may not be a file on this device, so the core wraps each
+     * URI in a source that opens it through the ContentResolver.
+     *
+     * `multiple` rides the request as a FLAG here, an EXTRA on the
+     * intent; macOS spells the same choice as a property and GTK and
+     * WinUI as a different method — one field on the wire, four
+     * spellings under it. A single tap answers either way (measured):
+     * with ALLOW_MULTIPLE set, one chosen file still comes back through
+     * `data.data` with an empty clipData.
+     */
+    private fun kayaPresentFileDialog(
+        dialog: Long,
+        multiple: Boolean,
+        extensions: List<String>,
+    ) {
+        val activity = mountedActivity ?: error("kaya: a picker with no mounted activity")
+        check(kayaLivePickerDialog == null) {
+            "kaya: a second file dialog while $kayaLivePickerDialog is still up"
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            // WRITE as well as read: the vocabulary lets a guest reopen
+            // a picked handle for writing, and the grant is decided HERE
+            // — asking later is not possible.
+            .addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        if (multiple) {
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        // The wire carries EXTENSIONS and an intent wants MIME types.
+        // A filter nothing maps to is dropped rather than guessed at:
+        // it is advisory, and an invented type would hide the file.
+        val mimes = extensions.mapNotNull {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.lowercase())
+        }
+        if (mimes.isNotEmpty()) {
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
+        }
+        kayaPendingPickerDirectory?.let {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri(it))
+        }
+
+        // register() and launch() in the same breath, from a RESUMED
+        // activity — measured to work, and the reason this needs no
+        // lifecycle-scoped registration in the shell Activity. The key
+        // carries the dialog id so a leaked registration cannot collide
+        // with the next picker.
+        kayaLivePickerDialog = dialog
+        kayaLivePickerLauncher = activity.activityResultRegistry.register(
+            "kaya-file-dialog-$dialog",
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            kayaLivePickerDialog = null
+            kayaLivePickerLauncher?.unregister()
+            kayaLivePickerLauncher = null
+            kayaAnswerFileDialog(activity, dialog, result.data)
+        }
+        kayaLivePickerLauncher?.launch(intent)
+    }
+
+    /// The picked documents, or the EMPTY list for cancel — faithfully,
+    /// because no platform can confirm an empty selection and there is
+    /// no sentinel to invent. A cancelled picker arrives here with a
+    /// null Intent.
+    private fun kayaAnswerFileDialog(
+        activity: ComponentActivity,
+        dialog: Long,
+        data: Intent?,
+    ) {
+        val clip = data?.clipData
+        val uris = when {
+            data?.data != null -> listOf(data.data!!)
+            clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
+            else -> emptyList()
+        }
+        // The DISPLAY NAME, not the last URI segment: the segment is the
+        // provider's document id, which is a path fragment on the
+        // ExternalStorage provider and an opaque key on others.
+        val names = uris.map { uri ->
+            var name = ""
+            try {
+                activity.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (c.moveToFirst() && i >= 0) name = c.getString(i) ?: ""
+                }
+            } catch (e: Exception) {
+                Log.w("kaya", "kaya: reading the picked name failed: $e")
+            }
+            name
+        }
+        KayaPresent.emitFileDialogResult(
+            dialog,
+            uris.map { it.toString() }.toTypedArray(),
+            names.toTypedArray(),
+        )
+    }
+
+    /// The ExternalStorage provider's document uri for a directory under
+    /// the primary volume, which is what EXTRA_INITIAL_URI wants — a
+    /// filesystem path in that extra is ignored.
+    ///
+    /// AIMED SOMEWHERE THE PLATFORM HIDES, the extra is accepted and the
+    /// picker SILENTLY opens on Recent instead (measured, with
+    /// `Android/data/...`). Nothing reports it; expect_file_dialog
+    /// reading the breadcrumb back is what catches it.
+    private fun initialUri(dir: String): Uri {
+        val root = Environment.getExternalStorageDirectory().path.trimEnd('/')
+        val rel = dir.removePrefix("$root/")
+        return DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE_AUTHORITY, "primary:$rel")
+    }
+
+    /**
+     * The provider that publishes the device's own storage — the one
+     * EXTRA_INITIAL_URI's document ids are minted against. Not the
+     * picker's package: DocumentsUI is the browser, this is the
+     * provider it browses.
+     */
+    private const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+
+    /**
+     * The Activity whose ContentResolver redeems a picked URI, for
+     * [KayaPresent.openPickedUri] — which the CORE calls, from whatever
+     * thread the guest opened on, so it cannot be handed one.
+     */
+    internal fun pickerContext(): ComponentActivity? = mountedActivity
 
     private fun kayaWidgetTarget(spec: String): KayaNode? {
         val kind = spec.substringBefore('#')
@@ -1740,8 +1939,27 @@ object KayaCompose {
                         }
                     }
                     "expect_file_dialog" -> {
-                        val wantDir = parts.getOrNull(1) ?: ""
+                        // Expanded like the goto's argument, so a scene
+                        // can name the same directory in both places and
+                        // the pid stays out of the script. An
+                        // interpreter that expanded only the goto reads
+                        // the RIGHT directory back and compares it to
+                        // the literal "$PID".
+                        val wantDir = kayaExpandPath(parts.getOrNull(1) ?: "")
                         val wantNames = parts.drop(2)
+                        // A LEFTOVER $ means the expansion did not
+                        // happen, and an unexpanded expectation is the
+                        // WORST shape of this bug: the picker is aimed
+                        // correctly, shows the right directory, and the
+                        // comparison fails against a literal "$PID" —
+                        // which reads as a broken picker. Measured
+                        // here, wiring this arm.
+                        if (wantDir.contains("$")) {
+                            failures.add(
+                                "expect_file_dialog $wantDir: unexpanded substitution — " +
+                                    "only \$TMP and \$PID exist",
+                            )
+                        }
                         // Reads the REAL picker: the directory it is
                         // showing and the names its list holds. Both
                         // matter — a panel aimed at the wrong place, or
@@ -1768,8 +1986,9 @@ object KayaCompose {
                         }
                     }
                     "file_dialog_goto" -> {
-                        // Silent like click. Nothing can be live here
-                        // until Android's picker arm lands.
+                        // Silent like click: the observable is where the
+                        // NEXT picker opens, which expect_file_dialog
+                        // reads back off the platform.
                         kayaFileDialogGoto(parts.getOrNull(1) ?: "")
                     }
                     "file_choose" -> {
@@ -1798,7 +2017,9 @@ object KayaCompose {
                             // this failure list with it.
                             kayaFileDialogDrive("cancel")
                         } else {
-                            kayaFileDialogDrive(want)
+                            kayaFileDialogDrive(want)?.let {
+                                failures.add("file_choose $want: $it")
+                            }
                         }
                     }
                     "alert_choose" -> {

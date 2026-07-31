@@ -406,6 +406,109 @@ not a regression (CLAUDE.md, Sequencing). Only after mac is green:
 Compose, GTK, WinUI, then the seven remaining languages with an
 explicit do/can't/defer verdict each, then `tools/validate-all.sh`.
 
+## §6d — Compose, and the source a content:// URI needs — DONE
+
+Landed 2026-07-31: the apply arm, the three verbs, and the URI-holding
+source. The android lane runs 46 legs, the matrix 813, all pass. What
+follows is the design record and the measurements behind it.
+
+The accessibility service is landed and verified bound (docs/traps.md),
+so the harness can read and drive DocumentsUI. What remains is the apply
+arm and the source behind the handle, and the second is the real design
+question.
+
+`kaya_emit_file_dialog_result` builds a `PathSource` for every
+interpreter platform today, and that cannot work here: DocumentsUI
+answers with a `content://` URI, and `PathSource::open` is
+`std::fs::OpenOptions::open`, which has no idea what that is.
+
+Two shapes, and the deciding constraint is RE-OPENABILITY. A handle is
+redeemable more than once on purpose — that is what lets save-back work
+without pinning a writable descriptor from the moment of the pick
+(DESIGN.md, measurement 7).
+
+- **The interpreter opens it and hands over a descriptor.** Simplest,
+  needs no new JNI, and gives up re-openability: an already-open fd
+  cannot be opened again. It would make Android the one platform where
+  a second `open` fails, which is a semantics divergence the binding
+  conventions do not allow.
+- **A source holding the URI, opening through the ContentResolver.**
+  `open()` calls into the JVM — `openFileDescriptor(uri, mode)` then
+  `detachFd()` — so every redemption is a real open and the semantics
+  matches the other four platforms exactly. Costs a global JVM
+  reference per live handle and a Kotlin helper reached the way
+  KayaPresent's natives already are.
+
+The second is the one to build. The first is recorded only so nobody
+re-derives it and mistakes it for the cheap option: it is cheap because
+it drops the property the vocabulary promises.
+
+### What the probe measured (tools/android/pickerprobe, API 35, google_apis)
+
+Every arm before this one had an assumption overturned by measuring, so
+this one was measured first. The probe is a throwaway app with its own
+copy of the accessibility service; run.sh drives four variants of the
+question, because the picker is modal and one run answers one.
+
+1. **The picker's package is `com.google.android.documentsui`** on
+   google_apis images. `KayaHarnessAccessibility.PICKER_PACKAGE` says
+   `com.android.documentsui`, which is the AOSP spelling. Both exist;
+   the reader has to accept either and say which windows it DID see when
+   it finds neither.
+2. **Shared storage is writable with ordinary file I/O**, from an app
+   targeting 35 with no storage permission declared and
+   `isExternalStorageManager` false: `Documents/` and `Download/` both
+   take a `mkdirs` and a write. `/data/local/tmp` does not.
+3. **`java.io.tmpdir` and the `TMPDIR` env var are the same string** —
+   the app's cache dir — so Rust's `std::env::temp_dir` and
+   KayaCompose's `kayaTempDir` DO agree, and the existing comment
+   claiming so is right. It does not help: DocumentsUI cannot browse
+   app-private storage, so the SCENE's directory cannot live under it.
+   `$TMP` on Android has to mean the shared Documents directory, on both
+   sides. `EXTERNAL_STORAGE=/sdcard` is in the process environment, so
+   the guest finds it with `std::env::var` and no JNI.
+4. **`EXTRA_INITIAL_URI` aims the picker**, given the ExternalStorage
+   provider's document id (`primary:Documents/<dir>`). Aimed at a
+   directory the platform hides — `Android/data/...` — it is accepted
+   and SILENTLY lands on Recent instead. The first probe run did exactly
+   that and read like the extra being ignored.
+5. **`activityResultRegistry.register` then `launch` works from a
+   RESUMED activity**, which is when the apply pump runs. No
+   lifecycle-scoped registration, no restructuring of the Activity.
+6. **The service reads the picker's tree**: rows are `item_root` (a
+   clickable CardView) with the basename on a descendant `title`; the
+   directory is on the last `breadcrumb_text` and in `header_title`
+   ("Files in <dir>").
+7. **The click IS the answer** — `performAction(ACTION_CLICK)` on
+   `item_root` returns the document immediately. There is no Open button
+   to press, and with `EXTRA_ALLOW_MULTIPLE` a single click still
+   answers through `data.data` with an empty clipData.
+8. **Cancel is BACK, and one is not enough**: the first backs walk UP
+   the directory tree, and only the one taken at the root dismisses.
+   Three, from the depth the scene aims at. So it is a bounded loop with
+   the picker being gone as the proof — the same shape the press already
+   needed on every other platform.
+9. **The drive must not run on the main thread.** `getWindows()` is
+   refreshed on the service's main looper, which is this app's, so a
+   drive that blocks main reads a FROZEN window list and reports the
+   picker still up when it has already gone. Measured: the same cancel
+   loop said `backs=8 gone=false` on the main thread and `backs=3
+   gone=true` off it.
+10. **The URI is re-openable** — the property the source design was
+    chosen for, now measured rather than assumed: three redemptions
+    (two on the main thread, one on a worker) each returned a fresh
+    descriptor carrying the whole file. The descriptor is a regular
+    file and seeks. `rw` and `w` both succeed when the intent carried
+    `FLAG_GRANT_WRITE_URI_PERMISSION`.
+11. **`w` does not truncate.** The file kept its 12 bytes. `PathSource`
+    opens Write with `.truncate(true)`, so Android's mode string has to
+    be `wt` or the same `FileMode::Write` means two different things on
+    two platforms — exactly the divergence the binding conventions
+    forbid.
+12. The advisory filter is an EXTENSION on the wire and the intent wants
+    MIME types: `MimeTypeMap` maps `txt` to `text/plain`, and the rows
+    still list.
+
 ## What is already done and needs no re-litigating
 
 The vocabulary, the deferred open with its measured 256-descriptor

@@ -1392,26 +1392,32 @@ pub(crate) fn alert_resolved(alert: u64, choice: crate::protocol::AlertChoice) {
 /// own core sink (alert_resolved is cfg'd out of existence there),
 /// so on GTK/WinUI hosts this entry has no caller by construction
 /// and panics loudly if one appears.
-/// Presentation side: the file picker's one answer. `paths` and `names`
-/// are parallel arrays of `count` NUL-terminated UTF-8 strings; an
-/// EMPTY count is cancel, which every platform reports the same way
+/// Presentation side: the file picker's one answer. `locators` and
+/// `names` are parallel arrays of `count` NUL-terminated UTF-8 strings;
+/// an EMPTY count is cancel, which every platform reports the same way
 /// because none can confirm an empty selection.
 ///
-/// THE CORE MINTS THE HANDLES, not the backend: it wraps each path in a
-/// source, registers it, and hands the guest integers. On the desktops
-/// a path IS the capability, so `PathSource` is the whole story. The
-/// phones will register a source holding the platform object instead —
-/// Android has no path at all, and iOS has one that EPERMs the moment
-/// the security scope drops (measured) — which is exactly why the
-/// registration seam is a trait and not a string.
+/// LOCATORS AND NOT PATHS: a locator is whatever the platform's picker
+/// says a file IS, and that differs. macOS and iOS answer with a
+/// filesystem path; Android answers with a `content://` URI into a
+/// document provider that may not be a filesystem at all. The parameter
+/// was called `paths` while only the desktops had an arm, and the name
+/// would have been a lie the moment Android got one.
+///
+/// THE CORE MINTS THE HANDLES, not the backend: it wraps each locator in
+/// the platform's source, registers it, and hands the guest integers. On
+/// the desktops a path IS the capability, so `PathSource` is the whole
+/// story. Android registers a source holding the URI, because opening it
+/// means the ContentResolver — which is exactly why the registration
+/// seam is a trait and not a string.
 ///
 /// # Safety
-/// `paths` and `names` must each point to `count` valid NUL-terminated
-/// UTF-8 strings that outlive the call.
+/// `locators` and `names` must each point to `count` valid
+/// NUL-terminated UTF-8 strings that outlive the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_emit_file_dialog_result(
     dialog: u64,
-    paths: *const *const std::os::raw::c_char,
+    locators: *const *const std::os::raw::c_char,
     names: *const *const std::os::raw::c_char,
     count: usize,
 ) {
@@ -1431,10 +1437,18 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
                     .to_string_lossy()
                     .into_owned()
             };
-            let source = std::sync::Arc::new(crate::protocol::PathSource {
-                name: read(names),
-                path: read(paths),
-            });
+            #[cfg(target_os = "android")]
+            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+                std::sync::Arc::new(crate::android::UriSource {
+                    name: read(names),
+                    uri: read(locators),
+                });
+            #[cfg(not(target_os = "android"))]
+            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+                std::sync::Arc::new(crate::protocol::PathSource {
+                    name: read(names),
+                    path: read(locators),
+                });
             let handle = picked_register(source.clone());
             // Read the record back OFF the source, so the source stays
             // the single answer to "what is this file called and can
@@ -1449,7 +1463,7 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
     {
-        let _ = (dialog, paths, names, count);
+        let _ = (dialog, locators, names, count);
         panic!(
             "kaya: kaya_emit_file_dialog_result is the interpreter platforms' \
              entry — this host's backend answers on its own sink"

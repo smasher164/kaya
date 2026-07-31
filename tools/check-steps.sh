@@ -558,5 +558,52 @@ out="$(menu_serial tools/deploy-win.sh)" || {
     status=1
 }
 
+# EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
+# every scene there, so the leg selects one by name through
+# `--es KAYA_SELFTEST <scene>` and the guest matches it. A name the
+# match does not carry used to fall through to the milestone-2 scene:
+# the leg launched, a scene ran, it drew, and every step of the script
+# the runner asked for failed against labels from a scene nobody
+# selected. Measured 2026-07-31, wiring the filedialog leg — the verdict
+# named eight unrelated widgets and read like a broken interpreter.
+#
+# The guest now panics on an unknown name, which turns a silent wrong
+# scene into a loud one; this makes it a two-second answer instead of an
+# emulator boot.
+android_scenes() {
+    local runner="$1" guest="$2"
+    python3 -c '
+import re
+import sys
+
+runner, guest = sys.argv[1], sys.argv[2]
+selected = set(re.findall(r"dev\.kaya\.milestone2/\.MainActivity ([a-z0-9]+)",
+                          open(runner).read()))
+armed = set(re.findall(r"Ok\(\"([a-z0-9]+)\"\)", open(guest).read()))
+missing = sorted(selected - armed)
+for name in missing:
+    print(f"{runner} selects scene {name!r}, which {guest} has no arm for")
+sys.exit(1 if missing else 0)
+' "$runner" "$guest"
+}
+
+# The guard guards itself, both directions: a selector with no arm must
+# fail, and the real pair must pass.
+sample="$(mktemp -d)"
+echo 'dev.kaya.milestone2/.MainActivity ghostscene' >"$sample/runner.sh"
+echo 'Ok("entry") => entry::app(ctx),' >"$sample/guest.rs"
+if android_scenes "$sample/runner.sh" "$sample/guest.rs" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (an unarmed android selector passed)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+rm -rf "$sample"
+
+out="$(android_scenes tools/android/run-emulator.sh guests/rust/milestone2_android.rs)" || {
+    echo "check-steps: an android leg selects a scene the APK's guest cannot run:" >&2
+    echo "$out" >&2
+    status=1
+}
+
 [ "$status" = 0 ] && echo "check-steps: OK"
 exit "$status"

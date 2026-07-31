@@ -93,6 +93,26 @@ for sub in subs:
                 f"it would be used as a literal path segment"
             )
 
+# AND THE EXPANSION HAS TO REACH BOTH SIDES OF THE SCENE. Carrying the
+# tokens is not enough: an implementation can expand the path a verb
+# NAVIGATES to and forget the one it ASSERTS against, which is the worst
+# shape of the bug — the picker is aimed correctly, shows the right
+# directory, and the comparison fails against a literal "$PID", reading
+# as a broken picker rather than a harness one. Measured 2026-07-31 on
+# the Compose interpreter. All three carry the refusal now, and this is
+# what keeps them carrying it.
+for name, text in (
+    ("KayaSwiftUI.swift", swift),
+    ("KayaCompose.kt", kotlin),
+    ("harness.rs", harness),
+):
+    if "expect_file_dialog" in text and "unexpanded substitution" not in text:
+        fail(
+            f"{name} reads expect_file_dialog's directory but never refuses an "
+            f"unexpanded substitution — an expansion it forgot would read as a "
+            f"broken picker"
+        )
+
 # --- Wire constants the interpreters mirror privately. ---------------
 # APPLY/KIND/PROP/COMMAND/MENU_KIND/MPROP: all of them. VALUE: only the
 # types reachable through the spec's PROPS PropKinds (the scene's prop

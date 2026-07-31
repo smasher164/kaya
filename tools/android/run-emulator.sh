@@ -326,6 +326,15 @@ run_apk_on() {
     # this reaches no user's app.
     adb -s "$serial" shell am force-stop "${component%%:*}" >/dev/null 2>&1 || true
     adb -s "$serial" shell am force-stop "${component%%/*}"
+    # AND THE PICKER, which is a DIFFERENT PACKAGE and therefore survives
+    # the force-stop above. A leg that failed with DocumentsUI still up
+    # leaves it on top of the app's task, and the next leg's `am start`
+    # then brings that task forward instead of starting the activity —
+    # onCreate never runs, no scene runs, and the leg reads as a clean
+    # run of nothing. Measured while building the picker probe.
+    for picker in com.google.android.documentsui com.android.documentsui; do
+        adb -s "$serial" shell am force-stop "$picker" >/dev/null 2>&1 || true
+    done
     adb -s "$serial" logcat -c
     # ENABLED HERE, AFTER force-stop AND logcat -c, and the order is the
     # whole trick. force-stop kills every component of the package —
@@ -529,6 +538,17 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity confirm \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script confirm)'"
+    # The filedialog scene: ACTION_OPEN_DOCUMENT, which hands off to
+    # DocumentsUI — a SEPARATE APP, which is the whole reason this lane
+    # carries an accessibility service. The scene's files live under the
+    # shared Documents collection rather than the temp directory, because
+    # no document provider publishes an app's private storage and a
+    # picker aimed there opens on Recent instead (see the guest's
+    # scene_root and KayaCompose's kayaTempDir).
+    run_apk filedialog-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity filedialog \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
     # The nav scene: navigation is phone-native — the system back
     # gesture (the BackHandler dispatch) is the affordance, and
     # intercept_back answers with pop_entry.

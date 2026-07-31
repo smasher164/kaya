@@ -40,6 +40,21 @@ pub use jni::sys::jint as jint_export;
 /// interpreter (one backend per platform).
 const PRESENT_GUEST: i32 = 1;
 
+/// The JVM this process's kaya was attached from, and dev.kaya.KayaPresent
+/// as a GLOBAL REFERENCE — both remembered at attach because a picked
+/// file is opened LATER, from a thread the guest made.
+///
+/// THE GLOBAL REF IS NOT AN OPTIMIZATION. A thread attached with
+/// AttachCurrentThread resolves classes through the SYSTEM class loader,
+/// which knows the framework and nothing of this app: `FindClass` for
+/// dev/kaya/KayaPresent succeeds on the Activity's thread and fails on
+/// the guest's. That is precisely the thread hop filedialog.steps exists
+/// to exercise, so the by-name spelling would have passed every read
+/// done inline and failed the one the scene actually makes.
+static JVM: std::sync::OnceLock<jni::JavaVM> = std::sync::OnceLock::new();
+static PRESENT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
 
 fn init_logging() {
     android_logger::init_once(
@@ -107,6 +122,10 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
 // KayaHostApi on the Apple side.
 fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaPresent")?;
+    // Remembered HERE, on the thread that can still resolve an app class
+    // (see JVM/PRESENT_CLASS above).
+    let _ = JVM.set(env.get_java_vm()?);
+    let _ = PRESENT_CLASS.set(env.new_global_ref(&class)?);
     env.register_native_methods(
         &class,
         &[
@@ -134,6 +153,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "emitAlertResult".into(),
                 sig: "(JI)V".into(),
                 fn_ptr: present_emit_alert_result as *mut _,
+            },
+            NativeMethod {
+                name: "emitFileDialogResult".into(),
+                sig: "(J[Ljava/lang/String;[Ljava/lang/String;)V".into(),
+                fn_ptr: present_emit_file_dialog_result as *mut _,
             },
             NativeMethod {
                 name: "emitEntryPopped".into(),
@@ -189,6 +213,93 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     )
 }
 
+/// A picked file on Android: the `content://` URI DocumentsUI answered
+/// with, opened through the ContentResolver on EVERY redemption.
+///
+/// The other four platforms hold a path and `PathSource` opens it. There
+/// is no path here at all — DocumentsUI answers with a URI into a
+/// provider, and the provider may not be a filesystem — so the source
+/// holds the URI and pays a JNI call per open. That is the price of the
+/// property the vocabulary promises: a handle is redeemable more than
+/// once, which an already-open descriptor cannot be. Measured on the
+/// emulator: three redemptions, one of them from a thread that did not
+/// do the picking, each a fresh descriptor carrying the whole file.
+pub(crate) struct UriSource {
+    pub name: String,
+    pub uri: String,
+}
+
+impl crate::protocol::PickedSource for UriSource {
+    fn open(&self, mode: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
+        let fd = open_through_resolver(&self.uri, crate::protocol::android_open_mode(mode))?;
+        // Seekability RIDES THE OPEN because only the descriptor knows:
+        // a document provider may hand back a pipe (a cloud file being
+        // streamed) where the same URI gave a regular file yesterday.
+        let file = unsafe { crate::protocol::file_from_raw(fd) };
+        let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
+        Ok((crate::protocol::raw_handle(file), seekable))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// EMPTY, and the doc-comment's condition is why: `local_path` is a
+    /// name re-opening actually works through, and a content URI is not
+    /// a path any file API on any language accepts. The guest gets the
+    /// handle, which is the capability, and nothing that looks like a
+    /// path but is not one.
+    fn local_path(&self) -> &str {
+        ""
+    }
+}
+
+/// KayaPresent.openPickedUri: `openFileDescriptor(uri, mode)` then
+/// `detachFd()`, on whatever thread the guest called `open` from.
+///
+/// The JVM exception is READ AND CLEARED rather than left pending: it
+/// carries the only description of what went wrong (a revoked grant, a
+/// provider that is gone, a mode the document does not allow), and the
+/// guest sees it as the io::Error's message. A pending exception left
+/// on the thread would instead detonate at the next unrelated JNI call.
+fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
+    let vm = JVM
+        .get()
+        .ok_or_else(|| std::io::Error::other("kaya: the JVM was never attached"))?;
+    let class = PRESENT_CLASS
+        .get()
+        .ok_or_else(|| std::io::Error::other("kaya: dev.kaya.KayaPresent was never resolved"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| std::io::Error::other(format!("kaya: attaching to the JVM failed: {e}")))?;
+    let uri_arg = env
+        .new_string(uri)
+        .map_err(|e| std::io::Error::other(format!("kaya: the uri would not cross: {e}")))?;
+    let mode_arg = env
+        .new_string(mode)
+        .map_err(|e| std::io::Error::other(format!("kaya: the mode would not cross: {e}")))?;
+    let called = env.call_static_method(
+        class,
+        "openPickedUri",
+        "(Ljava/lang/String;Ljava/lang/String;)I",
+        &[(&uri_arg).into(), (&mode_arg).into()],
+    );
+    let pending = env.exception_check().unwrap_or(false);
+    if pending {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
+    let fd = called
+        .and_then(|v| v.i())
+        .map_err(|e| std::io::Error::other(format!("kaya: opening {uri} as {mode} failed: {e}")))?;
+    if fd < 0 {
+        return Err(std::io::Error::other(format!(
+            "kaya: the ContentResolver refused {uri} in mode {mode}"
+        )));
+    }
+    Ok(i64::from(fd))
+}
+
 extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {
     let bytes = env
         .convert_byte_array(&tag)
@@ -241,6 +352,65 @@ extern "system" fn present_emit_alert_result(
     choice: jint,
 ) {
     crate::capi::kaya_emit_alert_result(alert as u64, choice as u32);
+}
+
+/// KayaPresent.emitFileDialogResult: the picker's one answer.
+/// `uris` and `names` are parallel String[]s; EMPTY is cancel, which is
+/// how every platform reports it (none can confirm an empty selection).
+///
+/// The core mints the handles, so this hands over the locators and lets
+/// it — the arrays go over as UTF-8 the same way the desktop backends'
+/// `char*` do, and `kaya_emit_file_dialog_result` wraps each in the
+/// platform's source.
+extern "system" fn present_emit_file_dialog_result(
+    mut env: JNIEnv,
+    _class: JClass,
+    dialog: jlong,
+    uris: jni::objects::JObjectArray,
+    names: jni::objects::JObjectArray,
+) {
+    let read = |env: &mut JNIEnv, array: &jni::objects::JObjectArray, i: i32| -> String {
+        let Ok(item) = env.get_object_array_element(array, i) else {
+            return String::new();
+        };
+        env.get_string(&JString::from(item))
+            .map(|s| s.into())
+            .unwrap_or_default()
+    };
+    let count = env.get_array_length(&uris).unwrap_or(0);
+    let named = env.get_array_length(&names).unwrap_or(0);
+    assert_eq!(
+        count, named,
+        "kaya: the picker answered with {count} uris and {named} names"
+    );
+    let mut owned = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        owned.push((read(&mut env, &uris, i), read(&mut env, &names, i)));
+    }
+    // The C entry reads borrowed pointers for the length of the call, so
+    // the CStrings have to outlive the pointer vectors — hence two
+    // passes rather than one clever iterator.
+    let cstrings: Vec<(std::ffi::CString, std::ffi::CString)> = owned
+        .iter()
+        .map(|(u, n)| {
+            (
+                std::ffi::CString::new(u.as_str()).unwrap_or_default(),
+                std::ffi::CString::new(n.as_str()).unwrap_or_default(),
+            )
+        })
+        .collect();
+    let uri_ptrs: Vec<*const std::os::raw::c_char> =
+        cstrings.iter().map(|(u, _)| u.as_ptr()).collect();
+    let name_ptrs: Vec<*const std::os::raw::c_char> =
+        cstrings.iter().map(|(_, n)| n.as_ptr()).collect();
+    unsafe {
+        crate::capi::kaya_emit_file_dialog_result(
+            dialog as u64,
+            uri_ptrs.as_ptr(),
+            name_ptrs.as_ptr(),
+            cstrings.len(),
+        )
+    };
 }
 
 /// KayaPresent.emitEntryPopped: the user's back gesture popped an

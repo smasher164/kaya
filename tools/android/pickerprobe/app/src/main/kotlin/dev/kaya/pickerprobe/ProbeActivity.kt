@@ -1,0 +1,340 @@
+package dev.kaya.pickerprobe
+
+import android.accessibilityservice.AccessibilityService
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.system.Os
+import android.system.OsConstants
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import java.io.FileInputStream
+
+/**
+ * Measures every Android assumption the Compose picker arm rests on, in
+ * one install, and logs the answers under the tag `kayaprobe`. Not a
+ * lane — see run.sh. The answers themselves are in
+ * docs/file-dialogs-plan.md §6d and docs/traps.md.
+ *
+ * The questions, in the order they decide things:
+ *
+ *  Q1 Where can this process WRITE a directory that DocumentsUI can then
+ *     browse? The scene's premise is that guest and interpreter agree on
+ *     a directory with no runner involvement, and the desktops' answer
+ *     (the temp dir) is invisible to DocumentsUI.
+ *  Q2 Does `java.io.tmpdir` agree with what Rust's `std::env::temp_dir`
+ *     returns on Android? KayaCompose already assumes it does.
+ *  Q3 Does EXTRA_INITIAL_URI aim the picker at a chosen directory, from
+ *     an app (not just from `am start`)?
+ *  Q4 Can the picker be launched through activityResultRegistry AFTER
+ *     the activity is RESUMED — which is when the apply pump runs?
+ *  Q5 Does the accessibility service SEE the picker's tree, and does
+ *     performAction(ACTION_CLICK) on a row actually answer the picker?
+ *  Q6 Is the URI RE-OPENABLE — the property the whole source design was
+ *     chosen for? And openable off the main thread?
+ *  Q7 Does the OPEN_DOCUMENT grant carry WRITE, and is the descriptor
+ *     seekable?
+ */
+class ProbeActivity : ComponentActivity() {
+    private val main = Handler(Looper.getMainLooper())
+    private var picked: Uri? = null
+
+    /**
+     * Which shape of the question this run asks — the scene needs four,
+     * and one run can only answer one because the picker is modal:
+     *
+     *  basic  one file, no filter, chosen by clicking its row
+     *  multi  ALLOW_MULTIPLE (the scene's first pick is pick_files)
+     *  filter EXTRA_MIME_TYPES from the scene's "txt" filter
+     *  cancel dismissed with BACK, the scene's second half
+     */
+    private val variant: String by lazy { intent.getStringExtra("variant") ?: "basic" }
+
+    private fun log(s: String) = android.util.Log.i(ProbeA11y.TAG, "PROBE[$variant] $s")
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        log("==== begin, sdk=${Build.VERSION.SDK_INT} pid=${android.os.Process.myPid()}")
+
+        // Q2: the two halves' idea of "temp".
+        log("Q2 java.io.tmpdir=${System.getProperty("java.io.tmpdir")}")
+        log("Q2 env TMPDIR=${System.getenv("TMPDIR")}")
+        log("Q2 rust std::env::temp_dir would be TMPDIR or /data/local/tmp")
+        log("Q2 cacheDir=$cacheDir")
+        // Can a guest that has no JNI find the shared root WITHOUT
+        // hardcoding /storage/emulated/0? Android sets these in the
+        // process environment, and a Rust guest reads them with
+        // std::env::var.
+        log("Q8 env EXTERNAL_STORAGE=${System.getenv("EXTERNAL_STORAGE")}")
+        log("Q8 env ANDROID_STORAGE=${System.getenv("ANDROID_STORAGE")}")
+        log("Q8 Environment.getExternalStorageDirectory=" +
+            "${Environment.getExternalStorageDirectory()}")
+        log("Q8 publicDocuments=" +
+            "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)}")
+        log("Q2 externalFilesDir=${getExternalFilesDir(null)}")
+
+        // Q1: which candidate directories this process can actually make
+        // and fill. `isExternalStorageManager` is the appops state the
+        // runner would have to grant.
+        log("Q1 isExternalStorageManager=${Environment.isExternalStorageManager()}")
+        val pid = android.os.Process.myPid()
+        val candidates = listOf(
+            "data-local-tmp" to "/data/local/tmp/kaya-probe-$pid",
+            "cache" to "$cacheDir/kaya-probe-$pid",
+            "ext-files" to "${getExternalFilesDir(null)}/kaya-probe-$pid",
+            "shared-documents" to
+                "${Environment.getExternalStorageDirectory()}/Documents/kaya-probe-$pid",
+            "shared-download" to
+                "${Environment.getExternalStorageDirectory()}/Download/kaya-probe-$pid",
+        )
+        var aimAt: String? = null
+        for ((label, path) in candidates) {
+            val ok = tryWrite(path)
+            log("Q1 $label $path -> $ok")
+            // ONLY the shared collections: aiming at Android/data/ is
+            // accepted by the intent and silently lands on Recent
+            // instead — measured on the first run of this probe, and the
+            // failure looks exactly like the extra being ignored.
+            if (ok == "OK" && aimAt == null && label == "shared-documents") aimAt = path
+        }
+
+        // Q3/Q4: register and launch LATE, the way the apply pump would.
+        main.postDelayed({ launchPicker(aimAt) }, 1500)
+    }
+
+    /** mkdirs plus the scene's two files; the outcome, never a throw. */
+    private fun tryWrite(path: String): String = try {
+        val dir = File(path)
+        if (!dir.mkdirs() && !dir.isDirectory) {
+            "MKDIR-FAILED"
+        } else {
+            File(dir, "picked.txt").writeText("picked bytes")
+            File(dir, "decoy.txt").writeText("decoy")
+            if (File(dir, "picked.txt").readText() == "picked bytes") "OK" else "READBACK-WRONG"
+        }
+    } catch (e: Throwable) {
+        "${e.javaClass.simpleName}: ${e.message}"
+    }
+
+    /**
+     * Q3/Q4. StartActivityForResult rather than the OpenDocument
+     * contract, because the real arm needs the intent verbatim: the
+     * initial directory rides as an extra and WRITE has to be asked for.
+     */
+    private fun launchPicker(aimAt: String?) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            .addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        if (variant == "multi") {
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        if (variant == "filter") {
+            // The scene's advisory filter is an EXTENSION ("txt"); the
+            // intent wants MIME types, so the extension has to be mapped.
+            val mimes = listOf("txt").mapNotNull {
+                android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it)
+            }
+            log("Q9 extensions [txt] -> mimes $mimes")
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
+        }
+        if (aimAt != null) {
+            // primary:Documents/kaya-probe-<pid> — the ExternalStorage
+            // provider's document id for a path under the primary volume.
+            val rel = aimAt.removePrefix("${Environment.getExternalStorageDirectory()}/")
+            val docId = "primary:$rel"
+            val uri = DocumentsContract.buildDocumentUri(
+                "com.android.externalstorage.documents", docId,
+            )
+            log("Q3 aiming at $uri")
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+        } else {
+            log("Q3 NOTHING WRITABLE ON SHARED STORAGE — cannot aim")
+        }
+
+        val launcher = activityResultRegistry.register(
+            "probe-picker",
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            val clip = result.data?.clipData
+            val clipUris = (0 until (clip?.itemCount ?: 0)).map { clip!!.getItemAt(it).uri }
+            log("Q4 result code=${result.resultCode} data=${result.data?.data} " +
+                "clip=${clipUris.size} $clipUris")
+            picked = result.data?.data ?: clipUris.firstOrNull()
+            picked?.let { onPicked(it) } ?: log("Q4 no uri — cancelled or failed")
+        }
+        try {
+            launcher.launch(intent)
+            log("Q4 launched from a RESUMED activity through activityResultRegistry")
+        } catch (e: Throwable) {
+            log("Q4 LAUNCH THREW ${e.javaClass.simpleName}: ${e.message}")
+        }
+        // Q5: let the picker come up, then read and drive it — FROM A
+        // WORKER THREAD, which is where the harness's verbs run. It is
+        // not a detail: getWindows() is refreshed on the service's main
+        // looper, which is this app's, so a drive that blocks the main
+        // thread reads a FROZEN window list and concludes the picker is
+        // still up when it has already gone. Measured.
+        main.postDelayed({ Thread { readAndDrivePicker() }.start() }, 3000)
+    }
+
+    /** Q5: what the service sees, and whether a click on a row answers. */
+    private fun readAndDrivePicker() {
+        val svc = ProbeA11y.live
+        if (svc == null) {
+            log("Q5 NO SERVICE — enable it with adb before running")
+            return
+        }
+        log("Q5 window packages=${svc.windowPackages()}")
+        for (pkg in listOf("com.google.android.documentsui", "com.android.documentsui")) {
+            val nodes = svc.nodesIn(pkg)
+            log("Q5 $pkg -> ${nodes.size} nodes")
+            if (nodes.isEmpty()) continue
+            for (n in nodes) {
+                val id = n.viewIdResourceName ?: ""
+                val t = n.text?.toString() ?: ""
+                val d = n.contentDescription?.toString() ?: ""
+                if (id.isNotEmpty() || t.isNotEmpty() || d.isNotEmpty()) {
+                    log("Q5   id=${id.substringAfterLast('/')} cls=${n.className} " +
+                        "text=${t} desc=${d} click=${n.isClickable}")
+                }
+            }
+            // The two reads expect_file_dialog needs, in the three
+            // spellings the tree offers for "where".
+            log("Q5 rows=${allRowTitles(nodes)}")
+            log("Q5 where header_title=${textOf(nodes, "header_title")} " +
+                "breadcrumbs=${allTexts(nodes, "breadcrumb_text")}")
+            if (variant == "cancel") {
+                // The scene's `file_choose cancel`. There is no Cancel
+                // button in this picker at all — dismissal is the system
+                // back gesture. ONE IS NOT ENOUGH: measured, the first
+                // back walks UP the directory tree (the picker was aimed
+                // three levels deep) and only the back taken at the root
+                // dismisses. So: bounded, and the picker being gone is
+                // the only proof.
+                var backs = 0
+                while (backs < 8) {
+                    if (!ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)) break
+                    svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+                    backs += 1
+                    Thread.sleep(400)
+                }
+                log("Q10 backs=$backs gone=${
+                    !ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)
+                }")
+            } else {
+                // The row: an item_root whose subtree carries the basename.
+                val row = nodes.firstOrNull { n ->
+                    n.viewIdResourceName?.endsWith("/item_root") == true &&
+                        titlesUnder(n).contains("picked.txt")
+                }
+                if (row == null) {
+                    log("Q5 NO ROW for picked.txt — rows are ${allRowTitles(nodes)}")
+                } else {
+                    val ok = row.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    log("Q5 performAction(ACTION_CLICK) on item_root -> $ok")
+                }
+            }
+            // THE PRESS MUST HAVE LANDED. A click that arrives before the
+            // picker is interactive is swallowed with no error anywhere,
+            // so the picker being GONE is the only honest proof.
+            Thread.sleep(1500)
+            log("Q5 picker still up 1500ms after the drive: " +
+                "${ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)}")
+            return
+        }
+        log("Q5 the picker's package was not among the windows")
+    }
+
+    private fun textOf(nodes: List<AccessibilityNodeInfo>, id: String): String? =
+        nodes.firstOrNull { it.viewIdResourceName?.endsWith("/$id") == true }
+            ?.text?.toString()
+
+    private fun allTexts(nodes: List<AccessibilityNodeInfo>, id: String): List<String> =
+        nodes.filter { it.viewIdResourceName?.endsWith("/$id") == true }
+            .mapNotNull { it.text?.toString() }
+
+    /** Every row the picker is showing — what expect_file_dialog reads. */
+    private fun allRowTitles(nodes: List<AccessibilityNodeInfo>): List<String> =
+        nodes.filter { it.viewIdResourceName?.endsWith("/item_root") == true }
+            .mapNotNull { titlesUnder(it).firstOrNull() }
+
+    private fun titlesUnder(node: AccessibilityNodeInfo): List<String> {
+        val out = mutableListOf<String>()
+        fun walk(n: AccessibilityNodeInfo) {
+            n.text?.toString()?.let { if (it.isNotEmpty()) out.add(it) }
+            for (i in 0 until n.childCount) walk(n.getChild(i) ?: continue)
+        }
+        walk(node)
+        return out
+    }
+
+    /** Q6/Q7: the properties the source design was chosen for. */
+    private fun onPicked(uri: Uri) {
+        // The display name, which is what PickedFile.name must carry.
+        try {
+            contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0) log("Q6 display name=${c.getString(i)}")
+            }
+        } catch (e: Throwable) {
+            log("Q6 name query threw ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        openOnce("first r (main thread)", uri, "r")
+
+        // THE PROPERTY THE DESIGN TURNS ON: a second redemption.
+        openOnce("second r (main thread)", uri, "r")
+
+        // ...and off the thread that picked, which is what the scene
+        // uniquely proves.
+        Thread {
+            openOnce("third r (worker thread)", uri, "r")
+            openOnce("rw (worker thread)", uri, "rw")
+            // LAST, because "w" truncates: everything after it would
+            // measure an empty file.
+            openOnce("w (worker thread)", uri, "w")
+            log("==== end")
+        }.start()
+    }
+
+    private fun openOnce(label: String, uri: Uri, mode: String) {
+        try {
+            val pfd = contentResolver.openFileDescriptor(uri, mode)
+            if (pfd == null) {
+                log("Q7 $label mode=$mode -> null")
+                return
+            }
+            val fd = pfd.detachFd()
+            val adopted = ParcelFileDescriptor.adoptFd(fd)
+            val st = Os.fstat(adopted.fileDescriptor)
+            val reg = OsConstants.S_ISREG(st.st_mode)
+            val seek = try {
+                Os.lseek(adopted.fileDescriptor, 0, OsConstants.SEEK_CUR); true
+            } catch (e: Throwable) {
+                false
+            }
+            val body = if (mode == "r") {
+                FileInputStream(adopted.fileDescriptor).readBytes().decodeToString()
+            } else {
+                "(not read)"
+            }
+            log("Q7 $label mode=$mode fd=$fd isreg=$reg lseek=$seek size=${st.st_size} body=$body")
+            adopted.close()
+        } catch (e: Throwable) {
+            log("Q7 $label mode=$mode THREW ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+}

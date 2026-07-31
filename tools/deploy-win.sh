@@ -273,6 +273,35 @@ case "$hide_ext" in
         exit 1
         ;;
 esac
+# AND NO NOTIFICATION TOASTS, for a sharper version of the same reason.
+# A toast is a foreground window owned by the shell, and while one is up
+# SetForegroundWindow FAILS for everything else — so every leg that
+# injects a real keyboard chord (menus_*, commands_*, one per language)
+# dies with "could not foreground the guest window", which reads exactly
+# like a WinUI bug. Measured 2026-07-31: a "Turn off notifications from
+# OneDrive?" SUGGESTION toast took out all ten of them, twice in a row,
+# while the other 121 legs passed. The lane had been green the day
+# before; nothing in the tree had changed.
+#
+# Three values, because the shell has three places to say it: toasts at
+# all, the notification centre's master switch, and the "suggestions"
+# channel that raised this particular one unprompted. Set every deploy,
+# like HideFileExt above, and for the same reason — any settings visit
+# can put them back and a silent revert costs the round twice.
+run_ssh 'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications" /v ToastEnabled /t REG_DWORD /d 0 /f >nul'
+run_ssh 'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings" /v NOC_GLOBAL_SETTING_TOASTS_ENABLED /t REG_DWORD /d 0 /f >nul'
+run_ssh 'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338389Enabled /t REG_DWORD /d 0 /f >nul'
+toasts="$(run_ssh 'reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications" /v ToastEnabled' 2>/dev/null | tr -d '\r')"
+case "$toasts" in
+    *0x0*) ;;
+    *)
+        echo "deploy-win: toasts are still enabled on the guest — a shell toast" >&2
+        echo "  holds the foreground and every shortcut-injection leg would fail" >&2
+        echo "  as though WinUI could not raise its own window. Got: $toasts" >&2
+        exit 1
+        ;;
+esac
+
 for guest in $SCENES; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum

@@ -1625,6 +1625,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                     // the same directory both places and the pid stays
                     // out of the script.
                     let dir = expand_path(dir);
+                    // A LEFTOVER $ means the expansion did not happen,
+                    // and an unexpanded expectation is the WORST shape
+                    // of this bug: the picker is aimed correctly, shows
+                    // the right directory, and the comparison fails
+                    // against a literal "$PID" — which reads as a broken
+                    // picker. The goto arm has carried this guard since
+                    // the scene was written; the expect side went
+                    // without, and an interpreter that expanded only the
+                    // goto cost a round.
+                    if dir.contains('$') {
+                        return Err(format!(
+                            "expect_file_dialog {dir}: unexpanded substitution — \
+                             only $TMP and $PID exist"
+                        ));
+                    }
                     if !where_.ends_with(dir.as_str()) {
                         return Err(format!("file dialog showing {where_:?}, wanted {dir:?}"));
                     }

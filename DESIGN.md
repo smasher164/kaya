@@ -1037,7 +1037,15 @@ WHAT MAKES IT POSSIBLE, measured rather than assumed:
 - **Android** has no path in the universe — SAF resolves to a
   `content://` URI — but `ContentResolver.openFileDescriptor(uri, "r")`
   yields a `ParcelFileDescriptor` whose `detachFd()` returns the native
-  fd AND detaches ownership.
+  fd AND detaches ownership. MEASURED ON THE EMULATOR, 2026-07-31 (API
+  35), because the source design turns on it: the URI redeemed THREE
+  times — twice on the picking thread, once on a worker — each time a
+  fresh descriptor carrying the whole file, regular and seekable; `rw`
+  and `w` both succeed where the intent carried
+  `FLAG_GRANT_WRITE_URI_PERMISSION`. One divergence found and closed:
+  a bare `w` does NOT truncate (O_WRONLY without O_TRUNC), so the
+  write-truncating mode is asked for as `wt` or the same `FileMode`
+  would mean two things on two platforms.
 - **iOS** hands back a security-scoped URL. Permissions resolve at
   `open()` and the descriptor stays valid afterwards, so the core starts
   the scope, opens, and stops IMMEDIATELY. That is not a workaround: the
@@ -1146,6 +1154,16 @@ Three modes cover every platform: read, write-truncating, read-write.
 Android takes them as the mode string of
 `openFileDescriptor(uri, mode)`, WinUI as `FileAccessMode`, iOS and the
 desktops as ordinary open flags.
+
+THE OPENED HANDLE IS ONE `i64` WITH TWO SPELLINGS: a descriptor on
+POSIX, a `HANDLE` on Windows. The semantics — you are holding an open
+file the OS knows about — is uniform, and only the platform's name for
+it differs, which is the carve-out shape the binding conventions allow.
+This was once written down as deferred, to be bridged with
+`_open_osfhandle`; that would have been a trap, because the fd it mints
+is valid only inside the CRT that minted it, and Python, Go and the JVM
+each bring their own. It would have worked for the Rust and C guests
+and quietly broken the rest.
 
 WRITABILITY IS DISCOVERABLE BUT NOT REQUESTABLE, on all four, and that
 is what FORCES the deferred open rather than merely permitting it. NO
@@ -1288,7 +1306,15 @@ the core would move the data.
 
 MEASUREMENT 5 IS WHAT THE HANDLE RESTS ON. A held URL re-acquires its
 scope and opens again, so the handle is redeemable for the process
-lifetime, which is what lets the pick defer the open at all.
+lifetime, which is what lets the pick defer the open at all. Android's
+half of the same claim is measured too (the Android bullet above), and
+it is what decided the shape of that platform's source: it holds the
+URI and opens through the ContentResolver on every redemption, rather
+than opening once at the pick and handing the descriptor over. The
+second shape is simpler and needs no JNI, and it gives up exactly the
+property this paragraph rests on — an already-open descriptor cannot be
+opened again, which would have made Android the one platform where a
+second `open` fails.
 
 SAVE-BACK NEEDS NO SPECIAL MACHINERY, which measurement 7 is what
 settles. The document the user opened can be opened `O_RDWR` through
@@ -1304,9 +1330,7 @@ Deferred, each with a stated reason rather than for lack of time: SAVE
 is designed alongside but comes second, because creating a document
 through SAF is a different request from opening one and the error
 surface (permissions, disk full, a revoked scope) is the real work;
-directory selection waits for an artifact that needs it; the Windows
-descriptor is a HANDLE rather than an fd, so the field's meaning is
-per-platform and the bindings bridge it with `_open_osfhandle`; and
+directory selection waits for an artifact that needs it; and
 EXPLICIT handle release waits for a caller who needs it, because an
 unreleased handle holds a URL and a string rather than anything the
 kernel counts — the resource that made eager opening untenable is

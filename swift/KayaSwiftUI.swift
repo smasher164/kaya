@@ -2880,6 +2880,18 @@ private func kayaRunScript(_ script: String) {
                 // of the script.
                 let wantDir = parts.count > 1 ? kayaExpandPath(String(parts[1])) : ""
                 let wantNames = parts.count > 2 ? parts[2...].map(String.init) : []
+                // A LEFTOVER $ means the expansion did not happen, and
+                // an unexpanded expectation is the WORST shape of this
+                // bug: the picker is aimed correctly, shows the right
+                // directory, and the comparison fails against a literal
+                // "$PID" — which reads as a broken picker. The goto arm
+                // has carried this guard since the scene was written;
+                // the expect side went without and cost the round.
+                if wantDir.contains("$") {
+                    failures.append(
+                        "expect_file_dialog \(wantDir): unexpanded substitution — "
+                            + "only $TMP and $PID exist")
+                }
                 let state = DispatchQueue.main.sync { () -> (String, [String])? in
                     #if os(macOS)
                         return kayaOpenPanelState()

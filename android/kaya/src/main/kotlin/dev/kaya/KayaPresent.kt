@@ -1,5 +1,7 @@
 package dev.kaya
 
+import android.net.Uri
+
 /**
  * The presentation-side C API over JNI, for guest-side backends: emit
  * occurrences exactly as a core backend's action handler would, and pump
@@ -31,6 +33,54 @@ object KayaPresent {
      * sentinel (Int -1 — the wire u32's java-int spelling) for every
      * native dismissal. kaya_emit_alert_result's JNI spelling. */
     @JvmStatic external fun emitAlertResult(alert: Long, choice: Int)
+
+    /**
+     * The picker's one answer: parallel arrays of `content://` URIs and
+     * the display names beside them. EMPTY IS CANCEL — no platform can
+     * confirm an empty selection, so there is no sentinel to invent.
+     *
+     * The core mints the handles from these, wrapping each URI in the
+     * source that knows how to open it. kaya_emit_file_dialog_result's
+     * JNI spelling.
+     */
+    @JvmStatic external fun emitFileDialogResult(
+        dialog: Long,
+        uris: Array<String>,
+        names: Array<String>,
+    )
+
+    /**
+     * Redeem a picked URI: `openFileDescriptor(uri, mode)` then
+     * `detachFd`, returning the descriptor the guest now owns.
+     *
+     * CALLED FROM THE CORE, not from Kotlin — the one native method that
+     * runs the other way. It exists because a handle is redeemable more
+     * than once by design, so every `open` has to be a real open through
+     * the resolver; handing over a descriptor at pick time would be
+     * simpler and would give that property up.
+     *
+     * The mode is the ContentResolver's spelling and the core decides
+     * it (see `android_open_mode`) — in particular Write arrives as
+     * `wt`, because a bare `w` does not truncate.
+     *
+     * Runs on whatever thread the guest called `open` from, which is
+     * the point: `openFileDescriptor` blocks, and a provider may
+     * download the file before it returns. Throws rather than returning
+     * a bare -1 where the platform gives a reason — the core turns the
+     * exception's message into the guest's io error.
+     */
+    @JvmStatic
+    fun openPickedUri(uri: String, mode: String): Int {
+        val resolver = KayaCompose.pickerContext()?.contentResolver
+            ?: throw IllegalStateException("kaya: no mounted activity to open $uri through")
+        val pfd = resolver.openFileDescriptor(Uri.parse(uri), mode)
+            ?: throw java.io.IOException("kaya: the provider returned no descriptor for $uri")
+        // detachFd, NOT getFd: ownership crosses to the guest, which
+        // closes it with its own file API. Closing the
+        // ParcelFileDescriptor here would hand back a descriptor that is
+        // already gone.
+        return pfd.detachFd()
+    }
 
     /** The user's back gesture popped an entry natively (the core's
      * stack reconciles inside this call, post-fact). */
