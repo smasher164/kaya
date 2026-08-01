@@ -93,7 +93,7 @@ for arg in "$@"; do
         sections_rust|sections_python|sections_go|sections_csharp|sections_java) SUITE="$arg" ;;
         layout_rust|layout_python|layout_go|layout_csharp|layout_java) SUITE="$arg" ;;
         menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
-        filedialog_rust|filedialog_python|filedialog_go|filedialog_csharp|filedialog_java) SUITE="$arg" ;;  # java: diagnostic only, see the block below
+        filedialog_rust|filedialog_python|filedialog_go|filedialog_csharp|filedialog_java) SUITE="$arg" ;;
         commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
@@ -252,6 +252,7 @@ scp -q "$ROOT"/tools/scenes/*.steps "$HOST:C:/kaya/scenes/"
 # Set once for the machine rather than in forty checked-in .cmd files:
 # every leg runs through schtasks, which inherits the user environment.
 run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul' 
+
 
 # EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
 # with HideFileExt=1, so the file picker's rows publish "picked" where
@@ -1063,23 +1064,8 @@ case "$SUITE" in
         drain_suites
         run_suite filedialog_csharp
         drain_suites
-        # NO filedialog_java LEG, and it is a HARNESS limit rather than a
-        # binding gap — the Java picker itself is green on mac and linux,
-        # same surface, same guest. What fails is DRIVING the Shell's
-        # dialog from inside a JVM process: dismissing it makes
-        # uiautomationcore fault its RPC to the provider that just went
-        # away (RPC_E_DISCONNECTED), raised as a structured exception on
-        # a COM worker thread AFTER the harness has moved on. The other
-        # four language legs never notice. The JVM's process-wide
-        # handler turns it into a fatal error and kills a run whose every
-        # assertion had already passed.
-        #
-        # Five fixes measured and rejected, so nobody re-tries them:
-        # not touching UIA after the press, a plain-Win32 gone-check
-        # instead of a UIA re-read, releasing every proxy before the
-        # click, balancing CoUninitialize, -Xrs, and an STA client
-        # apartment. Three of those were real improvements and stayed;
-        # none of them stops this. docs/deferred.md carries the item.
+        run_suite filedialog_java
+        drain_suites
         run_suite background_rust
         run_suite background_python
         run_suite background_go
