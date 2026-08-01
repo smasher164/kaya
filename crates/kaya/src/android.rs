@@ -135,6 +135,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit as *mut _,
             },
             NativeMethod {
+                name: "stalledMs".into(),
+                sig: "()J".into(),
+                fn_ptr: present_stalled_ms as *mut _,
+            },
+            NativeMethod {
                 name: "emitTextChanged".into(),
                 sig: "([BLjava/lang/String;)V".into(),
                 fn_ptr: present_emit_text as *mut _,
@@ -298,6 +303,16 @@ fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
         )));
     }
     Ok(i64::from(fd))
+}
+
+/// The stall watchdog's reading, for the Compose interpreter's
+/// `expect_stall`. A read rather than an emit, and it comes through the
+/// same registered-natives table for the same reason everything else
+/// does: the interpreter must ask the one live core.
+extern "system" fn present_stalled_ms(_env: JNIEnv, _class: JClass) -> i64 {
+    crate::stall::stalled_for()
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {

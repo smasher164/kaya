@@ -16,6 +16,11 @@ object KayaPresent {
      */
     @JvmStatic external fun emitClicked(tag: ByteArray)
 
+    /** Milliseconds the app thread has been ignoring pending
+     * occurrences, 0 when it is keeping up — the stall watchdog's
+     * reading, which `expect_stall` asserts. */
+    @JvmStatic external fun stalledMs(): Long
+
     /**
      * Emit an entry edit: [tag] is the tag bytes delivered with the
      * entry's CREATE record, [text] the field's current content.

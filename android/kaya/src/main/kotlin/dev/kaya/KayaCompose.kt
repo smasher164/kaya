@@ -1705,6 +1705,24 @@ object KayaCompose {
                 val failuresBefore = failures.size
                 when (parts[0]) {
                     "settle" -> Thread.sleep(parts[1].toLong())
+                    // The core's watchdog reading. Polled like every
+                    // other expectation — the watchdog needs its
+                    // threshold to elapse before it says anything, and
+                    // the retry above re-evaluates until the deadline.
+                    // Reported in the verdict rather than merely
+                    // passed, so a green leg still shows how long the
+                    // app was gone.
+                    "expect_stall" -> {
+                        val stalledMs = KayaPresent.stalledMs()
+                        if (stalledMs > 0) {
+                            observed.add("stalled ${stalledMs}ms")
+                        } else {
+                            failures.add(
+                                "the app thread is keeping up — no pending occurrences have " +
+                                    "gone unclaimed, so the stall watchdog has nothing to report"
+                            )
+                        }
+                    }
                     "click" -> {
                         val ok = onUi(activity) {
                             target(parts[1], "button", KayaSceneModel.buttons)

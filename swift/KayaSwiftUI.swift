@@ -2768,6 +2768,23 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_stall":
+                // The core's watchdog reading, over the C floor
+                // (kaya_stalled_ms). Polled like every other
+                // expectation — the watchdog needs its threshold to
+                // elapse before it will say anything, and the retry
+                // above re-evaluates until the deadline.
+                //
+                // Reported in the verdict rather than just passed, so a
+                // green leg still shows how long the app was gone.
+                let stalledMs = KayaHost.api.stalled_ms()
+                if stalledMs > 0 {
+                    observed.append("stalled \(stalledMs)ms")
+                } else {
+                    failures.append(
+                        "the app thread is keeping up — no pending occurrences have gone "
+                            + "unclaimed, so the stall watchdog has nothing to report")
+                }
             case "expect_focused":
                 // The model's focusedId is the observation the focus
                 // command lands as (the entry view's FocusState mirrors

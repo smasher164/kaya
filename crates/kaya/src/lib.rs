@@ -13,6 +13,10 @@ mod harness;
 mod protocol;
 mod ring;
 mod scene;
+// The stall watchdog: pending occurrences nobody is taking. Not gated
+// on the harness feature — a shipped app is where an unreported stall
+// costs the most (DESIGN, Threading model and protocol).
+mod stall;
 /// The protocol as data — the root document tools/kaya-bindgen walks.
 pub mod spec;
 mod wire;

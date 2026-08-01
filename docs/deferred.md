@@ -47,6 +47,30 @@ own the state (see the undo note in this file).
   thread), turning "the app looks alive and ignores you" into a
   reported fault. Wire it into the harness so a scene FAILS on a stall
   rather than timing out.
+  DEPTH SLICE LANDED 2026-07-31: crates/kaya/src/stall.rs, the
+  `expect_stall` verb in all three interpreters, the `stall` scene, and
+  the Rust guest on mac + linux + windows. Matrix ALL PASS at 841 legs.
+  THREE THINGS THE SLICE TAUGHT, all of which cost a lane run each:
+  - **The cursor is not the signal, the COUNTERS are.** DESIGN says the
+    core reads the app's consumer cursor, and the occurrence ring has
+    one — but the ring is only ONE of two transports. The Rust binding's
+    own path is an mpsc channel (lib.rs sets `OccSink::Mpsc`), so on mac
+    and iOS nothing ever moves a ring cursor and the first watchdog
+    reported "keeping up" about an app that was provably asleep. Two
+    counters (enqueued, taken) say the same thing about either.
+  - **Nothing may start from an entry point.** It was started from
+    `kaya_run`, which is one of three entries — `kaya::run` reaches
+    `swiftui_host::run` and `backend::run_core` directly. Every Rust
+    guest on every platform ran with no watchdog. It now starts itself
+    from the first enqueue, which no path can avoid.
+  - **A stall needs PENDING work to be visible, and that is correct.**
+    The consumer cursor advances before a record reaches the guest, so a
+    handler blocking on an empty ring is indistinguishable from an idle
+    app — and nothing is waiting on it, so it may as well be. The scene
+    therefore clicks twice, which is also what a person does.
+  STILL OPEN, the breadth: the other seven guests, and legs on iOS and
+  android. The watchdog is core-side and needs no backend arm, so this
+  is guests and runner wiring only.
 - **GAP — a kaya app cannot do background work.** Found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the

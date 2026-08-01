@@ -158,6 +158,10 @@ name = "confirm"
 path = "../../guests/rust/confirm.rs"
 
 [[example]]
+name = "stall"
+path = "../../guests/rust/stall.rs"
+
+[[example]]
 name = "entry"
 path = "../../guests/rust/entry.rs"
 

@@ -41,7 +41,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES=""
+DEPTH_SCENES="stall"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -477,6 +477,11 @@ for proto in x11 wayland; do
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
+    # The stall diagnostic (crates/kaya/src/stall.rs). Rust only for
+    # now — the watchdog is core-side and needs no backend arm, so this
+    # runs everywhere the Rust guest does; the other seven guests
+    # follow with the breadth sweep.
+    run "$proto" stall-rust env KAYA_SELFTEST=stall "$CARGO_TARGET_DIR/debug/examples/stall"
     run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
     run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         python3 guests/python/confirm.py

@@ -514,7 +514,14 @@ impl AppCtx {
                 // Not the guest's business: the drain above already ran
                 // whatever the wake was about.
                 Ok(Inbox::Woken) => continue,
-                Ok(Inbox::Occ(occ)) => return occ,
+                Ok(Inbox::Occ(occ)) => {
+                    // Taken off the transport (crate::stall). HERE and
+                    // not after the handler: a long handler is work, a
+                    // handler that never returns shows up as the NEXT
+                    // occurrence going unclaimed.
+                    crate::stall::taken();
+                    return occ;
+                }
                 Err(_) => return Occurrence::Shutdown,
             }
         }

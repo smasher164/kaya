@@ -916,6 +916,20 @@ pub extern "C" fn kaya_wake() {
     state().ring.wake();
 }
 
+/// How many milliseconds the app thread has been ignoring pending
+/// occurrences, or 0 when it is keeping up.
+///
+/// The stall watchdog's reading, for anyone outside Rust: the SwiftUI
+/// and Compose interpreters answer `expect_stall` with it, and an app
+/// that wants to report its own health can poll it. See crate::stall
+/// for what does and does not count as a stall.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_stalled_ms() -> u64 {
+    crate::stall::stalled_for()
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Direct-access setup: the occurrence ring's memory layout. Pointers
 /// remain valid for the life of the process.
 #[unsafe(no_mangle)]

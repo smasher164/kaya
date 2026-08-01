@@ -51,11 +51,10 @@ timing() {
 SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES. (Empty since the menus sweep
-# landed its guests on mac+linux; deploy-win/run-sim/run-emulator
-# still carry menus rust-only until the next phase registers their
-# language legs.)
-DEPTH_SCENES=""
+# arrive, when they move into SCENES. (`stall` is the current one: the
+# stall diagnostic's depth slice is core + harness verb + the Rust
+# guest, and the other seven guests follow with the breadth sweep.)
+DEPTH_SCENES="stall"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1001,6 +1000,19 @@ run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debu
 # the cancel slot) driven through the native press, the id retired
 # between rounds. Desktop AND phone: alerts are the first
 # presentation context every host has natively.
+# The stall diagnostic: the one scene that deliberately blocks the app
+# thread, asserting that kaya REPORTS it (crates/kaya/src/stall.rs).
+# Rust only for now — the depth slice; the other seven follow with the
+# breadth sweep.
+#
+# ITS OWN SCRIPT EXPORT, like every group here. KAYA_SELFTEST_SCRIPT is
+# exported once per scene and PERSISTS, so a leg placed after another
+# scene's export silently runs that scene's steps — which this one did,
+# reporting confirm's assertions against a scene that has no alerts.
+KAYA_SELFTEST_SCRIPT="$(scene_script stall)"
+export KAYA_SELFTEST_SCRIPT
+run stall-rust-swiftui env KAYA_SELFTEST=stall target/debug/examples/stall
+
 KAYA_SELFTEST_SCRIPT="$(scene_script confirm)"
 export KAYA_SELFTEST_SCRIPT
 run confirm-rust-swiftui env KAYA_SELFTEST=confirm target/debug/examples/confirm

@@ -1,0 +1,23 @@
+# The stall diagnostic: an app thread that stops taking its occurrences
+# is REPORTED, not merely survived.
+#
+# This is the one scene that deliberately misuses kaya. Every other
+# guest is careful to keep blocking work off the app thread — the
+# filedialog guests each carry a paragraph explaining why they hand the
+# read to a worker — and nothing proved that kaya would notice a guest
+# that did not. DESIGN's threading section promised it would.
+#
+# WHY TWO CLICKS. The consumer cursor advances BEFORE a record reaches
+# the guest, so a handler blocking on an empty ring is indistinguishable
+# from an idle app, and rightly so: nothing is waiting on it. The second
+# click is what makes work PENDING while the app thread is gone, which
+# is both what the watchdog can see and what a person actually reports —
+# they click, and click again, and nothing happens.
+expect label#0 "ready"
+click button#0
+click button#1
+expect_stall
+# AND IT RECOVERS. The blocked handler returns, the queued click is
+# taken, and the app carries on — proving the watchdog reported a stall
+# rather than a death, and that nothing was dropped while it was gone.
+expect label#0 "pinged"

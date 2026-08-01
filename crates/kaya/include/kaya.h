@@ -979,6 +979,15 @@ typedef struct KayaHostApi {
   void (*emit_menu_activated)(uint64_t, const uint8_t*, uintptr_t);
   void (*emit_menu_toggled)(uint64_t, const uint8_t*, uintptr_t, uint8_t);
   void (*emit_menu_value_changed)(uint64_t, const uint8_t*, uintptr_t, double);
+  /**
+   * The stall watchdog's reading, for `expect_stall`. A READ rather
+   * than an emit, and it rides the vtable for the same reason every
+   * emit does: a direct symbol binds whichever kaya the loader
+   * happens to resolve, which is the wrong one on a static-Rust or
+   * RTLD_LOCAL-Python host. The interpreter must ask the ONE live
+   * instance, or it reads a watchdog watching nothing.
+   */
+  uint64_t (*stalled_ms)(void);
 } KayaHostApi;
 
 
@@ -1074,6 +1083,17 @@ uintptr_t kaya_next_occurrence(uint8_t *buf, uintptr_t cap);
  * once, finds the ring empty and its own queue empty, and parks again.
  */
 void kaya_wake(void);
+
+/**
+ * How many milliseconds the app thread has been ignoring pending
+ * occurrences, or 0 when it is keeping up.
+ *
+ * The stall watchdog's reading, for anyone outside Rust: the SwiftUI
+ * and Compose interpreters answer `expect_stall` with it, and an app
+ * that wants to report its own health can poll it. See crate::stall
+ * for what does and does not count as a stall.
+ */
+uint64_t kaya_stalled_ms(void);
 
 /**
  * Direct-access setup: the occurrence ring's memory layout. Pointers

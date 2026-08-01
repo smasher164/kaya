@@ -1225,6 +1225,7 @@ impl OccSink {
     pub(crate) fn send(&self, occurrence: Occurrence) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(occurrence));
             }
             OccSink::Ring(ring) => match occurrence {
@@ -1338,6 +1339,7 @@ impl OccSink {
     pub(crate) fn send_click_tag(&self, tag: &[u8]) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_click_tag(tag)));
             }
             OccSink::Ring(ring) => {
@@ -1351,6 +1353,7 @@ impl OccSink {
     pub(crate) fn send_toggle_tag(&self, tag: &[u8], checked: bool) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_toggled_tag(tag, checked)));
             }
             OccSink::Ring(ring) => {
@@ -1367,6 +1370,7 @@ impl OccSink {
     pub(crate) fn send_value_tag(&self, tag: &[u8], value: f64) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_value_changed_tag(tag, value)));
             }
             OccSink::Ring(ring) => {
@@ -1383,6 +1387,7 @@ impl OccSink {
     pub(crate) fn send_text_tag(&self, tag: &[u8], text: &str) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_text_changed_tag(tag, text)));
             }
             OccSink::Ring(ring) => {
@@ -1405,6 +1410,7 @@ impl OccSink {
     pub(crate) fn send_menu_activated_tag(&self, tag: &[u8]) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_activated_tag(tag)));
             }
             OccSink::Ring(ring) => {
@@ -1422,6 +1428,7 @@ impl OccSink {
     pub(crate) fn send_menu_toggled_tag(&self, tag: &[u8], checked: bool) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_toggled_tag(tag, checked)));
             }
             OccSink::Ring(ring) => {
@@ -1442,6 +1449,7 @@ impl OccSink {
     pub(crate) fn send_menu_value_tag(&self, tag: &[u8], index: f64) {
         match self {
             OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
                 let _ = tx.send(Inbox::Occ(crate::wire::decode_menu_value_tag(tag, index)));
             }
             OccSink::Ring(ring) => {

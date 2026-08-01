@@ -161,6 +161,8 @@ impl OccRing {
     /// length (record bodies always are). Panics when full; the design
     /// says never block and never drop, and growth is not built yet.
     pub fn push_record(&self, kind: u16, body: &[u8]) {
+        // One occurrence bound for the app thread (crate::stall).
+        crate::stall::enqueued();
         if !self.try_push_record(kind, body) {
             panic!("kaya occurrence ring full: segment growth is not implemented yet");
         }
@@ -241,6 +243,7 @@ impl OccRing {
                 self.head
                     .0
                     .store(head.wrapping_add(header.size), Ordering::Release);
+                crate::stall::taken();
                 return Waited::Record(header.kind, body);
             }
             if self.shutdown.load(Ordering::Acquire) {

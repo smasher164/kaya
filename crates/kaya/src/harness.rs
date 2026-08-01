@@ -189,6 +189,11 @@ impl MenuState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Settle(u64),
+    /// The app thread is ignoring pending occurrences — the stall the
+    /// watchdog reports (crate::stall). Asserted rather than merely
+    /// survived: a scene that only timed out would prove the app was
+    /// broken, not that kaya NOTICED.
+    ExpectStall,
     Click(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
@@ -421,6 +426,7 @@ impl Step {
             Step::SetValue { .. } => false,
             Step::SetText { .. } => false,
             Step::Expect { .. } => true,
+            Step::ExpectStall => true,
             Step::ExpectOrder { .. } => true,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -751,6 +757,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 rest.parse()
                     .map_err(|_| format!("settle wants milliseconds: {line:?}"))?,
             ),
+            "expect_stall" => Step::ExpectStall,
             "click" => Step::Click(parse_target(rest)?),
             "toggle" => {
                 let (target, state) = rest
@@ -1470,6 +1477,24 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
                 stage.click(*t);
                 None
             }
+            // WRAPPED IN `poll`, LIKE EVERY OTHER OBSERVATION, and it
+            // has to be: the watchdog needs its threshold to elapse
+            // before it will say anything, so a single evaluation
+            // reads "keeping up" every time. Without this the step
+            // returned in under a millisecond while the watchdog went
+            // on to report the stall correctly a second later — the
+            // assertion failing on a scene that was working.
+            //
+            // The verdict names the duration, so a leg that passes
+            // still shows how long the app was gone.
+            Step::ExpectStall => Some(poll(|| match crate::stall::stalled_for() {
+                Some(waited) => Ok(format!("stalled {}ms", waited.as_millis())),
+                None => Err(
+                    "the app thread is keeping up — no pending occurrences have gone \
+                     unclaimed, so the stall watchdog has nothing to report"
+                        .to_string(),
+                ),
+            })),
             Step::Toggle(t, on) => {
                 stage.toggle(*t, *on);
                 None

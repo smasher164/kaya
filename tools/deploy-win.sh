@@ -177,7 +177,7 @@ SCENES="background milestone2 entry gallery todos reorder feed grow layout align
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-stall}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -992,6 +992,9 @@ case "$SUITE" in
         # The confirm scene: the modal-alert grammar (ContentDialog),
         # all three answer paths through the REAL press (automation
         # peer Invoke; Hide for the cancel slot).
+        # The stall diagnostic (crates/kaya/src/stall.rs), Rust only —
+        # the watchdog is core-side, so it needs no WinUI arm.
+        run_suite stall_rust
         run_suite confirm_rust
         run_suite confirm_python
         run_suite confirm_go

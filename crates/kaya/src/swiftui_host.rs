@@ -165,6 +165,13 @@ pub struct KayaHostApi {
     pub emit_menu_activated: unsafe extern "C" fn(u64, *const u8, usize),
     pub emit_menu_toggled: unsafe extern "C" fn(u64, *const u8, usize, u8),
     pub emit_menu_value_changed: unsafe extern "C" fn(u64, *const u8, usize, f64),
+    /// The stall watchdog's reading, for `expect_stall`. A READ rather
+    /// than an emit, and it rides the vtable for the same reason every
+    /// emit does: a direct symbol binds whichever kaya the loader
+    /// happens to resolve, which is the wrong one on a static-Rust or
+    /// RTLD_LOCAL-Python host. The interpreter must ask the ONE live
+    /// instance, or it reads a watchdog watching nothing.
+    pub stalled_ms: extern "C" fn() -> u64,
 }
 
 unsafe extern "C" {
@@ -226,6 +233,7 @@ pub(crate) fn run() -> i32 {
         emit_menu_activated: crate::capi::kaya_emit_menu_activated,
         emit_menu_toggled: crate::capi::kaya_emit_menu_toggled,
         emit_menu_value_changed: crate::capi::kaya_emit_menu_value_changed,
+        stalled_ms: crate::capi::kaya_stalled_ms,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =
         unsafe { std::mem::transmute(symbol) };
