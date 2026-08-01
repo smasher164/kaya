@@ -45,6 +45,9 @@ class MainActivity : ComponentActivity() {
             "layout" -> Layout::app
             // Alerts are phone-native; confirm runs here for real.
             "confirm" -> Confirm::app
+            // The stall diagnostic: the watchdog is core-side, so this
+            // host needs no arm — see the compose tier's note.
+            "stall" -> Stall::app
             // Navigation is phone-native too: predictive back IS the
             // affordance; nav runs here for real.
             "nav" -> Nav::app

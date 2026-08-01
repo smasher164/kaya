@@ -532,6 +532,15 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity layout \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
+    # The stall diagnostic (crates/kaya/src/stall.rs): an app thread
+    # that stops taking its occurrences is REPORTED. Core-side, so no
+    # Compose arm — the leg is here because a phone is where an app
+    # that looks alive and ignores you is hardest to tell from a slow
+    # one.
+    run_apk stall-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity stall \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script stall)'"
     # The confirm scene: alerts are phone-native — the M3 dialog is
     # this host's REAL modal, and back/outside-tap IS the cancel slot.
     run_apk confirm-compose \
@@ -689,6 +698,11 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity layout \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
+    # The stall diagnostic through the JVM binding (see the compose leg).
+    run_apk stall-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity stall \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script stall)'"
     run_apk confirm-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity confirm \

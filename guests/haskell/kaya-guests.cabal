@@ -30,6 +30,11 @@ executable background
   main-is: background.hs
   build-depends: kaya-guests
 
+executable stall
+  import: shared
+  main-is: stall.hs
+  build-depends: kaya-guests
+
 executable filedialog
   import: shared
   main-is: filedialog.hs

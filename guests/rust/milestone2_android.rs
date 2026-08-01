@@ -41,6 +41,8 @@ mod align;
 mod grow;
 #[path = "confirm.rs"]
 mod confirm;
+#[path = "stall.rs"]
+mod stall;
 #[path = "nav.rs"]
 mod nav;
 mod split;
@@ -83,6 +85,11 @@ fn app(ctx: kaya::AppCtx) {
         Ok("grow") => grow::app(ctx),
         // Alerts are phone-native; confirm runs here for real.
         Ok("confirm") => confirm::app(ctx),
+        // The stall diagnostic. The watchdog is core-side and needs no
+        // arm here — the leg exists because a phone is exactly where an
+        // app that looks alive and ignores you is hardest to tell from
+        // a slow one.
+        Ok("stall") => stall::app(ctx),
         // Navigation is phone-native too: predictive back IS the
         // affordance; nav runs here for real.
         Ok("nav") => nav::app(ctx),

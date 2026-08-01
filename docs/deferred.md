@@ -68,9 +68,20 @@ own the state (see the undo note in this file).
     handler blocking on an empty ring is indistinguishable from an idle
     app — and nothing is waiting on it, so it may as well be. The scene
     therefore clicks twice, which is also what a person does.
-  STILL OPEN, the breadth: the other seven guests, and legs on iOS and
-  android. The watchdog is core-side and needs no backend arm, so this
-  is guests and runner wiring only.
+  BREADTH SWEEP COMPLETE 2026-08-01. All eight guest languages, every
+  runner: mac (8 languages), linux (7), windows (5), iOS (rust + swift),
+  android (compose + jvm). `stall` graduated out of DEPTH_SCENES on all
+  three desktop runners. Matrix ALL PASS at 868 legs, green on the first
+  try — the watchdog being core-side meant the sweep was guests and
+  runner wiring only, with no backend arm anywhere.
+  WHY EVERY LANGUAGE AND NOT JUST RUST: the misuse is available in all
+  of them, and it is the one discipline no gate enforced — each guest's
+  "do the blocking work on a worker" comment was honour-system until
+  this scene existed. A diagnostic that only fired for Rust guests would
+  have left seven bindings exactly as blind as before. Each leg is also
+  self-verifying: a guest whose block does not block reports no stall
+  and FAILS, so a passing leg is evidence that language really did wedge
+  its app thread and that kaya really did notice.
 - **GAP — a kaya app cannot do background work.** Found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the

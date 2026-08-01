@@ -74,6 +74,9 @@ public final class Main {
             case "background":
                 app = Background::app;
                 break;
+            case "stall":
+                app = Stall::app;
+                break;
             // One app behind both list-detail scripts: split resizes,
             // listdetail asserts the bare invariant where the host
             // picks the width.

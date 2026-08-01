@@ -169,7 +169,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -177,7 +177,7 @@ SCENES="background milestone2 entry gallery todos reorder feed grow layout align
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-stall}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -992,9 +992,16 @@ case "$SUITE" in
         # The confirm scene: the modal-alert grammar (ContentDialog),
         # all three answer paths through the REAL press (automation
         # peer Invoke; Hide for the cancel slot).
-        # The stall diagnostic (crates/kaya/src/stall.rs), Rust only —
-        # the watchdog is core-side, so it needs no WinUI arm.
+        # The stall diagnostic (crates/kaya/src/stall.rs): the one
+        # scene that deliberately blocks the app thread, asserting that
+        # kaya REPORTS it. EVERY LANGUAGE THIS LANE CARRIES, because
+        # the misuse it guards is available in all of them; the
+        # watchdog itself is core-side and needs no WinUI arm.
         run_suite stall_rust
+        run_suite stall_python
+        run_suite stall_go
+        run_suite stall_csharp
+        run_suite stall_java
         run_suite confirm_rust
         run_suite confirm_python
         run_suite confirm_go

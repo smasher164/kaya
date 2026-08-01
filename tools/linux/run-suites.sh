@@ -38,10 +38,10 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES="stall"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -477,11 +477,21 @@ for proto in x11 wayland; do
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
-    # The stall diagnostic (crates/kaya/src/stall.rs). Rust only for
-    # now — the watchdog is core-side and needs no backend arm, so this
-    # runs everywhere the Rust guest does; the other seven guests
-    # follow with the breadth sweep.
+    # The stall diagnostic (crates/kaya/src/stall.rs): the one scene
+    # that deliberately blocks the app thread, asserting that kaya
+    # REPORTS it. EVERY LANGUAGE, because the misuse it guards is
+    # available in every one of them — no swift leg here, as this lane
+    # has never carried one.
     run "$proto" stall-rust env KAYA_SELFTEST=stall "$CARGO_TARGET_DIR/debug/examples/stall"
+    run "$proto" stall-python env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
+        python3 guests/python/stall.py
+    run "$proto" stall-go env KAYA_SELFTEST=stall /tmp/go-guests/stall
+    run "$proto" stall-csharp env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" stall-ocaml env KAYA_SELFTEST=stall KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/stall.exe
+    run "$proto" stall-haskell env KAYA_SELFTEST=stall "$(hs_bin stall)"
+    run "$proto" stall-java env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
     run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         python3 guests/python/confirm.py

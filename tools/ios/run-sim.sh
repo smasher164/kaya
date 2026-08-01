@@ -780,7 +780,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -891,6 +891,16 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle layoutrs-swiftui dev.kaya.layoutswiftui "$TARGET_DIR/examples/layout")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on layout-swiftui "$APP" dev.kaya.layoutswiftui layout-swiftui layout layout
+
+    # The stall diagnostic (crates/kaya/src/stall.rs): an app thread
+    # that stops taking its occurrences is REPORTED. The watchdog is
+    # CORE-SIDE, so this host needs no arm of its own — the leg is here
+    # because a phone is exactly where an app that looks alive and
+    # ignores you is hardest to tell from a slow one.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example stall
+    APP=$(make_bundle stallrs-swiftui dev.kaya.stallswiftui "$TARGET_DIR/examples/stall")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on stall-swiftui "$APP" dev.kaya.stallswiftui stall-swiftui stall stall
 
     # The confirm scene: alerts are phone-native (see the swift leg).
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example confirm

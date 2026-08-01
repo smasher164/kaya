@@ -48,13 +48,12 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES. (`stall` is the current one: the
-# stall diagnostic's depth slice is core + harness verb + the Rust
-# guest, and the other seven guests follow with the breadth sweep.)
-DEPTH_SCENES="stall"
+# arrive, when they move into SCENES. (Empty again since the stall
+# sweep landed its seven remaining guests.)
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1002,8 +1001,11 @@ run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debu
 # presentation context every host has natively.
 # The stall diagnostic: the one scene that deliberately blocks the app
 # thread, asserting that kaya REPORTS it (crates/kaya/src/stall.rs).
-# Rust only for now — the depth slice; the other seven follow with the
-# breadth sweep.
+# EVERY LANGUAGE, because the misuse it guards is available in every
+# one of them — the discipline each other guest follows (blocking work
+# goes to a worker, the result comes back through post) was entirely
+# unenforced until this scene, and a diagnostic that only fires for
+# Rust guests would leave seven bindings exactly as blind as before.
 #
 # ITS OWN SCRIPT EXPORT, like every group here. KAYA_SELFTEST_SCRIPT is
 # exported once per scene and PERSISTS, so a leg placed after another
@@ -1012,6 +1014,16 @@ run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debu
 KAYA_SELFTEST_SCRIPT="$(scene_script stall)"
 export KAYA_SELFTEST_SCRIPT
 run stall-rust-swiftui env KAYA_SELFTEST=stall target/debug/examples/stall
+run stall-python-swiftui env KAYA_SELFTEST=stall python3 guests/python/stall.py
+run stall-go-swiftui env KAYA_SELFTEST=stall target/go-guests/stall
+run stall-csharp-swiftui env KAYA_SELFTEST=stall KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run stall-ocaml-swiftui env KAYA_SELFTEST=stall KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/stall.exe
+run stall-haskell-swiftui env KAYA_SELFTEST=stall "$(hs_bin stall)"
+run stall-swift-swiftui env KAYA_SELFTEST=stall target/swift-guests/stall
+run stall-java-swiftui env KAYA_SELFTEST=stall KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script confirm)"
 export KAYA_SELFTEST_SCRIPT
