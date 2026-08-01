@@ -981,86 +981,64 @@ own the state (see the undo note in this file).
   window and audio land; the blob table is its v1 realization.
 - Attach/embedding tooling rework (parked at milestone 0).
 
-## The filedialog scene has no java leg on Windows
 
-Measured 2026-07-31. The JAVA BINDING'S PICKER IS FINE — the same guest
-and the same surface are green on mac and on linux, both protocols. What
-does not work is DRIVING the Shell's dialog over UI Automation from
-inside a JVM process.
+## Retire the hand-edited shell and cmd scripts
 
-Dismissing the dialog makes uiautomationcore fault its RPC to the
-provider that just went away: RPC_E_DISCONNECTED (0x80010108), raised as
-a STRUCTURED EXCEPTION rather than returned as a failed HRESULT, on a
-COM worker thread, ASYNCHRONOUSLY — after the harness has already moved
-on to later steps. Four language legs never notice it. The JVM installs
-a process-wide exception handler, turns it into a fatal error report,
-and kills a run whose every assertion had passed.
+Raised 2026-07-31, after file dialogs. The repo already bans sed and awk
+for ad-hoc text work because BSD and GNU diverge; this is the same
+argument one level up, about the scripts themselves.
 
-Five fixes were measured and rejected, recorded so they are not retried:
-touching no UIA after the press; asking the window manager rather than
-re-reading the UIA tree for the gone-check; releasing every UIA proxy
-before the click that kills the dialog; balancing CoUninitialize so the
-apartment does not outlive the walk; `-Xrs`; and an STA client
-apartment. THREE OF THOSE WERE REAL IMPROVEMENTS AND STAYED — the
-ordering and the balanced apartment are correct regardless — but none of
-them stops this.
+The failure mode is not that shell is hard to write. It is that these
+files are easy to CORRUPT and the corruption is invisible until a lane
+runs. Measured in one session: tools/guest/*.cmd must keep CRLF or
+cmd.exe reads a lone LF as part of the command, and two separate
+attempts to edit one of them programmatically mangled it — once by
+splitting on CRLF and rejoining wrong, once by a `\r\n` that did not
+survive shell quoting into python. Neither showed up until a leg timed
+out at 327 seconds. Around the same afternoon a slice edit to
+tools/deploy-win.sh silently swallowed five `run_suite background_*`
+lines; only check-steps caught it.
 
-What would settle it, for whoever picks it up: the fault is inside
-Windows' own UIA client machinery talking to a dead provider, so the
-routes worth trying are ones that hold no provider connection across
-the dismissal at all.
+What to move, roughly in order of pain: tools/guest/*.cmd (CRLF, cmd
+escaping, forty near-identical files), tools/deploy-win.sh (the longest
+and the one whose leg ordering is load-bearing), then the rest of
+tools/*.sh. Python is the obvious target — it is already the mandated
+language for text processing here, it is in the dev shell, and it has
+real data structures for things the shell fakes with string splicing.
 
-An earlier version of this entry asserted the rows are a SysListView32
-readable with LVM_GETITEMTEXT. THAT WAS NEVER MEASURED AND IT IS WRONG
-— true of the old GetOpenFileName dialog, not of this one.
-tools/win/dialogprobe now measures it, and the real shape is:
+Two things NOT to lose in the move: the dev-shell fingerprint check
+every tools/ script starts with, and the `$?`-read-once discipline that
+tools/check-shell.sh enforces (a rule that exists only because shell
+makes it easy to get wrong — which is itself an argument for leaving).
+See also the portsh work for the cases where one script must run on both
+sides.
 
-  - The file list is SHELLDLL_DefView (id 1121) wrapping a DirectUIHWND,
-    which answers LVM_GETITEMCOUNT with 0. The rows are DirectUI items
-    and NOT windows, so no SendMessage reads them. The only
-    SysTreeView32 in the dialog is the navigation sidebar (id 100).
-  - The address bar IS a plain window: ToolbarWindow32, control id 1001,
-    whose window text is "Address: <full path>". GetWindowTextW answers
-    the current directory outright, no COM involved.
-  - The file-name box is an Edit inside a ComboBoxEx32, both control id
-    1148. Open and Cancel are Buttons with the classic ids 1 and 2.
+## MAYBE: read Windows accessibility client-side, like the other platforms
 
-So Win32 can fully DRIVE the dialog and cannot READ its row list. That
-splits the problem in a useful way, because the fault fires on
-DISMISSAL: choosing a file needs no row read at all — WM_SETTEXT the
-name into 1148 and BM_CLICK 1 — which would leave UIA holding nothing
-at the moment the dialog goes away. The row-list assertion
-(`expect_file_dialog` naming both files, the one thing that proves the
-picker is really showing that directory) would keep its UIA read, but
-it runs while the dialog is stably up and can drop every proxy before
-anything is pressed.
+Raised 2026-07-31, NOT decided. Recorded so a green lane does not read
+as a settled question.
 
-THE HELPER ROUTE IS MEASURED, not reasoned. tools/win/dialogprobe's
-`hold`/`attach` pair puts the dialog up in one process and interrogates
-it from another, which is the arrangement a helper would have, and all
-four answers came back yes on the lane's own VM:
+The Windows `expect_ax` read is IN-PROCESS and PROVIDER-SIDE: it asks
+XAML what it publishes, through FrameworkElementAutomationPeer. mac
+(AXUIElement), linux (AT-SPI) and android (an accessibility service) all
+read CLIENT-SIDE, from outside the app, which is the stronger form —
+it observes what an assistive technology would actually receive rather
+than what the app believes it exposes. The asymmetry predates the file
+dialog work and nothing about it is newly broken.
 
-  - the address toolbar (id 1001) reads "Address: <path>" through
-    GetWindowTextW across the boundary;
-  - a UIA walk from outside returns the DirectUI rows by name
-    (["decoy.txt", "picked.txt"]) — the load-bearing one, since it is
-    the only route to the row list at all;
-  - WM_SETTEXT into the file-name Edit (id 1148) takes, and reads back;
-  - BM_CLICK on IDCANCEL dismisses it.
+WHY IT IS ONLY A MAYBE. The obvious fix — a Win32 UI Automation client
+walking our own process — is now known to be the thing that cannot be
+done here: attaching any UIA client makes the shell's DirectUI raise
+automation events during message dispatch, which raises a NONCONTINUABLE
+COM exception inside the guest that HotSpot reports as fatal
+(docs/traps.md). It would have to run out of process, in the shape
+iOS's tools/ios/simdrive uses, and it would have to be guaranteed not to
+be attached while a file dialog is up. That is a lot of machinery for a
+read that currently works.
 
-So a helper can do everything the in-process read does, and the guest
-process never loads uiautomationcore. That matters beyond java: the
-fault fires on a COM worker thread and the other four runtimes merely
-SWALLOW it, so this removes an undetected structured exception from the
-Windows dismissal path in every language rather than papering over the
-one runtime that reports it.
-
-The shape to build: a helper exe the harness spawns per verb
-(`kaya-dialogdrive <pid> <verb>`, answers on stdout), finding its target
-with the EnumWindows-for-#32770 filtered by owning pid that
-file_dialog_is_up already does. It should CHOOSE THROUGH THE FILE-NAME
-BOX rather than hit-testing a row: WM_SETTEXT 1148 then BM_CLICK 1, no
-coordinates and no DirectUI. iOS's tools/ios/simdrive is the same idea
-for the same reason, and is the model to copy — including keeping the
-driver out of the lane runner so a probe cannot change what the lane
-does.
+The honest counter-argument is that a provider-side read cannot catch
+the class of bug where XAML publishes something a client cannot see, and
+that is exactly the class the a11y milestone was about. Decide on
+evidence: if a real defect ever slips past the Windows a11y legs while
+another platform's client-side read would have caught it, this stops
+being a maybe.

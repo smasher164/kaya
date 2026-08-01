@@ -1634,18 +1634,6 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 /// has laid anything out.
 /// What to do with the live file dialog: read it back, or drive it.
 #[cfg(feature = "harness")]
-enum UiaOp<'a> {
-    /// The directory it is showing and the names its list contains.
-    Read,
-    /// Select the row with this filename.
-    Select(&'a str),
-    /// Find the window of the button with this classic control id (1 is
-    /// IDOK "Open", 2 is IDCANCEL) — WITHOUT pressing it. The press
-    /// happens after this call returns, for the reason
-    /// `file_dialog_press` gives.
-    ButtonWindow(i32),
-}
-
 /// Is the Shell's file dialog on screen? Plain Win32, no COM.
 ///
 /// THE GONE-CHECK MUST NOT WALK THE DIALOG. `choose_file` presses Open
@@ -1681,222 +1669,268 @@ fn file_dialog_is_up() -> bool {
     found
 }
 
-/// Read or drive the Shell's file dialog over UI Automation.
-///
-/// UIA AND NOT THE XAML TREE, which is what every other read in this
-/// backend walks: the picker is a #32770 window owned by the shell, not
-/// a XAML object, so `on_ui_read` cannot see it at all. This is the only
-/// UIA in the backend and it exists for exactly that reason.
-///
-/// Everything below was measured against the real dialog rather than
-/// assumed (docs/traps.md): the directory is the pane with AutomationId
-/// 1001, whose name is "Address: <full path>"; the rows are ListItems
-/// whose names carry extensions ONLY when Explorer's HideFileExt is 0,
-/// which the deploy sets and verifies; and Open and Cancel are the
-/// classic control ids 1 and 2, reported as ControlType.Pane, so they
-/// offer no Invoke pattern and are pressed with BM_CLICK to their own
-/// window instead.
-///
-/// Conditions are avoided entirely: building UIA property conditions
-/// needs VARIANTs, and walking descendants under a true condition and
-/// filtering in Rust says the same thing with none of that.
+/// The live dialog's window, or nothing. Plain Win32: no COM, no
+/// automation, no messages sent.
 #[cfg(feature = "harness")]
-fn file_dialog_uia(op: UiaOp<'_>) -> Option<(String, Vec<String>)> {
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+fn live_dialog() -> Option<isize> {
+    unsafe extern "system" fn visit(hwnd: isize, found: isize) -> i32 {
+        let mut class = [0u16; 64];
+        let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if n > 0 && unsafe { IsWindowVisible(hwnd) } != 0 {
+            let name = String::from_utf16_lossy(&class[..n as usize]);
+            if name == "#32770" {
+                unsafe { *(found as *mut isize) = hwnd };
+                return 0;
+            }
+        }
+        1
+    }
+    let mut found: isize = 0;
+    unsafe { EnumWindows(Some(visit), &mut found as *mut isize as isize) };
+    (found != 0).then_some(found)
+}
+
+/// What the live dialog is SHOWING, sampled through the shell's own
+/// interfaces rather than through UI Automation.
+///
+/// UIA IS THE THING THAT MUST NOT HAPPEN, and moving the client out of
+/// process could never have fixed it, because the fault is on the
+/// PROVIDER side — inside this process. Measured stack, bottom up:
+/// USER32 dispatches a message, DirectUI (DUI70) handles it, and while
+/// handling it uiautomationcore raises an automation event to whatever
+/// client has attached, which needs an outgoing COM call. Windows
+/// refuses one from a thread dispatching an input-synchronous call and
+/// raises RPC_E_CANTCALLOUT_ININPUTSYNCCALL (0x8001010d) — flagged
+/// NONCONTINUABLE, so no handler may dismiss it. COM catches it and
+/// carries on; four runtimes never notice; HotSpot's vectored exception
+/// handler on windows-aarch64 sees the same first-chance event and
+/// reports a fatal error. So MERELY ATTACHING A UIA CLIENT makes this
+/// dialog fatal to a JVM, and nothing on the client side can help —
+/// which is why a helper process was built, measured, and thrown away.
+///
+/// The dialog is ours, created in this process, so the shell will
+/// simply say what its view holds: IServiceProvider ->
+/// SID_STopLevelBrowser -> IShellBrowser -> the active IShellView ->
+/// IFolderView -> its items. No automation client, no WM_GETOBJECT, no
+/// event notifications, no exception.
+///
+/// SAMPLED ON THE DIALOG'S OWN THREAD, because the dialog is an STA
+/// object and belongs to the thread that created it. The harness thread
+/// posts a request to a message-only window living on that thread and
+/// reads the answer out of a mutex; nothing crosses an apartment.
+#[cfg(feature = "harness")]
+mod sampler {
+    use std::sync::Mutex;
+
+    /// The message-only window on the dialog's thread, 0 when no dialog
+    /// is up.
+    pub(crate) static WINDOW: std::sync::atomic::AtomicIsize =
+        std::sync::atomic::AtomicIsize::new(0);
+    /// The last sample. Cleared when a dialog opens, so a stale answer
+    /// can never satisfy an assertion about a new one.
+    pub(crate) static VIEW: Mutex<Option<(String, Vec<String>)>> = Mutex::new(None);
+    /// WM_APP: "sample now". pub(crate) and not pub: cbindgen scrapes
+    /// public constants into the C header regardless of the privacy of
+    /// the module holding them, and this is an internal detail of one
+    /// backend rather than part of the ABI.
+    pub(crate) const SAMPLE: u32 = 0x8000;
+}
+
+#[cfg(feature = "harness")]
+fn sample_folder_view(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
+    use windows::Win32::System::Com::IServiceProvider;
+    use windows::Win32::UI::Shell::{
+        IFolderView, IShellBrowser, IShellItemArray, SVGIO_ALLVIEW, SIGDN_FILESYSPATH,
+        SIGDN_PARENTRELATIVEFORUI,
     };
-    use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationSelectionItemPattern,
-        TreeScope_Children, TreeScope_Descendants, UIA_SelectionItemPatternId,
-    };
+    // {4C96BE40-915C-11CF-99D3-00AA004AE837}, the top-level browser the
+    // dialog hosts its view in. Not exported by the metadata, so it is
+    // spelled out.
+    const SID_S_TOP_LEVEL_BROWSER: windows_core::GUID =
+        windows_core::GUID::from_u128(0x4C96BE40_915C_11CF_99D3_00AA004AE837);
+    // SVGIO_ALLVIEW is everything the view is displaying, which is the
+    // question the scene asks — not the selection, not the background.
 
-    const BM_CLICK: u32 = 0x00F5;
-    const DIALOG_CLASS: &str = "#32770";
-    const ADDRESS_ID: &str = "1001";
-    // UIA_ListItemControlTypeId; naming the constant beats the number.
-    const LIST_ITEM: i32 = 50007;
+    let sampled = (|| -> windows_core::Result<(String, Vec<String>)> {
+        let directory = unsafe { dialog.GetFolder()?.GetDisplayName(SIGDN_FILESYSPATH)? };
+        let directory = unsafe { directory.to_string()? };
 
-    unsafe {
-        // MTA: this runs on the harness thread, which owns no apartment
-        // and pumps no messages. S_FALSE (already initialized) is fine.
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        // BALANCED, and the balance is what stops an asynchronous
-        // crash. Every call here used to enter the apartment and never
-        // leave it, so the UIA proxies this walk creates outlived the
-        // walk — and when the dialog was dismissed a moment later,
-        // uiautomationcore's RPC to those dead providers faulted on a
-        // COM worker thread with RPC_E_DISCONNECTED, raised as a
-        // STRUCTURED EXCEPTION rather than a failed HRESULT. Four
-        // language legs never saw it. The JVM installs a process-wide
-        // exception handler, so for java it was a FATAL crash report
-        // arriving after the scene had already moved on — which is why
-        // it looked like it came from nowhere.
-        //
-        // Declared FIRST so it drops LAST: Rust drops locals in reverse,
-        // and CoUninitialize must come after every COM object released
-        // above it.
-        struct Apartment;
-        impl Drop for Apartment {
-            fn drop(&mut self) {
-                unsafe { windows::Win32::System::Com::CoUninitialize() };
-            }
+        let provider: IServiceProvider = dialog.cast()?;
+        let browser: IShellBrowser =
+            unsafe { provider.QueryService(&SID_S_TOP_LEVEL_BROWSER)? };
+        let view = unsafe { browser.QueryActiveShellView()? };
+        let folder: IFolderView = view.cast()?;
+        let items: IShellItemArray = unsafe { folder.Items(SVGIO_ALLVIEW)? };
+
+        let mut rows = Vec::new();
+        for i in 0..unsafe { items.GetCount()? } {
+            let item = unsafe { items.GetItemAt(i)? };
+            // PARENTRELATIVEFORUI is WHAT THE USER SEES, which is what
+            // every other backend reports and what the shared scene
+            // compares byte for byte. It honours Explorer's HideFileExt,
+            // so the deploy still has to set that to 0 — the same guard
+            // as before, for the same reason.
+            let name = unsafe { item.GetDisplayName(SIGDN_PARENTRELATIVEFORUI)? };
+            rows.push(unsafe { name.to_string()? });
         }
-        let _apartment = Apartment;
-        let automation: IUIAutomation =
-            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
-        let condition = automation.CreateTrueCondition().ok()?;
+        Ok((directory, rows))
+    })();
 
-        // The dialog is a TOP-LEVEL window, not a child of ours: the
-        // shell owns it and only makes our window its owner.
-        let root = automation.GetRootElement().ok()?;
-        let windows = root.FindAll(TreeScope_Children, &condition).ok()?;
-        let mut dialog: Option<IUIAutomationElement> = None;
-        for i in 0..windows.Length().ok()? {
-            let Ok(element) = windows.GetElement(i) else {
-                continue;
-            };
-            let class = element
-                .CurrentClassName()
-                .map(|c| c.to_string())
-                .unwrap_or_default();
-            if class == DIALOG_CLASS {
-                dialog = Some(element);
-                break;
-            }
-        }
-        let Some(dialog) = dialog else {
-            // A miss is never self-explaining: the question is always
-            // what the desktop DID publish, and one deploy cycle per
-            // answer is the expensive way to learn it.
-            static DUMPED: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(false);
-            if DUMPED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                // ONCE. expect_file_dialog is a bounded retry and calls
-                // this several times a second while a dialog is still
-                // coming up, so an unguarded dump buries the leg's own
-                // output in its normal case.
-                return None;
-            }
-            let mut seen = Vec::new();
-            for i in 0..windows.Length().unwrap_or(0) {
-                if let Ok(element) = windows.GetElement(i) {
-                    seen.push(format!(
-                        "{}/{}",
-                        element.CurrentClassName().map(|c| c.to_string()).unwrap_or_default(),
-                        element.CurrentName().map(|c| c.to_string()).unwrap_or_default()
-                    ));
-                }
-            }
-            eprintln!("KAYA_UIA_TRACE: no {DIALOG_CLASS} among {seen:?}");
-            return None;
-        };
-
-        let mut directory = String::new();
-        let mut rows: Vec<String> = Vec::new();
-        let mut acted = false;
-        let mut button: Option<isize> = None;
-
-        let all = dialog.FindAll(TreeScope_Descendants, &condition).ok()?;
-        for i in 0..all.Length().ok()? {
-            let Ok(element) = all.GetElement(i) else {
-                continue;
-            };
-            let id = element
-                .CurrentAutomationId()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            let name = element
-                .CurrentName()
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            let control = element.CurrentControlType().map(|c| c.0).unwrap_or(0);
-
-            if id == ADDRESS_ID {
-                // "Address: C:\...\kaya-picked" — the prefix is the
-                // control's label, not part of the path.
-                directory = name
-                    .split_once(": ")
-                    .map(|(_, path)| path.to_owned())
-                    .unwrap_or(name.clone());
-                continue;
-            }
-
-            if control == LIST_ITEM && !name.is_empty() {
-                rows.push(name.clone());
-                if let UiaOp::Select(want) = op {
-                    if name == want {
-                        if let Ok(pattern) = element.GetCurrentPatternAs::<
-                            IUIAutomationSelectionItemPattern,
-                        >(UIA_SelectionItemPatternId)
-                        {
-                            // Select, not AddToSelection: choosing one
-                            // file means exactly one, and a multi-select
-                            // dialog already carries a selection.
-                            acted = pattern.Select().is_ok();
-                        }
-                    }
-                }
-                continue;
-            }
-
-            if let UiaOp::ButtonWindow(want) = op {
-                if id == want.to_string() {
-                    if let Ok(hwnd) = element.CurrentNativeWindowHandle() {
-                        button = Some(hwnd.0 as isize);
-                        acted = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if let UiaOp::ButtonWindow(_) = op {
-            // Out through the thread-local rather than the return type,
-            // which every other op uses for (directory, rows).
-            PRESS_TARGET.with(|t| t.set(button));
-        }
-        match op {
-            UiaOp::Read => Some((directory, rows)),
-            _ if acted => Some((directory, rows)),
-            _ => None,
+    if let Ok(state) = sampled {
+        if let Ok(mut slot) = sampler::VIEW.lock() {
+            *slot = Some(state);
         }
     }
+}
+
+/// A control of the dialog by its classic id and class. The ids were
+/// confirmed against the real dialog by tools/win/dialogprobe rather
+/// than taken from documentation: 1 is Open, 2 is Cancel, and 1148 is
+/// the file-name box, which is an Edit inside a ComboBoxEx32 that
+/// shares its id.
+#[cfg(feature = "harness")]
+fn dialog_control(dialog: isize, id: i32, class: &str) -> Option<isize> {
+    struct Hunt<'a> {
+        id: i32,
+        class: &'a str,
+        found: isize,
+    }
+    unsafe extern "system" fn visit(hwnd: isize, param: isize) -> i32 {
+        let hunt = unsafe { &mut *(param as *mut Hunt) };
+        let mut buf = [0u16; 64];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        let class = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        if unsafe { GetDlgCtrlID(hwnd) } == hunt.id && class == hunt.class {
+            hunt.found = hwnd;
+            return 0;
+        }
+        unsafe { EnumChildWindows(hwnd, Some(visit), param) };
+        1
+    }
+    let mut hunt = Hunt { id, class, found: 0 };
+    unsafe { EnumChildWindows(dialog, Some(visit), &mut hunt as *mut Hunt as isize) };
+    (hunt.found != 0).then_some(hunt.found)
+}
+
+#[cfg(feature = "harness")]
+const ID_OK: i32 = 1;
+#[cfg(feature = "harness")]
+const ID_CANCEL: i32 = 2;
+#[cfg(feature = "harness")]
+const ID_FILENAME: i32 = 1148;
+#[cfg(feature = "harness")]
+const WM_CHAR: u32 = 0x0102;
+#[cfg(feature = "harness")]
+const EM_SETSEL: u32 = 0x00B1;
+#[cfg(feature = "harness")]
+const BM_CLICK: u32 = 0x00F5;
+
+/// The WNDCLASSW the sampler window registers. Hand-declared beside
+/// the user32 calls this file already names, rather than by enabling
+/// Win32_UI_WindowsAndMessaging for one struct.
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct WndClassW {
+    style: u32,
+    proc_: Option<unsafe extern "system" fn(isize, u32, usize, isize) -> isize>,
+    cls_extra: i32,
+    wnd_extra: i32,
+    instance: isize,
+    icon: isize,
+    cursor: isize,
+    background: isize,
+    menu_name: *const u16,
+    class_name: *const u16,
+}
+
+/// The message-only window the harness posts its sample request to.
+///
+/// It lives on the DIALOG'S thread, because that is the only thread
+/// allowed to touch an STA object, and it is a window rather than a
+/// channel because that thread is inside a modal Show() loop — a loop
+/// that pumps the thread's queue and so dispatches to this window
+/// without knowing anything about it. Nothing here crosses an
+/// apartment, which is the entire point.
+#[cfg(feature = "harness")]
+unsafe extern "system" fn sampler_proc(
+    hwnd: isize,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    if msg == sampler::SAMPLE {
+        SAMPLED_DIALOG.with(|held| {
+            if let Some(dialog) = held.borrow().as_ref() {
+                sample_folder_view(dialog);
+            }
+        });
+        return 0;
+    }
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
 #[cfg(feature = "harness")]
 thread_local! {
-    static PRESS_TARGET: std::cell::Cell<Option<isize>> = const { std::cell::Cell::new(None) };
+    /// The live dialog, reachable from the window proc above. A
+    /// thread-local and not a global: an STA interface pointer is only
+    /// valid on the thread that created it, and this is that thread.
+    static SAMPLED_DIALOG: std::cell::RefCell<Option<windows::Win32::UI::Shell::IFileOpenDialog>> =
+        const { std::cell::RefCell::new(None) };
 }
 
-/// Press Open or Cancel on the live dialog.
-///
-/// THE UIA OBJECTS ARE RELEASED BEFORE THE CLICK, and that ordering is
-/// the whole function. Pressing either button dismisses the dialog, and
-/// `SendMessageW` is synchronous — so by the time it returns, the
-/// provider behind every UIA proxy still held is gone. Releasing one
-/// then (which Rust does automatically, at end of scope) makes
-/// uiautomationcore send an RPC to a dead object: RPC_E_DISCONNECTED,
-/// raised as a STRUCTURED EXCEPTION rather than returned as a failed
-/// HRESULT. Four of the five language legs never noticed. The JVM's
-/// process-wide exception handler turns it into a FATAL error report,
-/// so the java leg died at exactly this point, every run.
-///
-/// Finding the window and clicking it are therefore two steps with a
-/// scope boundary between them: the walk hands back an HWND and drops
-/// every proxy while the dialog is still ALIVE, and the click is a
-/// plain window message with no COM held at all.
 #[cfg(feature = "harness")]
-fn file_dialog_press(control_id: i32) -> bool {
-    const BM_CLICK: u32 = 0x00F5;
-    PRESS_TARGET.with(|t| t.set(None));
-    file_dialog_uia(UiaOp::ButtonWindow(control_id));
-    match PRESS_TARGET.with(|t| t.take()) {
-        Some(hwnd) => {
-            unsafe { SendMessageW(hwnd, BM_CLICK, 0, 0) };
-            true
-        }
-        None => false,
+fn utf16(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Stand the sampler up for the life of one dialog.
+#[cfg(feature = "harness")]
+fn open_sampler(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
+    let class = utf16("KayaFileDialogSampler");
+    let instance = unsafe { GetModuleHandleW(core::ptr::null()) };
+    let mut wc: WndClassW = unsafe { core::mem::zeroed() };
+    wc.proc_ = Some(sampler_proc);
+    wc.instance = instance;
+    wc.class_name = class.as_ptr();
+    // Registering the same class twice simply fails; the class outlives
+    // any one dialog and that is fine.
+    unsafe { RegisterClassW(&wc) };
+    // HWND_MESSAGE is -3: no screen presence, no z-order, nothing but a
+    // queue endpoint.
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            core::ptr::null(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            -3,
+            0,
+            instance,
+            core::ptr::null_mut(),
+        )
+    };
+    SAMPLED_DIALOG.with(|held| *held.borrow_mut() = Some(dialog.clone()));
+    // A NEW DIALOG STARTS WITH NO ANSWER, so a sample of the previous
+    // one can never satisfy an assertion about this one.
+    if let Ok(mut slot) = sampler::VIEW.lock() {
+        *slot = None;
     }
+    sampler::WINDOW.store(hwnd, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Take it down when the dialog goes. A published handle to a window
+/// nobody pumps would leave the harness posting into nothing.
+#[cfg(feature = "harness")]
+fn close_sampler() {
+    let hwnd = sampler::WINDOW.swap(0, std::sync::atomic::Ordering::SeqCst);
+    if hwnd != 0 {
+        unsafe { DestroyWindow(hwnd) };
+    }
+    SAMPLED_DIALOG.with(|held| *held.borrow_mut() = None);
 }
 
 /// Show the Shell's common item dialog and return (name, path) per
@@ -1911,7 +1945,6 @@ fn file_dialog_show(
     filters: &[(String, String)],
     folder: Option<&str>,
 ) -> Vec<(String, String)> {
-    use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
@@ -1982,6 +2015,13 @@ fn file_dialog_show(
             dialog.SetFolder(&item)?;
             }
 
+            // The sampler lives exactly as long as the modal loop:
+            // stood up immediately before Show, taken down the instant
+            // it returns (below, outside this closure, because cancel
+            // leaves through the `?`).
+            #[cfg(feature = "harness")]
+            open_sampler(&dialog);
+
             stage = "Show";
             // NO OWNER, and that is not laziness. Show() disables its
             // owner and waits on the owner's input queue, and this runs
@@ -2012,6 +2052,12 @@ fn file_dialog_show(
             }
             Ok(())
         })();
+        // OUTSIDE THE CLOSURE, because Show() answers cancel with an
+        // Err that leaves it early — a teardown inside would run on the
+        // happy path only, and the harness would go on posting into a
+        // queue nobody pumps.
+        #[cfg(feature = "harness")]
+        close_sampler();
         // A cancelled dialog returns ERROR_CANCELLED from Show(); the
         // empty vector already says that, so nothing is logged for it.
         if let Err(err) = result {
@@ -4087,6 +4133,9 @@ const MDD_ON_NO_MATCH_SHOW_UI: i32 = 0x8;
 unsafe extern "system" {
     fn LoadLibraryW(name: *const u16) -> *mut c_void;
     fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+    /// This module's own base, for the sampler window's class.
+    #[cfg(feature = "harness")]
+    fn GetModuleHandleW(name: *const u16) -> isize;
 }
 
 #[link(name = "ole32")]
@@ -4407,13 +4456,6 @@ unsafe extern "system" {
     fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
     fn GetClientRect(hwnd: isize, rect: *mut Rect) -> i32;
 
-    /// BM_CLICK to a button's own window is how the harness presses
-    /// Open and Cancel. UI Automation reports them as ControlType.Pane
-    /// (class Button), and a Pane offers no Invoke pattern — but they
-    /// are real child windows with the classic control ids, so the
-    /// message a click sends is available directly.
-    fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
-
     /// The gone-check's three entries, declared here beside the rest
     /// rather than by enabling Win32_UI_WindowsAndMessaging: this file
     /// already names the handful of user32 calls it needs, and the
@@ -4442,6 +4484,41 @@ unsafe extern "system" {
         lparam: isize,
     ) -> isize;
     fn DefWindowProcW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+
+    /// The harness's own calls: the sampler window that lets it ask an
+    /// STA object a question from another thread, and the posts that
+    /// drive the dialog. EVERY ONE IS GATED, because WndClassW is, and
+    /// a shipped app carries none of this — check-targets builds both
+    /// feature configurations for exactly this reason.
+    #[cfg(feature = "harness")]
+    fn RegisterClassW(class: *const WndClassW) -> u16;
+    #[cfg(feature = "harness")]
+    fn EnumChildWindows(
+        parent: isize,
+        callback: Option<unsafe extern "system" fn(isize, isize) -> i32>,
+        param: isize,
+    ) -> i32;
+    #[cfg(feature = "harness")]
+    fn GetDlgCtrlID(hwnd: isize) -> i32;
+    #[cfg(feature = "harness")]
+    #[allow(clippy::too_many_arguments)]
+    fn CreateWindowExW(
+        ex_style: u32,
+        class: *const u16,
+        window: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        parent: isize,
+        menu: isize,
+        instance: isize,
+        param: *mut core::ffi::c_void,
+    ) -> isize;
+    #[cfg(feature = "harness")]
+    fn DestroyWindow(hwnd: isize) -> i32;
+    #[cfg(feature = "harness")]
     fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
 }
 
@@ -6034,55 +6111,85 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
-        // The REAL dialog, read over UI Automation as an assistive
-        // client would — never this backend's record of what it asked
-        // for. A picker aimed at the wrong place, or filtered down to
-        // nothing, presents perfectly and is useless.
+        // The REAL dialog, read through the shell's own view — never
+        // this backend's record of what it asked for. A picker aimed at
+        // the wrong place, or filtered down to nothing, presents
+        // perfectly and is useless.
         //
-        // NOT through on_ui_read: the picker is a #32770 window the
-        // shell owns, not a XAML object, so the tree this backend's
-        // other reads walk cannot see it. And the UI thread is busy
-        // being a UI thread — the dialog runs on its own.
-        file_dialog_uia(UiaOp::Read)
+        // NOT over UI Automation, which cannot be used against this
+        // dialog at all: attaching any automation client makes the
+        // shell's DirectUI raise event notifications during message
+        // dispatch, each one an outgoing COM call that Windows refuses
+        // and turns into a NONCONTINUABLE structured exception. See
+        // sample_folder_view for the measured stack.
+        //
+        // NOT through on_ui_read either: the picker is a #32770 the
+        // shell owns, not a XAML object, and it runs on its own thread.
+        let window = sampler::WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+        if window == 0 {
+            return None;
+        }
+        // Ask, then wait briefly for the dialog's own thread to answer.
+        // expect_file_dialog is itself a bounded retry, so a slow first
+        // sample costs nothing but a second lap.
+        unsafe { PostMessageW(window, sampler::SAMPLE, 0, 0) };
+        for _ in 0..20 {
+            if let Ok(slot) = sampler::VIEW.lock() {
+                if let Some(state) = slot.as_ref() {
+                    return Some(state.clone());
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        None
     }
 
     fn choose_file(&self, name: Option<&str>) {
-        match name {
-            // SELECT, THEN PRESS, in two passes so neither depends on
-            // the order the tree happens to enumerate in. Selection is
-            // not decoration: a dialog completes with the only row when
-            // nothing is selected, which is why the scene keeps a decoy
-            // that sorts first.
-            Some(file) => {
-                // BOUNDED RETRY, because one pass is a guess. The dialog
-                // takes a moment to become interactive after its list
-                // populates, and a press that lands too early is
-                // swallowed with no error anywhere — the leg then fails
-                // on a later assertion about the guest, three steps from
-                // the cause. The observable is the dialog GOING AWAY, so
-                // that is what this waits for rather than a return code.
-                for _ in 0..40 {
-                    file_dialog_uia(UiaOp::Select(file));
-                    file_dialog_press(1);
-                    // Asked of the WINDOW MANAGER, not of the dialog's
-                    // UIA tree: right after the press that tree is being
-                    // torn down, and walking it faults (see
-                    // file_dialog_is_up).
-                    if !file_dialog_is_up() {
-                        return;
+        // POSTED, NEVER SENT. A SendMessage puts the receiving thread
+        // into an input-synchronous call, and everything in this dialog
+        // calls out over COM while handling messages — the file-name box
+        // is backed by shell autocomplete, the buttons drive the shell
+        // view. Windows refuses those callouts and raises
+        // RPC_E_CANTCALLOUT_ININPUTSYNCCALL, which is fatal under a JVM
+        // (sample_folder_view). Posting queues the message and returns,
+        // leaving the dialog's thread in no special state at all.
+        //
+        // The observable is the dialog GOING AWAY, so that is what this
+        // waits for rather than a return code: a press that lands before
+        // the list is interactive is swallowed with no error anywhere,
+        // and the leg would fail three steps later on an assertion about
+        // the guest.
+        for _ in 0..40 {
+            let Some(dialog) = live_dialog() else { return };
+            match name {
+                // Named in the dialog's own file-name box rather than by
+                // hit-testing a row: the rows are DirectUI items, not
+                // windows, so there is nothing to click. Typed a
+                // character at a time because WM_SETTEXT carries a
+                // pointer, and only SendMessage marshals one.
+                Some(file) => {
+                    if let Some(edit) = dialog_control(dialog, ID_FILENAME, "Edit") {
+                        unsafe { PostMessageW(edit, EM_SETSEL, 0, -1) };
+                        for ch in file.encode_utf16() {
+                            unsafe { PostMessageW(edit, WM_CHAR, ch as usize, 1) };
+                        }
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    if let Some(ok) = dialog_control(dialog, ID_OK, "Button") {
+                        unsafe { PostMessageW(ok, BM_CLICK, 0, 0) };
+                    }
+                }
+                // Cancel is the empty list, faithfully: IDCANCEL,
+                // pressed on the dialog's own button.
+                None => {
+                    if let Some(cancel) = dialog_control(dialog, ID_CANCEL, "Button") {
+                        unsafe { PostMessageW(cancel, BM_CLICK, 0, 0) };
+                    }
                 }
             }
-            // Cancel is the empty list, faithfully. IDCANCEL, pressed on
-            // the dialog's own button.
-            None => {
-                for _ in 0..40 {
-                    file_dialog_press(2);
-                    if !file_dialog_is_up() {
-                        return;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if !file_dialog_is_up() {
+                    return;
                 }
             }
         }

@@ -2460,3 +2460,49 @@ to ignore it. Every one of these was caught on the first run by
 `file_dialog_goto`'s "does not exist" refusal rather than by a confusing
 comparison three steps later, which is the whole reason that guard
 checks the directory before aiming at it.
+
+## UI Automation cannot read the Shell's file dialog from a guest
+
+Measured 2026-07-31, after it cost most of a milestone.
+
+The Windows harness used to read the file dialog over UI Automation.
+Under a JVM that killed the run outright — `Internal Error (0x8001010d)`,
+`RPC_E_CANTCALLOUT_ININPUTSYNCCALL` — while the same scene passed in
+Rust, Python, Go and C#. It reads exactly like a Java binding defect and
+is nothing of the kind.
+
+WHAT IS ACTUALLY HAPPENING, from the stack a vectored exception handler
+captured in the guest: USER32 dispatches a message, the shell's DirectUI
+(DUI70) handles it, and while handling it `uiautomationcore` raises an
+automation event to whatever client has attached. That notification is
+an outgoing COM call, and Windows refuses one from a thread that is
+dispatching an input-synchronous call, raising a structured exception
+flagged NONCONTINUABLE. COM catches it and carries on.
+
+So it is NORMAL, HANDLED, FIRST-CHANCE control flow. The identical
+exception — same code, same address — fires in the Rust guest on every
+green run. What differs is the runtime: HotSpot installs a vectored
+exception handler on 64-bit Windows, sees the same first-chance event,
+and reports a fatal error.
+
+THREE CONSEQUENCES WORTH KEEPING:
+
+- The fault is on the PROVIDER side, inside the guest. Moving the UIA
+  CLIENT to another process cannot help, and a helper was built,
+  measured and thrown away proving it. Where the client lives is
+  irrelevant.
+- NONCONTINUABLE means no exception handler may dismiss it. There is no
+  workaround on the calling side at all.
+- Four runtimes swallowing an exception is not four runtimes being
+  fine. It was racing undetected in all of them.
+
+The dialog is created in the app's own process, so the shell will simply
+say what its view holds: `IServiceProvider` -> `SID_STopLevelBrowser` ->
+`IShellBrowser` -> `QueryActiveShellView` -> `IFolderView` -> `Items`.
+No client attaches, no `WM_GETOBJECT` is sent, nothing is raised. It is
+also four times faster than the UIA walk it replaced.
+
+THE GUARD IS THE ABSENT CARGO FEATURE: `crates/kaya/Cargo.toml` does not
+enable `Win32_UI_Accessibility`, so reaching for `IUIAutomation` fails
+`cargo build` with the reason written beside it, rather than dying as an
+unexplained JVM crash on one lane months later.
