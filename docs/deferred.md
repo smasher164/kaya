@@ -1035,7 +1035,32 @@ picker is really showing that directory) would keep its UIA read, but
 it runs while the dialog is stably up and can drop every proxy before
 anything is pressed.
 
-Worth trying in that order: move select/confirm/cancel to pure Win32
-first and re-run the java leg. If the fault survives even that, the
-remaining route is driving the dialog from OUTSIDE the guest process,
-the way iOS's simdrive works.
+THE HELPER ROUTE IS MEASURED, not reasoned. tools/win/dialogprobe's
+`hold`/`attach` pair puts the dialog up in one process and interrogates
+it from another, which is the arrangement a helper would have, and all
+four answers came back yes on the lane's own VM:
+
+  - the address toolbar (id 1001) reads "Address: <path>" through
+    GetWindowTextW across the boundary;
+  - a UIA walk from outside returns the DirectUI rows by name
+    (["decoy.txt", "picked.txt"]) — the load-bearing one, since it is
+    the only route to the row list at all;
+  - WM_SETTEXT into the file-name Edit (id 1148) takes, and reads back;
+  - BM_CLICK on IDCANCEL dismisses it.
+
+So a helper can do everything the in-process read does, and the guest
+process never loads uiautomationcore. That matters beyond java: the
+fault fires on a COM worker thread and the other four runtimes merely
+SWALLOW it, so this removes an undetected structured exception from the
+Windows dismissal path in every language rather than papering over the
+one runtime that reports it.
+
+The shape to build: a helper exe the harness spawns per verb
+(`kaya-dialogdrive <pid> <verb>`, answers on stdout), finding its target
+with the EnumWindows-for-#32770 filtered by owning pid that
+file_dialog_is_up already does. It should CHOOSE THROUGH THE FILE-NAME
+BOX rather than hit-testing a row: WM_SETTEXT 1148 then BM_CLICK 1, no
+coordinates and no DirectUI. iOS's tools/ios/simdrive is the same idea
+for the same reason, and is the model to copy — including keeping the
+driver out of the lane runner so a probe cannot change what the lane
+does.

@@ -36,8 +36,15 @@ EXE="$HERE/target/aarch64-pc-windows-msvc/release/dialogprobe.exe"
 
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 scp -q "$EXE" "$HOST:C:/kaya/dialogprobe.exe"
+# TWO PROCESSES, because the in-process answers were the easy half and
+# the arrangement that matters is a reader outside the owning process.
+# `hold` puts a dialog up and steps back; `attach` finds the first
+# #32770 that is not its own and interrogates it. Both must land in the
+# SAME interactive session — SendMessage does not cross one — which the
+# single /it task guarantees.
+#
 # CRLF, because cmd.exe reads a lone LF as part of the command.
-printf '@echo off\r\nC:\\kaya\\dialogprobe.exe %%1 > C:\\kaya\\out_dialogprobe.txt 2>&1\r\n' \
+printf '@echo off\r\nstart "" /b C:\\kaya\\dialogprobe.exe hold %%1 > C:\\kaya\\out_dialoghold.txt 2>&1\r\nping -n 6 127.0.0.1 >nul\r\nC:\\kaya\\dialogprobe.exe attach > C:\\kaya\\out_dialogprobe.txt 2>&1\r\n' \
     > "$HERE/dialogprobe.cmd"
 scp -q "$HERE/dialogprobe.cmd" "$HOST:C:/kaya/dialogprobe.cmd"
 
@@ -56,3 +63,5 @@ until ssh -n -o BatchMode=yes "$HOST" 'type C:\kaya\out_dialogprobe.txt' 2>/dev/
     sleep 2
 done
 ssh -n -o BatchMode=yes "$HOST" 'type C:\kaya\out_dialogprobe.txt'
+echo "== the holder's own view =="
+ssh -n -o BatchMode=yes "$HOST" 'type C:\kaya\out_dialoghold.txt' 2>/dev/null || true
