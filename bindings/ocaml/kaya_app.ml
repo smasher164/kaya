@@ -157,6 +157,33 @@ and tx = {
    runtime. Single-threaded by the dispatch discipline. *)
 let ambient_tx : tx option ref = ref None
 
+(* The app thread's id, learned when the dispatch loop starts. None
+   before then, which is the single-threaded construction phase. *)
+let app_thread : int option ref = ref None
+
+(* The OCaml spelling of a rule the handle bindings get from a stale-tx
+   check. [ambient_tx] above is a GLOBAL ref, not thread-local, so a
+   transaction opened on a background thread would stamp its records
+   into the app thread's open transaction -- silently, and interleaved.
+   Rust makes that a compile error (its Tx is !Send), Go, Java, C# and
+   Swift raise on a transaction that has closed; OCaml has no handle to
+   check, so it checks the thread, exactly as Python does.
+
+   Reads and writes need no guard of their own: a signal write outside
+   a transaction already fails with "no ambient transaction", which is
+   what a background thread gets. *)
+let require_app_thread () =
+  match !app_thread with
+  | Some owner when owner <> Thread.id (Thread.self ()) ->
+      failwith
+        (Printf.sprintf
+           "kaya: a transaction belongs to the app thread -- this is thread %d, the app \
+            thread is %d. To mutate from a background thread use Kaya_app.post, which runs \
+            your function as a transaction over there."
+           (Thread.id (Thread.self ()))
+           owner)
+  | _ -> ()
+
 let the_tx () =
   match !ambient_tx with
   | Some tx -> tx
@@ -310,6 +337,7 @@ let recompute_derived tx cid path =
    it atomically. A program that raises abandons its records, and the
    model abandons the same writes before the exception continues. *)
 let build app (program : unit -> 'a) =
+  require_app_thread ();
   let tx = { app; records = []; journal = []; pending_derived = [] } in
   let outer = !ambient_tx in
   ambient_tx := Some tx;
@@ -1766,6 +1794,9 @@ let drain_posted app =
   List.iter (fun program -> dispatch app program) batch
 
 let dispatch_loop app =
+  (* Claim the thread before the first occurrence: every build after
+     this point must happen here. *)
+  app_thread := Some (Thread.id (Thread.self ()));
   let rec loop () =
     (* Posted work first, then the ring, then park. Draining at the TOP
        is what makes a wake sufficient: whatever brought this thread

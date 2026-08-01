@@ -117,10 +117,29 @@ own the state (see the undo note in this file).
   checks the THREAD — `_require_app_thread` raises and names `app.post`
   as the fix. Signal writes needed no new guard: outside a transaction
   they already raise.
-  STILL OPEN for C#, Swift, Java, OCaml and Haskell: same audit, same
-  negative test. The rule is that a background thread may call exactly
-  ONE method, the post, and everything else needs a transaction handle
-  that only exists on the app thread.
+  CLOSED 2026-07-31 for the remaining five, and the sweep found that
+  the languages split in two rather than one rule fitting all:
+  - **HANDLE bindings** hand the guest a transaction object, so a stale
+    one can be refused. C# and Swift needed NO callsite changes at all —
+    every write already went through one member (`Records.Add(...)` in
+    C#, `tx.<verb>(...)` in Swift), so making that member a PROPERTY
+    that checks liveness first guards all ~100 and ~90 of them, and
+    guards the next one written. Java has no properties, so it took
+    Go's shape: 109 direct appends routed through one private `emit`.
+  - **AMBIENT bindings** keep the open transaction in a global, so
+    there is no handle to invalidate — a background build would stamp
+    into the app thread's transaction (OCaml) or race its IORefs
+    (Haskell). Both check the THREAD at the build entry, which is
+    exactly Python's `_require_app_thread`, so the three ambient
+    bindings now spell the rule identically.
+  THE GATE IS `tools/check-tx-liveness.sh`, in validate-mac: it pins
+  that each guard exists, that each chokepoint is still the ONLY way in
+  (exact counts, not "at most"), and that every message names the post
+  as the way out. Five negative tests, and the first draft of the gate
+  FAILED three of them — grepping a bare function name matched the
+  definition as well as the call, so the ocaml and haskell clauses
+  passed with the call deleted. Bounds that say "at most" hide the
+  extra write they are meant to catch.
 - ~~**DEFECT — the iPad menu lowering is wrong as of iPadOS 26**~~ —
   FIXED 2026-07-25, checked off 2026-07-27. As filed (2026-07-24): kaya
   routed the entire catalog into a trailing More overflow on every iOS

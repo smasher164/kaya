@@ -182,7 +182,7 @@ module KayaApp
   )
 where
 
-import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent (ThreadId, forkIO, myThreadId, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
@@ -201,6 +201,7 @@ import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
 import Control.Exception (SomeException, catch, evaluate)
 import System.IO (hPutStrLn, stderr)
+import System.IO.Unsafe (unsafePerformIO)
 
 import KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, registerBlob, wake, waitOccurrences)
 import qualified KayaRuntime as R
@@ -1990,8 +1991,47 @@ data App = App
 -- inside the Build's pure state and is stored back here, alongside the
 -- submit — a transaction that never reaches this point (its Build
 -- threw) leaves the model exactly as committed.
+-- | The app thread, learned when the dispatch loop starts. Nothing
+-- before then, which is the single-threaded construction phase.
+--
+-- A process-wide fact gets a process-wide ref, which is also how Python
+-- and OCaml spell it -- the three bindings whose transaction is ambient
+-- rather than a handle say this the same way.
+appThreadRef :: IORef (Maybe ThreadId)
+appThreadRef = unsafePerformIO (newIORef Nothing)
+{-# NOINLINE appThreadRef #-}
+
+-- | The Haskell spelling of a rule the handle bindings get from a
+-- stale-transaction check.
+--
+-- A Build is a pure state function, so there is no handle to invalidate
+-- -- but 'buildTx' reads and writes the app's IORefs and submits to the
+-- ring, and a background thread doing that races the app thread on both.
+-- Rust makes the equivalent a compile error (its Tx is !Send); Go, Java,
+-- C# and Swift raise on a transaction that has closed; Haskell, like
+-- Python and OCaml, has nothing to check but the thread.
+requireAppThread :: IO ()
+requireAppThread = do
+  owner <- readIORef appThreadRef
+  case owner of
+    Just expected -> do
+      here <- myThreadId
+      if here /= expected
+        then
+          error
+            ( "kaya: a transaction belongs to the app thread -- this is thread "
+                ++ show here
+                ++ ", the app thread is "
+                ++ show expected
+                ++ ". To mutate from a background thread use post, which runs your "
+                ++ "action as a transaction over there."
+            )
+        else return ()
+    Nothing -> return ()
+
 buildTx :: App -> Build a -> IO a
 buildTx app (Build f) = do
+  requireAppThread
   counters <- readIORef (appCounters app)
   (model, children) <- readIORef (appModel app)
   derived <- readIORef (appDerived app)
@@ -2179,6 +2219,9 @@ drainPosted app = do
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
+  -- Claim the thread before the first occurrence: every build after
+  -- this point must happen here.
+  myThreadId >>= \here -> writeIORef appThreadRef (Just here)
   -- Posted work first, then the ring, then park. Draining at the TOP is
   -- what makes a wake sufficient: whatever brought this thread back, it
   -- looks here before anywhere else.

@@ -122,7 +122,15 @@ in docs/deferred.md.
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
    still keyed on the prop alone), `tools/check-abort.sh` (uniform abort
-   semantics, all languages), `tools/check-verbs.sh` (every harness verb
+   semantics, all languages),
+   `tools/check-tx-liveness.sh` (a transaction is usable only inside
+   the build or handler that made it, on the app thread — the HANDLE
+   bindings refuse a closed one at a single write chokepoint, the
+   AMBIENT ones check the thread instead, having no handle to
+   invalidate. The failure it guards is SILENT: a write through an
+   already-submitted transaction vanishes with no error, which Go
+   shipped for months because its check lived on two chains and not on
+   the hundred other callsites), `tools/check-verbs.sh` (every harness verb
    and wire constant present in BOTH interpreter backends — plus the
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the

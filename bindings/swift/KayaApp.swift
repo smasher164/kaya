@@ -535,9 +535,11 @@ final class KayaApp {
         do {
             let out = try build(tx)
             tx.submitIfAny()
+            tx.close()
             return out
         } catch {
             tx.rollback()
+            tx.close()
             throw error
         }
     }
@@ -952,7 +954,46 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
 
 final class KayaAppTx {
     let app: KayaApp
-    var tx = KayaTx()
+
+    // THE ONE CHOKEPOINT. Every write in this file is `tx.<verb>(...)`
+    // — a mutating method on the struct — so a computed property that
+    // checks liveness on the way in guards all ninety of them without
+    // touching a callsite, and guards the next one too. That is the
+    // part that matters: a check spread over callsites is a check that
+    // gets forgotten. Go's lived on two chains only, and a write
+    // through a Tx that had outlived its build appended into a buffer
+    // already submitted and never submitted again — no error, the
+    // write simply vanished.
+    //
+    // Nothing invited that mistake until post arrived. Posting is
+    // exactly the reason a guest now holds a tx near a background
+    // thread, so the guard has to be total.
+    private var storage = KayaTx()
+    private var closed = false
+    var tx: KayaTx {
+        get {
+            alive()
+            return storage
+        }
+        set {
+            alive()
+            storage = newValue
+        }
+    }
+
+    /// A KayaAppTx is valid ONLY inside the build or handler that made
+    /// it, on the app thread. To mutate from anywhere else, post.
+    func alive() {
+        precondition(
+            !closed,
+            "kaya: transaction is over — a tx is only usable inside the build or handler "
+                + "that created it; to mutate from a background thread use app.post")
+    }
+
+    /// Called by build on the way out, on every path.
+    func close() {
+        closed = true
+    }
     // How to undo this transaction's mirror edits: a snapshot per
     // touched collection / signal, taken on first touch (nil = it did
     // not exist before this transaction). Derived registrations are
@@ -979,8 +1020,11 @@ final class KayaAppTx {
         for (id, recompute) in pendingDerived {
             app.derived[id, default: []].append(recompute)
         }
-        if !tx.bytes.isEmpty {
-            tx.submit()
+        // `storage` and not `tx`: the submit is the transaction's own
+        // last act, and routing it through the liveness property would
+        // make the guard trip on the very call that closes it.
+        if !storage.bytes.isEmpty {
+            storage.submit()
         }
     }
 

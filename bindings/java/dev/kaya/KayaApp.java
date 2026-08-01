@@ -282,7 +282,7 @@ public final class KayaApp {
             if (onResult != null) {
                 app.alerts.put(id, onResult);
             }
-            tx.records.add(KayaWire.txShowAlert(
+            tx.emit(KayaWire.txShowAlert(
                     window, id, actions.size(), title, message,
                     action0, action1, cancel));
             return id;
@@ -362,7 +362,7 @@ public final class KayaApp {
             if (onResult != null) {
                 app.fileDialogs.put(id, onResult);
             }
-            tx.records.add(KayaWire.txShowFileDialog(
+            tx.emit(KayaWire.txShowFileDialog(
                     window, id, multiple ? 1 : 0, filters.toArray()));
             return id;
         }
@@ -398,20 +398,20 @@ public final class KayaApp {
 
         /** The surface's title (title bar / switcher / task label). */
         public WindowRef title(String title) {
-            tx.records.add(KayaWire.txSetWindowTitle(id, title));
+            tx.emit(KayaWire.txSetWindowTitle(id, title));
             return this;
         }
 
         /** The ADVISORY content-size request in DIP. */
         public WindowRef size(double width, double height) {
-            tx.records.add(KayaWire.txSetWindowWidth(id, width));
-            tx.records.add(KayaWire.txSetWindowHeight(id, height));
+            tx.emit(KayaWire.txSetWindowWidth(id, width));
+            tx.emit(KayaWire.txSetWindowHeight(id, height));
             return this;
         }
 
         /** Arms the veto class for the chrome close. */
         public WindowRef vetoClose(boolean on) {
-            tx.records.add(KayaWire.txSetWindowVetoClose(id, on));
+            tx.emit(KayaWire.txSetWindowVetoClose(id, on));
             return this;
         }
 
@@ -420,7 +420,7 @@ public final class KayaApp {
          * There is no argument for WHICH way it presents - that is the size class's answer, not the app's.
          */
         public WindowRef listDetail(boolean on) {
-            tx.records.add(KayaWire.txSetWindowListDetail(id, on));
+            tx.emit(KayaWire.txSetWindowListDetail(id, on));
             return this;
         }
 
@@ -428,7 +428,7 @@ public final class KayaApp {
          * (KayaWire.SECTIONS_PRESENTATION_AUTO/BAR/SIDEBAR — the
          * width/height precedent; phones ignore it by physics). */
         public WindowRef sectionsPresentation(long hint) {
-            tx.records.add(KayaWire.txSetWindowSectionsPresentation(id, hint));
+            tx.emit(KayaWire.txSetWindowSectionsPresentation(id, hint));
             return this;
         }
 
@@ -448,7 +448,7 @@ public final class KayaApp {
          */
         public MenuItem menu(String label) {
             MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_MENU, label, false);
-            tx.records.add(KayaWire.txMenubarAppend(id, m.id));
+            tx.emit(KayaWire.txMenubarAppend(id, m.id));
             return m;
         }
 
@@ -462,7 +462,7 @@ public final class KayaApp {
          */
         public MenuItem radioGroup(String label) {
             MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_RADIO_GROUP, label, false);
-            tx.records.add(KayaWire.txMenubarAppend(id, m.id));
+            tx.emit(KayaWire.txMenubarAppend(id, m.id));
             return m;
         }
     }
@@ -504,7 +504,7 @@ public final class KayaApp {
 
         MenuItem child(int kind, String label) {
             MenuItem c = chain().newMenuItem(kind, label, ctx);
-            tx.records.add(KayaWire.txMenuItemAppend(id, c.id));
+            tx.emit(KayaWire.txMenuItemAppend(id, c.id));
             return c;
         }
 
@@ -550,13 +550,13 @@ public final class KayaApp {
         /** Renames the item to constant text. Label writes never emit
          * anything. */
         public MenuItem label(String text) {
-            chain().records.add(KayaWire.txSetMenuLabel(id, text));
+            chain().emit(KayaWire.txSetMenuLabel(id, text));
             return this;
         }
 
         /** Binds the item's label to a Str signal. */
         public MenuItem label(Signal<String> s) {
-            chain().records.add(KayaWire.txBindMenuLabel(id, s.id));
+            chain().emit(KayaWire.txBindMenuLabel(id, s.id));
             return this;
         }
 
@@ -564,13 +564,13 @@ public final class KayaApp {
          * writes never emit anything; disabling a grouping node
          * disables its subtree (the inherited-disabled contract). */
         public MenuItem enabled(boolean on) {
-            chain().records.add(KayaWire.txSetMenuEnabled(id, on));
+            chain().emit(KayaWire.txSetMenuEnabled(id, on));
             return this;
         }
 
         /** Binds the item's enablement to a Bool signal. */
         public MenuItem enabled(Signal<Boolean> s) {
-            chain().records.add(KayaWire.txBindMenuEnabled(id, s.id));
+            chain().emit(KayaWire.txBindMenuEnabled(id, s.id));
             return this;
         }
 
@@ -578,27 +578,27 @@ public final class KayaApp {
          * Checkbox contract. The programmatic write is configuration —
          * QUIET, no menu_toggled echo (the echo doctrine). */
         public MenuItem checked(boolean on) {
-            chain().records.add(KayaWire.txSetMenuChecked(id, on));
+            chain().emit(KayaWire.txSetMenuChecked(id, on));
             return this;
         }
 
         /** Binds a toggle's state to a Bool signal, both ways. */
         public MenuItem checked(Signal<Boolean> s) {
-            chain().records.add(KayaWire.txBindMenuChecked(id, s.id));
+            chain().emit(KayaWire.txBindMenuChecked(id, s.id));
             return this;
         }
 
         /** A radio group's selected option index (radio groups only —
          * root-checked): the Choice contract. QUIET, like checked. */
         public MenuItem value(int index) {
-            chain().records.add(KayaWire.txSetMenuValue(id, index));
+            chain().emit(KayaWire.txSetMenuValue(id, index));
             return this;
         }
 
         /** Binds a radio group's selected index to a float signal,
          * both ways. */
         public MenuItem value(Signal<Double> s) {
-            chain().records.add(KayaWire.txBindMenuValue(id, s.id));
+            chain().emit(KayaWire.txBindMenuValue(id, s.id));
             return this;
         }
 
@@ -606,7 +606,7 @@ public final class KayaApp {
          * promotion, ignored where native menu dress has no icons.
          * Const-only. */
         public MenuItem icon(byte[] data) {
-            chain().records.add(KayaWire.txSetMenuIcon(id, KayaRing.blobRegister(data)));
+            chain().emit(KayaWire.txSetMenuIcon(id, KayaRing.blobRegister(data)));
             return this;
         }
 
@@ -614,7 +614,7 @@ public final class KayaApp {
          * Flipping it recomputes the promoted set deterministically;
          * INERT on desktops — not a toolbar grammar. Const-only. */
         public MenuItem primary(boolean on) {
-            chain().records.add(KayaWire.txSetMenuPrimary(id, on));
+            chain().emit(KayaWire.txSetMenuPrimary(id, on));
             return this;
         }
 
@@ -631,7 +631,7 @@ public final class KayaApp {
                         "kaya: a context item takes no role — a role names a"
                                 + " standard command in the window catalog");
             }
-            chain().records.add(KayaWire.txSetMenuRole(id, name));
+            chain().emit(KayaWire.txSetMenuRole(id, name));
             return this;
         }
 
@@ -647,7 +647,7 @@ public final class KayaApp {
                         "kaya: a context item takes no shortcut — a shortcut needs"
                                 + " a window catalog as its native dispatch home");
             }
-            chain().records.add(KayaWire.txSetMenuShortcut(id, spelling));
+            chain().emit(KayaWire.txSetMenuShortcut(id, spelling));
             return this;
         }
 
@@ -720,7 +720,7 @@ public final class KayaApp {
 
         MenuItem root(int kind, String label) {
             MenuItem m = tx.newMenuItem(kind, label, true);
-            tx.records.add(KayaWire.txContextAttach(widget, m.id));
+            tx.emit(KayaWire.txContextAttach(widget, m.id));
             return m;
         }
 
@@ -815,14 +815,14 @@ public final class KayaApp {
 
         /** The entry's title — the back affordance's label source. */
         public EntryRef title(String title) {
-            tx.records.add(KayaWire.txSetEntryTitle(id, title));
+            tx.emit(KayaWire.txSetEntryTitle(id, title));
             return this;
         }
 
         /** Arms the close-veto class transplanted to POP: back emits
          * back_requested and nothing pops until popEntry agrees. */
         public EntryRef interceptBack(boolean on) {
-            tx.records.add(KayaWire.txSetEntryInterceptBack(id, on));
+            tx.emit(KayaWire.txSetEntryInterceptBack(id, on));
             return this;
         }
 
@@ -865,7 +865,7 @@ public final class KayaApp {
 
         /** The switcher item's label — the tab title everywhere. */
         public SectionRef title(String title) {
-            tx.records.add(KayaWire.txSetSectionTitle(id, title));
+            tx.emit(KayaWire.txSetSectionTitle(id, title));
             return this;
         }
 
@@ -1173,6 +1173,37 @@ public final class KayaApp {
 
         private final List<byte[]> records = new ArrayList<>();
 
+        /**
+         * THE ONE CHOKEPOINT: the only place that appends to a
+         * transaction. Every constructor, setter and chain method goes
+         * through it so the liveness check cannot be forgotten at a new
+         * callsite. The check used to live on the chain methods only,
+         * so a write through a Tx that had outlived its build appended
+         * into a list already submitted and never submitted again — no
+         * exception, no error, the write simply vanished.
+         *
+         * <p>Nothing invited that mistake until {@code post} arrived.
+         * Posting is exactly the reason a guest now holds a Tx near a
+         * background thread, so the guard has to be total.
+         */
+        private void emit(byte[] record) {
+            alive();
+            records.add(record);
+        }
+
+        /**
+         * A Tx is valid ONLY inside the build or handler that made it,
+         * on the app thread. To mutate from anywhere else, post.
+         */
+        void alive() {
+            if (closed) {
+                throw new IllegalStateException(
+                        "kaya: transaction is over — a Tx is only usable inside the build or "
+                                + "handler that created it; to mutate from a background thread "
+                                + "use App.post");
+            }
+        }
+
         // How to undo this transaction's model edits: a snapshot per
         // touched collection, taken on first touch.
         private final Map<Long, List<Instance>> journal = new HashMap<>();
@@ -1342,17 +1373,17 @@ public final class KayaApp {
 
         public <V> Signal<V> signal(V initial) {
             Signal s = new Signal<>(++signals);
-            records.add(KayaWire.txCreateSignal(s.id, initial));
+            emit(KayaWire.txCreateSignal(s.id, initial));
             return s;
         }
 
         public <V> void write(Signal<V> s, V value) {
-            records.add(KayaWire.txWriteSignal(s.id, value));
+            emit(KayaWire.txWriteSignal(s.id, value));
         }
 
         public Widget widget(int kind) {
             Widget w = new Widget(++widgets, this);
-            records.add(KayaWire.txCreateWidget(w.id, kind));
+            emit(KayaWire.txCreateWidget(w.id, kind));
             autoParent(w.id);
             return w;
         }
@@ -1366,16 +1397,16 @@ public final class KayaApp {
         void autoParent(long id) {
             long p = currentParent();
             if (p != 0) {
-                records.add(KayaWire.txAddChild(p, id));
+                emit(KayaWire.txAddChild(p, id));
             }
         }
 
         public void setText(Widget w, String text) {
-            records.add(KayaWire.txSetText(w.id, text));
+            emit(KayaWire.txSetText(w.id, text));
         }
 
         public void setChecked(Widget w, boolean checked) {
-            records.add(KayaWire.txSetChecked(w.id, checked));
+            emit(KayaWire.txSetChecked(w.id, checked));
         }
 
         /**
@@ -1387,7 +1418,7 @@ public final class KayaApp {
          * spelling and the dynamic path.
          */
         public void setGrow(Widget w, double weight) {
-            records.add(KayaWire.txSetGrow(w.id, weight));
+            emit(KayaWire.txSetGrow(w.id, weight));
         }
 
         /**
@@ -1396,7 +1427,7 @@ public final class KayaApp {
          * rejects it anywhere else.
          */
         public void setSpacing(Widget w, double gap) {
-            records.add(KayaWire.txSetSpacing(w.id, gap));
+            emit(KayaWire.txSetSpacing(w.id, gap));
         }
 
         /**
@@ -1405,7 +1436,7 @@ public final class KayaApp {
          * root.
          */
         public void setAlign(Widget w, Align align) {
-            records.add(KayaWire.txSetAlign(w.id, align.wire));
+            emit(KayaWire.txSetAlign(w.id, align.wire));
         }
 
         /**
@@ -1416,7 +1447,7 @@ public final class KayaApp {
          * chain at construction.
          */
         public void setA11yId(Widget w, String id) {
-            records.add(KayaWire.txSetA11yId(w.id, id));
+            emit(KayaWire.txSetA11yId(w.id, id));
         }
 
         /**
@@ -1428,7 +1459,7 @@ public final class KayaApp {
          * needs nothing here.
          */
         public void setA11yLabel(Widget w, String label) {
-            records.add(KayaWire.txSetA11yLabel(w.id, label));
+            emit(KayaWire.txSetA11yLabel(w.id, label));
         }
 
         /**
@@ -1438,15 +1469,15 @@ public final class KayaApp {
          * Activation kinds only; the root rejects it elsewhere.
          */
         public void setA11yHint(Widget w, String hint) {
-            records.add(KayaWire.txSetA11yHint(w.id, hint));
+            emit(KayaWire.txSetA11yHint(w.id, hint));
         }
 
         public void bindChecked(Widget w, Signal<Boolean> s) {
-            records.add(KayaWire.txBindChecked(w.id, s.id));
+            emit(KayaWire.txBindChecked(w.id, s.id));
         }
 
         public void bindText(Widget w, Signal<String> s) {
-            records.add(KayaWire.txBindText(w.id, s.id));
+            emit(KayaWire.txBindText(w.id, s.id));
         }
 
         /**
@@ -1457,11 +1488,11 @@ public final class KayaApp {
          * Handles are single-submit: setting again re-registers.
          */
         public void setSource(Widget w, byte[] source) {
-            records.add(KayaWire.txSetSource(w.id, KayaRing.blobRegister(source)));
+            emit(KayaWire.txSetSource(w.id, KayaRing.blobRegister(source)));
         }
 
         public void bindSource(Widget w, Signal<byte[]> s) {
-            records.add(KayaWire.txBindSource(w.id, s.id));
+            emit(KayaWire.txBindSource(w.id, s.id));
         }
 
         // Construction sugar: containers take their body as a
@@ -1492,7 +1523,7 @@ public final class KayaApp {
          * across rows (the thing nested rows cannot express). */
         public Widget grid(int columns, Runnable body) {
             Widget parent = widget(KayaWire.KIND_GRID);
-            records.add(KayaWire.txSetColumns(parent.id, columns));
+            emit(KayaWire.txSetColumns(parent.id, columns));
             parents.add(parent.id);
             if (body != null) {
                 body.run();
@@ -1506,7 +1537,7 @@ public final class KayaApp {
          * siblings. */
         public Widget spacer() {
             Widget w = widget(KayaWire.KIND_COLUMN);
-            records.add(KayaWire.txSetGrow(w.id, 1.0));
+            emit(KayaWire.txSetGrow(w.id, 1.0));
             return w;
         }
 
@@ -1551,14 +1582,14 @@ public final class KayaApp {
          * progressIndeterminate is the activity-mode arm. */
         public Widget progress(double value) {
             Widget w = widget(KayaWire.KIND_PROGRESS);
-            records.add(KayaWire.txSetValue(w.id, value));
+            emit(KayaWire.txSetValue(w.id, value));
             return w;
         }
 
         /** A progress bar in the platform's activity mode. */
         public Widget progressIndeterminate() {
             Widget w = widget(KayaWire.KIND_PROGRESS);
-            records.add(KayaWire.txSetIndeterminate(w.id, true));
+            emit(KayaWire.txSetIndeterminate(w.id, true));
             return w;
         }
 
@@ -1569,9 +1600,9 @@ public final class KayaApp {
         public Widget slider(double min, double max, Signal<Double> value,
                 BiConsumer<Tx, Double> onChange) {
             Widget w = widget(KayaWire.KIND_SLIDER);
-            records.add(KayaWire.txSetMin(w.id, min));
-            records.add(KayaWire.txSetMax(w.id, max));
-            records.add(KayaWire.txBindValue(w.id, value.id));
+            emit(KayaWire.txSetMin(w.id, min));
+            emit(KayaWire.txSetMax(w.id, max));
+            emit(KayaWire.txBindValue(w.id, value.id));
             if (onChange != null) {
                 KayaApp.this.onValueChanged(w, onChange);
             }
@@ -1583,9 +1614,9 @@ public final class KayaApp {
         public Widget slider(double min, double max, double value,
                 BiConsumer<Tx, Double> onChange) {
             Widget w = widget(KayaWire.KIND_SLIDER);
-            records.add(KayaWire.txSetMin(w.id, min));
-            records.add(KayaWire.txSetMax(w.id, max));
-            records.add(KayaWire.txSetValue(w.id, value));
+            emit(KayaWire.txSetMin(w.id, min));
+            emit(KayaWire.txSetMax(w.id, max));
+            emit(KayaWire.txSetValue(w.id, value));
             if (onChange != null) {
                 KayaApp.this.onValueChanged(w, onChange);
             }
@@ -1608,7 +1639,7 @@ public final class KayaApp {
                 setText(o, option);
             }
             parents.remove(parents.size() - 1);
-            records.add(KayaWire.txSetValue(w.id, selected));
+            emit(KayaWire.txSetValue(w.id, selected));
             if (onSelect != null) {
                 KayaApp.this.onValueChanged(w,
                         (tx, v) -> onSelect.accept(tx, (int) (double) v));
@@ -1629,7 +1660,7 @@ public final class KayaApp {
                 setText(o, option);
             }
             parents.remove(parents.size() - 1);
-            records.add(KayaWire.txSetValue(w.id, selected));
+            emit(KayaWire.txSetValue(w.id, selected));
             if (onSelect != null) {
                 KayaApp.this.onValueChanged(w,
                         (tx, v) -> onSelect.accept(tx, (int) (double) v));
@@ -1693,7 +1724,7 @@ public final class KayaApp {
         }
 
         public void addChild(Widget parent, Widget child) {
-            records.add(KayaWire.txAddChild(parent.id, child.id));
+            emit(KayaWire.txAddChild(parent.id, child.id));
         }
 
         /**
@@ -1707,20 +1738,20 @@ public final class KayaApp {
          * empties itself — never a side assignment).
          */
         public void clear(Widget w) {
-            records.add(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_CLEAR));
+            emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_CLEAR));
         }
 
         /** Give the widget keyboard focus (the post-submit refocus
          * every real form wants) — a one-shot command riding the
          * transaction like clear. */
         public void focus(Widget w) {
-            records.add(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
+            emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
         }
 
         public Collection collection() {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
-            records.add(KayaWire.txCreateCollection(c.id, new int[][] { { KayaWire.VALUE_STR } }));
+            emit(KayaWire.txCreateCollection(c.id, new int[][] { { KayaWire.VALUE_STR } }));
             return c;
         }
 
@@ -1747,7 +1778,7 @@ public final class KayaApp {
             // must land after template_end — an addChild inside the
             // blueprint would cross zones.
             long parent = currentParent();
-            records.add(KayaWire.txCreateFor(w.id, c.id));
+            emit(KayaWire.txCreateFor(w.id, c.id));
             openFors.add(c.id);
             parents.add(0L);
             // try/finally: a throwing body abandons the tx but the app
@@ -1761,9 +1792,9 @@ public final class KayaApp {
             }
             parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
-            records.add(KayaWire.txTemplateEnd());
+            emit(KayaWire.txTemplateEnd());
             if (parent != 0) {
-                records.add(KayaWire.txAddChild(parent, w.id));
+                emit(KayaWire.txAddChild(parent, w.id));
             }
             return new Stamped<>(w, out);
         }
@@ -1779,7 +1810,7 @@ public final class KayaApp {
             c.assertRoot();
             long id = tplDepth > 0 ? ++nodes : ++widgets;
             long parent = currentParent();
-            records.add(KayaWire.txCreateFor(id, c.id));
+            emit(KayaWire.txCreateFor(id, c.id));
             openFors.add(c.id);
             parents.add(0L);
             openTraces++;
@@ -1790,10 +1821,10 @@ public final class KayaApp {
                 tplDepth--;
                 parents.remove(parents.size() - 1);
                 openFors.remove(openFors.size() - 1);
-                records.add(KayaWire.txTemplateEnd());
+                emit(KayaWire.txTemplateEnd());
                 openTraces--;
                 if (parent != 0) {
-                    records.add(KayaWire.txAddChild(parent, id));
+                    emit(KayaWire.txAddChild(parent, id));
                 }
             });
         }
@@ -1809,7 +1840,7 @@ public final class KayaApp {
         public <R> Stamped<Widget, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Widget w = new Widget(++widgets, this);
             long parent = currentParent();
-            records.add(KayaWire.txCreateWhen(w.id, s.id));
+            emit(KayaWire.txCreateWhen(w.id, s.id));
             parents.add(0L);
             tplDepth++;
             R out;
@@ -1819,22 +1850,22 @@ public final class KayaApp {
                 tplDepth--;
             }
             parents.remove(parents.size() - 1);
-            records.add(KayaWire.txTemplateEnd());
+            emit(KayaWire.txTemplateEnd());
             if (parent != 0) {
-                records.add(KayaWire.txAddChild(parent, w.id));
+                emit(KayaWire.txAddChild(parent, w.id));
             }
             return new Stamped<>(w, out);
         }
 
         public void insert(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, 0, new Object[] { value }));
+            emit(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, 0, new Object[] { value }));
             recomputeDerived(c);
         }
 
         public void update(Collection c, Object key, Object value) {
             modelSet(c.id, c.path, key, value);
-            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, 0, new Object[] { value }));
+            emit(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, 0, new Object[] { value }));
             recomputeDerived(c);
         }
 
@@ -1847,29 +1878,29 @@ public final class KayaApp {
         Collection collectionWithVariants(int[][] variants) {
             Collection c = new Collection(++collections, java.util.Collections.emptyList());
             registerCollection(c.id);
-            records.add(KayaWire.txCreateCollection(c.id, variants));
+            emit(KayaWire.txCreateCollection(c.id, variants));
             return c;
         }
 
         void emitVariantCase(int variant) {
-            records.add(KayaWire.txVariantCase(variant));
+            emit(KayaWire.txVariantCase(variant));
         }
 
         void insertRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, variant, fields));
+            emit(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, variant, fields));
             recomputeDerived(c);
         }
 
         void updateRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, variant, fields));
+            emit(KayaWire.txCollectionUpdate(c.id, c.path.toArray(), key, variant, fields));
             recomputeDerived(c);
         }
 
         void updateFieldRaw(Collection c, Object key, Object model, int variant, int field, Object value) {
             modelSet(c.id, c.path, key, model);
-            records.add(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, variant, value));
+            emit(KayaWire.txCollectionUpdateField(c.id, c.path.toArray(), key, field, variant, value));
             recomputeDerived(c);
         }
 
@@ -1940,13 +1971,13 @@ public final class KayaApp {
                 return;
             }
             modelMove(c.id, c.path, key, before);
-            records.add(KayaWire.txCollectionMove(c.id, c.path.toArray(), key, before));
+            emit(KayaWire.txCollectionMove(c.id, c.path.toArray(), key, before));
             recomputeDerived(c);
         }
 
         public void remove(Collection c, Object key) {
             modelRemove(c.id, c.path, key);
-            records.add(KayaWire.txCollectionRemove(c.id, c.path.toArray(), key));
+            emit(KayaWire.txCollectionRemove(c.id, c.path.toArray(), key));
             recomputeDerived(c);
         }
 
@@ -1988,7 +2019,7 @@ public final class KayaApp {
          * the window vocabulary.
          */
         public void mount(Widget root) {
-            records.add(KayaWire.txMount(0, root.id));
+            emit(KayaWire.txMount(0, root.id));
         }
 
         /**
@@ -2037,7 +2068,7 @@ public final class KayaApp {
         }
 
         public WindowRef createWindow(long id) {
-            records.add(KayaWire.txCreateWindow(id));
+            emit(KayaWire.txCreateWindow(id));
             return new WindowRef(this, KayaApp.this, id);
         }
 
@@ -2052,12 +2083,12 @@ public final class KayaApp {
          * chrome close.
          */
         public void destroyWindow(long id) {
-            records.add(KayaWire.txDestroyWindow(id));
+            emit(KayaWire.txDestroyWindow(id));
         }
 
         /** Mount a root into a specific window; mounting presents. */
         public void mountIn(long window, Widget root) {
-            records.add(KayaWire.txMount(window, root.id));
+            emit(KayaWire.txMount(window, root.id));
         }
 
         /**
@@ -2068,14 +2099,14 @@ public final class KayaApp {
          * tx.pushEntry(7).title("detail").interceptBack(true).
          */
         public EntryRef pushEntry(long id) {
-            records.add(KayaWire.txPushEntry(0, id));
+            emit(KayaWire.txPushEntry(0, id));
             return new EntryRef(this, KayaApp.this, id);
         }
 
         /** Push onto another window's stack (the System Settings
          * shape: a stack inside a desktop auxiliary). */
         public EntryRef pushEntryIn(long window, long id) {
-            records.add(KayaWire.txPushEntry(window, id));
+            emit(KayaWire.txPushEntry(window, id));
             return new EntryRef(this, KayaApp.this, id);
         }
 
@@ -2085,11 +2116,11 @@ public final class KayaApp {
          * onBackRequested. Popping an empty stack is a scene error.
          */
         public void popEntry() {
-            records.add(KayaWire.txPopEntry(0));
+            emit(KayaWire.txPopEntry(0));
         }
 
         public void popEntryIn(long window) {
-            records.add(KayaWire.txPopEntry(window));
+            emit(KayaWire.txPopEntry(window));
         }
 
         /**
@@ -2102,24 +2133,24 @@ public final class KayaApp {
          * tx.addSection(7).title("Feed").onSelected(tx -> …).
          */
         public SectionRef addSection(long id) {
-            records.add(KayaWire.txAddSection(0, id));
+            emit(KayaWire.txAddSection(0, id));
             return new SectionRef(this, KayaApp.this, id);
         }
 
         /** Append onto another window's section set. */
         public SectionRef addSectionIn(long window, long id) {
-            records.add(KayaWire.txAddSection(window, id));
+            emit(KayaWire.txAddSection(window, id));
             return new SectionRef(this, KayaApp.this, id);
         }
 
         /** Select a section programmatically: configuration, never
          * echoes onSelected (the echo doctrine). */
         public void selectSection(long id) {
-            records.add(KayaWire.txSelectSection(0, id));
+            emit(KayaWire.txSelectSection(0, id));
         }
 
         public void selectSectionIn(long window, long id) {
-            records.add(KayaWire.txSelectSection(window, id));
+            emit(KayaWire.txSelectSection(window, id));
         }
 
         // --- Menus: the command vocabulary (DESIGN.md, Menus) --------
@@ -2137,9 +2168,9 @@ public final class KayaApp {
                                 + " template with Tpl.contextMenu");
             }
             MenuItem m = new MenuItem(++menuItems, this, KayaApp.this, ctx);
-            records.add(KayaWire.txMenuItemCreate(m.id, kind));
+            emit(KayaWire.txMenuItemCreate(m.id, kind));
             if (label != null) {
-                records.add(KayaWire.txSetMenuLabel(m.id, label));
+                emit(KayaWire.txSetMenuLabel(m.id, label));
             }
             return m;
         }
@@ -2182,7 +2213,7 @@ public final class KayaApp {
          * Android).
          */
         public void windowTitle(String title) {
-            records.add(KayaWire.txSetWindowTitle(0, title));
+            emit(KayaWire.txSetWindowTitle(0, title));
         }
 
     }
@@ -2200,13 +2231,13 @@ public final class KayaApp {
 
         public Node widget(int kind) {
             Node n = new Node(++nodes);
-            tx.records.add(KayaWire.txCreateWidget(n.id, kind));
+            tx.emit(KayaWire.txCreateWidget(n.id, kind));
             tx.autoParent(n.id);
             return n;
         }
 
         public void setText(Node n, String text) {
-            tx.records.add(KayaWire.txSetText(n.id, text));
+            tx.emit(KayaWire.txSetText(n.id, text));
         }
 
         /**
@@ -2214,25 +2245,25 @@ public final class KayaApp {
          * Fors up (0 = nearest).
          */
         public void bindTextElement(Node n, int level) {
-            tx.records.add(KayaWire.txBindTextElement(n.id, level, 0));
+            tx.emit(KayaWire.txBindTextElement(n.id, level, 0));
         }
 
         /** Bind a label's text to one field of the element; a String
          * field token only — the type pins it at compile time. */
         public void bindTextField(Node n, int level, KayaRecords.Field<String> f) {
-            tx.records.add(KayaWire.txBindTextElement(n.id, level, f.index));
+            tx.emit(KayaWire.txBindTextElement(n.id, level, f.index));
         }
 
         /** Bind a checkbox's state to one field of the element; a
          * Boolean field token only. */
         public void bindCheckedField(Node n, int level, KayaRecords.Field<Boolean> f) {
-            tx.records.add(KayaWire.txBindCheckedElement(n.id, level, f.index));
+            tx.emit(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
 
         /** Bind an image's source to one field of the element; a
          * byte[] field token only — the type pins it at compile time. */
         public void bindSourceField(Node n, int level, KayaRecords.Field<byte[]> f) {
-            tx.records.add(KayaWire.txBindSourceElement(n.id, level, f.index));
+            tx.emit(KayaWire.txBindSourceElement(n.id, level, f.index));
         }
 
         // The template flavor of the sugar: bindings take field
@@ -2265,7 +2296,7 @@ public final class KayaApp {
 
         public Node label(Signal<String> s) {
             Node n = widget(KayaWire.KIND_LABEL);
-            tx.records.add(KayaWire.txBindText(n.id, s.id));
+            tx.emit(KayaWire.txBindText(n.id, s.id));
             return n;
         }
 
@@ -2279,13 +2310,13 @@ public final class KayaApp {
          * at record time, and every stamp shows them. */
         public Node image(byte[] source) {
             Node n = widget(KayaWire.KIND_IMAGE);
-            tx.records.add(KayaWire.txSetSource(n.id, KayaRing.blobRegister(source)));
+            tx.emit(KayaWire.txSetSource(n.id, KayaRing.blobRegister(source)));
             return n;
         }
 
         public Node image(Signal<byte[]> s) {
             Node n = widget(KayaWire.KIND_IMAGE);
-            tx.records.add(KayaWire.txBindSource(n.id, s.id));
+            tx.emit(KayaWire.txBindSource(n.id, s.id));
             return n;
         }
 
@@ -2311,7 +2342,7 @@ public final class KayaApp {
             }
             catalog.attached = true;
             for (long root : catalog.roots) {
-                tx.records.add(KayaWire.txContextAttachNode(n.id, root));
+                tx.emit(KayaWire.txContextAttachNode(n.id, root));
             }
         }
 
@@ -2330,7 +2361,7 @@ public final class KayaApp {
         }
 
         public void addChild(Node parent, Node child) {
-            tx.records.add(KayaWire.txAddChild(parent.id, child.id));
+            tx.emit(KayaWire.txAddChild(parent.id, child.id));
         }
 
         public Collection collection() {
@@ -2349,7 +2380,7 @@ public final class KayaApp {
             c.assertRoot();
             Node n = new Node(++nodes);
             long parent = tx.currentParent();
-            tx.records.add(KayaWire.txCreateFor(n.id, c.id));
+            tx.emit(KayaWire.txCreateFor(n.id, c.id));
             openFors.add(c.id);
             parents.add(0L);
             tplDepth++;
@@ -2361,9 +2392,9 @@ public final class KayaApp {
             }
             parents.remove(parents.size() - 1);
             openFors.remove(openFors.size() - 1);
-            tx.records.add(KayaWire.txTemplateEnd());
+            tx.emit(KayaWire.txTemplateEnd());
             if (parent != 0) {
-                tx.records.add(KayaWire.txAddChild(parent, n.id));
+                tx.emit(KayaWire.txAddChild(parent, n.id));
             }
             return new Stamped<>(n, out);
         }
@@ -2378,7 +2409,7 @@ public final class KayaApp {
         public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
             Node n = new Node(++nodes);
             long parent = tx.currentParent();
-            tx.records.add(KayaWire.txCreateWhen(n.id, s.id));
+            tx.emit(KayaWire.txCreateWhen(n.id, s.id));
             parents.add(0L);
             tplDepth++;
             R out;
@@ -2388,9 +2419,9 @@ public final class KayaApp {
                 tplDepth--;
             }
             parents.remove(parents.size() - 1);
-            tx.records.add(KayaWire.txTemplateEnd());
+            tx.emit(KayaWire.txTemplateEnd());
             if (parent != 0) {
-                tx.records.add(KayaWire.txAddChild(parent, n.id));
+                tx.emit(KayaWire.txAddChild(parent, n.id));
             }
             return new Stamped<>(n, out);
         }

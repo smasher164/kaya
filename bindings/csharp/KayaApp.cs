@@ -401,6 +401,7 @@ sealed class KayaApp
         catch
         {
             tx.Rollback();
+            tx.Close();
             throw;
         }
         finally
@@ -408,6 +409,10 @@ sealed class KayaApp
             CurrentTx = null;
         }
         tx.SubmitIfAny();
+        // AFTER the submit, and on the throwing path too (the catch
+        // above rethrows, so this line is not reached there — Close is
+        // called in the catch as well).
+        tx.Close();
     }
 
     /// Register a click handler for a live widget.
@@ -668,7 +673,45 @@ sealed class KayaApp
 sealed class Tx
 {
     internal readonly KayaApp App;
-    internal readonly List<byte[]> Records = new();
+
+    // THE ONE CHOKEPOINT. Every one of the hundred-odd writes in this
+    // file is `Records.Add(...)`, so making Records a property that
+    // checks liveness first guards all of them without touching a
+    // single callsite — and guards the next one too, which is the part
+    // that matters. A check spread over the callsites is a check that
+    // gets forgotten: Go's lived on the Widget and MenuItem chains
+    // only, and a write through a Tx that had outlived its Build
+    // appended into a list already submitted and never submitted
+    // again. No exception, no error, the write simply vanished.
+    //
+    // Nothing invited that mistake until App.Post arrived. Posting is
+    // exactly the reason a guest now holds a Tx near a background
+    // thread, so the guard has to be total.
+    readonly List<byte[]> records = new();
+    internal List<byte[]> Records
+    {
+        get
+        {
+            Alive();
+            return records;
+        }
+    }
+
+    // Set when Build finishes with this transaction, committed or not.
+    bool closed;
+
+    /// A Tx is valid ONLY inside the Build or handler that made it, on
+    /// the app thread. To mutate from anywhere else, post.
+    internal void Alive()
+    {
+        if (closed)
+            throw new InvalidOperationException(
+                "kaya: transaction is over — a Tx is only usable inside the Build or "
+                    + "handler that created it; to mutate from a background thread use App.Post");
+    }
+
+    /// Called by Build on the way out, on every path.
+    internal void Close() => closed = true;
 
     // How to undo this transaction's model edits: a snapshot per
     // touched collection, taken on first touch.
@@ -703,8 +746,11 @@ sealed class Tx
             list.Add(recompute);
         }
         pendingSignalDeps.Clear();
-        if (Records.Count > 0)
-            Kaya.Submit(Records.ToArray());
+        // `records` and not `Records`: the submit is the transaction's
+        // own last act, and routing it through the liveness property
+        // would make the guard trip on the very call that closes it.
+        if (records.Count > 0)
+            Kaya.Submit(records.ToArray());
     }
 
     internal void Rollback()
