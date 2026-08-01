@@ -52,9 +52,28 @@ windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Foundation_Collections",
     "Win32_System_Com",
-    "Win32_UI_Accessibility",
+# NO Win32_UI_Accessibility, DELIBERATELY, and this is a wall rather
+# than a preference. UI Automation cannot be used against the Shell's
+# file dialog from a guest process: attaching any automation client
+# makes the shell's DirectUI raise event notifications during message
+# dispatch, each an outgoing COM call that Windows refuses from a thread
+# in an input-synchronous call, raising a NONCONTINUABLE
+# RPC_E_CANTCALLOUT_ININPUTSYNCCALL inside the guest. COM handles it and
+# four runtimes never notice; HotSpot's vectored exception handler on
+# windows-aarch64 reports it as a fatal error and kills the java leg.
+# Measured end to end; the read now goes through the shell's own
+# IFolderView instead (winui/mod.rs, sample_folder_view).
+#
+# Leaving the feature off means a future attempt to reach for
+# IUIAutomation fails `cargo build` here rather than dying as an
+# unexplained JVM crash on one lane.
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    # IShellBrowser derives from IOleWindow, so the metadata gates it
+    # behind Ole. It is the route from the file dialog to the view it is
+    # showing (sample_folder_view) — the read that replaced UI
+    # Automation, which cannot be used against this dialog at all.
+    "Win32_System_Ole",
 ] }
 windows-numerics = "0.3"
 windows-collections = "0.3"
