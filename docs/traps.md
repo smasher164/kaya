@@ -2506,3 +2506,40 @@ THE GUARD IS THE ABSENT CARGO FEATURE: `crates/kaya/Cargo.toml` does not
 enable `Win32_UI_Accessibility`, so reaching for `IUIAutomation` fails
 `cargo build` with the reason written beside it, rather than dying as an
 unexplained JVM crash on one lane months later.
+
+## A rebooted Windows VM refuses every shortcut-injection leg
+
+Measured 2026-07-31. Ten legs — menus and commands, all five languages
+— failed reproducibly with "could not foreground the guest window for
+shortcut injection", alone and concurrent, on a commit that had passed
+three times earlier the same evening. Nothing in kaya had changed; the
+VM had been rebooted in between.
+
+WHY. Windows denies SetForegroundWindow to a process that did not
+receive the last input event, and makes everyone else wait
+ForegroundLockTimeout — 200000 ms by default. Shortcut injection needs
+the guest window foregrounded, so with the default value those legs
+only ever passed because the session had incidentally accumulated input
+from earlier runs. A long-lived VM hides this completely. A fresh boot
+removes it, and every one of those legs fails at once.
+
+TWO THINGS THAT LOOK LIKE FIXES AND ARE NOT. Synthesizing input from a
+helper does nothing: the foreground right is granted to the process
+that RECEIVED the input, which is the helper, not the guest. And the
+assert's own wording sent the search the wrong way — it names an active
+Start menu as "the usual cause", which was true of the 2026-07-25
+incident but not of this one, so a screenshot showing an idle desktop
+read as ruling nothing out.
+
+THE FIX IS A SETTING THE DEPLOY OWNS. tools/deploy-win.sh writes
+ForegroundLockTimeout=0, applies it to the live session with
+SystemParametersInfo (a registry write alone waits for the next logon),
+and VERIFIES it — the third setting in that file to exist because the
+desktop can quietly refuse a window the foreground, after HideFileExt
+and toasts. Any settings visit, or any reboot, can put it back.
+
+THE LESSON FOR NEXT TIME, since two of the night's dead ends were the
+same shape: when a lane goes red after an environment event and the
+same commit was green before it, bisect against the ENVIRONMENT first
+(stash the changes and re-run the old commit) rather than reading the
+diff. Both answers came in one command.

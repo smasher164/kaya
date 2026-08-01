@@ -306,6 +306,43 @@ case "$toasts" in
         ;;
 esac
 
+# THE FOREGROUND LOCK MUST BE OFF, and this is the third setting in a
+# row that exists because the desktop can quietly refuse a window the
+# foreground.
+#
+# Windows denies SetForegroundWindow to a process that has not received
+# the last input event, and waits ForegroundLockTimeout (200000 ms by
+# default) before letting anyone else in. Every shortcut-injection leg
+# needs the guest window foregrounded, so with the default value the
+# ONLY reason those legs pass is that some earlier leg happened to
+# deliver input to the session. A long-running VM accumulates that
+# incidentally, which is why this was invisible for months.
+#
+# A REBOOT REMOVES IT. Measured 2026-07-31: after restarting the VM,
+# every menus and commands leg failed — ten of them, in all five
+# languages, reproducibly, alone and concurrent — with "could not
+# foreground the guest window". Nothing had changed in kaya; the same
+# commit had passed three times that evening. Synthesizing input from a
+# helper does NOT fix it, because the foreground right is granted to the
+# process that received the input, which was the helper.
+#
+# Zero means SetForegroundWindow always succeeds. SystemParametersInfo
+# applies it to the LIVE session (a registry write alone waits for the
+# next logon), so both are done.
+run_ssh 'reg add "HKCU\Control Panel\Desktop" /v ForegroundLockTimeout /t REG_DWORD /d 0 /f >nul'
+run_ssh 'powershell -NoProfile -Command "$s=\"[DllImport(\`\"user32.dll\`\")] public static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);\"; $t=Add-Type -MemberDefinition $s -Name Spi -Namespace W -PassThru; $null=$t::SystemParametersInfo(0x2001,0,[IntPtr]::Zero,2)"' >/dev/null 2>&1 || true
+fglock="$(run_ssh 'reg query "HKCU\Control Panel\Desktop" /v ForegroundLockTimeout' 2>/dev/null | tr -d '\r')"
+case "$fglock" in
+    *0x0*) ;;
+    *)
+        echo "deploy-win: the guest still holds a foreground lock — every" >&2
+        echo "  shortcut-injection leg will fail as though WinUI could not raise" >&2
+        echo "  its own window, which is what a freshly rebooted VM looks like." >&2
+        echo "  Got: $fglock" >&2
+        exit 1
+        ;;
+esac
+
 for guest in $SCENES; do
     run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
     # The whole package, not just main.go: guests with generated sum
@@ -447,7 +484,27 @@ else
         "$ROOT"/tools/guest/*.vbs \
         "$ROOT/tools/guest/minimal-resources.pri" \
         "$ROOT/tools/guest/shot.ps1" \
-        "$HOST:C:/kaya/"
+        "$HOST:C:/kaya/" || {
+        # WHAT TO DO NEXT, because scp's own message ("dest open ...:
+        # Failure") names neither the cause nor the fix. A copy of
+        # kaya.dll fails for exactly one reason in practice: a guest
+        # from an earlier run is still alive and holding it. Aborted
+        # deploys are the usual source — killing this script leaves the
+        # wscript shims and their guests orphaned on the VM.
+        #
+        # set -e already stops here, which is the important part: the
+        # alternative is a lane that runs every leg against the PREVIOUS
+        # dll and reports green for code that was never deployed.
+        echo "deploy-win: could not overwrite the deployed artifacts." >&2
+        echo "  A guest process from an earlier run is almost certainly still" >&2
+        echo "  holding C:\\kaya\\kaya.dll. Check with:" >&2
+        echo "    ssh $HOST 'tasklist | findstr /i \"wscript exe\"'" >&2
+        echo "  and clear it with:" >&2
+        echo "    ssh $HOST 'cmd /c \"taskkill /f /im wscript.exe & exit /b 0\"'" >&2
+        echo "  A process tasklist shows but taskkill cannot kill is wedged;" >&2
+        echo "  reboot the VM (ssh $HOST 'shutdown /r /t 0') and re-run." >&2
+        exit 1
+    }
     # Recreated from scratch every deploy: dotnet run picks up whatever
     # sources and project files are in the directory, so a leftover from a
     # renamed or removed example would poison the build.
