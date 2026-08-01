@@ -29,6 +29,13 @@
 -- click is taken, and the label shows it — so the watchdog reported a
 -- stall rather than a death, and nothing was dropped.
 --
+-- AND THEN ONE THAT NEVER COMES BACK. A handler blocking for 2.5
+-- seconds is a SLOW handler, and every assertion above would pass for
+-- one; a real deadlock does not politely end. `wedge` never returns, so
+-- the scene ends there — and the leg still reports its verdict, because
+-- the harness runs on its own thread and asks the MAIN thread to exit.
+-- Neither path needs the app thread that is gone.
+--
 -- See guests/rust/stall.rs and tools/scenes/stall.steps.
 
 import Control.Concurrent (threadDelay)
@@ -41,6 +48,15 @@ import KayaWire (Value (..))
 -- microseconds.
 blockMicros :: Int
 blockMicros = 2500000
+
+-- AND ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+-- has. A day rather than a literal park, because "forever" is spelled
+-- differently in all eight languages and some of those spellings wake
+-- their runtime's own deadlock detector; within a leg that lasts
+-- seconds, a day and forever are the same thing. The process exits out
+-- from under it.
+wedgeMicros :: Int
+wedgeMicros = 86400 * 1000000
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -64,6 +80,10 @@ main = kayaMain $ \app -> do
           buttonOn
             "ping" -- button#1
             (buildTx app (writeSignal status (VStr "pinged")))
+            [],
+          buttonOn
+            "wedge" -- button#2
+            (threadDelay wedgeMicros)
             []
         ]
     mount root

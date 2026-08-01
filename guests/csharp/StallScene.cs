@@ -27,6 +27,13 @@
 // click is taken, and the label shows it — so the watchdog reported a
 // stall rather than a death, and nothing was dropped.
 //
+// AND THEN ONE THAT NEVER COMES BACK. A handler blocking for 2.5
+// seconds is a SLOW handler, and every assertion above would pass for
+// one; a real deadlock does not politely end. `wedge` never returns, so
+// the scene ends there — and the leg still reports its verdict, because
+// the harness runs on its own thread and asks the MAIN thread to exit.
+// Neither path needs the app thread that is gone.
+//
 // See guests/rust/stall.rs and tools/scenes/stall.steps.
 
 using System;
@@ -38,6 +45,14 @@ static class StallScene
     // enough that the leg is not paying for it: the scene asserts the
     // stall and then the recovery, so this is the whole cost.
     const int BlockMs = 2500;
+
+    // AND ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+    // has. A day rather than a literal park, because "forever" is spelled
+    // differently in all eight languages and some of those spellings wake
+    // their runtime's own deadlock detector; within a leg that lasts
+    // seconds, a day and forever are the same thing. The process exits out
+    // from under it.
+    const int WedgeMs = 86400 * 1000;
 
     public static void Run()
     {
@@ -66,6 +81,10 @@ static class StallScene
                 tx.Button("ping", inner =>  // button#1
                 {
                     inner.Write(status, "pinged");
+                });
+                tx.Button("wedge", inner =>  // button#2
+                {
+                    Thread.Sleep(WedgeMs);
                 });
             }));
         });

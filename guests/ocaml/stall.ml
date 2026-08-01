@@ -27,6 +27,13 @@
    click is taken, and the label shows it — so the watchdog reported a
    stall rather than a death, and nothing was dropped.
 
+   AND THEN ONE THAT NEVER COMES BACK. A handler blocking for 2.5
+   seconds is a SLOW handler, and every assertion above would pass for
+   one; a real deadlock does not politely end. `wedge` never returns, so
+   the scene ends there — and the leg still reports its verdict, because
+   the harness runs on its own thread and asks the MAIN thread to exit.
+   Neither path needs the app thread that is gone.
+
    See guests/rust/stall.rs and tools/scenes/stall.steps. *)
 
 open Kaya_wire
@@ -36,6 +43,14 @@ open Kaya_app
    enough that the leg is not paying for it: the scene asserts the stall
    and then the recovery, so this is the whole cost. *)
 let block_seconds = 2.5
+
+(* AND ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+   has. A day rather than a literal park, because "forever" is spelled
+   differently in all eight languages and some of those spellings wake
+   their runtime's own deadlock detector; within a leg that lasts
+   seconds, a day and forever are the same thing. The process exits out
+   from under it. *)
+let wedge_seconds = 86400.
 
 let () =
   let app = Kaya_app.create () in
@@ -50,6 +65,7 @@ let () =
          does, and what the watchdog's own message tells you to do. *)
       let block () = Thread.delay block_seconds in
       let ping () = write status (Str "pinged") in
+      let wedge () = Thread.delay wedge_seconds in
 
       (* Children are THUNKS: omitting the trailing unit leaves one, and
          the container realizes them left to right (the curried-children
@@ -60,6 +76,7 @@ let () =
             label ~a11y_id:"status" ~bind:status (* label#0 *);
             button ~text:"block" ~on_click:block (* button#0 *);
             button ~text:"ping" ~on_click:ping (* button#1 *);
+            button ~text:"wedge" ~on_click:wedge (* button#2 *);
           ]
           ()
       in

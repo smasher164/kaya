@@ -32,6 +32,13 @@ import dev.kaya.KayaApp;
  * queued click is taken, and the label shows it — so the watchdog
  * reported a stall rather than a death, and nothing was dropped.
  *
+ * <p>AND THEN ONE THAT NEVER COMES BACK. A handler blocking for 2.5
+ * seconds is a SLOW handler, and every assertion above would pass for
+ * one; a real deadlock does not politely end. `wedge` never returns, so
+ * the scene ends there — and the leg still reports its verdict, because
+ * the harness runs on its own thread and asks the MAIN thread to exit.
+ * Neither path needs the app thread that is gone.
+ *
  * <p>See guests/rust/stall.rs and tools/scenes/stall.steps.
  */
 final class Stall {
@@ -41,6 +48,16 @@ final class Stall {
      * stall and then the recovery, so this is the whole cost.
      */
     private static final long BLOCK_MS = 2500;
+
+    /**
+     * AND ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+     * has. A day rather than a literal park, because "forever" is spelled
+     * differently in all eight languages and some of those spellings wake
+     * their runtime's own deadlock detector; within a leg that lasts
+     * seconds, a day and forever are the same thing. The process exits out
+     * from under it.
+     */
+    private static final long WEDGE_MS = 86_400_000L;
 
     static void app() {
         KayaApp app = new KayaApp();
@@ -66,6 +83,13 @@ final class Stall {
                 });
                 tx.button("ping", inner -> { // button#1
                     inner.write(status, "pinged");
+                });
+                tx.button("wedge", inner -> { // button#2
+                    try {
+                        Thread.sleep(WEDGE_MS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 });
             }));
         });

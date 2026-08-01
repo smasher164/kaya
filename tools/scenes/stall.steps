@@ -21,3 +21,22 @@ expect_stall
 # taken, and the app carries on — proving the watchdog reported a stall
 # rather than a death, and that nothing was dropped while it was gone.
 expect label#0 "pinged"
+
+# THEN THE ONE THAT NEVER COMES BACK, which is the shape a real
+# deadlock has: a handler that blocks for 2.5 seconds is a slow handler,
+# and every assertion above would also pass for one. This half proves
+# the report survives an app thread that is simply gone.
+#
+# THE SETTLE IS LOAD-BEARING, and it is not a lifecycle sleep. The
+# watchdog clears its reading when the queue drains, and it polls at
+# 100ms — so without a pause the assertion below could be satisfied by
+# the reading left over from the FIRST stall, and would pass even if
+# the second wedge did nothing at all.
+settle 300
+click button#2
+click button#1
+expect_stall
+# NOTHING FOLLOWS, and nothing can: the app thread never returns. That
+# the leg still reports a verdict at all is the other half of what this
+# proves — the harness runs on its own thread and asks the MAIN thread
+# to exit, so neither path needs the app thread that is wedged.

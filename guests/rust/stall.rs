@@ -28,18 +28,34 @@
 //! The recovery is asserted too. The blocked handler returns, the
 //! queued click is taken, and the label shows it — so the watchdog
 //! reported a stall rather than a death, and nothing was dropped.
+//!
+//! AND THEN ONE THAT NEVER COMES BACK. A handler blocking for 2.5
+//! seconds is a SLOW handler, and every assertion above would pass for
+//! one; a real deadlock does not politely end. `wedge` never returns,
+//! so the scene ends there — and the leg still reports its verdict,
+//! because the harness runs on its own thread and asks the MAIN thread
+//! to exit. Neither path needs the app thread that is gone.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
     enum Msg {
         Block,
         Ping,
+        Wedge,
     }
 
     // Comfortably past the watchdog's one-second threshold, and short
     // enough that the leg is not paying for it: the scene asserts the
     // stall and then the recovery, so this is the whole cost.
     const BLOCK: std::time::Duration = std::time::Duration::from_millis(2500);
+
+    // AND ONE THAT NEVER COMES BACK, which is the shape a real deadlock
+    // has. A day rather than a literal park, because "forever" is
+    // spelled differently in all eight languages and some of those
+    // spellings wake their runtime's own deadlock detector; within a
+    // leg that lasts seconds, a day and forever are the same thing. The
+    // process exits out from under it.
+    const WEDGE: std::time::Duration = std::time::Duration::from_secs(86_400);
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
@@ -52,6 +68,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(block, Msg::Block);
                 let ping = tx.button("ping").id(); // button#1
                 msgs.on_click(ping, Msg::Ping);
+                let wedge = tx.button("wedge").id(); // button#2
+                msgs.on_click(wedge, Msg::Wedge);
             })
             .id();
         tx.mount(root);
@@ -66,6 +84,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // does, and what the watchdog's message tells you to do.
             Msg::Block => std::thread::sleep(BLOCK),
             Msg::Ping => ctx.apply(|tx| tx.write(status, "pinged")),
+            Msg::Wedge => std::thread::sleep(WEDGE),
         }
     }
 }

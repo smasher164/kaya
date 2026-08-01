@@ -82,6 +82,28 @@ own the state (see the undo note in this file).
   self-verifying: a guest whose block does not block reports no stall
   and FAILS, so a passing leg is evidence that language really did wedge
   its app thread and that kaya really did notice.
+  AND THE NEVER-RECOVERS HALF, added the same day: a third button whose
+  handler never returns, asserted LAST because nothing can follow it. A
+  handler that blocks for 2.5 seconds is a SLOW handler, and every
+  assertion in the first half would also pass for one; a real deadlock
+  does not politely end. Two findings from it:
+  - **The verdict has to be final.** `finish` prints the verdict and
+    asks the MAIN thread for an orderly exit, which is what normally
+    ends the process. But an app thread that never returns cannot take
+    part in shutdown — the cleanup would have to run on the thread that
+    is gone — and five of the eight bindings then hung at exit waiting
+    for it (python, go, csharp, ocaml, haskell; rust and java exited
+    fine). Every assertion passed and the legs still burned their whole
+    180-second timeout. No framework can fix that: there is nowhere
+    left to run the cleanup. The harness now waits a grace period after
+    `finish` and then leaves under its own verdict, so the normal path
+    still wins everywhere it works.
+  - **The settle before the second stall is load-bearing.** The
+    watchdog clears its reading when the queue drains and polls at
+    100ms, so without a pause the second assertion could be satisfied
+    by the FIRST stall's leftover reading. Negative-tested: with the
+    wedge made a no-op the leg fails, so it cannot pass on the stale
+    value.
 - **GAP — a kaya app cannot do background work.** Found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the

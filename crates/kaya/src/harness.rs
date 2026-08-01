@@ -1382,13 +1382,36 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             let _ = std::io::stdout().flush();
             std::process::exit(1);
         }
+        // AND THE VERDICT IS FINAL EVEN IF NOTHING CAN SHUT DOWN.
+        //
+        // `finish` printed the verdict and asked the main thread for an
+        // orderly exit, which is what normally ends the process a
+        // moment later. But an app thread that never returns cannot
+        // participate in shutdown — cleanup would have to run on the
+        // very thread that is gone — and five of the eight bindings
+        // then hang at exit waiting for it (python, go, csharp, ocaml
+        // and haskell; measured 2026-08-01 on the stall scene's
+        // permanent wedge, where every assertion passed and the leg
+        // still burned its whole 180-second timeout).
+        //
+        // No framework can fix that: there is nowhere left to run the
+        // cleanup. What it can do is stop pretending an orderly exit is
+        // coming. The grace period lets the normal path win whenever it
+        // works — which is every scene but this one — and the process
+        // leaves under its own verdict when it does not.
+        let code = outcome.unwrap_or(1);
+        std::thread::sleep(Duration::from_secs(3));
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        let _ = std::io::stdout().flush();
+        std::process::exit(code);
     });
 }
 
 /// The synchronous run loop, factored out of spawn so tests can drive
 /// it with a mock stage.
 pub fn run(steps: Vec<Step>, stage: impl Stage) {
-    run_with_log(steps, stage, None);
+    let _ = run_with_log(steps, stage, None);
 }
 
 /// Recording handshake: when the runner exports KAYA_HARNESS_GATE, it
@@ -1430,7 +1453,10 @@ fn record_linger() {
     }
 }
 
-fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
+/// Returns the verdict's exit code, which the harness thread needs
+/// after `finish` in order to leave under its own verdict when nothing
+/// else can end the process (see spawn).
+fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i32 {
     if log.is_some() {
         gate_wait();
     }
@@ -1452,7 +1478,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     if !steps.iter().any(Step::is_assertion)
     {
         stage.finish(1, "KAYA_SELFTEST: FAILED (script has no expects)");
-        return;
+        return 1;
     }
     let mut observed = Vec::new();
     let mut failures = Vec::new();
@@ -2085,8 +2111,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) {
     record_linger();
     if failures.is_empty() {
         stage.finish(0, &format!("KAYA_SELFTEST: OK ({})", observed.join(", ")));
+        0
     } else {
         stage.finish(1, &format!("KAYA_SELFTEST: FAILED ({})", failures.join("; ")));
+        1
     }
 }
 
