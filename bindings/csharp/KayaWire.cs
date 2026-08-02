@@ -12,13 +12,18 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x4d40b317286880f6;
+    public const ulong SpecHash = 0x1e193381cb6ed308;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
     public const uint ValueF64 = 3;
     public const uint ValueStr = 4;
     public const uint ValueBlob = 5;
+    public const uint ClipText = 1;
+    public const uint ClipHtml = 2;
+    public const uint ClipImage = 4;
+    public const uint ClipFiles = 8;
+    public const uint ClipCustom = 16;
     public const uint KindColumn = 1;
     public const uint KindButton = 2;
     public const uint KindLabel = 3;
@@ -47,6 +52,7 @@ static class KayaWire
     public const uint PropA11yId = 12;
     public const uint PropA11yLabel = 13;
     public const uint PropA11yHint = 14;
+    public const uint PropAccepts = 15;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -915,6 +921,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropA11yHint); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant accepts value.
+    public static byte[] TxSetAccepts(ulong widgetId, double accepts)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAccepts); w.Write(SourceConst);
+        EncodeValue(w, accepts);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound accepts value.
+    public static byte[] TxBindAccepts(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAccepts); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindAcceptsElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropAccepts); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

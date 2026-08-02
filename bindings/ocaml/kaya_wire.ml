@@ -15,13 +15,18 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x4d40b317286880f6L
+let spec_hash = 0x1e193381cb6ed308L
 
 let value_bool = 1
 let value_i64 = 2
 let value_f64 = 3
 let value_str = 4
 let value_blob = 5
+let clip_text = 1
+let clip_html = 2
+let clip_image = 4
+let clip_files = 8
+let clip_custom = 16
 let kind_column = 1
 let kind_button = 2
 let kind_label = 3
@@ -50,6 +55,7 @@ let prop_columns = 11
 let prop_a11y_id = 12
 let prop_a11y_label = 13
 let prop_a11y_hint = 14
+let prop_accepts = 15
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -810,6 +816,32 @@ let tx_bind_a11y_hint_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_a11y_hint);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant accepts value. *)
+let tx_set_accepts widget_id accepts =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_accepts);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 accepts))
+
+(* set_property with a signal-bound accepts value. *)
+let tx_bind_accepts widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_accepts);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_accepts_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_accepts);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

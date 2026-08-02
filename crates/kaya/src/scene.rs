@@ -339,6 +339,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // column is a labelled group to an assistive client, and a
         // harness must be able to address one.
         Prop::A11yId | Prop::A11yLabel => true,
+        // Acceptance is scoped to what can RECEIVE a paste. A column
+        // cannot take content; an entry and a textarea can, and so can
+        // any widget an app makes its own paste target. Kept to the
+        // text kinds for now because those are the ones with native
+        // paste behaviour to override — widening it is a decision about
+        // which kinds get a paste hook, not about this prop.
+        Prop::Accepts => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
         // The hint is the ONE accessibility prop that is not universal,
         // and the reason is the platforms' own definition rather than a
         // lowering gap: a hint says what ACTIVATING the control does,
@@ -397,6 +404,10 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint => ValueType::Str,
+        // A MASK over the clip enum, carried in the numeric slot like
+        // every other scalar. Not an enum-typed slot: a widget accepts
+        // a SET, and align (the only enum prop) carries exactly one.
+        Prop::Accepts => ValueType::F64,
     }
 }
 

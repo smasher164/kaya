@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x4d40b317286880f6
+let kayaSpecHash: UInt64 = 0x1e193381cb6ed308
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -112,6 +112,10 @@ private let propColumns: UInt32 = 11
 private let propA11yId: UInt32 = 12
 private let propA11yLabel: UInt32 = 13
 private let propA11yHint: UInt32 = 14
+/// Which clip representations this widget accepts, a mask over the
+/// clip enum. Read but not yet acted on: the paste hook and the
+/// standard-command enablement it feeds are still to come.
+private let propAccepts: UInt32 = 15
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -152,6 +156,10 @@ final class KayaNode: Identifiable {
     var a11yId = ""
     var a11yLabel = ""
     var a11yHint = ""
+    /// Which clip representations this widget accepts, a mask over the
+    /// clip enum. Recorded here because the paste hook and the standard
+    /// commands' enablement both read it off the focused node.
+    var accepts: UInt32 = 0
     var checked = false
     var value = 0.0
     var minValue = 0.0
@@ -1600,6 +1608,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propA11yHint, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.a11yHint = String(decoding: bytes, as: UTF8.self)
+                case (propAccepts, valueF64):
+                    // A MASK in the numeric slot, not an enum ordinal:
+                    // a widget accepts a set.
+                    kayaScene.nodes[id]!.accepts = UInt32(
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.

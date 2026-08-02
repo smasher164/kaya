@@ -10,13 +10,18 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x4d40b317286880f6
+SPEC_HASH = 0x1e193381cb6ed308
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
 VALUE_F64 = 3
 VALUE_STR = 4
 VALUE_BLOB = 5
+CLIP_TEXT = 1
+CLIP_HTML = 2
+CLIP_IMAGE = 4
+CLIP_FILES = 8
+CLIP_CUSTOM = 16
 KIND_COLUMN = 1
 KIND_BUTTON = 2
 KIND_LABEL = 3
@@ -45,6 +50,7 @@ PROP_COLUMNS = 11
 PROP_A11Y_ID = 12
 PROP_A11Y_LABEL = 13
 PROP_A11Y_HINT = 14
+PROP_ACCEPTS = 15
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -560,6 +566,21 @@ def tx_bind_a11y_hint(widget_id, signal_id):
 def tx_bind_a11y_hint_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_A11Y_HINT, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_accepts(widget_id, accepts):
+    """set_property with a constant accepts value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ACCEPTS, SOURCE_CONST) + _enc.value(accepts))
+
+
+def tx_bind_accepts(widget_id, signal_id):
+    """set_property with a signal-bound accepts value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ACCEPTS, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_accepts_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ACCEPTS, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

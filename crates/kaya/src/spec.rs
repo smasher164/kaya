@@ -151,6 +151,21 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // the gesture, while TalkBack prefixes "double tap to", so only the
     // verb phrase reads correctly on both.
     ("a11y_hint", 14, PropKind::Str),
+    // WHICH CLIP REPRESENTATIONS THIS WIDGET ACCEPTS, as a mask over
+    // the `clip` enum. Per-widget and not app-global, because whether
+    // Paste should be live is the INTERSECTION of what the clipboard
+    // offers and what the focused target takes: a search field wants
+    // plain text, a rich editor also wants images. Every platform asks
+    // exactly this of the focused target — canPerformAction on Apple,
+    // and Android's setOnReceiveContentListener takes the accepted MIME
+    // types as an argument ON THE VIEW.
+    //
+    // It does three jobs from one declaration: it drives whether the
+    // standard Paste command is enabled while this widget is focused,
+    // it filters what can ever reach the widget's paste hook, and on
+    // Android it IS the native registration. Text widgets default to
+    // text alone.
+    ("accepts", 15, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -1222,6 +1237,29 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("bool", 1), ("i64", 2), ("f64", 3), ("str", 4), ("blob", 5)],
         },
         EnumSpec {
+            // WHAT A CLIP CAN BE OFFERED AS. Closed on purpose
+            // (docs/clipboard-plan.md §0): the platform lowerings are
+            // real work only kaya can absorb — CF_HTML's mandatory
+            // offset header, Android's content:// URI for an image,
+            // CF_HDROP's DROPFILES struct — and an open MIME map would
+            // push every one of them onto guest authors in eight
+            // languages. `custom` is the escape hatch, passed through
+            // opaquely under an app-chosen id: it round-trips within
+            // an app and kaya does nothing clever with it.
+            //
+            // The VALUES double as bit positions: a copy says which
+            // representations it carries, and a widget says which it
+            // accepts, as a mask over these.
+            name: "clip",
+            variants: &[
+                ("text", 1),
+                ("html", 2),
+                ("image", 4),
+                ("files", 8),
+                ("custom", 16),
+            ],
+        },
+        EnumSpec {
             name: "kind",
             variants: &[
                 ("column", 1),
@@ -1257,6 +1295,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("a11y_id", 12),
                 ("a11y_label", 13),
                 ("a11y_hint", 14),
+                ("accepts", 15),
             ],
         },
         EnumSpec {
@@ -1661,6 +1700,7 @@ mod tests {
                     ("prop", "a11y_id") => wire::PROP_A11Y_ID,
                     ("prop", "a11y_label") => wire::PROP_A11Y_LABEL,
                     ("prop", "a11y_hint") => wire::PROP_A11Y_HINT,
+                    ("prop", "accepts") => wire::PROP_ACCEPTS,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -1708,6 +1748,11 @@ mod tests {
                     ("occurrence", "text_changed") => crate::ring::REC_TEXT_CHANGED as u32,
                     ("occurrence", "toggled") => crate::ring::REC_TOGGLED as u32,
                     ("occurrence", "value_changed") => crate::ring::REC_VALUE_CHANGED as u32,
+                    ("clip", "text") => wire::CLIP_TEXT,
+                    ("clip", "html") => wire::CLIP_HTML,
+                    ("clip", "image") => wire::CLIP_IMAGE,
+                    ("clip", "files") => wire::CLIP_FILES,
+                    ("clip", "custom") => wire::CLIP_CUSTOM,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,

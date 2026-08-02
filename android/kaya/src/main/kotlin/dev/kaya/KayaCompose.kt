@@ -121,6 +121,11 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var a11yId by mutableStateOf("")
     var a11yLabel by mutableStateOf("")
     var a11yHint by mutableStateOf("")
+
+    /** Which clip representations this widget accepts, a mask over the
+     * clip enum. Recorded here because the paste hook and the standard
+     * commands' enablement both read it off the focused node. */
+    var accepts by mutableStateOf(0)
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -389,7 +394,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x4d40b317286880f6uL
+    private const val SPEC_HASH: ULong = 0x1e193381cb6ed308uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -493,6 +498,11 @@ object KayaCompose {
     private const val PROP_A11Y_ID = 12
     private const val PROP_A11Y_LABEL = 13
     private const val PROP_A11Y_HINT = 14
+
+    /** Which clip representations this widget accepts, a mask over the
+     * clip enum. Read but not yet acted on: the paste hook and the
+     * standard-command enablement it feeds are still to come. */
+    private const val PROP_ACCEPTS = 15
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -703,6 +713,10 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.a11yLabel = readString(b)
                         PROP_A11Y_HINT ->
                             KayaSceneModel.nodes[id]!!.a11yHint = readString(b)
+                        PROP_ACCEPTS ->
+                            // A MASK in the numeric slot, not an enum
+                            // ordinal: a widget accepts a set.
+                            KayaSceneModel.nodes[id]!!.accepts = readF64(b).toInt()
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into

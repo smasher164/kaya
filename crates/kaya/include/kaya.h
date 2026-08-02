@@ -230,6 +230,31 @@
 #define PROP_A11Y_HINT 14
 
 /**
+ * Which clip representations a widget accepts, a mask over the `clip`
+ * enum (docs/clipboard-plan.md §0). Per-widget because whether Paste
+ * is live is the intersection of what the clipboard offers and what
+ * the focused target takes.
+ */
+#define PROP_ACCEPTS 15
+
+/**
+ * The clip representation masks (spec enum "clip"). BIT POSITIONS, not
+ * an ordinal: a copy carries several and a widget accepts several, so
+ * both ride as a mask. The canonical order richest-first is files,
+ * image, html, text — kaya defines it once rather than leaving each
+ * app to get the wire's preference order right.
+ */
+#define CLIP_TEXT 1
+
+#define CLIP_HTML 2
+
+#define CLIP_IMAGE 4
+
+#define CLIP_FILES 8
+
+#define CLIP_CUSTOM 16
+
+/**
  * Window property ids (spec::WINDOW_PROPS) — their own namespace;
  * windows are not widgets.
  */
@@ -726,6 +751,18 @@
 #define KAYA_PROP_A11Y_LABEL 13
 
 #define KAYA_PROP_A11Y_HINT 14
+
+/**
+ * Which clip representations a widget accepts, as a mask over the
+ * `clip` enum (spec: the `accepts` prop). Numeric like every other
+ * scalar slot; the root domain-checks it.
+ * A LITERAL, like every sibling above, and the assert below is what
+ * keeps it honest: cbindgen evaluates no paths, so `= wire::X` is
+ * silently omitted from kaya.h and the first thing to notice is a
+ * generated binding failing to compile against a constant that does
+ * not exist.
+ */
+#define KAYA_PROP_ACCEPTS 15
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

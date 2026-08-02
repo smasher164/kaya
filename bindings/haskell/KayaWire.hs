@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x4d40b317286880f6
+specHash = 0x1e193381cb6ed308
 
 valueBool :: Word32
 valueBool = 1
@@ -36,6 +36,16 @@ valueStr :: Word32
 valueStr = 4
 valueBlob :: Word32
 valueBlob = 5
+clipText :: Word32
+clipText = 1
+clipHtml :: Word32
+clipHtml = 2
+clipImage :: Word32
+clipImage = 4
+clipFiles :: Word32
+clipFiles = 8
+clipCustom :: Word32
+clipCustom = 16
 kindColumn :: Word32
 kindColumn = 1
 kindButton :: Word32
@@ -92,6 +102,8 @@ propA11yLabel :: Word32
 propA11yLabel = 13
 propA11yHint :: Word32
 propA11yHint = 14
+propAccepts :: Word32
+propAccepts = 15
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -764,6 +776,25 @@ txBindA11yHint widgetId signalId = wireRecord txKindSetProperty
 txBindA11yHintElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindA11yHintElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propA11yHint <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant accepts value.
+txSetAccepts :: Word64 -> Double -> Builder
+txSetAccepts widgetId accepts = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAccepts <> word32LE sourceConst
+    <> encodeValue (VF64 accepts))
+
+-- set_property with a signal-bound accepts value.
+txBindAccepts :: Word64 -> Word64 -> Builder
+txBindAccepts widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAccepts <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindAcceptsElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindAcceptsElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propAccepts <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

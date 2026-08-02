@@ -465,6 +465,15 @@ pub const KAYA_PROP_COLUMNS: u32 = 11;
 pub const KAYA_PROP_A11Y_ID: u32 = 12;
 pub const KAYA_PROP_A11Y_LABEL: u32 = 13;
 pub const KAYA_PROP_A11Y_HINT: u32 = 14;
+/// Which clip representations a widget accepts, as a mask over the
+/// `clip` enum (spec: the `accepts` prop). Numeric like every other
+/// scalar slot; the root domain-checks it.
+/// A LITERAL, like every sibling above, and the assert below is what
+/// keeps it honest: cbindgen evaluates no paths, so `= wire::X` is
+/// silently omitted from kaya.h and the first thing to notice is a
+/// generated binding failing to compile against a constant that does
+/// not exist.
+pub const KAYA_PROP_ACCEPTS: u32 = 15;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -612,6 +621,7 @@ const _: () = assert!(
         && KAYA_PROP_A11Y_ID == wire::PROP_A11Y_ID
         && KAYA_PROP_A11Y_LABEL == wire::PROP_A11Y_LABEL
         && KAYA_PROP_A11Y_HINT == wire::PROP_A11Y_HINT
+        && KAYA_PROP_ACCEPTS == wire::PROP_ACCEPTS
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -640,7 +650,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 14,
+    crate::spec::PROPS.len() == 15,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

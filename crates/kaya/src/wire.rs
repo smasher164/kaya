@@ -125,6 +125,22 @@ pub const PROP_COLUMNS: u32 = 11;
 pub const PROP_A11Y_ID: u32 = 12;
 pub const PROP_A11Y_LABEL: u32 = 13;
 pub const PROP_A11Y_HINT: u32 = 14;
+/// Which clip representations a widget accepts, a mask over the `clip`
+/// enum (docs/clipboard-plan.md §0). Per-widget because whether Paste
+/// is live is the intersection of what the clipboard offers and what
+/// the focused target takes.
+pub const PROP_ACCEPTS: u32 = 15;
+
+/// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
+/// an ordinal: a copy carries several and a widget accepts several, so
+/// both ride as a mask. The canonical order richest-first is files,
+/// image, html, text — kaya defines it once rather than leaving each
+/// app to get the wire's preference order right.
+pub const CLIP_TEXT: u32 = 1;
+pub const CLIP_HTML: u32 = 2;
+pub const CLIP_IMAGE: u32 = 4;
+pub const CLIP_FILES: u32 = 8;
+pub const CLIP_CUSTOM: u32 = 16;
 
 /// Window property ids (spec::WINDOW_PROPS) — their own namespace;
 /// windows are not widgets.
@@ -371,6 +387,7 @@ fn prop(raw: u32) -> Prop {
         PROP_A11Y_ID => Prop::A11yId,
         PROP_A11Y_LABEL => Prop::A11yLabel,
         PROP_A11Y_HINT => Prop::A11yHint,
+        PROP_ACCEPTS => Prop::Accepts,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -1598,6 +1615,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Columns => PROP_COLUMNS,
         Prop::A11yId => PROP_A11Y_ID,
         Prop::A11yLabel => PROP_A11Y_LABEL,
+        Prop::Accepts => PROP_ACCEPTS,
         Prop::A11yHint => PROP_A11Y_HINT,
     }
 }
