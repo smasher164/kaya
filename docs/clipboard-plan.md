@@ -413,17 +413,80 @@ and even a correct number would hit the Android 10+ rule that a
 non-focused reader gets nothing, which the shell always is.
 
 So the host cannot see the Android clipboard, exactly as it could not
-see DocumentsUI. THREE OPTIONS, none picked yet:
+see DocumentsUI. tools/android/clipprobe then asked the rest from
+inside an app, on API 35:
 
-- **In-process, through ClipboardManager, from the focused guest.**
-  This is still the REAL system service rather than kaya's own
-  bookkeeping, which is the property the standard exists to protect. It
-  does not prove kaya accepts content from another app.
-- **Two APKs.** The lane already installs milestone2 and milestone2kt.
-  One copies, the other pastes: genuinely cross-app on one device, but
-  the harness has never run a scene spanning two processes.
-- **The accessibility service** already built for DocumentsUI. Worth
-  measuring what it can reach before assuming.
+    Q0 read at onCreate (focus=false) -> null
+    Q3 window has focus: true                 (at +2.5s)
+    Q4 pre-existing clip: items=1 text=kaya-own-content mime=[text/plain]
+    Q1 own read took 1ms -> kaya-own-content
+    Q2 focus=false read -> null
+
+**A FOCUSED READ WORKS AND IS FAST.** One millisecond, through the real
+system service.
+
+**A READ AT onCreate RETURNS NULL**, and this is the trap: the window
+does not have focus yet when the activity is created, so an app that
+touches the clipboard during startup gets nothing, with no error and no
+way to tell it apart from an empty clipboard. kaya's harness runs after
+the window is up so it is not exposed, but a guest author would be.
+
+**CONTENT OUTLIVES THE PROCESS THAT WROTE IT.** Q4 read what a previous
+run of the app had left behind after that process was force-stopped. So
+a later focused reader gets content it did not write, which is the
+property a copy-then-paste scene inside one process cannot show. Note
+Android has no per-source gate at all, unlike iOS: the only question it
+asks is whether the reader is focused.
+
+**COPYING PUTS A SYSTEM OVERLAY ON SCREEN.** API 33+ pops a floating
+clipboard preview over the app — the copied text, a dismiss button, a
+share button — sitting on top of the guest for several seconds. It did
+NOT steal focus and did NOT block the read (Q1 succeeded with it up),
+but it is on screen and in the accessibility tree while the harness is
+asserting, and it would appear in recording mode. Any clipboard leg has
+to expect it; a leg that fails mysteriously after a copy should suspect
+it first.
+
+**WRITES ARE NOT FOCUS-GATED. ONLY READS ARE.** Q5 wrote from the app
+while another was in front, and the next run read it back:
+
+    Q5 wrote while focus=false
+    Q4 pre-existing clip: text=written-while-unfocused   (next run)
+
+That is the fact the Android helper's shape turns on, and it is good
+news: SEEDING needs no focus, so a helper can put content on the
+clipboard from the background without taking the foreground away from
+the guest mid-scene. Only READING has to come to the front.
+
+### THE ANDROID HELPER IS PART OF THIS WORK, NOT A LATER PHASE
+
+Every other lane verifies with a FOREIGN reader and seeds with a
+foreign writer: pbcopy/pbpaste, xclip, wl-copy/wl-paste, Set-Clipboard,
+simctl pbcopy/pbpaste. Android has no such tool, so it needs a small
+helper APK. Build it with the rest.
+
+WHY THIS IS NOT OPTIONAL, and the argument is about the design rather
+than about tidiness. The representation set is CLOSED precisely because
+the lowerings are platform-specific and easy to get wrong: CF_HTML's
+mandatory offset header, Android's content:// URI for images, CF_HDROP's
+DROPFILES struct. A test where kaya reads what kaya wrote CANNOT CATCH
+ANY OF THAT — our own reader would parse our own wrong header perfectly
+happily and the leg would pass. A foreign reader is the only thing that
+validates the decision the whole design rests on.
+
+The helper therefore does both directions:
+- **seed**: a background component writes, no focus taken (measured
+  above), which is parity with the other four lanes' writers;
+- **verify**: comes to the foreground briefly, reads, reports. Taking
+  focus is unavoidable, and by then the guest has already copied — the
+  same shape as DocumentsUI taking over during a file dialog.
+
+REJECTED: an in-process ClipboardManager read as the verification, with
+a foreign reader "later". It reads the real system service, so it is not
+wrong, but it cannot see a malformed lowering, which is the class the
+closed representation set exists to prevent. Shipping the verification
+that cannot fail for the reason we care about is worse than shipping
+nothing.
 
 ### 4. SERIALISATION IS AN ANDROID PROBLEM, NOT A LINUX ONE
 

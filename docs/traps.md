@@ -2571,3 +2571,35 @@ the wlr-data-control protocol (which Weston does not implement) by
 creating its own surface and TAKING FOCUS. So an out-of-process
 clipboard read on this lane is not passive, and any leg that does one
 while another leg holds focus is asking for trouble.
+
+## Android hands an unfocused reader an empty clipboard, silently
+
+Measured 2026-08-02 by tools/android/clipprobe on API 35.
+
+Android 10+ gives `ClipboardManager.getPrimaryClip()` nothing unless the
+caller has window focus or is the default IME. It does not throw and it
+does not log: it returns null, which is indistinguishable from an empty
+clipboard.
+
+THE PART THAT WILL CATCH SOMEONE: the window does not have focus at
+`onCreate`. An app that reads the clipboard while starting up gets null
+even though it is the app the user just launched. Measured, in order:
+
+    read at onCreate (focus=false) -> null
+    window has focus: true              (2.5 seconds later)
+    read (focused)  -> kaya-own-content (1ms)
+    read (focus=false, another app in front) -> null
+
+The host cannot help either. There is no `cmd clipboard`; the service is
+only reachable through `service call clipboard <n>` with a transaction
+number that shifts per API level (a guess on API 35 mis-parsed its own
+arguments into a 7MB allocation); and the shell is never the focused
+app, so even a correct number would read nothing.
+
+SECOND FINDING FROM THE SAME PROBE: copying pops a SYSTEM OVERLAY on
+API 33+ — a floating preview of the copied text with dismiss and share
+buttons — over the top of the app for several seconds. It steals
+neither focus nor the read, but it is on screen and in the
+accessibility tree while a scene is asserting, and it lands in recording
+mode's video. A leg that fails oddly right after a copy should suspect
+it before suspecting kaya.
