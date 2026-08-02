@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x94b9162b2c50a3c7ULL
+#define KAYA_SPEC_HASH 0x2ed696ff6043310cULL
 
 
 /* Create a signal holding `initial`. */
@@ -435,7 +435,7 @@ static inline void kaya_tx_show_file_dialog(KayaTx *tx, uint64_t window, uint64_
     kaya_wire_end(tx, start);
 }
 
-/* Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
+/* Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
 static inline void kaya_tx_copy(KayaTx *tx, uint32_t present, uint32_t file_count, uint32_t custom_count, const KayaVal *reps, uint32_t reps_len) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_COPY);
     kaya_wire_u32(tx, present);

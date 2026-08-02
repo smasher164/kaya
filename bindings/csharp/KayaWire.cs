@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x94b9162b2c50a3c7;
+    public const ulong SpecHash = 0x2ed696ff6043310c;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -161,6 +161,8 @@ static class KayaWire
     public const ushort ApplyKindContextAttachNode = 22;
     public const ushort ApplyKindSetMenuProp = 23;
     public const ushort ApplyKindPresentFileDialog = 24;
+    public const ushort ApplyKindCopy = 25;
+    public const ushort ApplyKindReadClipboard = 26;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -175,6 +177,8 @@ static class KayaWire
     public const ushort OccKindMenuToggled = 12;
     public const ushort OccKindMenuValueChanged = 13;
     public const ushort OccKindFileDialogResult = 14;
+    public const ushort OccKindClipboardResult = 15;
+    public const ushort OccKindPasted = 16;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -576,7 +580,7 @@ static class KayaWire
         return Finish(stream, w, TxKindShowFileDialog);
     }
 
-    /// Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
+    /// Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
     public static byte[] TxCopy(uint present, uint fileCount, uint customCount, object[] reps)
     {
         var w = Begin(out var stream);
@@ -1300,7 +1304,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

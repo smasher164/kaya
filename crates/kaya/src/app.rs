@@ -2159,6 +2159,12 @@ pub struct Messages<M> {
     /// Per-dialog, one-shot like an alert: the registration retires with
     /// the one result, so no guest ever inspects a dialog id.
     dialogs: RefCell<HashMap<u64, Box<dyn Fn(Vec<crate::protocol::PickedFile>) -> M>>>,
+    /// Per-read, one-shot like a dialog. `None` is the universal no —
+    /// denied, unfocused, empty, or nothing the request accepted — and
+    /// the guest is not told which, because no platform says.
+    clip_reads: RefCell<
+        HashMap<u64, Box<dyn Fn(Option<crate::protocol::Representation>) -> M>>,
+    >,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -2182,6 +2188,7 @@ impl<M> Messages<M> {
             section_selected: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             dialogs: RefCell::new(HashMap::new()),
+            clip_reads: RefCell::new(HashMap::new()),
         }
     }
 
@@ -2468,6 +2475,17 @@ impl<M> Messages<M> {
         self.dialogs.borrow_mut().insert(dialog.0, Box::new(f));
     }
 
+    /// Bind the one-shot result handler to a clipboard read. The answer
+    /// is at most one representation; `None` covers every way the
+    /// platform declines to hand one over, and it is not an error.
+    pub fn on_clipboard(
+        &self,
+        request: u64,
+        f: impl Fn(Option<crate::protocol::Representation>) -> M + 'static,
+    ) {
+        self.clip_reads.borrow_mut().insert(request, Box::new(f));
+    }
+
     /// The mapped occurrence stream: blocks for the next occurrence
     /// with a registered meaning. Unmapped occurrences fold into
     /// nothing; None is Shutdown — `while let Some(msg) = msgs.next(&ctx)`.
@@ -2479,13 +2497,15 @@ impl<M> Messages<M> {
                 Occurrence::ButtonClicked { id }
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Toggled { id, .. }
-                | Occurrence::ValueChanged { id, .. } => {
+                | Occurrence::ValueChanged { id, .. }
+                | Occurrence::Pasted { id, .. } => {
                     self.widgets.borrow().get(&id.0).and_then(|f| f(&occ))
                 }
                 Occurrence::InstanceButtonClicked { node, .. }
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
-                | Occurrence::InstanceValueChanged { node, .. } => {
+                | Occurrence::InstanceValueChanged { node, .. }
+                | Occurrence::InstancePasted { node, .. } => {
                     self.nodes.borrow().get(&node.0).and_then(|f| f(&occ))
                 }
                 Occurrence::CloseRequested { window } => {
@@ -2509,6 +2529,14 @@ impl<M> Messages<M> {
                         .borrow_mut()
                         .remove(&dialog.0)
                         .map(|f| f(files.clone()))
+                }
+                Occurrence::ClipboardResult { request, clip } => {
+                    // One-shot, exactly as the dialog: the registration
+                    // retires with the answer, empty or not.
+                    self.clip_reads
+                        .borrow_mut()
+                        .remove(request)
+                        .map(|f| f(clip.clone()))
                 }
                 Occurrence::BackRequested { entry } => {
                     self.back_requested.borrow().get(&entry.0).map(|f| f())
@@ -4325,7 +4353,10 @@ mod tests {
                     | Occurrence::MenuToggled { .. }
                     | Occurrence::InstanceMenuToggled { .. }
                     | Occurrence::MenuValueChanged { .. }
-                    | Occurrence::InstanceMenuValueChanged { .. } => {}
+                    | Occurrence::InstanceMenuValueChanged { .. }
+                    | Occurrence::ClipboardResult { .. }
+                    | Occurrence::Pasted { .. }
+                    | Occurrence::InstancePasted { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

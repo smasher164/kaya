@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x94b9162b2c50a3c7
+specHash = 0x2ed696ff6043310c
 
 valueBool :: Word32
 valueBool = 1
@@ -320,6 +320,10 @@ applyKindSetMenuProp :: Word16
 applyKindSetMenuProp = 23
 applyKindPresentFileDialog :: Word16
 applyKindPresentFileDialog = 24
+applyKindCopy :: Word16
+applyKindCopy = 25
+applyKindReadClipboard :: Word16
+applyKindReadClipboard = 26
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -348,6 +352,10 @@ occKindMenuValueChanged :: Word16
 occKindMenuValueChanged = 13
 occKindFileDialogResult :: Word16
 occKindFileDialogResult = 14
+occKindClipboardResult :: Word16
+occKindClipboardResult = 15
+occKindPasted :: Word16
+occKindPasted = 16
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -516,7 +524,7 @@ txSetMenuProp item prop source = wireRecord txKindSetMenuProp (word64LE item <> 
 txShowFileDialog :: Word64 -> Word64 -> Word32 -> [Value] -> Builder
 txShowFileDialog window dialog multiple filters = wireRecord txKindShowFileDialog (word64LE window <> word64LE dialog <> word32LE multiple <> word32LE 0 <> encodeValues filters)
 
--- Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
+-- Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
 txCopy :: Word32 -> Word32 -> Word32 -> [Value] -> Builder
 txCopy present fileCount customCount reps = wireRecord txKindCopy (word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE 0 <> encodeValues reps)
 
@@ -1078,7 +1086,7 @@ parseValue rec at = do
 parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
 parseOccurrence rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

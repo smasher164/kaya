@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x94b9162b2c50a3c7
+SPEC_HASH = 0x2ed696ff6043310c
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -160,6 +160,8 @@ APPLY_CONTEXT_ATTACH = 21
 APPLY_CONTEXT_ATTACH_NODE = 22
 APPLY_SET_MENU_PROP = 23
 APPLY_PRESENT_FILE_DIALOG = 24
+APPLY_COPY = 25
+APPLY_READ_CLIPBOARD = 26
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -174,6 +176,8 @@ OCC_MENU_ACTIVATED = 11
 OCC_MENU_TOGGLED = 12
 OCC_MENU_VALUE_CHANGED = 13
 OCC_FILE_DIALOG_RESULT = 14
+OCC_CLIPBOARD_RESULT = 15
+OCC_PASTED = 16
 
 
 def _pad(b):
@@ -360,7 +364,7 @@ def tx_show_file_dialog(window, dialog, multiple, filters):
     return record(TX_SHOW_FILE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", multiple) + struct.pack("<I", 0) + _enc.values(filters))
 
 def tx_copy(present, file_count, custom_count, reps):
-    """Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya."""
+    """Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya."""
     return record(TX_COPY, struct.pack("<I", present) + struct.pack("<I", file_count) + struct.pack("<I", custom_count) + struct.pack("<I", 0) + _enc.values(reps))
 
 def tx_read_clipboard(request, accepting):
@@ -819,7 +823,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).

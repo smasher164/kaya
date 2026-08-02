@@ -42,6 +42,14 @@
  */
 #define REC_FILE_DIALOG_RESULT 14
 
+/**
+ * The clipboard's two answers: the privileged read's, and the one that
+ * arrives because the user pasted.
+ */
+#define REC_CLIPBOARD_RESULT 15
+
+#define REC_PASTED 16
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -441,6 +449,16 @@
 #define KAYA_OCCURRENCE_FILE_DIALOG_RESULT 14
 
 /**
+ * The clipboard's two answers: the privileged read's, and the one that
+ * arrives because the user pasted. Literals, like every sibling — the
+ * pin below is what keeps them honest, since cbindgen evaluates no
+ * paths and would silently omit `= ring::X`.
+ */
+#define KAYA_OCCURRENCE_CLIPBOARD_RESULT 15
+
+#define KAYA_OCCURRENCE_PASTED 16
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -677,6 +695,16 @@
  * or an EMPTY list for cancel.
  */
 #define KAYA_APPLY_PRESENT_FILE_DIALOG 24
+
+/**
+ * The clipboard pair, backend side. COPY's body is byte-identical to
+ * the tx record's, values in descending richness — offer them in that
+ * order. READ_CLIPBOARD is answered exactly once with
+ * kaya_emit_clipboard_result, empty included.
+ */
+#define KAYA_APPLY_COPY 25
+
+#define KAYA_APPLY_READ_CLIPBOARD 26
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -934,6 +962,32 @@ typedef struct KayaRingInfo {
 } KayaRingInfo;
 
 /**
+ * ONE REPRESENTATION, as C sees it: the kind names which arm, and
+ * exactly the fields that arm uses are read. `text` carries text and
+ * html; `id` plus `bytes`/`len` carry a custom format; `bytes`/`len`
+ * alone carry an image; `locators`/`names`/`count` carry files, in the
+ * picker's own parallel-array shape so a backend that already emits a
+ * dialog result emits a pasted file list with the same code.
+ *
+ * A STRUCT AND NOT NINE PARAMETERS TWICE: the read's answer and a
+ * paste carry the identical payload, and the two entries below would
+ * otherwise repeat a signature wide enough to get wrong.
+ */
+typedef struct KayaRepresentation {
+  /**
+   * A single KAYA_CLIP_* member, never a mask.
+   */
+  uint32_t clip;
+  const char *text;
+  const char *id;
+  const uint8_t *bytes;
+  uintptr_t len;
+  const char *const *locators;
+  const char *const *names;
+  uintptr_t count;
+} KayaRepresentation;
+
+/**
  * Wire framing of every record, exported through the C header so direct
  * consumers cast a pointer instead of bit-twiddling. Little-endian
  * layout; records are 8-byte aligned, so the payload follows the header
@@ -1090,6 +1144,21 @@ uint64_t kaya_blob_register(const uint8_t *bytes, uintptr_t len);
 const uint8_t *kaya_blob_data(uint64_t handle, uintptr_t *len);
 
 /**
+ * Fetch the bytes an occurrence's blob value named. Returns the
+ * pointer and writes the length; NULL for a handle already released.
+ * The pointer borrows core memory and stays valid until
+ * `kaya_occurrence_blob_release` — copy, then release.
+ */
+const uint8_t *kaya_occurrence_blob(uint64_t handle, uintptr_t *len);
+
+/**
+ * Drop an occurrence blob. Idempotent: a handle already released, or
+ * never minted, is a no-op rather than an error, so a binding's
+ * decode path needs no bookkeeping of its own.
+ */
+void kaya_occurrence_blob_release(uint64_t handle);
+
+/**
  * Submit one transaction: `len` bytes of records at `records`, applied
  * atomically on the UI thread. The buffer is copied before this call
  * returns. Malformed records are a broken binding and fail loudly.
@@ -1222,15 +1291,6 @@ int32_t kaya_open_picked(uint64_t handle,
                          uint32_t *out_seekable);
 
 /**
- * Presentation side: the alert's one answer — an ALERT_CHOICE value
- * (an action index, or the cancel sentinel for every platform-native
- * dismissal). The alert id retires here. Exported on every platform
- * (one C header, one export surface — deploy-win's header/dll gate
- * holds that line), but ANSWERABLE only where a guest-language
- * presentation layer exists: the rust-native backends emit on their
- * own core sink (alert_resolved is cfg'd out of existence there),
- * so on GTK/WinUI hosts this entry has no caller by construction
- * and panics loudly if one appears.
  * Presentation side: the file picker's one answer. `locators` and
  * `names` are parallel arrays of `count` NUL-terminated UTF-8 strings;
  * an EMPTY count is cancel, which every platform reports the same way
@@ -1258,6 +1318,33 @@ void kaya_emit_file_dialog_result(uint64_t dialog,
                                   const char *const *locators,
                                   const char *const *names,
                                   uintptr_t count);
+
+/**
+ * Presentation side: the privileged read's one answer. `rep` NULL, or
+ * its `clip` zero, is the universal no — denied, unfocused, empty, or
+ * nothing the request accepted. The request id retires here.
+ *
+ * # Safety
+ * `rep` must be NULL or a valid `KayaRepresentation` outliving the call.
+ */
+void kaya_emit_clipboard_result(uint64_t request, const struct KayaRepresentation *rep);
+
+/**
+ * Presentation side: content arriving at a widget because the user
+ * pasted. `tag` is the widget's stored click tag — the same identity
+ * bytes every other occurrence rides on, so a stamped row's paste
+ * needs no second entry.
+ *
+ * A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE: `rep` must name
+ * a representation. The empty answer belongs to the read, which asked
+ * and may be refused; a paste that reached a widget already carries
+ * content by definition.
+ *
+ * # Safety
+ * `tag` must point to `tag_len` valid bytes and `rep` to a valid
+ * `KayaRepresentation`, both outliving the call.
+ */
+void kaya_emit_pasted(const uint8_t *tag, uintptr_t tag_len, const struct KayaRepresentation *rep);
 
 void kaya_emit_alert_result(uint64_t alert, uint32_t choice);
 

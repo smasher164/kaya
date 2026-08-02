@@ -68,6 +68,12 @@ pub const KAYA_OCCURRENCE_MENU_VALUE_CHANGED: u16 = 13;
 /// handle, a Str display name, and a Str `local_path`. Cancel is count
 /// zero. Redeem a handle with `kaya_open_picked`.
 pub const KAYA_OCCURRENCE_FILE_DIALOG_RESULT: u16 = 14;
+/// The clipboard's two answers: the privileged read's, and the one that
+/// arrives because the user pasted. Literals, like every sibling — the
+/// pin below is what keeps them honest, since cbindgen evaluates no
+/// paths and would silently omit `= ring::X`.
+pub const KAYA_OCCURRENCE_CLIPBOARD_RESULT: u16 = 15;
+pub const KAYA_OCCURRENCE_PASTED: u16 = 16;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -84,6 +90,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
         && KAYA_OCCURRENCE_MENU_VALUE_CHANGED == ring::REC_MENU_VALUE_CHANGED
         && KAYA_OCCURRENCE_FILE_DIALOG_RESULT == ring::REC_FILE_DIALOG_RESULT
+        && KAYA_OCCURRENCE_CLIPBOARD_RESULT == ring::REC_CLIPBOARD_RESULT
+        && KAYA_OCCURRENCE_PASTED == ring::REC_PASTED
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -330,6 +338,17 @@ pub const KAYA_APPLY_SET_MENU_PROP: u16 = 23;
 /// validated by the core). Answered exactly once, with the chosen files
 /// or an EMPTY list for cancel.
 pub const KAYA_APPLY_PRESENT_FILE_DIALOG: u16 = 24;
+
+/// The clipboard pair, backend side. COPY's body is byte-identical to
+/// the tx record's, values in descending richness — offer them in that
+/// order. READ_CLIPBOARD is answered exactly once with
+/// kaya_emit_clipboard_result, empty included.
+pub const KAYA_APPLY_COPY: u16 = 25;
+pub const KAYA_APPLY_READ_CLIPBOARD: u16 = 26;
+const _: () = assert!(
+    KAYA_APPLY_COPY == wire::APPLY_COPY
+        && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
+);
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
         && KAYA_APPLY_SET_PROP == wire::APPLY_SET_PROP
@@ -587,7 +606,7 @@ const _: () = assert!(
 // thing to notice (the spacing-prop lesson, occurrence spelling). A
 // new spec occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 14,
+    crate::spec::SPEC.occurrence.len() == 16,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -832,6 +851,75 @@ pub unsafe extern "C" fn kaya_blob_data(handle: u64, len: *mut usize) -> *const 
             std::ptr::null()
         }
     }
+}
+
+/// THE OCCURRENCE BLOB TABLE, the third direction: core -> guest.
+///
+/// The other two both have a boundary that retires a handle — a submit
+/// drains `pending`, a batch replaces `out` — and this one has neither.
+/// The guest takes occurrences one at a time and the core cannot see it
+/// advance, least of all the direct-ring consumers that move the head
+/// themselves. So these handles are released EXPLICITLY.
+///
+/// THE APP NEVER SEES ONE. A binding decoding an occurrence redeems the
+/// handle, copies the bytes into its own language's byte type, and
+/// releases before the occurrence reaches the guest — the same shape a
+/// backend already uses on the pump side, and the reason the contract
+/// is safe to state as "release immediately". An app holding a pasted
+/// image holds its own bytes, so nothing here outlives the decode.
+struct OccBlobs {
+    next: u64,
+    live: std::collections::HashMap<u64, std::sync::Arc<[u8]>>,
+}
+
+fn occ_blobs() -> &'static Mutex<OccBlobs> {
+    static TABLE: OnceLock<Mutex<OccBlobs>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        Mutex::new(OccBlobs {
+            next: 1,
+            live: std::collections::HashMap::new(),
+        })
+    })
+}
+
+/// Core side: publish bytes an occurrence record will name by handle.
+pub(crate) fn occ_blob_register(bytes: std::sync::Arc<[u8]>) -> u64 {
+    let mut table = occ_blobs().lock().unwrap();
+    let handle = table.next;
+    table.next += 1;
+    table.live.insert(handle, bytes);
+    handle
+}
+
+/// Fetch the bytes an occurrence's blob value named. Returns the
+/// pointer and writes the length; NULL for a handle already released.
+/// The pointer borrows core memory and stays valid until
+/// `kaya_occurrence_blob_release` — copy, then release.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_occurrence_blob(handle: u64, len: *mut usize) -> *const u8 {
+    let table = occ_blobs().lock().unwrap();
+    match table.live.get(&handle) {
+        Some(arc) => {
+            if !len.is_null() {
+                unsafe { *len = arc.len() };
+            }
+            arc.as_ptr()
+        }
+        None => {
+            if !len.is_null() {
+                unsafe { *len = 0 };
+            }
+            std::ptr::null()
+        }
+    }
+}
+
+/// Drop an occurrence blob. Idempotent: a handle already released, or
+/// never minted, is a no-op rather than an error, so a binding's
+/// decode path needs no bookkeeping of its own.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_occurrence_blob_release(handle: u64) {
+    occ_blobs().lock().unwrap().live.remove(&handle);
 }
 
 /// Submit one transaction: `len` bytes of records at `records`, applied
@@ -1418,6 +1506,69 @@ pub(crate) fn alert_resolved(alert: u64, choice: crate::protocol::AlertChoice) {
 /// own core sink (alert_resolved is cfg'd out of existence there),
 /// so on GTK/WinUI hosts this entry has no caller by construction
 /// and panics loudly if one appears.
+/// Turn a backend's parallel locator/name arrays into registered picked
+/// files. THE ONE PLACE THE PLATFORM SOURCE IS CHOSEN — the picker and
+/// a pasted file list both arrive as locators, and a second copy of
+/// this decision is a second place for a platform to be forgotten.
+///
+/// # Safety
+/// `locators` and `names` must each point to `count` valid
+/// NUL-terminated UTF-8 strings that outlive the call.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+unsafe fn register_picked(
+    locators: *const *const std::os::raw::c_char,
+    names: *const *const std::os::raw::c_char,
+    count: usize,
+) -> Vec<crate::protocol::PickedFile> {
+    let mut files = Vec::with_capacity(count);
+    for i in 0..count {
+        let read = |base: *const *const std::os::raw::c_char| -> String {
+            if base.is_null() {
+                return String::new();
+            }
+            let p = unsafe { *base.add(i) };
+            if p.is_null() {
+                return String::new();
+            }
+            unsafe { std::ffi::CStr::from_ptr(p) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        // ONE SOURCE PER PLATFORM, decided here because the locator
+        // means something different on each: a path on macOS, a
+        // `content://` URI on Android, and on iOS a name only the
+        // backend can redeem (the path EPERMs once the scope drops).
+        #[cfg(target_os = "android")]
+        let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+            std::sync::Arc::new(crate::android::UriSource {
+                name: read(names),
+                uri: read(locators),
+            });
+        #[cfg(target_os = "ios")]
+        let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+            std::sync::Arc::new(crate::swiftui_host::UrlSource {
+                name: read(names),
+                locator: read(locators),
+            });
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+            std::sync::Arc::new(crate::protocol::PathSource {
+                name: read(names),
+                path: read(locators),
+            });
+        let handle = picked_register(source.clone());
+        // Read the record back OFF the source, so the source stays the
+        // single answer to "what is this file called and can its name
+        // be re-opened".
+        files.push(crate::protocol::PickedFile {
+            handle,
+            name: crate::protocol::PickedSource::name(&*source).to_owned(),
+            local_path: crate::protocol::PickedSource::local_path(&*source).to_owned(),
+        });
+    }
+    files
+}
+
 /// Presentation side: the file picker's one answer. `locators` and
 /// `names` are parallel arrays of `count` NUL-terminated UTF-8 strings;
 /// an EMPTY count is cancel, which every platform reports the same way
@@ -1449,52 +1600,7 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
 ) {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
     {
-        let mut files = Vec::with_capacity(count);
-        for i in 0..count {
-            let read = |base: *const *const std::os::raw::c_char| -> String {
-                if base.is_null() {
-                    return String::new();
-                }
-                let p = unsafe { *base.add(i) };
-                if p.is_null() {
-                    return String::new();
-                }
-                unsafe { std::ffi::CStr::from_ptr(p) }
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            // ONE SOURCE PER PLATFORM, decided here because the locator
-            // means something different on each: a path on macOS, a
-            // `content://` URI on Android, and on iOS a name only the
-            // backend can redeem (the path EPERMs once the scope drops).
-            #[cfg(target_os = "android")]
-            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
-                std::sync::Arc::new(crate::android::UriSource {
-                    name: read(names),
-                    uri: read(locators),
-                });
-            #[cfg(target_os = "ios")]
-            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
-                std::sync::Arc::new(crate::swiftui_host::UrlSource {
-                    name: read(names),
-                    locator: read(locators),
-                });
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
-                std::sync::Arc::new(crate::protocol::PathSource {
-                    name: read(names),
-                    path: read(locators),
-                });
-            let handle = picked_register(source.clone());
-            // Read the record back OFF the source, so the source stays
-            // the single answer to "what is this file called and can
-            // its name be re-opened".
-            files.push(crate::protocol::PickedFile {
-                handle,
-                name: crate::protocol::PickedSource::name(&*source).to_owned(),
-                local_path: crate::protocol::PickedSource::local_path(&*source).to_owned(),
-            });
-        }
+        let files = unsafe { register_picked(locators, names, count) };
         file_dialog_resolved(dialog, files);
     }
     #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
@@ -1503,6 +1609,173 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
         panic!(
             "kaya: kaya_emit_file_dialog_result is the interpreter platforms' \
              entry — this host's backend answers on its own sink"
+        );
+    }
+}
+
+/// ONE REPRESENTATION, as C sees it: the kind names which arm, and
+/// exactly the fields that arm uses are read. `text` carries text and
+/// html; `id` plus `bytes`/`len` carry a custom format; `bytes`/`len`
+/// alone carry an image; `locators`/`names`/`count` carry files, in the
+/// picker's own parallel-array shape so a backend that already emits a
+/// dialog result emits a pasted file list with the same code.
+///
+/// A STRUCT AND NOT NINE PARAMETERS TWICE: the read's answer and a
+/// paste carry the identical payload, and the two entries below would
+/// otherwise repeat a signature wide enough to get wrong.
+#[repr(C)]
+pub struct KayaRepresentation {
+    /// A single KAYA_CLIP_* member, never a mask.
+    pub clip: u32,
+    pub text: *const std::os::raw::c_char,
+    pub id: *const std::os::raw::c_char,
+    pub bytes: *const u8,
+    pub len: usize,
+    pub locators: *const *const std::os::raw::c_char,
+    pub names: *const *const std::os::raw::c_char,
+    pub count: usize,
+}
+
+/// Read a `KayaRepresentation` into the protocol's sum. NULL is the
+/// universal no; so is `clip` zero.
+///
+/// # Safety
+/// The struct's pointers must be valid for the kind `clip` names.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+unsafe fn representation(
+    rep: *const KayaRepresentation,
+) -> Option<crate::protocol::Representation> {
+    use crate::protocol::Representation as R;
+    if rep.is_null() {
+        return None;
+    }
+    let rep = unsafe { &*rep };
+    let cstr = |p: *const std::os::raw::c_char| -> String {
+        if p.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(p) }
+                .to_string_lossy()
+                .into_owned()
+        }
+    };
+    let blob = || -> crate::protocol::Blob {
+        let src = if rep.bytes.is_null() || rep.len == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(rep.bytes, rep.len) }
+        };
+        crate::protocol::Blob(std::sync::Arc::from(src))
+    };
+    match rep.clip {
+        0 => None,
+        wire::CLIP_TEXT => Some(R::Text(cstr(rep.text))),
+        wire::CLIP_HTML => Some(R::Html(cstr(rep.text))),
+        wire::CLIP_IMAGE => Some(R::Image(blob())),
+        wire::CLIP_CUSTOM => Some(R::Custom { id: cstr(rep.id), bytes: blob() }),
+        wire::CLIP_FILES => Some(R::Files(unsafe {
+            register_picked(rep.locators, rep.names, rep.count)
+        })),
+        other => panic!(
+            "kaya: a clipboard answer names clip kind {other}, which is not a \
+             single member of the clip enum"
+        ),
+    }
+}
+
+/// Presentation side: the privileged read's one answer. `rep` NULL, or
+/// its `clip` zero, is the universal no — denied, unfocused, empty, or
+/// nothing the request accepted. The request id retires here.
+///
+/// # Safety
+/// `rep` must be NULL or a valid `KayaRepresentation` outliving the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_clipboard_result(
+    request: u64,
+    rep: *const KayaRepresentation,
+) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let clip = unsafe { representation(rep) };
+        if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+            sink.send(crate::protocol::Occurrence::ClipboardResult { request, clip });
+            return;
+        }
+        state().ring.push_record(
+            ring::REC_CLIPBOARD_RESULT,
+            &crate::wire::clipboard_result_body(request, clip.as_ref()),
+        );
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (request, rep);
+        panic!(
+            "kaya: kaya_emit_clipboard_result is the interpreter platforms' \
+             entry — this host's backend answers on its own sink"
+        );
+    }
+}
+
+/// Presentation side: content arriving at a widget because the user
+/// pasted. `tag` is the widget's stored click tag — the same identity
+/// bytes every other occurrence rides on, so a stamped row's paste
+/// needs no second entry.
+///
+/// A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE: `rep` must name
+/// a representation. The empty answer belongs to the read, which asked
+/// and may be refused; a paste that reached a widget already carries
+/// content by definition.
+///
+/// # Safety
+/// `tag` must point to `tag_len` valid bytes and `rep` to a valid
+/// `KayaRepresentation`, both outliving the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_pasted(
+    tag: *const u8,
+    tag_len: usize,
+    rep: *const KayaRepresentation,
+) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let clip = unsafe { representation(rep) }.expect(
+            "kaya: kaya_emit_pasted was handed no representation — a paste \
+             that delivered nothing is not an occurrence",
+        );
+        let bytes = if tag.is_null() || tag_len == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(tag, tag_len) }
+        };
+        let occurrence = match crate::wire::decode_click_tag(bytes) {
+            crate::protocol::Occurrence::ButtonClicked { id } => {
+                crate::protocol::Occurrence::Pasted { id, clip }
+            }
+            crate::protocol::Occurrence::InstanceButtonClicked { node, path } => {
+                crate::protocol::Occurrence::InstancePasted { node, path, clip }
+            }
+            other => unreachable!("kaya: a click tag decoded to {other:?}"),
+        };
+        if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+            sink.send(occurrence);
+            return;
+        }
+        let clip = match &occurrence {
+            crate::protocol::Occurrence::Pasted { clip, .. }
+            | crate::protocol::Occurrence::InstancePasted { clip, .. } => clip,
+            _ => unreachable!(),
+        };
+        // The tag went out as the backend holds it and comes back
+        // verbatim: no re-encoding, so no chance of a different one.
+        state()
+            .ring
+            .push_record(ring::REC_PASTED, &crate::wire::pasted_body(bytes, clip));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (tag, tag_len, rep);
+        panic!(
+            "kaya: kaya_emit_pasted is the interpreter platforms' entry — \
+             this host's backend emits on its own sink"
         );
     }
 }
@@ -1823,6 +2096,8 @@ mod tests {
             ("context_attach_node", KAYA_APPLY_CONTEXT_ATTACH_NODE),
             ("set_menu_prop", KAYA_APPLY_SET_MENU_PROP),
             ("present_file_dialog", KAYA_APPLY_PRESENT_FILE_DIALOG),
+            ("copy", KAYA_APPLY_COPY),
+            ("read_clipboard", KAYA_APPLY_READ_CLIPBOARD),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

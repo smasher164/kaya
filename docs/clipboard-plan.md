@@ -504,8 +504,81 @@ It still stands for ANDROID, where an unfocused reader gets nothing and
 there is no data-control equivalent. Whatever option finding 3 settles
 on has to keep the focused app focused for the length of the read.
 
-## §1 onwards — to be written
+## §1 — the protocol (landed)
 
-Sequencing once §0 is ratified and the probes have reported: spec.rs
-and the hash, the core, one backend, the Rust binding, the scene, green
-on mac, then the fan-out and the matrix.
+The vocabulary, both directions, with nothing platform-specific in it.
+
+### The four records
+
+- tx `copy` (35) and `read_clipboard` (36), with apply twins `copy`
+  (25) and `read_clipboard` (26). One encoder writes both channels'
+  clip body, so the two cannot drift.
+- occurrence `clipboard_result` (15): the read's one answer.
+- occurrence `pasted` (16): the same answer arriving because the user
+  pasted.
+
+### COPY IS A RECORD, THE TWO ANSWERS ARE A SUM
+
+`Clip` is the record of optional fields §0 argued for. `Representation`
+is the sum, and both answers carry it: a read and a paste differ in
+their TRIGGER, not in their payload, so a guest matches one shape
+either way. `None` only exists on the read — a paste that delivered
+nothing is not an occurrence, and `kaya_emit_pasted` refuses one.
+
+### THE CANONICAL ORDER IS DESCENDING CLIP VALUE
+
+custom (16), files (8), image (4), html (2), text (1) — which is
+descending richness, and is preference order on every host that has one
+(macOS pasteboard types, X11 TARGETS). A backend offers the values in
+the order it reads them and is right; it needs no table of its own.
+
+This replaces the order the §0 text stated (files, image, html, text,
+with custom unplaced) and the order §1's first draft actually encoded
+(text first, the reverse). Tying it to the enum's own values makes it
+one rule instead of a list to get wrong in eight bindings, and it puts
+an app's custom format first — the one representation that round-trips
+into the same app losslessly.
+
+### THE PASTE TAG RIDES VERBATIM
+
+`pasted` is a click tag followed by the clip kind and its values, which
+is exactly how `text_changed` carries an edit. A paste onto a stamped
+row is the same event as a paste onto a live one, so it is ONE record
+kind with `path_len` deciding, like every click since milestone 2.
+
+The first draft put the clip kind in the tag's reserved slot, which
+saved eight bytes and broke every existing "read a click tag" reader.
+The round-trip test caught it immediately.
+
+### THE OCCURRENCE BLOB TABLE, the third direction
+
+An image or a custom format is bytes, and bytes never enter a record
+stream. The two existing blob tables both have a boundary that retires
+a handle — a submit drains the pending table, a batch replaces the out
+table — and the occurrence channel has NEITHER: the guest takes records
+one at a time, and the direct-ring consumers (Go, JVM, C#) move the
+head themselves, so the core cannot see it advance.
+
+So occurrence blobs are released EXPLICITLY, through
+`kaya_occurrence_blob` / `kaya_occurrence_blob_release`, and the app
+never sees a handle: the binding redeems it, copies into its own
+language's byte type, and releases while decoding. Reusing the apply
+channel's batch-local index instead would have named a slot in whatever
+batch the pump happened to be serving — a pasted image arriving as some
+window's icon. The round-trip test was made to fail that way on purpose
+before it was believed.
+
+### The pin that could not fail
+
+The occurrence kinds were pinned by a list of indexed asserts covering
+the first fourteen, which said nothing about a fifteenth: two new
+occurrences passed it without touching it. It compares the whole list
+now, and was watched failing.
+
+## §2 onwards — to be written
+
+Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering
+and the paste hook, Cut/Copy/Paste as standard commands (the gesture
+layer §0 argued the data layer cannot replace), the Rust binding, the
+scene. Then the fan-out — seven more bindings, three more backends, the
+Android helper APK — and the matrix.

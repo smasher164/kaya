@@ -305,6 +305,29 @@ pub struct Clip {
     pub custom: Vec<(String, Blob)>,
 }
 
+/// One representation, arriving — the sum [`Clip`] is the record of.
+///
+/// YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so. A
+/// clipboard read and a paste both materialise exactly one of the kinds
+/// the reader accepted, because that is what every host does: macOS
+/// walks the pasteboard's types in preference order and hands back the
+/// first match, Android's `onReceiveContent` delivers one item, and a
+/// Wayland offer is read one mime type at a time. A record here would
+/// invite a guest to check five fields where four are structurally
+/// always empty.
+///
+/// `files` is plural INSIDE one representation, which is the same
+/// nesting `text/uri-list` and `CF_HDROP` already have and the same one
+/// a multi-select pick already returns.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Representation {
+    Text(String),
+    Html(String),
+    Image(Blob),
+    Files(Vec<PickedFile>),
+    Custom { id: String, bytes: Blob },
+}
+
 /// A collection: a core-side ordered key→value table, the sibling of a
 /// signal, changed with delta records and rendered by a For.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -427,6 +450,26 @@ pub enum Occurrence {
     MenuValueChanged { group: MenuItemId, index: f64 },
     /// A radio option picked on a node-anchored context menu.
     InstanceMenuValueChanged { group: MenuItemId, path: Path, index: f64 },
+    /// The privileged read's one answer, or `None` for the universal
+    /// no. Empty covers a denied iOS prompt, an unfocused reader on
+    /// Android or Wayland, an empty clipboard, and content in no
+    /// representation the request accepted — the platforms decline to
+    /// say which, so kaya does not invent a distinction. The request id
+    /// retires here, exactly as the dialog id does.
+    ClipboardResult {
+        request: u64,
+        clip: Option<Representation>,
+    },
+    /// Content arriving at a widget because the USER pasted. Same
+    /// payload as the read, different trigger — and free of the read's
+    /// permission cost, since a gesture is its own authorisation.
+    Pasted { id: WidgetId, clip: Representation },
+    /// A paste onto a stamped copy of a template widget.
+    InstancePasted {
+        node: TemplateNodeId,
+        path: Path,
+        clip: Representation,
+    },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -1280,6 +1323,18 @@ impl OccSink {
                 Occurrence::FileDialogResult { dialog, files } => {
                     let body = crate::wire::file_dialog_result_body(dialog, &files);
                     ring.push_record(crate::ring::REC_FILE_DIALOG_RESULT, &body);
+                }
+                Occurrence::ClipboardResult { request, clip } => {
+                    let body = crate::wire::clipboard_result_body(request, clip.as_ref());
+                    ring.push_record(crate::ring::REC_CLIPBOARD_RESULT, &body);
+                }
+                Occurrence::Pasted { id, clip } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_PASTED, &crate::wire::pasted_body(&tag, &clip));
+                }
+                Occurrence::InstancePasted { node, path, clip } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_PASTED, &crate::wire::pasted_body(&tag, &clip));
                 }
                 Occurrence::ButtonClicked { id } => {
                     let tag = crate::wire::click_tag(id.0, &[]);

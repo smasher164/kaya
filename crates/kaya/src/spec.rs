@@ -797,14 +797,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   of a runtime duplicate check. `present` is a mask over \
                   the `clip` enum for the single-valued kinds; the two \
                   plural ones carry counts. `reps` holds the populated \
-                  ones in the CANONICAL ORDER — files, image, html, \
-                  text, custom — which kaya fixes once because richness \
+                  ones in the CANONICAL ORDER, which kaya fixes once \
+                  because richness \
                   is a property of the kind rather than of the app's \
                   intent, and the wire's preference order (macOS type \
                   order, X11 TARGETS) has to be right whoever wrote the \
-                  guest. Values in order: Str text, Str html, I64 image \
-                  blob, `file_count` I64 handles, then `custom_count` \
-                  pairs of Str id and I64 blob. Files are the SAME \
+                  guest. THE ORDER IS DESCENDING CLIP VALUE, which is \
+                  descending richness, so a backend writes what it is \
+                  handed in the order it is handed: `custom_count` pairs \
+                  of Str id and I64 blob, `file_count` I64 handles, I64 \
+                  image blob, Str html, Str text. Files are the SAME \
                   CAPABILITY the picker returns — a handle redeemed with \
                   kaya_open_picked — so copying a file and picking one \
                   are one currency and the bytes never move through \
@@ -1096,6 +1098,50 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   exactly once — the chosen files, or an EMPTY list for \
                   cancel.",
         },
+        Record {
+            kind: 25,
+            name: "copy",
+            fields: &[
+                f("present", FieldTy::U32),
+                f("file_count", FieldTy::U32),
+                f("custom_count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("reps", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The tx record's twin, byte-identical in layout \
+                  (one encoder writes both, so the canonical order \
+                  cannot drift between the channels): put this clip on \
+                  the system clipboard. THE VALUES ARRIVE IN PREFERENCE \
+                  ORDER, descending richness, so a backend offers them \
+                  in the order it reads them and needs no table of its \
+                  own. Blob values are batch-local out-table handles \
+                  here, resolved with kaya_blob_data like any other \
+                  apply-side blob; file values are picked handles, whose \
+                  bytes never move through kaya at all.",
+        },
+        Record {
+            kind: 26,
+            name: "read_clipboard",
+            fields: &[
+                f("request", FieldTy::U64),
+                f("accepting", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Read the clipboard and answer this request with at \
+                  most one representation, through \
+                  kaya_emit_clipboard_result (rust-native backends send \
+                  ClipboardResult on their own sink). `accepting` is a \
+                  mask; the backend takes the FIRST match in descending \
+                  richness, which is the same order copy writes. \
+                  ANSWERING EMPTY IS ALWAYS CORRECT and is what a \
+                  backend does when the platform declines — an iOS \
+                  prompt the user refused, an unfocused Android or \
+                  Wayland reader, an empty clipboard, or content in no \
+                  accepted kind. Exactly one answer per request, always: \
+                  the guest's handler retires on it.",
+        },
     ],
     occurrence: &[
         Record {
@@ -1293,6 +1339,65 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   EPERM on iOS once the security scope drops, so it is \
                   empty on both phones. The handle is redeemed with \
                   kaya_open_picked; the dialog id retires here.",
+        },
+        Record {
+            kind: 15,
+            name: "clipboard_result",
+            fields: &[
+                f("request", FieldTy::U64),
+                f("clip", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The privileged read's one answer. `clip` is a SINGLE \
+                  member of the clip enum and not a mask — the request \
+                  said which representations it could use, and exactly \
+                  one is ever materialised, so the answer names which \
+                  one arrived. `value` carries it: a Str for text and \
+                  html, a Blob for image and custom, an I64 handle per \
+                  file. EMPTY IS THE UNIVERSAL NO, with `clip` zero: it \
+                  covers a denied prompt on iOS, an unfocused reader on \
+                  Android or Wayland, an empty clipboard, and content in \
+                  no representation this request accepted. The guest \
+                  cannot tell those apart and should not try — the \
+                  platforms deliberately refuse to say which, and a \
+                  binding that invented a distinction would be inventing \
+                  it.",
+        },
+        Record {
+            kind: 16,
+            name: "pasted",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("clip", FieldTy::U32),
+                f("clip_reserved", FieldTy::U32),
+                f("value", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Content arriving at a widget because the USER pasted, \
+                  which is the path an editor actually takes. The same \
+                  one-representation answer the privileged read gives, \
+                  reaching the widget that declared it accepts that kind \
+                  — so a guest matches one shape whether it asked or was \
+                  told, and only the trigger differs.\n\n\
+                  COSTS NOTHING ON ANY PLATFORM, unlike the read: it is \
+                  a user gesture, so iOS raises no prompt and the \
+                  focus rules are satisfied by construction. An editor \
+                  that reaches for the read instead pays a permission \
+                  prompt for content this delivers free.\n\n\
+                  IDENTITY READS AS IN button_clicked, and the identity \
+                  tag is byte-identical to one: path_len key values \
+                  follow the header (path_len 0 meaning `id` is a widget \
+                  id), and `clip` sits AFTER them, the way text_changed's \
+                  payload does. A paste onto a stamped row is the same \
+                  event as a paste onto a live one, exactly as a click \
+                  is. Drag and drop \
+                  lands here too when it comes: Android built \
+                  onReceiveContent as ONE api for paste, drop and \
+                  autofill, and Wayland uses one data offer for both.",
         },
     ],
     enums: &[
@@ -1653,22 +1758,39 @@ mod tests {
                 ("context_attach_node", wire::APPLY_CONTEXT_ATTACH_NODE),
                 ("set_menu_prop", wire::APPLY_SET_MENU_PROP),
                 ("present_file_dialog", wire::APPLY_PRESENT_FILE_DIALOG),
+                ("copy", wire::APPLY_COPY),
+                ("read_clipboard", wire::APPLY_READ_CLIPBOARD),
             ]
         );
-        assert_eq!(SPEC.occurrence[0].kind, crate::ring::REC_BUTTON_CLICKED);
-        assert_eq!(SPEC.occurrence[1].kind, crate::ring::REC_TEXT_CHANGED);
-        assert_eq!(SPEC.occurrence[2].kind, crate::ring::REC_TOGGLED);
-        assert_eq!(SPEC.occurrence[3].kind, crate::ring::REC_VALUE_CHANGED);
-        assert_eq!(SPEC.occurrence[4].kind, crate::ring::REC_CLOSE_REQUESTED);
-        assert_eq!(SPEC.occurrence[5].kind, crate::ring::REC_WINDOW_CLOSED);
-        assert_eq!(SPEC.occurrence[6].kind, crate::ring::REC_ALERT_RESULT);
-        assert_eq!(SPEC.occurrence[7].kind, crate::ring::REC_ENTRY_POPPED);
-        assert_eq!(SPEC.occurrence[8].kind, crate::ring::REC_BACK_REQUESTED);
-        assert_eq!(SPEC.occurrence[9].kind, crate::ring::REC_SECTION_SELECTED);
-        assert_eq!(SPEC.occurrence[10].kind, crate::ring::REC_MENU_ACTIVATED);
-        assert_eq!(SPEC.occurrence[11].kind, crate::ring::REC_MENU_TOGGLED);
-        assert_eq!(SPEC.occurrence[12].kind, crate::ring::REC_MENU_VALUE_CHANGED);
-        assert_eq!(SPEC.occurrence[13].kind, crate::ring::REC_FILE_DIALOG_RESULT);
+        // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
+        // this pin used to be a list of indexed asserts, which pinned
+        // the first fourteen occurrences and said nothing at all about
+        // a fifteenth. Two new clipboard occurrences passed it without
+        // touching it. A guard that cannot fail for the case it exists
+        // for is worse than none, so it compares the WHOLE list.
+        let occurrence: Vec<(&str, u16)> =
+            SPEC.occurrence.iter().map(|r| (r.name, r.kind)).collect();
+        assert_eq!(
+            occurrence,
+            vec![
+                ("button_clicked", crate::ring::REC_BUTTON_CLICKED),
+                ("text_changed", crate::ring::REC_TEXT_CHANGED),
+                ("toggled", crate::ring::REC_TOGGLED),
+                ("value_changed", crate::ring::REC_VALUE_CHANGED),
+                ("close_requested", crate::ring::REC_CLOSE_REQUESTED),
+                ("window_closed", crate::ring::REC_WINDOW_CLOSED),
+                ("alert_result", crate::ring::REC_ALERT_RESULT),
+                ("entry_popped", crate::ring::REC_ENTRY_POPPED),
+                ("back_requested", crate::ring::REC_BACK_REQUESTED),
+                ("section_selected", crate::ring::REC_SECTION_SELECTED),
+                ("menu_activated", crate::ring::REC_MENU_ACTIVATED),
+                ("menu_toggled", crate::ring::REC_MENU_TOGGLED),
+                ("menu_value_changed", crate::ring::REC_MENU_VALUE_CHANGED),
+                ("file_dialog_result", crate::ring::REC_FILE_DIALOG_RESULT),
+                ("clipboard_result", crate::ring::REC_CLIPBOARD_RESULT),
+                ("pasted", crate::ring::REC_PASTED),
+            ]
+        );
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same

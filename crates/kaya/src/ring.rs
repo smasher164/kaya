@@ -41,6 +41,10 @@ pub const REC_MENU_VALUE_CHANGED: u16 = 13;
 /// The picker's one answer: `count` files, each three consecutive
 /// values — I64 handle, Str name, Str local_path. Cancel is count zero.
 pub const REC_FILE_DIALOG_RESULT: u16 = 14;
+/// The clipboard's two answers: the privileged read's, and the one that
+/// arrives because the user pasted.
+pub const REC_CLIPBOARD_RESULT: u16 = 15;
+pub const REC_PASTED: u16 = 16;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

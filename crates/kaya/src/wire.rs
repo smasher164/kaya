@@ -904,6 +904,145 @@ pub(crate) fn file_dialog_result_body(
     b
 }
 
+/// The privileged read's answer on the wire: request id, the clip kind
+/// that arrived, reserved, then that one representation's values.
+/// `clip` zero with no values is the universal no.
+pub(crate) fn clipboard_result_body(
+    request: u64,
+    clip: Option<&crate::protocol::Representation>,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&request.to_le_bytes());
+    b.extend_from_slice(&representation_kind(clip).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_representation(&mut b, clip);
+    b
+}
+
+/// A paste landing on a widget: the widget's stored identity tag, then
+/// the clip kind and that representation's values.
+///
+/// THE TAG GOES IN VERBATIM, exactly as text_changed_body takes it —
+/// which is why the clip kind rides AFTER the path rather than in the
+/// tag's reserved slot. A backend holds the tag bytes and appends; a
+/// binding reads a click tag and then reads a payload; both already
+/// have that code, and a paste onto a stamped row needs neither to
+/// change. NEVER the empty kind: a paste that delivered nothing is not
+/// an occurrence.
+pub(crate) fn pasted_body(tag: &[u8], clip: &crate::protocol::Representation) -> Vec<u8> {
+    let mut b = Vec::with_capacity(tag.len() + 32);
+    b.extend_from_slice(tag);
+    b.extend_from_slice(&representation_kind(Some(clip)).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_representation(&mut b, Some(clip));
+    b
+}
+
+pub(crate) fn representation_kind(clip: Option<&crate::protocol::Representation>) -> u32 {
+    use crate::protocol::Representation as R;
+    match clip {
+        None => 0,
+        Some(R::Text(_)) => CLIP_TEXT,
+        Some(R::Html(_)) => CLIP_HTML,
+        Some(R::Image(_)) => CLIP_IMAGE,
+        Some(R::Files(_)) => CLIP_FILES,
+        Some(R::Custom { .. }) => CLIP_CUSTOM,
+    }
+}
+
+/// The one representation's values, as a Values block. The slot counts
+/// mirror [`write_clip`]'s: one value for text and html, one blob for
+/// an image, id-then-bytes for custom, and the picker's three-per-file
+/// grouping for files — so a guest that already decodes a dialog result
+/// decodes a pasted file list with the same loop.
+fn write_representation(b: &mut Vec<u8>, clip: Option<&crate::protocol::Representation>) {
+    use crate::protocol::Representation as R;
+    let values: Vec<Value> = match clip {
+        None => Vec::new(),
+        Some(R::Text(s) | R::Html(s)) => vec![Value::Str(s.clone())],
+        Some(R::Image(bytes)) => vec![Value::Blob(bytes.clone())],
+        Some(R::Custom { id, bytes }) => {
+            vec![Value::Str(id.clone()), Value::Blob(bytes.clone())]
+        }
+        Some(R::Files(files)) => files
+            .iter()
+            .flat_map(|f| {
+                [
+                    Value::I64(f.handle.0 as i64),
+                    Value::Str(f.name.clone()),
+                    Value::Str(f.local_path.clone()),
+                ]
+            })
+            .collect(),
+    };
+    b.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for v in &values {
+        write_occurrence_value(b, v);
+    }
+}
+
+/// A value on the OCCURRENCE channel, where a blob resolves through the
+/// occurrence blob table rather than a batch-local index.
+///
+/// The tx and apply channels both have a boundary that retires a blob
+/// handle — a submit, a batch — and the occurrence channel has neither:
+/// the guest takes one record at a time and the core cannot see it
+/// advance. So the handle is a table entry the binding redeems and
+/// releases while decoding, and `blobs` here stays empty by
+/// construction; a batch index would name a slot in whatever batch the
+/// pump happened to be serving.
+fn write_occurrence_value(b: &mut Vec<u8>, value: &Value) {
+    match value {
+        Value::Blob(blob) => {
+            let handle = crate::capi::occ_blob_register(blob.0.clone());
+            b.extend_from_slice(&VALUE_BLOB.to_le_bytes());
+            b.extend_from_slice(&8u32.to_le_bytes());
+            b.extend_from_slice(&handle.to_le_bytes());
+            while b.len() % 8 != 0 {
+                b.push(0);
+            }
+        }
+        other => write_value(b, other, &mut Vec::new()),
+    }
+}
+
+/// The mirror of [`write_representation`], for the round-trip tests and
+/// for any core-side consumer: the kind says which arm, the values
+/// carry it. Blobs arrive as table handles, so this is only meaningful
+/// where the table is live.
+#[cfg(test)]
+fn read_representation(kind: u32, values: Vec<Value>) -> Option<crate::protocol::Representation> {
+    use crate::protocol::Representation as R;
+    let mut it = values.into_iter();
+    match kind {
+        0 => None,
+        CLIP_TEXT => Some(R::Text(clip_str(it.next(), "text"))),
+        CLIP_HTML => Some(R::Html(clip_str(it.next(), "html"))),
+        CLIP_IMAGE => Some(R::Image(clip_blob(it.next(), "image"))),
+        CLIP_CUSTOM => Some(R::Custom {
+            id: clip_str(it.next(), "custom id"),
+            bytes: clip_blob(it.next(), "custom bytes"),
+        }),
+        CLIP_FILES => {
+            let mut files = Vec::new();
+            while let Some(handle) = it.next() {
+                let handle = match handle {
+                    Value::I64(v) => crate::protocol::PickedId(v as u64),
+                    other => panic!("kaya: a pasted file is {other:?}, wanted a handle"),
+                };
+                files.push(crate::protocol::PickedFile {
+                    handle,
+                    name: clip_str(it.next(), "file name"),
+                    local_path: clip_str(it.next(), "file local_path"),
+                });
+            }
+            Some(R::Files(files))
+        }
+        other => panic!("kaya: unknown clip kind {other}"),
+    }
+}
+
 pub(crate) fn alert_choice_raw(choice: AlertChoice) -> u32 {
     match choice {
         AlertChoice::Action(i) => i,
@@ -1634,8 +1773,8 @@ fn kind_raw(kind: WidgetKind) -> u32 {
 
 
 /// The mirror of [`write_clip`]: the header says how many of each
-/// plural kind follow, and the canonical order says which slot is
-/// which. ONE DECODER, for the same reason there is one encoder.
+/// plural kind follow, and the canonical order (descending clip value)
+/// says which slot is which. ONE DECODER, for the same reason there is one encoder.
 ///
 /// A COUNT THAT DOES NOT MATCH THE SLOTS IS A BROKEN BINDING, and it
 /// fails here rather than silently handing the app half a clip — the
@@ -1660,21 +1799,6 @@ fn read_clip(r: &mut Reader<'_>) -> crate::protocol::Clip {
 
     let mut it = values.into_iter();
     let mut clip = crate::protocol::Clip::default();
-    if present & CLIP_TEXT != 0 {
-        clip.text = Some(clip_str(it.next(), "text"));
-    }
-    if present & CLIP_HTML != 0 {
-        clip.html = Some(clip_str(it.next(), "html"));
-    }
-    if present & CLIP_IMAGE != 0 {
-        clip.image = Some(clip_blob(it.next(), "image"));
-    }
-    for _ in 0..file_count {
-        clip.files.push(match it.next() {
-            Some(Value::I64(v)) => crate::protocol::PickedId(v as u64),
-            other => panic!("kaya: a copied file is {other:?}, wanted a handle"),
-        });
-    }
     for _ in 0..custom_count {
         let id = clip_str(it.next(), "custom id");
         assert!(
@@ -1682,6 +1806,21 @@ fn read_clip(r: &mut Reader<'_>) -> crate::protocol::Clip {
             "kaya: a custom clip representation carries an empty id"
         );
         clip.custom.push((id, clip_blob(it.next(), "custom bytes")));
+    }
+    for _ in 0..file_count {
+        clip.files.push(match it.next() {
+            Some(Value::I64(v)) => crate::protocol::PickedId(v as u64),
+            other => panic!("kaya: a copied file is {other:?}, wanted a handle"),
+        });
+    }
+    if present & CLIP_IMAGE != 0 {
+        clip.image = Some(clip_blob(it.next(), "image"));
+    }
+    if present & CLIP_HTML != 0 {
+        clip.html = Some(clip_str(it.next(), "html"));
+    }
+    if present & CLIP_TEXT != 0 {
+        clip.text = Some(clip_str(it.next(), "text"));
     }
     clip
 }
@@ -1700,10 +1839,20 @@ fn clip_blob(v: Option<Value>, what: &str) -> crate::protocol::Blob {
     }
 }
 
-/// A clip's fixed header and its values, in the CANONICAL ORDER —
-/// files, image, html, text, custom. ONE ENCODER for both the tx and
-/// the apply record, because the order is the contract and two copies
-/// of it would drift.
+/// A clip's fixed header and its values, in the CANONICAL ORDER:
+/// DESCENDING CLIP VALUE, which is descending richness — custom (16),
+/// files (8), image (4), html (2), text (1).
+///
+/// THE ORDER IS PREFERENCE ORDER on every host that has one (macOS
+/// pasteboard types, X11 TARGETS), so a backend writes what it is
+/// handed, in the order it is handed, and is right. kaya fixes it once
+/// because richness is a property of the KIND and not of the app's
+/// intent, and eight bindings each deciding would be eight chances to
+/// invert it. An app's own custom format leads because it is the one
+/// representation that round-trips into the same app losslessly.
+///
+/// ONE ENCODER for both the tx and the apply record, because the order
+/// is the contract and two copies of it would drift.
 fn write_clip(
     b: &mut Vec<u8>,
     clip: &crate::protocol::Clip,
@@ -1738,21 +1887,21 @@ fn write_clip(
         + clip.custom.len() * 2;
     b.extend_from_slice(&(slots as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
-    if let Some(text) = &clip.text {
-        write_value(b, &Value::Str(text.clone()), blobs);
-    }
-    if let Some(html) = &clip.html {
-        write_value(b, &Value::Str(html.clone()), blobs);
-    }
-    if let Some(image) = &clip.image {
-        write_value(b, &Value::Blob(image.clone()), blobs);
+    for (id, bytes) in &clip.custom {
+        write_value(b, &Value::Str(id.clone()), blobs);
+        write_value(b, &Value::Blob(bytes.clone()), blobs);
     }
     for handle in &clip.files {
         write_value(b, &Value::I64(handle.0 as i64), blobs);
     }
-    for (id, bytes) in &clip.custom {
-        write_value(b, &Value::Str(id.clone()), blobs);
-        write_value(b, &Value::Blob(bytes.clone()), blobs);
+    if let Some(image) = &clip.image {
+        write_value(b, &Value::Blob(image.clone()), blobs);
+    }
+    if let Some(html) = &clip.html {
+        write_value(b, &Value::Str(html.clone()), blobs);
+    }
+    if let Some(text) = &clip.text {
+        write_value(b, &Value::Str(text.clone()), blobs);
     }
 }
 
@@ -2058,6 +2207,78 @@ mod tests {
         assert_eq!(decoded.len(), ops.len());
         for (a, b) in ops.iter().zip(decoded.iter()) {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// The two clipboard occurrences, out and back — including the
+    /// blob that never enters the record stream.
+    ///
+    /// THE BLOB HANDLE IS THE POINT. On the tx and apply channels a
+    /// blob rides as a batch-local index, and reusing that here would
+    /// name a slot in whatever batch the pump happened to be serving:
+    /// a pasted image would arrive as some window's icon, or as
+    /// nothing. So the decode below redeems through the occurrence
+    /// table exactly as a binding does, and RELEASES — a leak there is
+    /// a pasted megabyte per paste, forever.
+    #[test]
+    fn clipboard_occurrences_round_trip() {
+        use crate::protocol::Representation as R;
+
+        // A binding's decode: redeem, copy, release.
+        let resolve = |h: u64| -> Option<Arc<[u8]>> {
+            let mut len = 0usize;
+            let p = unsafe { crate::capi::kaya_occurrence_blob(h, &mut len) };
+            if p.is_null() {
+                return None;
+            }
+            let bytes: Arc<[u8]> = Arc::from(unsafe { std::slice::from_raw_parts(p, len) });
+            crate::capi::kaya_occurrence_blob_release(h);
+            Some(bytes)
+        };
+
+        let cases = vec![
+            None,
+            Some(R::Text("milk".into())),
+            Some(R::Html("<b>milk</b>".into())),
+            Some(R::Image(crate::protocol::Blob(Arc::from(&b"PNG"[..])))),
+            Some(R::Custom {
+                id: "dev.kaya.note".into(),
+                bytes: crate::protocol::Blob(Arc::from(&b"{}"[..])),
+            }),
+            Some(R::Files(vec![crate::protocol::PickedFile {
+                handle: crate::protocol::PickedId(7),
+                name: "notes.txt".into(),
+                local_path: "/tmp/notes.txt".into(),
+            }])),
+        ];
+
+        for want in cases {
+            let body = clipboard_result_body(42, want.as_ref());
+            let mut r = Reader { buf: &body, at: 0, blobs: &resolve };
+            assert_eq!(r.u64(), 42);
+            let kind = r.u32();
+            let _reserved = r.u32();
+            assert_eq!(read_representation(kind, r.path()), want);
+
+            let Some(clip) = want else { continue };
+            // The same payload, reached through a widget and through a
+            // stamped copy: one record kind, the click tag deciding.
+            let body = pasted_body(&click_tag(5, &[]), &clip);
+            let mut r = Reader { buf: &body, at: 0, blobs: &resolve };
+            assert_eq!(r.u64(), 5);
+            assert!(r.path().is_empty(), "an empty path is a live widget");
+            let kind = r.u32();
+            let _reserved = r.u32();
+            assert_eq!(read_representation(kind, r.path()), Some(clip.clone()));
+
+            let path = vec![Value::from("g1")];
+            let body = pasted_body(&click_tag(8, &path), &clip);
+            let mut r = Reader { buf: &body, at: 0, blobs: &resolve };
+            assert_eq!(r.u64(), 8);
+            assert_eq!(r.path(), path);
+            let kind = r.u32();
+            let _reserved = r.u32();
+            assert_eq!(read_representation(kind, r.path()), Some(clip));
         }
     }
 
