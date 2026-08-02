@@ -3521,6 +3521,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.menus_touched = true;
         }
 
+        // The clipboard's depth slice is SwiftUI on mac
+        // (docs/clipboard-plan.md); this backend has not reached it.
+        ApplyOp::Copy(_) | ApplyOp::ReadClipboard { .. } => crate::depth_stub("clipboard"),
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
             // means by a file picker.

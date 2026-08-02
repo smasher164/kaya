@@ -59,6 +59,9 @@ pub const TX_CONTEXT_ATTACH: u16 = 31;
 pub const TX_CONTEXT_ATTACH_NODE: u16 = 32;
 pub const TX_SET_MENU_PROP: u16 = 33;
 pub const TX_SHOW_FILE_DIALOG: u16 = 34;
+/// The clipboard pair: one clip out, one privileged read in.
+pub const TX_COPY: u16 = 35;
+pub const TX_READ_CLIPBOARD: u16 = 36;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -85,6 +88,8 @@ pub const APPLY_CONTEXT_ATTACH: u16 = 21;
 pub const APPLY_CONTEXT_ATTACH_NODE: u16 = 22;
 pub const APPLY_SET_MENU_PROP: u16 = 23;
 pub const APPLY_PRESENT_FILE_DIALOG: u16 = 24;
+pub const APPLY_COPY: u16 = 25;
+pub const APPLY_READ_CLIPBOARD: u16 = 26;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -696,6 +701,13 @@ pub fn decode_transaction_with_blobs(
                 }
                 TxOp::ShowAlert(AlertSpec { window, alert, title, message, actions, cancel })
             }
+            TX_COPY => TxOp::Copy(read_clip(&mut r)),
+            TX_READ_CLIPBOARD => {
+                let request = r.u64();
+                let accepting = r.u32();
+                let _reserved = r.u32();
+                TxOp::ReadClipboard { request, accepting }
+            }
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1168,6 +1180,16 @@ impl Writer {
                     }
                 })
             }
+            ApplyOp::Copy(clip) => self.record(APPLY_COPY, |b, blobs| {
+                write_clip(b, clip, blobs);
+            }),
+            ApplyOp::ReadClipboard { request, accepting } => {
+                self.record(APPLY_READ_CLIPBOARD, |b, _| {
+                    b.extend_from_slice(&request.to_le_bytes());
+                    b.extend_from_slice(&accepting.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                })
+            }
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -1462,6 +1484,16 @@ impl Writer {
                     .collect();
                 write_values(b, &flat, blobs);
             }),
+            TxOp::Copy(clip) => self.record(TX_COPY, |b, blobs| {
+                write_clip(b, clip, blobs);
+            }),
+            TxOp::ReadClipboard { request, accepting } => {
+                self.record(TX_READ_CLIPBOARD, |b, _| {
+                    b.extend_from_slice(&request.to_le_bytes());
+                    b.extend_from_slice(&accepting.to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                })
+            }
             TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&entry.0.to_le_bytes());
@@ -1597,6 +1629,130 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Radio => KIND_RADIO,
         WidgetKind::Grid => KIND_GRID,
         WidgetKind::Textarea => KIND_TEXTAREA,
+    }
+}
+
+
+/// The mirror of [`write_clip`]: the header says how many of each
+/// plural kind follow, and the canonical order says which slot is
+/// which. ONE DECODER, for the same reason there is one encoder.
+///
+/// A COUNT THAT DOES NOT MATCH THE SLOTS IS A BROKEN BINDING, and it
+/// fails here rather than silently handing the app half a clip — the
+/// same rule the picker's read-in-threes already follows.
+fn read_clip(r: &mut Reader<'_>) -> crate::protocol::Clip {
+    let present = r.u32();
+    let file_count = r.u32() as usize;
+    let custom_count = r.u32() as usize;
+    let _reserved = r.u32();
+    let values = r.record();
+
+    let singles = usize::from(present & CLIP_TEXT != 0)
+        + usize::from(present & CLIP_HTML != 0)
+        + usize::from(present & CLIP_IMAGE != 0);
+    let wanted = singles + file_count + custom_count * 2;
+    assert!(
+        values.len() == wanted,
+        "kaya: copy carries {} values but its header describes {wanted} \
+         (text/html/image flags, {file_count} files, {custom_count} custom)",
+        values.len()
+    );
+
+    let mut it = values.into_iter();
+    let mut clip = crate::protocol::Clip::default();
+    if present & CLIP_TEXT != 0 {
+        clip.text = Some(clip_str(it.next(), "text"));
+    }
+    if present & CLIP_HTML != 0 {
+        clip.html = Some(clip_str(it.next(), "html"));
+    }
+    if present & CLIP_IMAGE != 0 {
+        clip.image = Some(clip_blob(it.next(), "image"));
+    }
+    for _ in 0..file_count {
+        clip.files.push(match it.next() {
+            Some(Value::I64(v)) => crate::protocol::PickedId(v as u64),
+            other => panic!("kaya: a copied file is {other:?}, wanted a handle"),
+        });
+    }
+    for _ in 0..custom_count {
+        let id = clip_str(it.next(), "custom id");
+        assert!(
+            !id.is_empty(),
+            "kaya: a custom clip representation carries an empty id"
+        );
+        clip.custom.push((id, clip_blob(it.next(), "custom bytes")));
+    }
+    clip
+}
+
+fn clip_str(v: Option<Value>, what: &str) -> String {
+    match v {
+        Some(Value::Str(s)) => s,
+        other => panic!("kaya: clip {what} is {other:?}, wanted a string"),
+    }
+}
+
+fn clip_blob(v: Option<Value>, what: &str) -> crate::protocol::Blob {
+    match v {
+        Some(Value::Blob(b)) => b,
+        other => panic!("kaya: clip {what} is {other:?}, wanted bytes"),
+    }
+}
+
+/// A clip's fixed header and its values, in the CANONICAL ORDER —
+/// files, image, html, text, custom. ONE ENCODER for both the tx and
+/// the apply record, because the order is the contract and two copies
+/// of it would drift.
+fn write_clip(
+    b: &mut Vec<u8>,
+    clip: &crate::protocol::Clip,
+    blobs: &mut Vec<std::sync::Arc<[u8]>>,
+) {
+    let mut present = 0u32;
+    if clip.text.is_some() {
+        present |= CLIP_TEXT;
+    }
+    if clip.html.is_some() {
+        present |= CLIP_HTML;
+    }
+    if clip.image.is_some() {
+        present |= CLIP_IMAGE;
+    }
+    if !clip.files.is_empty() {
+        present |= CLIP_FILES;
+    }
+    if !clip.custom.is_empty() {
+        present |= CLIP_CUSTOM;
+    }
+    b.extend_from_slice(&present.to_le_bytes());
+    b.extend_from_slice(&(clip.files.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(clip.custom.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    // The count the Values field needs: one slot per single-valued
+    // representation present, one per file, two per custom pair.
+    let slots = clip.text.iter().count()
+        + clip.html.iter().count()
+        + clip.image.iter().count()
+        + clip.files.len()
+        + clip.custom.len() * 2;
+    b.extend_from_slice(&(slots as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    if let Some(text) = &clip.text {
+        write_value(b, &Value::Str(text.clone()), blobs);
+    }
+    if let Some(html) = &clip.html {
+        write_value(b, &Value::Str(html.clone()), blobs);
+    }
+    if let Some(image) = &clip.image {
+        write_value(b, &Value::Blob(image.clone()), blobs);
+    }
+    for handle in &clip.files {
+        write_value(b, &Value::I64(handle.0 as i64), blobs);
+    }
+    for (id, bytes) in &clip.custom {
+        write_value(b, &Value::Str(id.clone()), blobs);
+        write_value(b, &Value::Blob(bytes.clone()), blobs);
     }
 }
 

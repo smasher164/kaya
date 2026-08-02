@@ -278,6 +278,33 @@ pub struct FileDialogSpec {
     pub filters: Vec<(String, String)>,
 }
 
+/// One clip, offered in several representations at once.
+///
+/// A RECORD AND NOT A LIST, which is the whole shape: every platform
+/// models the clipboard as one item available in several types, with
+/// the consumer taking the richest it understands, and a record makes
+/// at-most-one-per-kind structural rather than a duplicate check the
+/// root has to run. `custom` is the one plural field with names,
+/// because several app-defined formats are legitimate.
+///
+/// kaya DERIVES NOTHING. An app that wants plain text alongside html
+/// puts both in: whether list bullets survive and where line breaks go
+/// are rendering decisions the app owns, and a bad auto-derivation is
+/// worse than none because it degrades every paste into a plain field
+/// silently. The one exception is `files`, which also gets a text
+/// rendition of the paths — universal convention, and no judgment in
+/// it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Clip {
+    pub text: Option<String>,
+    pub html: Option<String>,
+    pub image: Option<Blob>,
+    /// The SAME capability the picker returns, so a picked file goes
+    /// straight on and a pasted one opens with the call that exists.
+    pub files: Vec<PickedId>,
+    pub custom: Vec<(String, Blob)>,
+}
+
 /// A collection: a core-side ordered key→value table, the sibling of a
 /// signal, changed with delta records and rendered by a For.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1028,6 +1055,11 @@ pub enum TxOp {
     /// alert's grammar exactly, answered by one FileDialogResult. One
     /// dialog may be live per process.
     ShowFileDialog(FileDialogSpec),
+    /// Put one clip on the system clipboard.
+    Copy(Clip),
+    /// Read the clipboard outside any paste gesture — the privileged
+    /// one; see the spec record for what the platforms charge.
+    ReadClipboard { request: u64, accepting: u32 },
     /// Push a navigation entry onto `window`'s stack (no capability
     /// gate — every host materializes a serial stack natively).
     /// Materializes covered/incoming; mounting a root into it
@@ -1165,6 +1197,13 @@ pub enum ApplyOp {
     PresentAlert(AlertSpec),
     /// Present the platform's real file picker (already validated).
     PresentFileDialog(FileDialogSpec),
+    /// Put this clip on the system clipboard. The backend owns the
+    /// lowering per representation — CF_HTML's offset header, Android's
+    /// content:// URI for an image, CF_HDROP's struct — which is the
+    /// whole reason the representation set is closed.
+    Copy(Clip),
+    /// Answer a privileged read with the first accepted representation.
+    ReadClipboard { request: u64, accepting: u32 },
     /// Push a navigation entry onto the window's stack, hidden until
     /// a mount presents it. The covered root stays alive.
     PushEntry { window: WindowId, entry: WindowId },

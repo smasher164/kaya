@@ -394,7 +394,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x1e193381cb6ed308uL
+    private const val SPEC_HASH: ULong = 0x94b9162b2c50a3c7uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -408,6 +408,11 @@ object KayaCompose {
     private const val APPLY_DESTROY_WINDOW = 10
     private const val APPLY_PRESENT_ALERT = 11
     private const val APPLY_PRESENT_FILE_DIALOG = 24
+
+    /** The clipboard pair. Declared with the rest of the apply
+     * vocabulary; the arms that act on them are the next slice. */
+    private const val APPLY_COPY = 25
+    private const val APPLY_READ_CLIPBOARD = 26
     private const val APPLY_PUSH_ENTRY = 12
     private const val APPLY_POP_ENTRY = 13
     private const val APPLY_SET_ENTRY_PROP = 14
@@ -774,6 +779,13 @@ object KayaCompose {
                 // this interpreter disagree — fail loudly.
                 APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
+                // The clipboard's depth slice is SwiftUI on mac
+                // (docs/clipboard-plan.md). Refusing IN THIS BACKEND'S
+                // OWN WORDS rather than falling through: an unhandled
+                // apply op is silently dropped, and a scene that copied
+                // nothing would read as a kaya bug rather than as a
+                // backend that has not got there.
+                APPLY_COPY, APPLY_READ_CLIPBOARD -> depthStub("clipboard")
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
                     val dialog = b.long
@@ -2696,6 +2708,25 @@ object KayaCompose {
  * into it — user edits and pastes through onValueChange, the wire's
  * property write, the harness's set_text — and reads need none.
  */
+/**
+ * The one spelling of "this backend has not reached that scene yet",
+ * the Kotlin twin of Rust's `depth_stub` and Swift's `kayaDepthStub`.
+ *
+ * A CALL AND NOT A SENTENCE, which is the whole point: check-stubs and
+ * check-steps both READ this call — one refuses a runner that wires a
+ * scene's legs while the backend is still here, the other stops
+ * demanding those legs — and a backend that refuses in its own words is
+ * invisible to both. The convention was a free-form string for four
+ * milestones and no backend ever wrote it, so the gate could only ever
+ * pass. This interpreter had no such helper until the clipboard needed
+ * one.
+ */
+internal fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on this backend — " +
+            "it is a depth slice; see CLAUDE.md's sequencing"
+    )
+
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 

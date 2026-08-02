@@ -1120,6 +1120,43 @@ impl Scene {
                     crate::capi::file_dialog_shown(spec.dialog);
                     out.push(ApplyOp::PresentFileDialog(spec));
                 }
+                TxOp::Copy(clip) => {
+                    // AN EMPTY CLIP IS A MISTAKE, not a way to clear:
+                    // every platform distinguishes putting nothing on
+                    // the clipboard from putting an empty string, and a
+                    // copy that offers no representation at all can
+                    // only be an author who filled none of the record.
+                    assert!(
+                        clip.text.is_some()
+                            || clip.html.is_some()
+                            || clip.image.is_some()
+                            || !clip.files.is_empty()
+                            || !clip.custom.is_empty(),
+                        "kaya: copy offers no representation — fill at least one \
+                         field of the clip record"
+                    );
+                    for (id, _) in &clip.custom {
+                        assert!(
+                            !id.is_empty(),
+                            "kaya: a custom clip representation needs an id — it is \
+                             the name the format round-trips under"
+                        );
+                    }
+                    out.push(ApplyOp::Copy(clip));
+                }
+                TxOp::ReadClipboard { request, accepting } => {
+                    // ACCEPTING NOTHING CANNOT SUCCEED, so it is an
+                    // author error rather than a read that always
+                    // answers empty — the empty answer means denied or
+                    // absent, and conflating the two would hide a typo
+                    // behind a legitimate outcome.
+                    assert!(
+                        accepting != 0,
+                        "kaya: read_clipboard accepts no representation — pass a \
+                         mask of the kinds this read can use"
+                    );
+                    out.push(ApplyOp::ReadClipboard { request, accepting });
+                }
                 TxOp::PushEntry { window, entry } => {
                     // No capability gate — every host materializes a
                     // serial stack natively (the deliberate contrast

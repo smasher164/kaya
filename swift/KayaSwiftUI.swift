@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x1e193381cb6ed308
+let kayaSpecHash: UInt64 = 0x94b9162b2c50a3c7
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -38,6 +38,10 @@ private let applyCreateWindow: UInt16 = 9
 private let applyDestroyWindow: UInt16 = 10
 private let applyPresentAlert: UInt16 = 11
 private let applyPresentFileDialog: UInt16 = 24
+/// The clipboard pair. Declared here with the rest of the apply
+/// vocabulary; the arms that act on them are the next slice.
+private let applyCopy: UInt16 = 25
+private let applyReadClipboard: UInt16 = 26
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -1450,6 +1454,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaWindowDelegates.removeValue(forKey: wid)
                 #endif
                 kayaScene.windows.removeValue(forKey: wid)
+            case applyCopy, applyReadClipboard:
+                // The clipboard's depth slice starts here, but the arms
+                // are the next piece of work. Refusing in this
+                // backend's own words rather than falling through: an
+                // unhandled apply op is silently dropped, and a scene
+                // that copied nothing would read as a kaya bug.
+                kayaDepthStub("clipboard", on: "SwiftUI")
             case applyPresentFileDialog:
                 // The platform's REAL picker (NSOpenPanel), answered
                 // exactly once through kaya_emit_file_dialog_result —

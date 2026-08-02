@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x1e193381cb6ed308
+let kayaSpecHash: UInt64 = 0x94b9162b2c50a3c7
 
 struct KayaTx {
     var bytes = Data()
@@ -382,6 +382,26 @@ struct KayaTx {
         self.u32(multiple)
         self.u32(0)
         self.values(filters)
+        self.end(start)
+    }
+
+    /// Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
+    mutating func copy(_ present: UInt32, _ fileCount: UInt32, _ customCount: UInt32, _ reps: [KayaValue]) {
+        let start = self.begin(UInt16(KAYA_TX_COPY))
+        self.u32(present)
+        self.u32(fileCount)
+        self.u32(customCount)
+        self.u32(0)
+        self.values(reps)
+        self.end(start)
+    }
+
+    /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+    mutating func readClipboard(_ request: UInt64, _ accepting: UInt32) {
+        let start = self.begin(UInt16(KAYA_TX_READ_CLIPBOARD))
+        self.u64(request)
+        self.u32(accepting)
+        self.u32(0)
         self.end(start)
     }
 

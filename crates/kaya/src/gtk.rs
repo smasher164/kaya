@@ -2601,6 +2601,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
 
+        // The clipboard's depth slice is SwiftUI on mac
+        // (docs/clipboard-plan.md); this backend has not reached it.
+        ApplyOp::Copy(_) | ApplyOp::ReadClipboard { .. } => crate::depth_stub("clipboard"),
         ApplyOp::PresentFileDialog(spec) => {
             // GNOME's own picker: gtk::FileDialog (4.10+), presented on
             // the requesting window and answered exactly once through

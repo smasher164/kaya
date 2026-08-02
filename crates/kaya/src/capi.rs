@@ -173,6 +173,8 @@ pub const KAYA_TX_SET_MENU_PROP: u16 = 33;
 /// on the alert's request/result grammar. Dialog ids are guest-chosen,
 /// one may be live per process, and the id retires with its result.
 pub const KAYA_TX_SHOW_FILE_DIALOG: u16 = 34;
+pub const KAYA_TX_COPY: u16 = 35;
+pub const KAYA_TX_READ_CLIPBOARD: u16 = 36;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -1793,6 +1795,8 @@ mod tests {
             ("context_attach_node", KAYA_TX_CONTEXT_ATTACH_NODE),
             ("set_menu_prop", KAYA_TX_SET_MENU_PROP),
             ("show_file_dialog", KAYA_TX_SHOW_FILE_DIALOG),
+            ("copy", KAYA_TX_COPY),
+            ("read_clipboard", KAYA_TX_READ_CLIPBOARD),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),

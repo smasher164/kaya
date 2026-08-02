@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x1e193381cb6ed308
+specHash = 0x94b9162b2c50a3c7
 
 valueBool :: Word32
 valueBool = 1
@@ -268,6 +268,10 @@ txKindSetMenuProp :: Word16
 txKindSetMenuProp = 33
 txKindShowFileDialog :: Word16
 txKindShowFileDialog = 34
+txKindCopy :: Word16
+txKindCopy = 35
+txKindReadClipboard :: Word16
+txKindReadClipboard = 36
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -511,6 +515,14 @@ txSetMenuProp item prop source = wireRecord txKindSetMenuProp (word64LE item <> 
 -- Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
 txShowFileDialog :: Word64 -> Word64 -> Word32 -> [Value] -> Builder
 txShowFileDialog window dialog multiple filters = wireRecord txKindShowFileDialog (word64LE window <> word64LE dialog <> word32LE multiple <> word32LE 0 <> encodeValues filters)
+
+-- Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
+txCopy :: Word32 -> Word32 -> Word32 -> [Value] -> Builder
+txCopy present fileCount customCount reps = wireRecord txKindCopy (word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE 0 <> encodeValues reps)
+
+-- Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+txReadClipboard :: Word64 -> Word32 -> Builder
+txReadClipboard request accepting = wireRecord txKindReadClipboard (word64LE request <> word32LE accepting <> word32LE 0)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

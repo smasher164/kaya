@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x1e193381cb6ed308ULL
+#define KAYA_SPEC_HASH 0x94b9162b2c50a3c7ULL
 
 
 /* Create a signal holding `initial`. */
@@ -432,6 +432,26 @@ static inline void kaya_tx_show_file_dialog(KayaTx *tx, uint64_t window, uint64_
     kaya_wire_u32(tx, multiple);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, filters, filters_len);
+    kaya_wire_end(tx, start);
+}
+
+/* Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER — files, image, html, text, custom — which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. Values in order: Str text, Str html, I64 image blob, `file_count` I64 handles, then `custom_count` pairs of Str id and I64 blob. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
+static inline void kaya_tx_copy(KayaTx *tx, uint32_t present, uint32_t file_count, uint32_t custom_count, const KayaVal *reps, uint32_t reps_len) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_COPY);
+    kaya_wire_u32(tx, present);
+    kaya_wire_u32(tx, file_count);
+    kaya_wire_u32(tx, custom_count);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, reps, reps_len);
+    kaya_wire_end(tx, start);
+}
+
+/* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
+static inline void kaya_tx_read_clipboard(KayaTx *tx, uint64_t request, uint32_t accepting) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_READ_CLIPBOARD);
+    kaya_wire_u64(tx, request);
+    kaya_wire_u32(tx, accepting);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, start);
 }
 

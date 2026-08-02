@@ -112,6 +112,13 @@
 
 #define TX_SHOW_FILE_DIALOG 34
 
+/**
+ * The clipboard pair: one clip out, one privileged read in.
+ */
+#define TX_COPY 35
+
+#define TX_READ_CLIPBOARD 36
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -159,6 +166,10 @@
 #define APPLY_SET_MENU_PROP 23
 
 #define APPLY_PRESENT_FILE_DIALOG 24
+
+#define APPLY_COPY 25
+
+#define APPLY_READ_CLIPBOARD 26
 
 #define VALUE_BOOL 1
 
@@ -558,6 +569,10 @@
  * one may be live per process, and the id retires with its result.
  */
 #define KAYA_TX_SHOW_FILE_DIALOG 34
+
+#define KAYA_TX_COPY 35
+
+#define KAYA_TX_READ_CLIPBOARD 36
 
 /**
  * Host capability bits, queryable any time (like kaya_spec_hash).
