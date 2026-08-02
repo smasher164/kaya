@@ -2639,7 +2639,37 @@ Both clear-paths carry equality guards that read correctly
 (`connect_closed` and `ApplyOp::Destroy` each clear only when the claim
 is their own anchor).
 
-WHAT TO DO WHEN IT NEXT FIRES: read the trail the panic now prints.
+SOLVED 2026-08-02, BY THE TRAIL, ON ITS FIRST FIRING. Two legs failed
+in the next matrix and both printed the same thing:
+
+        -   388ms  harness context_open -> claimed by widget 6
+        -   185ms  context item activated -> cleared
+        -    89ms  harness context_open -> claimed by widget 9223372036854775811
+        -     0ms  popover closed (chrome dismissal) -> cleared
+
+The clearer is the POPOVER'S OWN `closed` HANDLER, 0ms before the
+panic — neither thing that had been guessed. The anchor
+9223372036854775811 is 0x8000...0003, the high-bit namespace: a STAMPED
+TEMPLATE ROW, restamped by the re-render the preceding Rename caused.
+Popping over a freshly restamped row does not stay up on Wayland, GTK
+emits `closed`, and the handler correctly releases a claim 89ms old.
+
+THE FIX: under the harness, a `closed` arriving with the claim still set
+is a FAILED PRESENTATION, not a dismissal, so it re-presents instead of
+releasing. The handler's own comment had said for months that it
+no-ops on the harness path — a scene has no user to press Esc or click
+away — so a close reaching it is by definition the failure case.
+
+AND IT REPRODUCES DETERMINISTICALLY, once the mechanism is known: inject
+`popover.popdown()` immediately after the `popup()` in `context_open`
+and the leg fails every time with that exact trail. With the fix in, the
+same injection passes. Twelve runs of the menus family under contention
+afterwards: clean. That is the whole loop — fails without the fix,
+passes with it, same forced condition both ways — and it is what 86
+statistical samples could not buy.
+
+WHAT TO DO IF SOMETHING LIKE IT FIRES AGAIN: read the trail the panic
+prints.
 Five sites record every touch of the claim with elapsed time — the
 right-click gesture, chrome dismissal, anchor destruction, activation,
 and the harness verb — so the message names which one cleared it and how

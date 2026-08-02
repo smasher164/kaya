@@ -1903,12 +1903,43 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
         let open = core.open_context.clone();
         #[cfg(feature = "harness")]
         let trail_closed = core.context_trail.clone();
-        popover.connect_closed(move |_| {
+        popover.connect_closed(move |popover| {
             let mut open = open.borrow_mut();
-            if *open == Some(widget) {
+            if *open != Some(widget) {
+                return;
+            }
+            // A CLOSE THAT ARRIVES WITH THE CLAIM STILL SET IS A FAILED
+            // PRESENTATION, NOT A DISMISSAL — under the harness, which
+            // is the only place this distinction is reachable.
+            //
+            // Chrome dismissal is a USER doing something (Esc, a click
+            // outside), and menu_activate clears the claim BEFORE its
+            // popdown, so on the harness path this handler is expected
+            // to no-op — the comment above has said so since it was
+            // written. There is no user in a scene. So a close landing
+            // here means popup() did not keep the menu up, and the
+            // right answer is to put it back rather than to release a
+            // claim the harness still believes in.
+            //
+            // MEASURED, not reasoned: menus-{csharp,java}-wayland both
+            // failed with `no such menu item "Remove"` and a trail
+            // reading `harness context_open -> claimed by widget
+            // 9223372036854775811` then `popover closed -> cleared` 0ms
+            // before the panic. The anchor is a STAMPED ROW, restamped
+            // by the re-render the preceding Rename caused, and popping
+            // over a freshly restamped row is what fails. Wayland only;
+            // every x11 twin passed. 86 earlier attempts to reproduce
+            // it found nothing, and two other mechanisms were proposed
+            // and disproved (docs/traps.md).
+            #[cfg(feature = "harness")]
+            {
+                note_claim(&trail_closed, "popover closed without showing — re-presenting", Some(widget));
+                popover.popup();
+                return;
+            }
+            #[cfg(not(feature = "harness"))]
+            {
                 *open = None;
-                #[cfg(feature = "harness")]
-                note_claim(&trail_closed, "popover closed (chrome dismissal)", None);
             }
         });
         core.context_menus.insert(
