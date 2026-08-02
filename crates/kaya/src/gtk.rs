@@ -561,6 +561,26 @@ struct CoreState {
     /// interpreters' rule). Rc'd: the popover's closed handler clears
     /// it without borrowing CORE.
     open_context: Rc<RefCell<Option<u64>>>,
+    /// EVERY TOUCH OF THE CLAIM ABOVE, so that a failure can say what
+    /// cleared it and when.
+    ///
+    /// menus-java-wayland flaked once with `no such menu item Remove`,
+    /// which is the BAR route reporting that the claim was None at the
+    /// moment the harness activated a CONTEXT item. Eighty-six attempts
+    /// to reproduce it failed — six full lane runs, fifty-three of the
+    /// leg alone, twenty of the whole menus family under contention —
+    /// and two mechanisms were proposed and DISPROVED (the claim is set
+    /// synchronously, so it is not late; and removing the scene's
+    /// intervening expect, which should have made a destroy-races-open
+    /// theory near-certain, still passed).
+    ///
+    /// So the next occurrence has to answer the question itself. Five
+    /// places touch the claim and any of them could be the one; the
+    /// trail names which, with the elapsed time, and the panic prints
+    /// it. Rc'd for the same reason the claim is: the popover handlers
+    /// clear it without borrowing CORE.
+    #[cfg(feature = "harness")]
+    context_trail: Rc<RefCell<Vec<(std::time::Instant, &'static str, Option<u64>)>>>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -1194,6 +1214,50 @@ fn menu_preorder(reg: &MenuRegistry, root: u64) -> Vec<u64> {
 /// materialization mints a titled row — an inline nested radio group
 /// has none, yet "View>Sort>Date" still lands on Date. `"Sort>Date"`
 /// is option Date inside group Sort; `"Sort"` is the group itself.
+/// Note a touch of the open-context claim. Bounded: the last sixteen
+/// are all anyone reads, and an unbounded trail on a long run is a
+/// leak.
+#[cfg(feature = "harness")]
+fn note_claim(
+    trail: &Rc<RefCell<Vec<(std::time::Instant, &'static str, Option<u64>)>>>,
+    why: &'static str,
+    value: Option<u64>,
+) {
+    let mut trail = trail.borrow_mut();
+    if trail.len() == 16 {
+        trail.remove(0);
+    }
+    trail.push((std::time::Instant::now(), why, value));
+}
+
+/// The trail as one line per event, newest last, with how long ago each
+/// happened — a race is a question about ORDER and INTERVAL, and both
+/// are unreadable from a list of ids alone.
+#[cfg(feature = "harness")]
+fn claim_trail(
+    trail: &Rc<RefCell<Vec<(std::time::Instant, &'static str, Option<u64>)>>>,
+) -> String {
+    let now = std::time::Instant::now();
+    let trail = trail.borrow();
+    if trail.is_empty() {
+        return "    (nothing has ever claimed it)".to_owned();
+    }
+    trail
+        .iter()
+        .map(|(at, why, value)| {
+            format!(
+                "    -{:>6}ms  {why} -> {}",
+                now.duration_since(*at).as_millis(),
+                match value {
+                    Some(id) => format!("claimed by widget {id}"),
+                    None => "cleared".to_owned(),
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn menu_resolve_path(reg: &MenuRegistry, roots: &[u64], path: &str) -> Option<u64> {
     let mut current: Vec<u64> = roots.to_vec();
     let mut found = None;
@@ -1819,12 +1883,16 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
         let gesture = gtk4::GestureClick::new();
         gesture.set_button(gtk4::gdk::BUTTON_SECONDARY);
         let open = core.open_context.clone();
+        #[cfg(feature = "harness")]
+        let trail_press = core.context_trail.clone();
         let popover_for_press = popover.clone();
         gesture.connect_pressed(move |_, _, x, y| {
             popover_for_press.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
                 x as i32, y as i32, 1, 1,
             )));
             *open.borrow_mut() = Some(widget);
+            #[cfg(feature = "harness")]
+            note_claim(&trail_press, "right-click gesture", Some(widget));
             popover_for_press.popup();
         });
         anchor.add_controller(gesture);
@@ -1833,10 +1901,14 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
         // on the harness path. The Rc keeps this closure off CORE —
         // popdown can run while a stage closure holds that borrow.
         let open = core.open_context.clone();
+        #[cfg(feature = "harness")]
+        let trail_closed = core.context_trail.clone();
         popover.connect_closed(move |_| {
             let mut open = open.borrow_mut();
             if *open == Some(widget) {
                 *open = None;
+                #[cfg(feature = "harness")]
+                note_claim(&trail_closed, "popover closed (chrome dismissal)", None);
             }
         });
         core.context_menus.insert(
@@ -2183,6 +2255,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let mut open = core.open_context.borrow_mut();
                     if *open == Some(id.0) {
                         *open = None;
+                        #[cfg(feature = "harness")]
+                        note_claim(&core.context_trail, "anchor destroyed", None);
                     }
                 }
                 let mut reg = core.menus.borrow_mut();
@@ -3376,6 +3450,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 menu_action_groups: HashMap::new(),
                 context_menus: HashMap::new(),
                 open_context: Rc::new(RefCell::new(None)),
+                #[cfg(feature = "harness")]
+                context_trail: Rc::new(RefCell::new(Vec::new())),
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
                     {
@@ -3503,6 +3579,7 @@ impl crate::harness::Stage for GtkStage {
                 // equality check no-ops), and the REAL per-anchor
                 // action carries the noun.
                 *core.open_context.borrow_mut() = None;
+                note_claim(&core.context_trail, "context item activated", None);
                 attachment.popover.popdown();
                 match route {
                     Some((action, None)) => action.activate(None),
@@ -3520,8 +3597,21 @@ impl crate::harness::Stage for GtkStage {
             let route = {
                 let reg = core.menus.borrow();
                 let roots = reg.bars.get(&0).cloned().unwrap_or_default();
-                let item = menu_resolve_path(&reg, &roots, &path)
-                    .unwrap_or_else(|| panic!("kaya: no such menu item {path:?}"));
+                let item = menu_resolve_path(&reg, &roots, &path).unwrap_or_else(|| {
+                    // REACHING HERE MEANS THE CLAIM WAS NONE, which for
+                    // a context item is the whole bug rather than a
+                    // detail: the bar cannot contain it, so the useful
+                    // question is never "which item" but "what cleared
+                    // the claim, and when". The trail answers it.
+                    panic!(
+                        "kaya: no such menu item {path:?} on the BAR route — the \
+                         open-context claim was None, so this resolved against the \
+                         menu bar. If {path:?} is a CONTEXT item, the claim was \
+                         taken and lost between context_open and here. What touched \
+                         it, newest last:\n{}",
+                        claim_trail(&core.context_trail)
+                    )
+                });
                 menu_activation_route(&reg, item, None)
             };
             match route {
@@ -3542,6 +3632,7 @@ impl crate::harness::Stage for GtkStage {
             // The claim, then the REAL chrome: the same popover the
             // right-click gesture presents.
             *core.open_context.borrow_mut() = Some(anchor);
+            note_claim(&core.context_trail, "harness context_open", Some(anchor));
             attachment.popover.popup();
         });
     }

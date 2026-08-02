@@ -2603,3 +2603,51 @@ neither focus nor the read, but it is on screen and in the
 accessibility tree while a scene is asserting, and it lands in recording
 mode's video. A leg that fails oddly right after a copy should suspect
 it before suspecting kaya.
+
+## A menus flake that survived 86 attempts to reproduce it
+
+Seen once, 2026-08-02, on `menus-java-wayland` inside a full parallel
+lane:
+
+    kaya: no such menu item "Remove"
+
+That message is the BAR route. It means the open-context claim was None
+when the harness activated a CONTEXT item, so resolution fell through to
+the menu bar, where "Remove" does not exist.
+
+NOT REPRODUCED, and the numbers are worth knowing before anyone spends
+the afternoon again: six full linux lane runs, six full windows lane
+runs, fifty-three runs of the leg on its own, twenty runs of the whole
+menus family under 8-wide contention. Eighty-six samples, zero
+failures. It only ever appeared inside a complete 412-leg lane, so the
+window is opened by contention the leg cannot create for itself — which
+also means REDUCING PARALLELISM WOULD HIDE IT RATHER THAN FIX IT.
+
+TWO MECHANISMS PROPOSED AND DISPROVED. Recorded because eliminating them
+is the only durable thing that came out of the hunt:
+
+- **The claim is set late.** It is not: `context_open` writes
+  `open_context` synchronously inside its own main-thread closure,
+  before `popup()`, so a following `menu_activate` on the same queue
+  cannot see None for that reason.
+- **The preceding Rename's re-render destroys the anchor and releases
+  the claim.** Tested by DELETING the scene's intervening
+  `expect label#0 "renamed"`, which should have made that race
+  near-certain by removing the partial synchronisation. It still passed.
+
+Both clear-paths carry equality guards that read correctly
+(`connect_closed` and `ApplyOp::Destroy` each clear only when the claim
+is their own anchor).
+
+WHAT TO DO WHEN IT NEXT FIRES: read the trail the panic now prints.
+Five sites record every touch of the claim with elapsed time — the
+right-click gesture, chrome dismissal, anchor destruction, activation,
+and the harness verb — so the message names which one cleared it and how
+long before. That was the question 86 samples could not answer.
+
+The instruments are `tools/flake-hunt.sh` (repeat a lane, parallel
+versus serial columns) and `KAYA_ONLY=` on the linux runner (one leg, or
+one family, repeatedly). The lesson about them: whole-lane repetition is
+far too coarse for a per-leg rate this low, and a single-leg hammer
+removes the contention that triggers it. A family of related legs under
+the pool is the middle instrument, and even that did not catch this one.
