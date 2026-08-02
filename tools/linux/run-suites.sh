@@ -142,12 +142,76 @@ status=0
 # below launch the bus INSIDE each leg through
 # tools/linux/a11y-leg.sh, which tears it down with the leg.
 
-# Headless Weston for the Wayland leg.
+# HEADLESS SWAY FOR THE WAYLAND LEG, and not Weston, for two measured
+# reasons (docs/clipboard-plan.md §0e, docs/traps.md).
+#
+# 1. HEADLESS WESTON HAS NO wl_seat, and a data device is obtained FROM
+#    a seat — so that compositor has no clipboard at all, for any
+#    client, including kaya's own GTK apps. Weston registers no seat for
+#    the headless backend deliberately; no flag fixes it. Nothing before
+#    the clipboard noticed, because kaya's harness clicks by driving the
+#    toolkit rather than injecting input, so no leg ever wanted input.
+# 2. WLROOTS COMPOSITORS SPEAK data-control, which lets a privileged
+#    client read the selection with NO SURFACE AND NO FOCUS. Without it
+#    wl-clipboard still works, but by creating a surface and TAKING
+#    FOCUS from whatever leg is running. Passive reads are what let the
+#    clipboard legs stay in the parallel pool.
+#
+# FLOATING IS NOT OPTIONAL: sway tiles by default, which forces every
+# window to the output size — measured, a window asking for 640x480 got
+# 1276x693 — and that would break every expect_window_size leg, none of
+# which has anything to do with the clipboard. kaya's GTK windows carry
+# application_id("dev.kaya.Milestone2"), so the app_id rule matches.
+#
+# The socket name is sway's to choose, unlike Weston's --socket, so it
+# is discovered after start rather than declared.
 export XDG_RUNTIME_DIR=/tmp/xdg
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-weston --backend=headless --socket=kaya-wayland &>/tmp/weston.log &
-WESTON_PID=$!
-sleep 2
+cat >/tmp/sway.conf <<'SWAY'
+for_window [app_id=".*"] floating enable
+SWAY
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1     sway -c /tmp/sway.conf &>/tmp/sway.log &
+COMPOSITOR_PID=$!
+KAYA_WAYLAND_SOCKET=""
+for _ in $(seq 1 40); do
+    for candidate in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
+        # -S and not -e: the lock file beside each socket matches the
+        # same glob and is not one.
+        if [ -S "$candidate" ]; then
+            KAYA_WAYLAND_SOCKET="$(basename "$candidate")"
+            break
+        fi
+    done
+    [ -n "$KAYA_WAYLAND_SOCKET" ] && break
+    sleep 0.25
+done
+if [ -z "${KAYA_WAYLAND_SOCKET:-}" ]; then
+    echo "run-suites: sway never created a socket" >&2
+    tail -5 /tmp/sway.log >&2
+    exit 1
+fi
+export KAYA_WAYLAND_SOCKET
+
+# THE SEAT IS THE REQUIREMENT, not the compositor's name, so the lane
+# checks for the seat. A compositor without one has no clipboard at all
+# and nothing else here would notice — the harness drives the toolkit
+# rather than injecting input, which is exactly why headless Weston's
+# missing seat went unseen until the clipboard needed it. Anyone who
+# swaps this compositor again meets this line instead of a mystery.
+# swaymsg finds the IPC socket through SWAYSOCK, which only sway's own
+# children inherit; from here it has to be located. It sits beside the
+# wayland socket as sway-ipc.<uid>.<pid>.sock.
+for candidate in "$XDG_RUNTIME_DIR"/sway-ipc.*.sock; do
+    [ -S "$candidate" ] && export SWAYSOCK="$candidate" && break
+done
+if ! swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
+    echo "run-suites: the wayland compositor advertises NO SEAT." >&2
+    echo "  A data device is obtained from a seat, so this session has no" >&2
+    echo "  clipboard for any client, including kaya's own apps. Headless" >&2
+    echo "  Weston is the known example; use a wlroots compositor" >&2
+    echo "  (docs/clipboard-plan.md, docs/traps.md)." >&2
+    exit 1
+fi
 
 # Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for the
 # old serial behavior): xvfb-run -a gives each X11 leg its own display,
@@ -221,7 +285,7 @@ run_one() {
                 xvfb-run -a -s "-screen 0 1024x768x24" "$@"
             ;;
         wayland)
-            KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY=kaya-wayland \
+            KAYA_SELFTEST=1 GDK_BACKEND=wayland WAYLAND_DISPLAY="$KAYA_WAYLAND_SOCKET" \
                 timeout 180 "$@"
             ;;
     esac
@@ -765,7 +829,7 @@ done
 drain
 timing legs
 
-kill "$WESTON_PID" 2>/dev/null
+kill "$COMPOSITOR_PID" 2>/dev/null
 
 # Best-effort screenshot of the running scene (X11 leg) for visual
 # validation.
