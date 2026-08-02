@@ -70,6 +70,15 @@ in docs/deferred.md.
    reads it; a wrong scene name panics the guest. Prefer that to one
    more entry in a gate list, and when only a gate will do, put it in
    the set the lanes already run. Plan against your future self.
+   AND WATCH THE NEGATIVE TEST FAIL. A negative test is only a test if
+   the perturbation is PROVEN to have applied: print the substitution
+   count and treat an unchanged file as a failed test, not a passed
+   one. This has misfired twice — three of check-tx-liveness's five
+   clauses passed with the guard deleted (grepping a bare function name
+   matched the definition as well as the call), and the wayland seat
+   guard's negative test passed VACUOUSLY TWICE because the pattern
+   never matched the file at all. A guard you believe in but have never
+   seen fail is worse than none: it stops you looking.
 4. **Validation scripts build and verify what they ship.** No stale
    artifacts, no bypassed mechanisms, no false PASS. A gate that can be
    satisfied without exercising the real thing is a bug in the gate.
