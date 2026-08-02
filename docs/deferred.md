@@ -30,6 +30,29 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
+- **Clipboard** — the next editor prerequisite, and the one that
+  unblocks the most: the edit roles (cut/copy/paste) are inert without
+  it, while undo/redo, find and dirty-state titles do not depend on it.
+  THE DESIGN IS WRITTEN: docs/clipboard-plan.md §0, with the reasoning
+  and, for each decision that replaced an earlier answer, the answer it
+  replaced. Four things worth knowing before opening it:
+  - the clipboard is ONE CLIP IN SEVERAL REPRESENTATIONS on all six
+    targets, so a text-only surface is a misstatement of it rather than
+    a simplification;
+  - COPY TAKES A RECORD AND PASTE RETURNS A SUM (you offer many, you
+    receive one), which makes "at most one per kind" structural instead
+    of a runtime check;
+  - ACCEPTANCE IS PER-WIDGET, not app-global, because whether Paste is
+    live is the intersection of what the clipboard offers and what the
+    focused target accepts — which is exactly what the platforms
+    already ask the focused responder;
+  - files on the clipboard ARE the file-dialog capability, so a picked
+    file goes straight on and a pasted one opens with the call that
+    already exists.
+  Four probes stand between the plan and any code (§0d): Weston and
+  out-of-process reads, iOS's paste prompt against simctl-seeded
+  content, Android reads with no shell command, and whether the legs
+  must serialise for focus.
 - **GAP — the stall diagnostic DESIGN promises is not implemented.**
   DESIGN's threading section says it comes free from the transport:
   "the core reads the app's log-consumer cursor, and undrained for N
@@ -104,6 +127,16 @@ own the state (see the undo note in this file).
     by the FIRST stall's leftover reading. Negative-tested: with the
     wedge made a no-op the leg fails, so it cannot pass on the stale
     value.
+  ONE CHARACTERISTIC WORTH KNOWING, seen 2026-08-02: the watchdog fired
+  inside `commands_csharp` on the windows lane, which has nothing to do
+  with stalls. The leg passed 3/3 when run alone and failed under the
+  4-wide pool, so the app thread was STARVED by contention rather than
+  blocked in a handler — and from outside those look identical, because
+  both are "nobody took the queued occurrence for a second". The report
+  is diagnostic and failed nothing on its own (the leg's own assertions
+  timed out), but a reader who sees it under load should suspect
+  scheduling before suspecting a handler. KAYA_STALL_MS raises the
+  threshold if a lane ever needs it to.
 - **GAP — a kaya app cannot do background work.** Found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the
