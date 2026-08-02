@@ -2543,3 +2543,31 @@ same shape: when a lane goes red after an environment event and the
 same commit was green before it, bisect against the ENVIRONMENT first
 (stash the changes and re-run the old commit) rather than reading the
 diff. Both answers came in one command.
+
+## Headless Weston has no seat, so it has no clipboard
+
+Measured 2026-08-01 by tools/linux/clipprobe, before the clipboard arm
+was written.
+
+The linux lane starts `weston --backend=headless`. That compositor
+advertises `wl_data_device_manager` but no `wl_seat`, and a data device
+is obtained FROM A SEAT. No seat, no data device, no clipboard — for
+any client, including kaya's own GTK apps. It is not a harness
+limitation and not something a flag fixes: Weston registers no seat for
+the headless backend deliberately.
+
+WHY THIS WENT UNNOTICED FOR SO LONG: nothing before the clipboard
+needed a seat. kaya's harness clicks by driving the toolkit, not by
+injecting input events, so the wayland legs never wanted keyboard or
+pointer input and never noticed there was none to want.
+
+The fix is a configuration this repo already runs: a nested Weston on
+the `--backend=x11` inside the Xvfb the lane already starts, which is
+what tools/linux/record-leg.sh uses for recording. That has real input,
+therefore a seat, and `wl-copy`/`wl-paste` round-trip through it.
+
+SECOND FINDING FROM THE SAME PROBE: wl-clipboard works there WITHOUT
+the wlr-data-control protocol (which Weston does not implement) by
+creating its own surface and TAKING FOCUS. So an out-of-process
+clipboard read on this lane is not passive, and any leg that does one
+while another leg holds focus is asking for trouble.
