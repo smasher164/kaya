@@ -17,9 +17,23 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 # Run one lane N times and report WHICH LEGS EVER FAIL, and how often.
 #
-# Usage: tools/flake-hunt.sh <lane> [runs] [--serial]
+# Usage: tools/flake-hunt.sh <lane> [runs] [--serial|--parallel]
 #        lane: mac | linux | windows
 #        runs: default 5
+#
+# ONE LEG AT A TIME IS USUALLY WHAT YOU WANT: set KAYA_ONLY (linux) or
+# pass a suite name through KAYA_WIN_SUITE (windows) and the lane runs
+# just that, which turns a three-minute sample into a three-second one.
+# Rare flakes are unreachable otherwise — six full runs of each of two
+# lanes reproduced nothing at all (2026-08-02), because a leg failing 1
+# in 20 needs about sixty whole-lane runs to show up three times.
+#
+# HALF A HUNT IS OFTEN ENOUGH, which is what the two flags are for. The
+# serial pass is the expensive one — a lane that runs eight wide takes
+# several times as long one at a time — and it only has to answer "does
+# this leg ever fail ALONE". If that is already known for the leg under
+# suspicion, --parallel skips it and spends the time on samples of the
+# column that is actually in question.
 #
 # WHY THIS EXISTS. A flake makes every real failure cost a re-run before
 # anyone will believe it, and the cost compounds: three separate times
@@ -49,8 +63,10 @@ cd "$ROOT" || exit 1
 LANE="${1:-}"
 RUNS="${2:-5}"
 SERIAL_ONLY=0
+PARALLEL_ONLY=0
 for arg in "$@"; do
     [ "$arg" = "--serial" ] && SERIAL_ONLY=1
+    [ "$arg" = "--parallel" ] && PARALLEL_ONLY=1
 done
 
 case "$LANE" in
@@ -72,7 +88,10 @@ lane_cmd() { # jobs
     case "$LANE" in
         mac) KAYA_JOBS="$1" "$ROOT/tools/validate-mac.sh" ;;
         linux) KAYA_JOBS="$1" "$ROOT/tools/validate-linux.sh" ;;
-        windows) KAYA_WIN_JOBS="$1" "$ROOT/tools/deploy-win.sh" "${KAYA_WIN_HOST:-akhil@192.168.64.2}" all ;;
+        windows)
+            KAYA_WIN_JOBS="$1" "$ROOT/tools/deploy-win.sh" \
+                "${KAYA_WIN_HOST:-akhil@192.168.64.2}" "${KAYA_WIN_SUITE:-all}"
+            ;;
     esac
 }
 
@@ -104,7 +123,11 @@ for line in open(sys.argv[1], errors="replace"):
 if [ "$SERIAL_ONLY" = 0 ]; then
     hunt "${KAYA_FLAKE_JOBS:-8}" parallel
 fi
-hunt 1 serial
+if [ "$PARALLEL_ONLY" = 0 ]; then
+    hunt 1 serial
+else
+    : >"$OUT/$LANE-serial.fails"
+fi
 
 echo
 echo "=== $LANE, $RUNS runs each ==="

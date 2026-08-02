@@ -31,6 +31,7 @@ T0=$SECONDS
 rc=0
 timeout 1800 docker run --rm -v "$ROOT:/work" \
     -e KAYA_RECORD="${KAYA_RECORD:-}" -e KAYA_JOBS="${KAYA_JOBS:-}" \
+    -e KAYA_ONLY="${KAYA_ONLY:-}" \
     kaya-linux bash /work/tools/linux/run-suites.sh || rc=$?
 echo "TIMING container-suites $((SECONDS - T0))s"
 exit "$rc"

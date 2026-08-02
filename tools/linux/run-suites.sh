@@ -222,9 +222,27 @@ LEGS_DIR="$(mktemp -d)"
 leg_names=()
 leg_pids=()
 
+# ONE LEG, REPEATEDLY, is the only practical way to characterise a rare
+# flake — and the only way to prove one fixed. A leg failing 1 in 20
+# needs about sixty WHOLE-LANE runs to show up three times, at three
+# minutes each; the leg itself takes three SECONDS. Measured the
+# expensive way first: six full runs of this lane and six of windows
+# reproduced nothing at all (2026-08-02).
+#
+# KAYA_ONLY is a prefix, so `KAYA_ONLY=menus-java` takes both protocols
+# and `KAYA_ONLY=menus-java-wayland` takes one. Empty means every leg,
+# which is what every lane run does.
+kaya_wanted() { # name proto
+    [ -z "${KAYA_ONLY:-}" ] && return 0
+    case "$1-$2" in "$KAYA_ONLY"*) return 0 ;; esac
+    case "$1" in "$KAYA_ONLY"*) return 0 ;; esac
+    return 1
+}
+
 run() {
     local proto="$1" name="$2"
     shift 2
+    kaya_wanted "$name" "$proto" || return 0
     if [ "$JOBS" = 1 ]; then
         echo "== $name ($proto) =="
         local t0=$SECONDS
