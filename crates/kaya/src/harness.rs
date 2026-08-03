@@ -279,6 +279,13 @@ pub enum Step {
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
+    /// A FOREIGN process puts something on the system clipboard, so a
+    /// read leg is answering content this app did not write — the one
+    /// thing a kaya-reads-what-kaya-wrote check cannot be.
+    ClipboardSeed(String, String),
+    /// A FOREIGN process reads the clipboard back, in one named
+    /// representation, and the observation is compared byte for byte.
+    ExpectClipboard(String, String),
     /// The number of live alerts (0 or 1 — one per process).
     ExpectAlerts(usize),
     /// The window's navigation-stack depth (None = the implicit
@@ -443,6 +450,8 @@ impl Step {
             Step::ExpectAlert { .. } => true,
             Step::FileChoose(..) => false,
             Step::FileDialogGoto(..) => false,
+            Step::ClipboardSeed(..) => false,
+            Step::ExpectClipboard(..) => true,
             Step::ExpectFileDialog(..) => true,
             Step::AlertChoose { .. } => false,
             Step::ExpectAlerts { .. } => true,
@@ -599,6 +608,28 @@ pub trait Stage: Send + 'static {
     /// not assumed either: expect_file_dialog reads the panel back.
     /// No default.
     fn goto_directory(&self, path: &str);
+    /// Put content on the system clipboard FROM OUTSIDE THIS APP, and
+    /// read it back the same way: a child process using whatever the
+    /// platform's own clipboard tool is (pbcopy/pbpaste and osascript,
+    /// wl-copy/wl-paste, the Android helper).
+    ///
+    /// FOREIGN ON PURPOSE, and it is the whole value of these two. The
+    /// representation set is closed because the LOWERINGS are tricky —
+    /// CF_HTML's offset header, Android's content:// URI for an image,
+    /// CF_HDROP's struct — and a check where kaya reads what kaya wrote
+    /// parses its own bad header perfectly happily. That is not less
+    /// coverage; it is a check that cannot fail for the reason the
+    /// design exists, which is worse than none because it looks like
+    /// coverage.
+    ///
+    /// `kind` is a closed name (text, html, image, files) or a custom
+    /// format id. The read's answer is the content for text, html and
+    /// custom, the basenames for files, and the decoded size for an
+    /// image; an empty string when the clipboard holds nothing of that
+    /// kind. No default: a backend that forgets it must fail to compile
+    /// rather than pass a clipboard leg vacuously.
+    fn clipboard_seed(&self, kind: &str, argument: &str);
+    fn clipboard_read(&self, kind: &str) -> String;
     /// The window's navigation-stack depth — the observation
     /// expect_entries verifies. No default: a backend that forgets it
     /// must fail to compile rather than pass a navigation leg
@@ -906,6 +937,33 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("file_dialog_goto wants a directory: {line:?}"));
                 }
                 Step::FileDialogGoto(path.to_owned())
+            }
+            "clipboard_seed" => {
+                // `clipboard_seed <kind> <argument>`: the kind is a
+                // closed name (text, html, image, files) or a custom
+                // format id, and the argument is the content — a
+                // literal for text, html and custom, a path for image
+                // and files (with $TMP/$PID expanded by the backend,
+                // the file_dialog_goto rule).
+                let (kind, arg) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("clipboard_seed wants a kind and its content: {line:?}")
+                })?;
+                // QUOTED like an expect's string, because seeded content
+                // is content: it may hold spaces, and a path may not.
+                Step::ClipboardSeed(kind.to_owned(), parse_string(arg)?)
+            }
+            "expect_clipboard" => {
+                // `expect_clipboard <kind> <expected>`. The expected
+                // string is the content for text, html and custom; the
+                // basenames, space separated, for files; and the
+                // DECODED SIZE ("4x4") for an image — the image widget's
+                // own observation, because the hosts re-encode freely
+                // and a byte count would be a different number on every
+                // platform for the same picture.
+                let (kind, want) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_clipboard wants a kind and the expected content: {line:?}")
+                })?;
+                Step::ExpectClipboard(kind.to_owned(), parse_string(want)?)
             }
             "file_choose" => {
                 let arg = rest.trim();
@@ -1585,6 +1643,25 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     None
                 }
             }
+            Step::ClipboardSeed(kind, arg) => {
+                // An action, silent like click — expect_clipboard or
+                // the guest's own read is what says whether it landed.
+                stage.clipboard_seed(kind, arg);
+                None
+            }
+            Step::ExpectClipboard(kind, want) => Some(poll(|| {
+                // POLLED like every other observation: the copy went
+                // out on the apply pump, so the clipboard changes a
+                // moment after the click that asked for it.
+                let got = stage.clipboard_read(kind);
+                if got == *want {
+                    Ok(got)
+                } else {
+                    Err(format!(
+                        "the clipboard's {kind} reads {got:?}, wanted {want:?}"
+                    ))
+                }
+            })),
             Step::FileChoose(name) => {
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result.
@@ -2480,6 +2557,10 @@ mod tests {
         }
         fn choose_file(&self, _: Option<&str>) {}
         fn goto_directory(&self, _: &str) {}
+        fn clipboard_seed(&self, _: &str, _: &str) {}
+        fn clipboard_read(&self, _: &str) -> String {
+            String::new()
+        }
         fn alert_count(&self) -> usize {
             0
         }
@@ -2620,6 +2701,10 @@ mod tests {
         assert_eq!(verdict, "KAYA_SELFTEST: OK (root fills)");
         struct Hugger(Sender<(i32, String)>);
         impl Stage for Hugger {
+            fn clipboard_seed(&self, _: &str, _: &str) {}
+            fn clipboard_read(&self, _: &str) -> String {
+                String::new()
+            }
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
@@ -2770,6 +2855,10 @@ mod tests {
         // ratio-at-minimum cannot pass it.
         struct Pooler(Sender<(i32, String)>);
         impl Stage for Pooler {
+            fn clipboard_seed(&self, _: &str, _: &str) {}
+            fn clipboard_read(&self, _: &str) -> String {
+                String::new()
+            }
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}

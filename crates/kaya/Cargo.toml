@@ -154,6 +154,10 @@ name = "filedialog"
 path = "../../guests/rust/filedialog.rs"
 
 [[example]]
+name = "clipboard"
+path = "../../guests/rust/clipboard.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 

@@ -173,12 +173,22 @@ def expect_arms(text, pattern, end_marker):
         yield m.group(1), text[m.start() : end if end > 0 else stop]
 
 
+# ONE EXEMPTION, and it is not a loophole: an arm that calls the depth
+# stub does not RETURN. It cannot pass vacuously because it cannot pass
+# at all — the process dies naming the scene and the platform. That is
+# the honest spelling for a verb whose backend has no feature yet, and
+# without this the rule would push a half-built backend into faking an
+# observation, which is the exact defect it exists to catch.
+def records_or_refuses(body, appender):
+    return appender in body or "epthStub(" in body or "epth_stub(" in body
+
+
 for verb, body in expect_arms(swift, r'case "(expect[a-z_]*)":', "\n            case "):
-    if "observed.append(" not in body:
+    if not records_or_refuses(body, "observed.append("):
         fail(f'KayaSwiftUI.swift\'s "{verb}" arm never appends to `observed` — '
              "an expect that records nothing passes without verifying anything")
 for verb, body in expect_arms(kotlin, r'"(expect[a-z_]*)" ->', "\n                    \""):
-    if "observed.add(" not in body:
+    if not records_or_refuses(body, "observed.add("):
         fail(f'KayaCompose.kt\'s "{verb}" arm never adds to `observed` — '
              "an expect that records nothing passes without verifying anything")
 

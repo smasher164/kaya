@@ -51,9 +51,8 @@ timing() {
 SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES. (Empty again since the stall
-# sweep landed its seven remaining guests.)
-DEPTH_SCENES=""
+# arrive, when they move into SCENES.
+DEPTH_SCENES="clipboard"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -810,6 +809,15 @@ run filedialog-haskell-swiftui env KAYA_SELFTEST=filedialog "$(hs_bin filedialog
 run filedialog-swift-swiftui env KAYA_SELFTEST=filedialog target/swift-guests/filedialog
 run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The clipboard scene: one clip in several representations, and the
+# privileged read. RUST-ONLY for now (a depth slice), and it drives
+# the platform's own clipboard tools as child processes — pbcopy,
+# pbpaste, osascript and sips — so every assertion crosses a process
+# boundary rather than reading back what kaya itself wrote.
+KAYA_SELFTEST_SCRIPT="$(scene_script clipboard)"
+export KAYA_SELFTEST_SCRIPT
+run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

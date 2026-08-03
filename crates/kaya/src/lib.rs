@@ -77,8 +77,8 @@ pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind,
     MenuProp, Occurrence, Path, Prop, SectionProp, SectionsPresentation, SignalId, TemplateNodeId,
-    FileDialogId, FileMode, PickedFile, PickedId, Value, ValueType, WidgetId, WidgetKind,
-    WindowId,
+    FileDialogId, FileMode, PickedFile, PickedId, Representation, Value, ValueType, WidgetId,
+    WidgetKind, WindowId,
 };
 
 #[cfg(target_os = "windows")]

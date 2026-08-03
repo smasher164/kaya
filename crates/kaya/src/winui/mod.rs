@@ -6198,6 +6198,18 @@ impl crate::harness::Stage for WinUiStage {
         }
     }
 
+    /// The foreign reader and writer. THE STUB IS A CALL, so
+    /// check-stubs sees it: this backend has no clipboard yet, and a
+    /// leg wired against it would otherwise seed nothing and compare
+    /// against an empty string that looks like a real answer.
+    fn clipboard_seed(&self, _kind: &str, _argument: &str) {
+        crate::depth_stub("clipboard")
+    }
+
+    fn clipboard_read(&self, _kind: &str) -> String {
+        crate::depth_stub("clipboard")
+    }
+
     fn goto_directory(&self, path: &str) {
         // ARMED, NOT SET: a dialog reads its folder when it is shown, so
         // this stores it and the apply arm applies it — the same shape

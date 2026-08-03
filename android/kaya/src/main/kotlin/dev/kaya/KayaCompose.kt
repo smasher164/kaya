@@ -2030,6 +2030,17 @@ object KayaCompose {
                             }
                         }
                     }
+                    "clipboard_seed", "expect_clipboard" -> {
+                        // Android's foreign reader and writer is the
+                        // helper APK: an unfocused app gets nothing back
+                        // from ClipboardManager, so the outside process
+                        // has to be a real one and cannot be a shell
+                        // tool. Refusing in this backend's own words —
+                        // a verb that silently did nothing would seed no
+                        // content and then compare against an empty
+                        // string that reads like a real answer.
+                        depthStub("clipboard")
+                    }
                     "file_dialog_goto" -> {
                         // Silent like click: the observable is where the
                         // NEXT picker opens, which expect_file_dialog

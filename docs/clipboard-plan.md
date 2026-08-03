@@ -625,7 +625,65 @@ through `clipboard info`. Neither is kaya reading what kaya wrote.
 Measured from a global queue: the write took, the change count moved,
 and the read back agreed. The apply pump can write directly.
 
-## §2 onwards — to be written
+## §2 — the data layer, green on mac (landed)
+
+`copy` and `read_clipboard` end to end: the Rust surface, the SwiftUI
+arms, two harness verbs, and a scene where EVERY ASSERTION CROSSES A
+PROCESS BOUNDARY. 553 ms, thirteen observations.
+
+### The two verbs, and why they are foreign
+
+`clipboard_seed <kind> "<content>"` and `expect_clipboard <kind>
+"<expected>"` drive the platform's OWN tools as child processes — on
+mac `pbcopy`, `pbpaste`, `osascript` and `sips`. Nothing kaya wrote.
+
+That is the whole value. The representation set is closed because the
+lowerings are the hard part, and a check where kaya reads what kaya
+wrote parses its own malformed header happily. A helper binary we wrote
+would be foreign in name only.
+
+ONE KIND CANNOT BE SEEDED: a custom format, because no stock tool on
+any platform writes an app-defined type. That is not a hole — a custom
+format's whole specification is that it round-trips within the app and
+that kaya does nothing clever with the bytes, so the scene copies one
+and reads it back, with `pbpaste -Prefer dev.kaya.note` confirming from
+outside that the bytes really are there under that id.
+
+### The image is a decoded size, never bytes
+
+`expect_clipboard image "4x4"`. macOS synthesizes tiff, jpeg, gif, bmp,
+jp2 and avif from one png on demand, so a byte count is a different
+number on every lane for one picture. The scene reads a seeded image
+and copies it straight back out, so a foreign DECODER answers.
+
+### Files are the picker's capability, arriving through a second door
+
+A pasted file is a `PickedFile`: the guest redeems the handle and reads
+it with ordinary `std::fs`, off the app thread, because `open` blocks
+either way. `expect label#0 "files pasted.txt pasted bytes"` fails
+unless a real descriptor came back carrying the real file.
+
+### An accept list is not a mask
+
+`accepts` and `read_clipboard(accepting)` both carry a space-separated
+ACCEPT LIST — the closed kinds by name plus any custom ids. A mask can
+name four things and nothing else, so a custom format could be written
+and never accepted: an escape hatch that only opens outward is not one.
+
+### One gate learned an exemption
+
+check-verbs requires every `expect_*` arm to record what it observed,
+or it passes without verifying. An arm that calls the depth stub does
+not RETURN, so it cannot pass vacuously — and without the exemption the
+rule would push a half-built backend into faking an observation, the
+exact defect it exists to catch. Watched failing both ways.
+
+## §3 onwards — to be written
+
+Next: the paste hook — the `accepts` sugar, `on_paste`, and
+Cut/Copy/Paste as standard commands, which is the gesture layer §0
+argued the data layer cannot replace. Then the fan-out: seven more
+bindings, three more backends, and the Android helper APK.
 
 Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering
 and the paste hook, Cut/Copy/Paste as standard commands (the gesture

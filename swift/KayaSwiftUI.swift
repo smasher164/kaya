@@ -734,6 +734,136 @@ func kayaReadClipboard(request: UInt64, accepting: String) {
     #endif
 }
 
+/// Run one of the platform's own clipboard tools as a CHILD PROCESS
+/// and hand back its stdout. The tools are Apple's — `pbcopy`,
+/// `pbpaste`, `osascript`, `sips` — never anything kaya wrote, because
+/// the whole value of the foreign side is that it does not share our
+/// assumptions about the lowering.
+@discardableResult
+func kayaRunTool(_ args: [String], stdin: Data? = nil) -> String {
+    #if os(macOS)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = Pipe()
+        let input = Pipe()
+        if stdin != nil { process.standardInput = input }
+        do { try process.run() } catch { return "" }
+        if let stdin {
+            input.fileHandleForWriting.write(stdin)
+            input.fileHandleForWriting.closeFile()
+        }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
+    #else
+        _ = (args, stdin)
+        return ""
+    #endif
+}
+
+/// The UTI each closed kind reads and writes under on this platform. A
+/// custom id IS its own type, verbatim — kaya's narrow promise.
+private func kayaClipUTI(_ kind: String) -> String {
+    switch kind {
+    case "text": return "public.utf8-plain-text"
+    case "html": return "public.html"
+    case "image": return "public.png"
+    case "files": return "public.file-url"
+    default: return kind
+    }
+}
+
+/// Put content on the clipboard FROM OUTSIDE this app, so a read leg is
+/// answering something this process did not write.
+///
+/// CUSTOM FORMATS ARE NOT SEEDABLE and deliberately so: no Apple tool
+/// can write an app-defined type, and a helper kaya wrote would be
+/// foreign in name only. A custom format's whole specification is that
+/// it round-trips within the app, so the scene copies and reads one
+/// back — with `pbpaste` confirming from outside that the bytes really
+/// are on the pasteboard under that id.
+func kayaClipboardSeed(kind: String, argument: String) {
+    #if os(macOS)
+        let arg = kayaExpandPath(argument)
+        switch kind {
+        case "text":
+            kayaRunTool(["pbcopy"], stdin: Data(arg.utf8))
+        case "html":
+            // An AppleScript data literal: «data» plus the four-character
+            // class code, then hex. The only way to put a TYPED payload
+            // on the pasteboard with a stock tool.
+            let hex = arg.utf8.map { String(format: "%02X", $0) }.joined()
+            kayaRunTool(["osascript", "-e", "set the clipboard to «data HTML\(hex)»"])
+        case "image":
+            kayaRunTool([
+                "osascript", "-e",
+                "set the clipboard to (read (POSIX file \"\(arg)\") as «class PNGf»)",
+            ])
+        case "files":
+            kayaRunTool(["osascript", "-e", "set the clipboard to POSIX file \"\(arg)\""])
+        default:
+            fatalError(
+                "kaya: clipboard_seed cannot write \(kind) from outside the app — no stock "
+                    + "tool writes an app-defined format, and a helper kaya wrote would be "
+                    + "foreign in name only")
+        }
+    #else
+        _ = (kind, argument)
+        kayaDepthStub("clipboard", on: "ios")
+    #endif
+}
+
+/// Read the clipboard back FROM OUTSIDE this app, in one
+/// representation. Empty when it holds nothing of that kind.
+func kayaClipboardRead(_ kind: String) -> String {
+    #if os(macOS)
+        switch kind {
+        case "files":
+            // The first file URL, which is all `pbpaste` exposes — so a
+            // scene that wants this verified copies one file. Basenames,
+            // never paths: the expected string is compared byte for byte
+            // across lanes whose temp directories differ.
+            let raw = kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty, let url = URL(string: raw) else { return "" }
+            return url.lastPathComponent
+        case "image":
+            // TWO OF APPLE'S TOOLS, because no single one decodes:
+            // osascript writes the clipboard's png out, sips reports the
+            // pixel size. The observation is WxH — the image widget's
+            // own — because the hosts re-encode freely and a byte count
+            // would read differently on every platform for one picture.
+            let scratch = kayaTempDir() + "/kaya-clipread-\(getpid()).png"
+            try? FileManager.default.removeItem(atPath: scratch)
+            kayaRunTool([
+                "osascript",
+                "-e", "set f to open for access POSIX file \"\(scratch)\" with write permission",
+                "-e", "set eof f to 0",
+                "-e", "write (the clipboard as «class PNGf») to f",
+                "-e", "close access f",
+            ])
+            guard FileManager.default.fileExists(atPath: scratch) else { return "" }
+            let sized = kayaRunTool(["sips", "-g", "pixelWidth", "-g", "pixelHeight", scratch])
+            try? FileManager.default.removeItem(atPath: scratch)
+            let numbers = sized.split(separator: "\n").compactMap { line -> String? in
+                guard let colon = line.lastIndex(of: ":") else { return nil }
+                return String(line[line.index(after: colon)...])
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            guard numbers.count == 2 else { return "" }
+            return "\(numbers[0])x\(numbers[1])"
+        default:
+            return kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])
+        }
+    #else
+        _ = kind
+        kayaDepthStub("clipboard", on: "ios")
+    #endif
+}
+
 func kayaExpandPath(_ path: String) -> String {
     // WHOLE NAMES, not prefixes. A plain replace of "$TMP" also eats the
     // first four characters of "$TMPDIR" and leaves "<tmp>DIR" — a path
@@ -3477,6 +3607,38 @@ private func kayaRunScript(_ script: String) {
                     #else
                         failures.append("no file dialog live, wanted \"\(wantDir)\"")
                     #endif
+                }
+            case "clipboard_seed":
+                // Silent like click: expect_clipboard, or the guest's
+                // own read, is what says whether it landed.
+                if parts.count > 2 {
+                    kayaClipboardSeed(
+                        kind: String(parts[1]),
+                        argument: kayaQuoted(Array(parts[2...])))
+                } else {
+                    failures.append("clipboard_seed wants a kind and its content")
+                }
+            case "expect_clipboard":
+                if parts.count > 2 {
+                    let kind = String(parts[1])
+                    let want = kayaQuoted(Array(parts[2...]))
+                    // POLLED: the copy went out on the apply pump, so
+                    // the clipboard changes a moment after the click.
+                    var got = ""
+                    let deadline = Date().addingTimeInterval(5)
+                    repeat {
+                        got = kayaClipboardRead(kind)
+                        if got == want { break }
+                        usleep(20_000)
+                    } while Date() < deadline
+                    if got == want {
+                        observed.append("clipboard \(kind) \"\(got)\"")
+                    } else {
+                        failures.append(
+                            "the clipboard's \(kind) reads \"\(got)\", wanted \"\(want)\"")
+                    }
+                } else {
+                    failures.append("expect_clipboard wants a kind and the expected content")
                 }
             case "file_dialog_goto":
                 // Silent like click; the expect that follows is what
