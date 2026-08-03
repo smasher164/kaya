@@ -705,22 +705,25 @@ final class KayaApp {
     }
 
     private func dispatchLoop() {
-        var buf = [UInt8](repeating: 0, count: 256)
+        var record: UnsafePointer<UInt8>?
         while true {
             // Posted work first, then the ring. Draining at the TOP is
             // what makes a wake sufficient: whatever brought this thread
             // back, it looks here before anywhere else.
             drainPosted()
-            let size = buf.withUnsafeMutableBufferPointer { p in
-                kaya_next_occurrence(p.baseAddress, 256)
-            }
+            let size = kaya_next_occurrence(&record)
             if size == KAYA_OCCURRENCE_SHUTDOWN { return }
             if size == KAYA_OCCURRENCE_WOKEN {
-                // NOTHING was written to the buffer. Decoding it here
-                // would re-parse the PREVIOUS record — a stale
-                // re-dispatch, and the bug this branch prevents.
+                // NO RECORD WAS HANDED OUT. Decoding here would re-parse
+                // the PREVIOUS one — a stale re-dispatch, and the bug
+                // this branch prevents.
                 continue
             }
+            // The core owns the bytes until the next call, so they are
+            // copied out here. There is no cap: an html clip is
+            // routinely kilobytes.
+            guard let start = record else { continue }
+            let buf = [UInt8](UnsafeBufferPointer(start: start, count: Int(size)))
             guard let (kind, id, keys, payload, files) = kayaParseOccurrence(buf)
             else { continue }
             var text: String?

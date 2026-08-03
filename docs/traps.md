@@ -2681,3 +2681,52 @@ one family, repeatedly). The lesson about them: whole-lane repetition is
 far too coarse for a per-leg rate this low, and a single-leg hammer
 removes the contention that triggers it. A family of related legs under
 the pool is the middle instrument, and even that did not catch this one.
+
+
+## A caller-sized occurrence buffer put a CAP ON HOW MUCH CONTENT A GUEST COULD RECEIVE
+
+The function floor used to copy each occurrence into a buffer the caller
+sized, and every caller sized it 256: Python, Swift and all ten C
+guests. The core asserted the record fit. It does not fit for long.
+
+Measured 2026-08-02 with a throwaway probe (`kaya_emit_pasted` with a
+long text, drained at the buffer size the bindings really pass):
+
+        200 bytes of pasted text -> next_occurrence returned 248, fine
+        240 bytes of pasted text -> "occurrence record of 288 bytes
+                                     exceeds the buffer of 256"
+                                     thread caused non-unwinding panic.
+                                     aborting.   (exit 134, SIGABRT)
+
+So the ceiling was **208 bytes of payload** on a live-widget occurrence,
+and going over it did not raise anything a guest could catch — the
+assert fires inside an `extern "C"` frame, so the panic cannot unwind
+and the process aborts. No guest in any language could have guarded
+against it.
+
+THE BUG PREDATES THE CLIPBOARD; the clipboard is what made it routine.
+`text_changed` has carried unbounded entry text since milestone 0 and
+every scene's text happened to be short. A pasted paragraph is over the
+line, and an `html` representation is over it every time — kilobytes is
+ordinary for one.
+
+THE FIX WAS TO DELETE THE CAP, NOT RAISE IT. `kaya_next_occurrence` now
+hands back a BORROWED POINTER to a core-owned record —
+`uintptr_t kaya_next_occurrence(const uint8_t **record)`, the same
+0/1/size return — and the caller copies out what it keeps, exactly as
+`kaya_blob_data` and `kaya_occurrence_blob` already ask. There is no
+buffer to be too small. A bigger buffer would only have moved the
+number, and a limit on how much content may reach a guest is not
+something kaya gets to have.
+
+THE SENTINELS NULL THE POINTER, which is the second half of the lesson.
+Only one of the ten C guests handled `KAYA_OCCURRENCE_WOKEN`; the other
+nine fell through and re-parsed whatever their buffer still held — the
+PREVIOUS occurrence, dispatched twice, silently. Under the old shape a
+zeroed buffer made that harmless by accident. Nulling turns it into a
+crash on the line that forgot, and all ten now carry the arm.
+
+THE GUARD is `capi::tests::the_function_floor_hands_out_a_record_of_any_size`:
+it pushes an 8 KiB pasted text and asserts the whole record arrives,
+header and all. Watched failing — reinstating the 256-byte cap aborts
+the test process with SIGABRT, which is the production failure exactly.

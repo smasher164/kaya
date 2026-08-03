@@ -726,7 +726,27 @@ action the failure landed on whatever the guest asserted next. The verb
 now waits until the content is really there, which is
 "validation scripts verify what they ship" applied to a harness verb.
 
-## §4 onwards — to be written
+## §4 — the floor, before the seven bindings (landed)
+
+The fan-out's first finding was not about the clipboard. Every
+function-floor binding — Python, Swift, and all ten C guests — passed
+`kaya_next_occurrence` a 256-byte buffer, and the core ABORTED when a
+record did not fit: 208 bytes of payload was the ceiling, and the assert
+sits inside an `extern "C"` frame so the panic cannot unwind. A pasted
+paragraph crosses it; an `html` clip crosses it every time.
+
+The bug predates the clipboard (`text_changed` has been unbounded since
+milestone 0 and every scene's text was short). The clipboard is what
+makes it routine, and writing four paste decoders against a floor that
+aborts on real content would have meant writing them twice.
+
+THE CAP IS GONE RATHER THAN LARGER. The floor hands back a borrowed
+pointer to a core-owned record — the caller copies out what it keeps,
+as `kaya_blob_data` already asks — so there is no buffer to be too
+small. Measurement, the guard, and the WOKEN half of the lesson are in
+docs/traps.md.
+
+## §5 onwards — to be written
 
 The fan-out: seven more bindings, three more backends, and the Android
 helper APK, then the matrix.

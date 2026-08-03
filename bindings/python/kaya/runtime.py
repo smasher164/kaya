@@ -42,7 +42,7 @@ if _lib.kaya_spec_hash() != SPEC_HASH:
         f"kaya: library speaks spec {_lib.kaya_spec_hash():#018x}, this binding was "
         f"generated from {SPEC_HASH:#018x} — rebuild the library or regenerate bindings"
     )
-_lib.kaya_next_occurrence.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.kaya_next_occurrence.argtypes = [ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8))]
 _lib.kaya_next_occurrence.restype = ctypes.c_size_t
 _lib.kaya_submit.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_submit.restype = None
@@ -59,7 +59,7 @@ _lib.kaya_open_picked.argtypes = [
 ]
 _lib.kaya_open_picked.restype = ctypes.c_int32
 
-_occ_buf = ctypes.create_string_buffer(256)
+_occ_record = ctypes.POINTER(ctypes.c_uint8)()
 
 
 def submit(*records):
@@ -113,15 +113,19 @@ def next_occurrence():
     for clicks.
     """
     while True:
-        size = _lib.kaya_next_occurrence(_occ_buf, 256)
+        size = _lib.kaya_next_occurrence(ctypes.byref(_occ_record))
         if size == _OCCURRENCE_SHUTDOWN:
             return None
         if size == _OCCURRENCE_WOKEN:
-            # NOTHING was written to the buffer. Decoding it here would
-            # re-parse the PREVIOUS record — a stale re-dispatch, and the
-            # bug this branch exists to prevent.
+            # NO RECORD WAS HANDED OUT. Decoding here would re-parse the
+            # PREVIOUS one — a stale re-dispatch, and the bug this branch
+            # exists to prevent.
             return WOKEN
-        kind, ident, keys, payload = parse_occurrence(_occ_buf.raw)
+        # The core owns the bytes until the next call, so they are copied
+        # out here and the rest of the binding sees an ordinary bytes.
+        # There is no cap: an html clip is routinely kilobytes.
+        kind, ident, keys, payload = parse_occurrence(
+            ctypes.string_at(_occ_record, size))
         if ident is not None:
             return kind, ident, keys, payload
 

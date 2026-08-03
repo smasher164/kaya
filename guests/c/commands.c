@@ -112,11 +112,13 @@ static void write_status(const char *status) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    uint8_t rec[512];
+    const uint8_t *rec;
     for (;;) {
-        size_t size = kaya_next_occurrence(rec, sizeof rec);
+        size_t size = kaya_next_occurrence(&rec);
         if (size == 0)
             break; /* shutdown */
+        if (size == KAYA_OCCURRENCE_WOKEN)
+            continue; /* no record; rec is NULL */
         uint64_t id;
         KayaVal keys[2];
         KayaVal payload;

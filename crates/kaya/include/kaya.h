@@ -932,11 +932,11 @@
 
 /**
  * Returned by `kaya_next_occurrence` when a background thread called
- * `kaya_wake`: nothing was written to `buf`, and the caller should run
+ * `kaya_wake`: no record was handed out, and the caller should run
  * whatever it has queued of its own before waiting again. Chosen
  * SMALLER than any real record (a header alone is 8 bytes) rather than
  * as a huge sentinel, so a consumer that has not learned about it yet
- * cannot mistake it for a length and read past the buffer.
+ * cannot mistake it for a length and read past the record.
  */
 #define KAYA_OCCURRENCE_WOKEN 1
 
@@ -1177,16 +1177,40 @@ void kaya_occurrence_blob_release(uint64_t handle);
 void kaya_submit(const uint8_t *records, uintptr_t len);
 
 /**
- * Function-floor consumption: block until the next occurrence and write
- * one complete record — header included, exactly the ring's bytes — to
- * `buf`. Returns the record size, `KAYA_OCCURRENCE_SHUTDOWN` when the
- * core has shut down, or `KAYA_OCCURRENCE_WOKEN` when a background
- * thread rang the doorbell for work of the caller's own.
- * 256 bytes of capacity covers any occurrence with a reasonable key
- * path; an overflowing record fails loudly. Call from a single app
- * thread, and do not mix with direct ring access.
+ * Function-floor consumption: block until the next occurrence and hand
+ * back one complete record — header included, exactly the ring's bytes.
+ * Writes the borrowed pointer to `record` and returns its size, or
+ * `KAYA_OCCURRENCE_SHUTDOWN` when the core has shut down, or
+ * `KAYA_OCCURRENCE_WOKEN` when a background thread rang the doorbell
+ * for work of the caller's own. Call from a single app thread, and do
+ * not mix with direct ring access.
+ *
+ * BOTH SENTINELS NULL THE POINTER rather than leaving it as it was,
+ * and that is deliberate. A caller that forgets the WOKEN case used to
+ * re-parse the buffer it still held — the PREVIOUS occurrence,
+ * dispatched a second time, silently. Nulling turns that into a crash
+ * at the deref, on the line that forgot, instead of a stale click
+ * nobody can trace back here.
+ *
+ * THE CORE OWNS THE BYTES, and that is the whole point of the shape.
+ * This used to copy into a caller-sized buffer, and every function-floor
+ * caller sized it 256 — which meant an occurrence carrying more than
+ * 208 bytes of payload ABORTED THE PROCESS from inside an extern "C"
+ * frame, uncatchable, with no guest able to guard against it. A pasted
+ * paragraph does that, and an html clip does it every time (measured
+ * 2026-08-02: 200 bytes of pasted text passed, 240 aborted). No cap is
+ * the fix rather than a bigger cap: a limit on how much content may
+ * reach a guest is not something kaya gets to have, and a buffer that
+ * cannot be too small cannot be too small at 1 MB either.
+ *
+ * The bytes stay valid until this thread's NEXT call — copy out what
+ * you keep, exactly as `kaya_blob_data` and `kaya_occurrence_blob`
+ * already ask.
+ *
+ * # Safety
+ * `record` must be a valid place to write a pointer.
  */
-uintptr_t kaya_next_occurrence(uint8_t *buf, uintptr_t cap);
+uintptr_t kaya_next_occurrence(const uint8_t **record);
 
 /**
  * Wake this process's app thread from wherever it is parked waiting for

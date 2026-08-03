@@ -89,11 +89,13 @@ static void *app(void *arg) {
      * so the app keeps its own item counts alongside the deltas it
      * sends — hand-rolled bookkeeping is C's idiom. */
     unsigned items_in[2] = {0, 0}; /* [0]: g1, [1]: g2 */
-    uint8_t rec[256];
+    const uint8_t *rec;
     for (;;) {
-        size_t size = kaya_next_occurrence(rec, sizeof rec);
+        size_t size = kaya_next_occurrence(&rec);
         if (size == 0)
             break; /* shutdown */
+        if (size == KAYA_OCCURRENCE_WOKEN)
+            continue; /* no record; rec is NULL */
         uint64_t id;
         KayaVal keys[2];
         uint32_t n_keys;

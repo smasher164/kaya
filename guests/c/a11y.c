@@ -188,8 +188,8 @@ static void *app(void *arg) {
     /* A static scene: nothing here needs a handler, so the occurrence
      * loop exists purely to block until shutdown (the keep-alive idiom
      * every handler-less scene uses). */
-    uint8_t rec[512];
-    while (kaya_next_occurrence(rec, sizeof rec) != 0) {
+    const uint8_t *rec;
+    while (kaya_next_occurrence(&rec) != 0) {
     }
     return NULL;
 }

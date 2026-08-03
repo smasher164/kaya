@@ -185,13 +185,13 @@ static void *app(void *arg) {
     build_scene();
     pthread_t worker_thread;
     int started = 0;
-    uint8_t rec[512];
+    const uint8_t *rec;
     for (;;) {
         /* Posted work first, then the ring, then park. Draining at the
          * TOP is what makes a wake sufficient: whatever brought this
          * thread back, it looks here before anywhere else. */
         drain_posted();
-        size_t size = kaya_next_occurrence(rec, sizeof rec);
+        size_t size = kaya_next_occurrence(&rec);
         if (size == KAYA_OCCURRENCE_SHUTDOWN)
             break;
         if (size == KAYA_OCCURRENCE_WOKEN)

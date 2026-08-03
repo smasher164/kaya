@@ -949,39 +949,75 @@ pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
 pub const KAYA_OCCURRENCE_SHUTDOWN: usize = 0;
 
 /// Returned by `kaya_next_occurrence` when a background thread called
-/// `kaya_wake`: nothing was written to `buf`, and the caller should run
+/// `kaya_wake`: no record was handed out, and the caller should run
 /// whatever it has queued of its own before waiting again. Chosen
 /// SMALLER than any real record (a header alone is 8 bytes) rather than
 /// as a huge sentinel, so a consumer that has not learned about it yet
-/// cannot mistake it for a length and read past the buffer.
+/// cannot mistake it for a length and read past the record.
 pub const KAYA_OCCURRENCE_WOKEN: usize = 1;
 
-/// Function-floor consumption: block until the next occurrence and write
-/// one complete record — header included, exactly the ring's bytes — to
-/// `buf`. Returns the record size, `KAYA_OCCURRENCE_SHUTDOWN` when the
-/// core has shut down, or `KAYA_OCCURRENCE_WOKEN` when a background
-/// thread rang the doorbell for work of the caller's own.
-/// 256 bytes of capacity covers any occurrence with a reasonable key
-/// path; an overflowing record fails loudly. Call from a single app
-/// thread, and do not mix with direct ring access.
+thread_local! {
+    /// Where the record handed out by the last `kaya_next_occurrence`
+    /// lives. THREAD-LOCAL AND NOT A GLOBAL because the borrow's
+    /// lifetime is stated per caller ("until your next call"), and a
+    /// second thread calling would otherwise free bytes the app thread
+    /// is still decoding — the failure would be a torn paste, arriving
+    /// nowhere near the thread that caused it.
+    static HELD_OCCURRENCE: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Function-floor consumption: block until the next occurrence and hand
+/// back one complete record — header included, exactly the ring's bytes.
+/// Writes the borrowed pointer to `record` and returns its size, or
+/// `KAYA_OCCURRENCE_SHUTDOWN` when the core has shut down, or
+/// `KAYA_OCCURRENCE_WOKEN` when a background thread rang the doorbell
+/// for work of the caller's own. Call from a single app thread, and do
+/// not mix with direct ring access.
+///
+/// BOTH SENTINELS NULL THE POINTER rather than leaving it as it was,
+/// and that is deliberate. A caller that forgets the WOKEN case used to
+/// re-parse the buffer it still held — the PREVIOUS occurrence,
+/// dispatched a second time, silently. Nulling turns that into a crash
+/// at the deref, on the line that forgot, instead of a stale click
+/// nobody can trace back here.
+///
+/// THE CORE OWNS THE BYTES, and that is the whole point of the shape.
+/// This used to copy into a caller-sized buffer, and every function-floor
+/// caller sized it 256 — which meant an occurrence carrying more than
+/// 208 bytes of payload ABORTED THE PROCESS from inside an extern "C"
+/// frame, uncatchable, with no guest able to guard against it. A pasted
+/// paragraph does that, and an html clip does it every time (measured
+/// 2026-08-02: 200 bytes of pasted text passed, 240 aborted). No cap is
+/// the fix rather than a bigger cap: a limit on how much content may
+/// reach a guest is not something kaya gets to have, and a buffer that
+/// cannot be too small cannot be too small at 1 MB either.
+///
+/// The bytes stay valid until this thread's NEXT call — copy out what
+/// you keep, exactly as `kaya_blob_data` and `kaya_occurrence_blob`
+/// already ask.
+///
+/// # Safety
+/// `record` must be a valid place to write a pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn kaya_next_occurrence(buf: *mut u8, cap: usize) -> usize {
-    if buf.is_null() {
+pub unsafe extern "C" fn kaya_next_occurrence(record: *mut *const u8) -> usize {
+    if record.is_null() {
         return KAYA_OCCURRENCE_SHUTDOWN;
     }
+    unsafe { *record = std::ptr::null() };
     match state().ring.wait_pop() {
         crate::ring::Waited::Record(kind, body) => {
             let size = wire::HEADER_SIZE + body.len();
-            assert!(
-                size <= cap,
-                "kaya: occurrence record of {size} bytes exceeds the buffer of {cap}"
-            );
-            let mut record = Vec::with_capacity(size);
-            record.extend_from_slice(&(size as u32).to_le_bytes());
-            record.extend_from_slice(&kind.to_le_bytes());
-            record.extend_from_slice(&0u16.to_le_bytes());
-            record.extend_from_slice(&body);
-            unsafe { std::ptr::copy_nonoverlapping(record.as_ptr(), buf, size) };
+            HELD_OCCURRENCE.with(|held| {
+                let mut held = held.borrow_mut();
+                held.clear();
+                held.reserve(size);
+                held.extend_from_slice(&(size as u32).to_le_bytes());
+                held.extend_from_slice(&kind.to_le_bytes());
+                held.extend_from_slice(&0u16.to_le_bytes());
+                held.extend_from_slice(&body);
+                unsafe { *record = held.as_ptr() };
+            });
             size
         }
         crate::ring::Waited::Woken => KAYA_OCCURRENCE_WOKEN,
@@ -2048,6 +2084,51 @@ mod tests {
         let zero = unsafe { kaya_blob_data(0, &mut len) };
         assert!(zero.is_null());
         blobs().lock().unwrap().out.clear();
+    }
+
+    /// THE FUNCTION FLOOR HAS NO SIZE CAP, because the core owns the
+    /// bytes it hands out.
+    ///
+    /// It used to copy into a caller-sized buffer, and every caller
+    /// sized it 256 — so an occurrence carrying more than 208 bytes of
+    /// payload ABORTED THE PROCESS from inside an extern "C" frame,
+    /// uncatchable by any guest (measured 2026-08-02: 200 bytes of
+    /// pasted text passed, 240 aborted). A pasted paragraph does that
+    /// and an html clip does it every time, so the clipboard is where a
+    /// latent limit became a routine one.
+    ///
+    /// 8 KiB is not a new cap. It is thirty-two times the buffer every
+    /// caller passed, which is the distance that matters: under the old
+    /// shape this test could not have run at all.
+    #[test]
+    fn the_function_floor_hands_out_a_record_of_any_size() {
+        let text = "x".repeat(8 * 1024);
+        let clip = crate::protocol::Representation::Text(text.clone());
+        let tag = crate::wire::click_tag(5, &[]);
+        let body = crate::wire::pasted_body(&tag, &clip);
+        state().ring.push_record(ring::REC_PASTED, &body);
+
+        let mut record: *const u8 = std::ptr::null();
+        let size = unsafe { kaya_next_occurrence(&mut record) };
+        assert_eq!(size, wire::HEADER_SIZE + body.len());
+        assert!(!record.is_null());
+
+        // The whole record arrives, header included, and the text in it
+        // is the text that went in — not a prefix that happened to fit.
+        let bytes = unsafe { std::slice::from_raw_parts(record, size) };
+        assert_eq!(
+            u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize,
+            size
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[4..6].try_into().unwrap()),
+            ring::REC_PASTED
+        );
+        assert!(
+            bytes.ends_with(text.as_bytes()),
+            "the record was truncated: {size} bytes for {} of text",
+            text.len()
+        );
     }
 
     #[test]
