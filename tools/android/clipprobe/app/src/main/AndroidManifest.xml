@@ -7,5 +7,35 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- The byte side of a clip: image and custom payloads ride
+             content:// URIs. grantUriPermissions lets ClipboardService
+             hand the pasting package a read grant at getPrimaryClip
+             time (the automatic per-paste grant the probe measures). -->
+        <provider
+            android:name=".ProbeProvider"
+            android:authorities="dev.kaya.clipprobe"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
+        <receiver android:name=".SeedReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="dev.kaya.clipprobe.SEED"/>
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".ReadReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="dev.kaya.clipprobe.READ"/>
+            </intent-filter>
+        </receiver>
+        <!-- Never shown, never bound: being the DEFAULT IME is what
+             exempts this package's reads from the focus gate. -->
+        <service
+            android:name=".ProbeIme"
+            android:exported="true"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod"/>
+            </intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/method"/>
+        </service>
     </application>
 </manifest>

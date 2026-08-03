@@ -1211,9 +1211,88 @@ image/png.
   falls back to the field's value — the macOS AXValue / GTK AT-SPI
   Text chain, spelled WinUI.
 
-## §7 onwards — to be written
+## §7 — what Android actually charges (measured 2026-08-03; arm pending)
 
-The fan-out continues: Compose + the Android helper APK, then the
-iOS arm (measure UIPasteboard's charge for a slashed custom type
+Two probe campaigns — tools/android/clipprobe/run2.sh (same-package)
+and tools/android/cliphelper/run3.sh (cross-package, the one that
+counts: same-package access needs no grant, so the first campaign's
+grant cells were vacuously green and are marked so here).
+
+### 1. THE HELPER READS WITHOUT TOUCHING THE GUEST'S FOCUS
+
+The plan assumed the helper must come to the foreground to read
+(finding 4's constraint). It does not: ClipboardService admits the
+DEFAULT IME's reads before it ever checks focus, the package need
+only own the selected input method (`adb shell ime enable/set`; the
+service never binds or shows), and the read raises no access toast.
+Measured: the helper's plain BroadcastReceiver reads the clipboard
+with the guest focused throughout — the return-focus problem is
+DELETED rather than solved. (The Appium pattern.) A receiver that is
+not the default IME reads null — the control cell.
+
+### 2. BYTES RIDE content:// URIS, AND THE GRANTS ARE PER-PASTE
+
+ClipData.Item carries text, htmlText, a Uri or an Intent — no byte
+array — so image and custom payloads ride a ContentProvider
+(`grantUriPermissions="true"`, consumers resolve the mime with
+ContentResolver.getType and read with openInputStream). Measured
+cross-package: the paste-grant is AUTOMATIC (ClipboardService grants
+the reading package at getPrimaryClip time), and it is REVOKED THE
+MOMENT THE CLIP CHANGES — re-opening a stashed URI answers
+SecurityException. The arm's rule: materialize URI payloads inside
+the paste, never hold one. (The documented-nowhere
+clear-the-whole-clipboard-on-ungrantable-URI failure did NOT
+reproduce on API 35 with an unresolvable authority; recorded as
+unconfirmed, not as safety.)
+
+### 3. THE CLIP IS BUILT BY HAND
+
+`newHtmlText` advertises `text/html` alone (AOSP source), so the one
+clip lists every offered mime in its ClipDescription explicitly:
+item 0 carries text+html inline, and one URI item per byte payload
+follows — measured round-tripping all four mimes cross-package
+(html verbatim; custom "dev.kaya/note" stored VERBATIM, no
+validation or normalization anywhere on the path). `coerceToText`
+returns "" for content URIs (contradicting its own javadoc) — never
+a fallback for byte payloads.
+
+### 4. THE LANE MECHANICS, ALL MEASURED
+
+- **The emulator-host clipboard bridge is SEVERED on this pool**,
+  both directions — EmulatorClipboardMonitor exists in the service
+  but nothing crossed. No cross-lane collision with the mac lane
+  under validate-all.
+- **The API 33+ copy overlay is suppressible**: the
+  `com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY` description
+  extra (honored on emulators). Every helper seed carries it; an
+  unsuppressed copy's overlay lingers for seconds over whatever the
+  harness is asserting against.
+- **Explicit-component broadcasts reach even a never-started
+  package** (the stopped-package exclusion applies to implicit
+  broadcasts) — the seed/read protocol uses `-n` and needs no
+  warm-up launch.
+- **Background WRITES are unrestricted** (confirmed in the service
+  source across API 10..15 and on the pool), so seeding never moves
+  focus. Results ride ORDERED broadcast result data — printed by
+  `am broadcast` on stdout host-side, and delivered to a result
+  receiver app-to-app, which is how the guest will orchestrate
+  seeds without any host round-trip.
+
+### 5. WHAT THE ARM STILL NEEDS (the map, from the recon)
+
+KayaCompose.kt: the APPLY_COPY/APPLY_READ_CLIPBOARD arms (and
+collectBlobs MUST learn APPLY_COPY — blob handles are batch-local
+and the miss is silent); the guest-side ContentProvider in the kaya
+android module serving its copies' byte payloads; the seed/read
+verbs orchestrating the helper over ordered broadcasts; the
+EditableText fallback in kayaAxName (the same field-value gap GTK
+and WinUI each had, third platform running); the roles + paste
+split mirroring the other arms; and the CLIP_* constants, which
+check-verbs' sweep does not cover — the clause worth adding while
+the second mirror copy is written.
+
+## §8 onwards — to be written
+
+The iOS arm (measure UIPasteboard's charge for a slashed custom type
 FIRST — §5b finding 4's two macOS write paths are the warning), then
 the full matrix.
