@@ -45,6 +45,31 @@ own the state (see the undo note in this file).
   The edit roles are no longer deferred — `cut`, `copy` and `paste`
   joined the closed role vocabulary beside `settings`.
 
+- **DEFERRED — wayland lane session architecture (researched
+  2026-08-03, no trigger yet).** The GTK clipboard work pinned two
+  session-level constraints and researched their exits
+  (docs/clipboard-plan.md §5b, "researched escapes", has the detail
+  and the source-level citations):
+  - A persistent seat keyboard and pooled focus assertions are
+    mutually exclusive (keyboard focus is per-seat-exclusive; a
+    session holder broke three legs the day it was tried).
+  - GDK pins `gdk_display_get_clipboard` to the FIRST seat, so
+    multi-seat can solve FOCUS exclusivity (with a ~20-line wtype
+    seat flag or a vendored micro-client, plus swaymsg per-seat
+    focus steering) but can NEVER partition clipboards between GDK
+    apps in one session.
+  THE EXIT THAT COVERS EVERYTHING: per-leg sway instances — measured
+  55ms to socket, the same cost class as the per-leg Xvfb the x11
+  half already uses. One session per leg dissolves focus
+  exclusivity, makes session keyboards safe, and gives each leg a
+  private clipboard (the wayland clipboard legs could then
+  unserialise). TRIGGERS: the first feature needing a persistent
+  seat keyboard (IME, key repeat, compositor-level shortcut
+  injection), or wayland lane time budget pressure from the
+  serialised clipboard block. Do it as its own slice — it is a
+  compositor-session change, and §0e records what the last one cost
+  to re-prove.
+
   The original entry follows, for the reasoning it carries.
 
 - **Clipboard** — the next editor prerequisite, and the one that
