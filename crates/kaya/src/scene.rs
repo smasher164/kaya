@@ -503,18 +503,32 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
 }
 
-/// The closed role vocabulary (DESIGN.md, Menus). One value in v1:
+/// The closed role vocabulary (DESIGN.md, Menus). Closed on purpose — a
+/// role is the only thing that can move an authored item into
+/// dress-owned chrome, or hand its behaviour to the platform.
+///
 /// `settings` names the app's settings command, which macOS places in
 /// the application menu and every other host leaves where the app put
-/// it. Closed on purpose — a role is the only thing that can move an
-/// authored item into dress-owned chrome.
+/// it.
+///
+/// `cut`, `copy` and `paste` are THE GESTURE LAYER, and they exist
+/// because kaya has no selection API: only the widget knows what is
+/// selected, so "copy the selection" cannot be assembled by an app out
+/// of the data layer. A role item lowers to the platform's own command,
+/// acts on the FOCUSED widget, and configures its own enablement —
+/// which kaya computes rather than handing the app a signal to compute
+/// it with, since kaya already knows what is focused, what the
+/// clipboard offers, and what the widget declared it accepts.
+pub(crate) const MENU_ROLES: &[&str] = &["settings", "cut", "copy", "paste"];
+
 fn check_menu_role(value: &Value) {
     let Value::Str(role) = value else {
         return;
     };
     assert!(
-        role == "settings",
-        "kaya: menu role {role:?} is not in the closed role vocabulary (settings)"
+        MENU_ROLES.contains(&role.as_str()),
+        "kaya: menu role {role:?} is not in the closed role vocabulary ({})",
+        MENU_ROLES.join(", ")
     );
 }
 

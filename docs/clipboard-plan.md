@@ -678,12 +678,58 @@ not RETURN, so it cannot pass vacuously — and without the exemption the
 rule would push a half-built backend into faking an observation, the
 exact defect it exists to catch. Watched failing both ways.
 
-## §3 onwards — to be written
+## §3 — the gesture layer, green on mac (landed)
 
-Next: the paste hook — the `accepts` sugar, `on_paste`, and
-Cut/Copy/Paste as standard commands, which is the gesture layer §0
-argued the data layer cannot replace. Then the fan-out: seven more
-bindings, three more backends, and the Android helper APK.
+Cut, Copy and Paste as standard-command ROLES, joining `settings` in
+the closed role vocabulary. A role item lowers to the platform's own
+command, acts on the FOCUSED widget, and works out its own enablement.
+
+### The paste split is the rule everything turns on
+
+A widget that DECLARED what it accepts takes the content itself: kaya
+reads the clipboard and delivers it to `on_paste`. A widget that
+declared nothing gets the platform's own insertion, and its ordinary
+change handler reports the result.
+
+So a plain text editor writes NONE of this and has working cut, copy
+and paste. Declaring is how an app OVERRIDES that default. The scene
+asserts both halves, and the assertion that the declared field stays
+EMPTY is what proves kaya delivered the content instead of letting the
+platform insert it.
+
+### Two macOS findings, both silent failures
+
+**Enablement is not a build-time fact.** It is the intersection of what
+the clipboard offers and what the focused widget accepts, and both move
+long after the bar was built. Kaya-owned menus set `autoenablesItems =
+false`, so AppKit recomputes nothing — and `performActionForItem`
+leaves a disabled item inert, exactly as native tracking does. Every
+paste leg failed with nothing happening and nothing saying why. The fix
+refreshes role items at the two moments enablement can change hands: a
+menu about to display (an `NSMenuDelegate`, for real users) and a
+harness activation.
+
+**`NSApp.sendAction(to: nil)` starts at the KEY window.** A leg running
+eight wide beside seven others is rarely the frontmost app, so it found
+no responder, returned false, and the paste vanished. Making the app
+key would have fixed it by stealing focus from every sibling leg — a
+flake generator, not a fix. A window's first responder exists whether
+or not the window is key, so the command starts there and
+`tryToPerform` walks up.
+
+### A seed that does not verify makes everything after it race
+
+`osascript` writes the clipboard through AppleEvents, in another
+process, and its EXIT does not mean the pasteboard has settled. The
+file leg failed about one run in three, and because a seed is a silent
+action the failure landed on whatever the guest asserted next. The verb
+now waits until the content is really there, which is
+"validation scripts verify what they ship" applied to a harness verb.
+
+## §4 onwards — to be written
+
+The fan-out: seven more bindings, three more backends, and the Android
+helper APK, then the matrix.
 
 Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering
 and the paste hook, Cut/Copy/Paste as standard commands (the gesture

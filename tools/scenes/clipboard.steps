@@ -83,7 +83,33 @@ clipboard_seed files "$TMP/kaya-clip-$PID/pasted.txt"
 click button#4
 expect label#0 "files pasted.txt pasted bytes"
 
+# ---- the gesture layer: Paste as a standard command ---------------
+#
+# THE PATH AN EDITOR ACTUALLY TAKES, and the one that costs nothing: a
+# gesture is its own authorisation, so no platform charges a permission
+# prompt for it. The privileged read above is the expensive door; this
+# is the free one.
+clipboard_seed text "pasted by hand"
+
+# A widget that DECLARED what it accepts takes the content itself: the
+# paste hook fires and the app decides. entry#0 stays empty, which is
+# the proof that kaya delivered the content INSTEAD of letting the
+# platform insert it.
+click button#5
+expect_focused entry#0
+menu_activate "Edit>Paste"
+expect label#0 "pasted pasted by hand"
+expect entry#0 ""
+
+# A widget that declared NOTHING gets the platform's own insertion, and
+# its ordinary change path reports the result — which is what a plain
+# text editor gets without writing a line of clipboard code.
+click button#6
+expect_focused entry#1
+menu_activate "Edit>Paste"
+expect entry#1 "pasted by hand"
+
 # One REAL-TREE read at the end: every assertion above reads kaya's own
 # model or the clipboard, and would pass for an arm that ran and drew
 # nothing.
-expect_ax label#0 "label/files pasted.txt pasted bytes"
+expect_ax entry#1 "field/pasted by hand"

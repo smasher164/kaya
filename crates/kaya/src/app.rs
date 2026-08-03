@@ -715,6 +715,17 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// What this widget accepts from a paste — the chained spelling of
+    /// [`Tx::accepts`], which remains the dynamic path.
+    ///
+    /// A SET, so a kind cannot be named twice: the root refuses a
+    /// duplicate rather than letting one silently win.
+    pub fn accepts(self, kinds: &[Accepts<'_>]) -> Self {
+        let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
+        self.tx.accepts(self.id, &list.join(" "));
+        self
+    }
+
     /// This widget's spoken accessibility label — the chained spelling
     /// of [`Tx::a11y_label`], which remains the dynamic path.
     pub fn a11y_label(self, label: &str) -> Self {
@@ -1302,6 +1313,27 @@ impl<'a> Tx<'a> {
     /// [`Prop::A11yId`].
     pub fn a11y_id(&mut self, widget: WidgetId, id: &str) {
         self.set(widget, Prop::A11yId, id);
+    }
+
+    /// WHAT THIS WIDGET ACCEPTS FROM A PASTE: the closed kinds by name
+    /// (`text`, `html`, `image`, `files`) and any custom format ids,
+    /// space separated. [`WidgetRef::accepts`] is the chained spelling
+    /// and takes the kinds as values.
+    ///
+    /// ONE DECLARATION, THREE JOBS. It drives whether the standard
+    /// Paste command is live while this widget is focused, it filters
+    /// what can reach the widget's paste hook, and on Android it IS the
+    /// native registration. Per-widget and not app-global, because
+    /// whether Paste should be enabled is the INTERSECTION of what the
+    /// clipboard offers and what the focused target takes — a search
+    /// field wants plain text, a rich editor also wants images.
+    ///
+    /// A TEXT WIDGET THAT DECLARES NOTHING still pastes: the platform's
+    /// own insertion happens and the existing change handler reports
+    /// the result. Declaring is how an app OVERRIDES that default and
+    /// takes the content itself.
+    pub fn accepts(&mut self, widget: WidgetId, list: &str) {
+        self.set(widget, Prop::Accepts, list);
     }
 
     /// This widget's accessibility LABEL: what an assistive client
@@ -2510,6 +2542,32 @@ impl<M> Messages<M> {
         self.dialogs.borrow_mut().insert(dialog.0, Box::new(f));
     }
 
+    /// Content arriving at this widget because the USER pasted — the
+    /// path an editor actually takes, and the one that costs nothing.
+    ///
+    /// A GESTURE IS ITS OWN AUTHORISATION: iOS raises no prompt for a
+    /// paste, and the focus rules Android and Wayland impose are
+    /// satisfied by construction. An editor that reaches for
+    /// [`Tx::read_clipboard`] instead pays a permission prompt for
+    /// content this delivers free.
+    ///
+    /// Fires only for widgets that DECLARED what they accept
+    /// ([`Tx::accepts`]) — without a declaration the platform's own
+    /// insertion happens and the change handler reports it.
+    pub fn on_paste(
+        &self,
+        w: WidgetId,
+        f: impl Fn(crate::protocol::Representation) -> M + 'static,
+    ) {
+        self.widgets.borrow_mut().insert(
+            w.0,
+            Box::new(move |occ| match occ {
+                Occurrence::Pasted { clip, .. } => Some(f(clip.clone())),
+                _ => None,
+            }),
+        );
+    }
+
     /// Bind the one-shot result handler to a clipboard read. The answer
     /// is at most one representation; `None` covers every way the
     /// platform declines to hand one over, and it is not an error.
@@ -3421,6 +3479,35 @@ impl<'t, 'b, A: MenuAnchor> RadioOptions<'t, 'b, A> {
     }
 }
 
+/// One entry of an accept list: a closed kind, or a custom format id.
+///
+/// A SUM AND NOT A MASK, because half the set is open-ended. A custom
+/// format that could be written and never accepted would be an escape
+/// hatch that only opens outward, and the whole reason to have one is
+/// an app round-tripping its own data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accepts<'a> {
+    Text,
+    Html,
+    Image,
+    Files,
+    /// An app-defined format, by the id it round-trips under. Reaches
+    /// every platform's own registry verbatim, so it carries no spaces.
+    Custom(&'a str),
+}
+
+impl Accepts<'_> {
+    fn token(&self) -> &str {
+        match self {
+            Accepts::Text => "text",
+            Accepts::Html => "html",
+            Accepts::Image => "image",
+            Accepts::Files => "files",
+            Accepts::Custom(id) => id,
+        }
+    }
+}
+
 /// A standard-command role (DESIGN.md, Menus): a uniform declaration
 /// whose PLACEMENT is each platform's business. `Settings` tells macOS
 /// to show the command in the application menu, where users press
@@ -3433,6 +3520,19 @@ impl<'t, 'b, A: MenuAnchor> RadioOptions<'t, 'b, A> {
 pub enum MenuRole {
     /// The app's settings command.
     Settings,
+    /// The three standard clipboard commands. They act on the FOCUSED
+    /// widget, lower to the platform's own command, and configure their
+    /// own enablement — an app writes none of that.
+    ///
+    /// THEY ARE NOT SUGAR OVER `copy`, and the reason is that kaya has
+    /// no selection API: only the widget knows what is selected, so an
+    /// app cannot assemble the payload for "copy the selection" itself.
+    /// Copy of a selection is therefore necessarily a command, and
+    /// Paste is its mirror. The data layer is for overriding that
+    /// default and for targets with no native behaviour.
+    Cut,
+    Copy,
+    Paste,
 }
 
 impl MenuRole {
@@ -3441,6 +3541,9 @@ impl MenuRole {
     fn wire(self) -> &'static str {
         match self {
             MenuRole::Settings => "settings",
+            MenuRole::Cut => "cut",
+            MenuRole::Copy => "copy",
+            MenuRole::Paste => "paste",
         }
     }
 }

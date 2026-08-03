@@ -693,6 +693,19 @@ func kayaCopyToPasteboard(
 /// request accepted.
 func kayaReadClipboard(request: UInt64, accepting: String) {
     #if os(macOS)
+        KayaHost.emitClipboardResult(request, kayaReadClipboardValue(accepting: accepting))
+    #else
+        _ = (request, accepting)
+        kayaDepthStub("clipboard", on: "ios")
+    #endif
+}
+
+/// The walk itself, shared by the privileged read and by a paste
+/// landing on a widget that declared what it accepts — ONE
+/// implementation, because the two differ in their trigger and never in
+/// what they can materialize.
+func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
+    #if os(macOS)
         let (kinds, custom) = kayaParseAcceptList(accepting)
         let board = NSPasteboard.general
         var answer: KayaClipValue?
@@ -727,9 +740,9 @@ func kayaReadClipboard(request: UInt64, accepting: String) {
         if answer == nil, kinds & kayaClipText != 0, let text = board.string(forType: .string) {
             answer = KayaClipValue(clip: kayaClipText, text: text)
         }
-        KayaHost.emitClipboardResult(request, answer)
+        return answer
     #else
-        _ = (request, accepting)
+        _ = accepting
         kayaDepthStub("clipboard", on: "ios")
     #endif
 }
@@ -810,6 +823,23 @@ func kayaClipboardSeed(kind: String, argument: String) {
                     + "tool writes an app-defined format, and a helper kaya wrote would be "
                     + "foreign in name only")
         }
+        // AND WAIT UNTIL IT IS REALLY THERE. `osascript` writes the
+        // clipboard through AppleEvents, in another process, and its
+        // EXIT does not mean the pasteboard server has settled — a
+        // guest that read immediately after got an empty answer about
+        // one run in three, with no retry to save it (the seed is a
+        // silent action, so the failure landed on whatever the guest
+        // asserted next). A verb that returns before its own work
+        // is visible makes every step after it race.
+        let want = kayaClipUTI(kind)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if NSPasteboard.general.types?.contains(where: { $0.rawValue == want }) == true {
+                return
+            }
+            usleep(10_000)
+        }
+        fatalError("kaya: clipboard_seed \(kind) never appeared on the clipboard")
     #else
         _ = (kind, argument)
         kayaDepthStub("clipboard", on: "ios")
@@ -5126,7 +5156,131 @@ func kayaMenuEffectiveEnabled(_ item: KayaMenuItemModel) -> Bool {
         enabled = enabled && parent.enabled
         current = parentId
     }
-    return enabled
+    // A STANDARD COMMAND CONFIGURES ITS OWN ENABLEMENT, and kaya
+    // computes it rather than handing the app a signal to compute it
+    // with: kaya knows what is focused, kaya knows what the clipboard
+    // offers, and the widget already declared what it accepts. Making
+    // an app track focus to derive a boolean kaya holds is busywork.
+    return enabled && kayaRoleEnabled(item.role)
+}
+
+/// Whether a clipboard role's command can act right now. A non-role
+/// item answers true and pays nothing.
+///
+/// Paste is the INTERSECTION: something focused that takes content, and
+/// something on the clipboard it takes. Cut and copy need only a
+/// focused widget that HAS a selection to give — which on this platform
+/// is any editable one, and the responder chain refuses the rest.
+func kayaRoleEnabled(_ role: String) -> Bool {
+    #if os(macOS)
+        switch role {
+        case "cut", "copy":
+            guard let id = kayaScene.focusedId else { return false }
+            return kayaScene.entryWidgets.contains(where: { $0.id == id })
+                || kayaScene.textareas.contains(where: { $0.id == id })
+        case "paste":
+            guard let id = kayaScene.focusedId,
+                let node = kayaScene.nodes[id]
+            else { return false }
+            // A widget that declared NOTHING still pastes — the
+            // platform inserts and the change handler reports it — so
+            // an undeclared editable target enables on the offer alone.
+            let (kinds, custom) = kayaParseAcceptList(node.accepts)
+            if node.accepts.isEmpty {
+                return NSPasteboard.general.canReadObject(forClasses: [NSString.self])
+            }
+            let offered = NSPasteboard.general.types?.map(\.rawValue) ?? []
+            if custom.contains(where: { offered.contains($0) }) { return true }
+            for (name, bit) in [
+                ("text", kayaClipText), ("html", kayaClipHtml),
+                ("image", kayaClipImage), ("files", kayaClipFiles),
+            ] where kinds & bit != 0 {
+                if offered.contains(kayaClipUTI(name)) { return true }
+            }
+            return false
+        default:
+            return true
+        }
+    #else
+        return role.isEmpty || !["cut", "copy", "paste"].contains(role)
+    #endif
+}
+
+/// Send a standard editing command down the responder chain, starting
+/// at the FOCUSED window's first responder rather than at the
+/// application.
+///
+/// NOT `NSApp.sendAction(to: nil)`, which was the first cut and never
+/// once worked: that route starts at the KEY window, and a leg running
+/// eight wide beside seven others is rarely the frontmost app — so it
+/// found no responder, returned false, and the paste vanished with no
+/// error. Making the app key instead would have fixed it by stealing
+/// focus from every sibling leg, which is a flake generator, not a fix.
+/// A window's first responder exists whether or not the window is key,
+/// and `tryToPerform` walks up from there exactly as AppKit's own
+/// dispatch would.
+@discardableResult
+func kayaSendToFocusedResponder(_ selector: Selector) -> Bool {
+    #if os(macOS)
+        for window in kayaNSWindows.values {
+            if window.firstResponder?.tryToPerform(selector, with: nil) == true {
+                return true
+            }
+        }
+        return NSApp.sendAction(selector, to: nil, from: nil)
+    #else
+        _ = selector
+        return false
+    #endif
+}
+
+/// Perform a clipboard role on the focused widget. Answers whether it
+/// WAS one, so a plain action falls through to its own dispatch.
+///
+/// THE PASTE SPLIT, and it is the rule the whole gesture layer turns
+/// on: a widget that DECLARED what it accepts takes the content itself
+/// — kaya reads the clipboard and delivers it to the paste hook — while
+/// one that declared nothing gets the platform's own insertion, and its
+/// change handler reports the result. A plain text editor writes none
+/// of this and works.
+func kayaPerformClipboardRole(_ role: String) -> Bool {
+    #if os(macOS)
+        switch role {
+        case "cut":
+            kayaSendToFocusedResponder(#selector(NSText.cut(_:)))
+            return true
+        case "copy":
+            kayaSendToFocusedResponder(#selector(NSText.copy(_:)))
+            return true
+        case "paste":
+            guard let id = kayaScene.focusedId, let node = kayaScene.nodes[id] else {
+                return true
+            }
+            if node.accepts.isEmpty {
+                // THE PLATFORM'S OWN INSERTION, down the responder
+                // chain from whatever is focused. It answers whether
+                // anything took it, and a refusal is reported rather
+                // than swallowed: a paste that reached no responder
+                // looks exactly like a widget that ignored the content.
+                kayaSendToFocusedResponder(#selector(NSText.paste(_:)))
+                return true
+            }
+            // The same walk the privileged read makes, and deliberately
+            // the same code: a paste and a read differ in their trigger,
+            // never in what they can materialize.
+            kayaReadClipboardValue(accepting: node.accepts).map { value in
+                KayaHost.emitPasted(node.tag, value)
+            }
+            return true
+        default:
+            return false
+        }
+    #else
+        if ["cut", "copy", "paste"].contains(role) {
+            kayaDepthStub("clipboard", on: "ios")
+        }
+        return false
+    #endif
 }
 
 /// Catalog preorder: top-level grouping nodes in menubar-append order,
@@ -5188,6 +5342,11 @@ func kayaMenuUserActivate(_ item: KayaMenuItemModel, noun: [UInt8] = []) {
     guard kayaMenuEffectiveEnabled(item) else { return }
     switch item.kind {
     case menuKindAction:
+        // A ROLE ITEM IS THE PLATFORM'S COMMAND, not the app's action:
+        // it acts on the focused widget and emits nothing of its own,
+        // because there is nothing for the app to decide. kaya has no
+        // selection API, which is exactly why these had to be commands.
+        if kayaPerformClipboardRole(item.role) { return }
         KayaHost.emitMenuActivated(item.id, noun)
     case menuKindToggle:
         item.checked.toggle()  // the retained mirror, BEFORE the emit
@@ -5427,6 +5586,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 holder.isEnabled = kayaMenuEffectiveEnabled(child)
                 let submenu = NSMenu(title: child.label)
                 submenu.autoenablesItems = false  // docs/traps.md
+            submenu.delegate = kayaMenuRefresher
                 kayaBuildNSMenuItems(into: submenu, children: child.children)
                 holder.submenu = submenu
                 menu.addItem(holder)
@@ -5524,6 +5684,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         let mainMenu = NSApp.mainMenu ?? {
             let menu = NSMenu()
             menu.autoenablesItems = false  // docs/traps.md
+            menu.delegate = kayaMenuRefresher
             NSApp.mainMenu = menu
             return menu
         }()
@@ -5536,6 +5697,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             holder.isEnabled = kayaMenuEffectiveEnabled(top)
             let submenu = NSMenu(title: top.label)
             submenu.autoenablesItems = false  // docs/traps.md
+            submenu.delegate = kayaMenuRefresher
             // A bar-level radio_group is a top-level menu whose
             // options use the checkmark idiom — the same inline
             // materialization, one level up.
@@ -5703,8 +5865,38 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// owned item carries), never by title-walking the chrome. The
     /// activation itself stays real chrome (no model-route fallback).
     /// Returns a failure description, nil on success.
+    /// A STANDARD COMMAND'S ENABLEMENT IS NOT A BUILD-TIME FACT: it is
+    /// the intersection of what the clipboard offers and what the
+    /// FOCUSED widget accepts, and both move long after the bar was
+    /// built. Kaya-owned menus set `autoenablesItems = false`
+    /// (docs/traps.md), so AppKit will not recompute one for us — this
+    /// does, at the two moments it can change hands: a menu about to
+    /// display, and a harness activation.
+    ///
+    /// Found the hard way: the first cut computed it once, at sync, and
+    /// every paste leg failed SILENTLY — `performActionForItem` leaves a
+    /// disabled item inert, exactly as native tracking does, so nothing
+    /// happened and nothing said why.
+    func kayaRefreshRoleEnablement() {
+        for (_, item) in kayaScene.menuItems where !item.role.isEmpty {
+            guard let nsItem = kayaOwnedNSMenuItem(item.id) else { continue }
+            nsItem.isEnabled = kayaMenuEffectiveEnabled(item)
+        }
+    }
+
+    /// The delegate that gives a REAL user the same freshness: AppKit
+    /// asks before it displays.
+    final class KayaMenuRefresher: NSObject, NSMenuDelegate {
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            kayaRefreshRoleEnablement()
+        }
+    }
+
+    let kayaMenuRefresher = KayaMenuRefresher()
+
     func kayaMacMenuActivate(_ path: String) -> String? {
         kayaEnsureMenuSegment()
+        kayaRefreshRoleEnablement()
         guard let target = kayaResolveMenuPath(path, roots: kayaPresentedCatalog()) else {
             return "no such menu item \(path)"
         }
@@ -5738,6 +5930,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// turns that into a script failure rather than a silent pass.
     func kayaMacShortcut(_ spelling: String) -> Bool {
         kayaEnsureMenuSegment()
+        kayaRefreshRoleEnablement()
         guard kayaShortcutItems[spelling] != nil else { return true }
         guard let (key, mask) = kayaKeyEquivalent(spelling),
             let event = NSEvent.keyEvent(

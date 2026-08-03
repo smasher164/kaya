@@ -111,6 +111,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ReadImage,
         ReadFiles,
         Answer(Option<kaya::Representation>),
+        FocusRich,
+        FocusPlain,
+        Pasted(kaya::Representation),
     }
 
     // The files the outside process will seed from, written before
@@ -121,9 +124,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     std::fs::write(dir.join("pasted.txt"), b"pasted bytes").expect("failed to write the file");
 
     let msgs = kaya::Messages::<Msg>::new();
-    let status = ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("clipboard");
+    let (status, rich_field, plain_field) = ctx.apply(|tx| {
+        // THE GESTURE LAYER'S DECLARATION, and an app writes nothing
+        // else for it: the Paste command lowers to the platform's own,
+        // acts on whatever is focused, and works out its own enablement
+        // from what the clipboard offers and what the focused widget
+        // takes. kaya has no selection API, which is exactly why copy
+        // of a selection has to be a command rather than something an
+        // app assembles out of the data layer.
+        tx.window(kaya::DEFAULT_WINDOW).title("clipboard").menu("Edit", |m| {
+            m.item("Cut").role(kaya::MenuRole::Cut).id();
+            m.item("Copy").role(kaya::MenuRole::Copy).id();
+            m.item("Paste").role(kaya::MenuRole::Paste).id();
+        });
         let status = tx.signal("ready");
+        let mut rich_field = None;
+        let mut plain_field = None;
         let root = tx
             .column(|tx| {
                 tx.label(status).a11y_id("status"); // label#0
@@ -137,10 +153,29 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(image, Msg::ReadImage);
                 let files = tx.button("read files").id(); // button#4
                 msgs.on_click(files, Msg::ReadFiles);
+                let focus_rich = tx.button("focus rich").id(); // button#5
+                msgs.on_click(focus_rich, Msg::FocusRich);
+                let focus_plain = tx.button("focus plain").id(); // button#6
+                msgs.on_click(focus_plain, Msg::FocusPlain);
+
+                // DECLARES WHAT IT TAKES, so a paste lands in the hook
+                // and this app decides what to do with it.
+                let field = tx
+                    .entry()
+                    .accepts(&[kaya::Accepts::Text])
+                    .a11y_id("rich")
+                    .id(); // entry#0
+                msgs.on_paste(field, Msg::Pasted);
+                rich_field = Some(field);
+
+                // DECLARES NOTHING, so the platform's own insertion
+                // happens and the field's ordinary change path reports
+                // it — which is what a plain text editor gets for free.
+                plain_field = Some(tx.entry().a11y_id("plain").id()); // entry#1
             })
             .id();
         tx.mount(root);
-        status
+        (status, rich_field.unwrap(), plain_field.unwrap())
     });
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -177,6 +212,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::ReadFiles => {
                 let request = ctx.apply(|tx| tx.read_clipboard().files().send());
                 msgs.on_clipboard(request, Msg::Answer);
+            }
+            Msg::FocusRich => ctx.apply(|tx| tx.focus(rich_field)),
+            Msg::FocusPlain => ctx.apply(|tx| tx.focus(plain_field)),
+            // THE SAME SHAPE THE READ ANSWERS WITH, and free where the
+            // read is not: a gesture is its own authorisation, so no
+            // platform charges a prompt for this one.
+            Msg::Pasted(kaya::Representation::Text(text)) => {
+                ctx.apply(|tx| tx.write(status, format!("pasted {text}")));
+            }
+            Msg::Pasted(other) => {
+                ctx.apply(|tx| tx.write(status, format!("pasted {other:?}")));
             }
             Msg::Answer(clip) => match clip {
                 // EMPTY IS THE UNIVERSAL NO, and the guest does not try
