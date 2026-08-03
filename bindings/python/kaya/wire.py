@@ -813,6 +813,29 @@ def parse_value(buf, at):
     raise ValueError(f"unknown value type {vtype}")
 
 
+occurrence_blob = None
+"""Redeem-and-release for occurrence blobs, installed by the runtime
+at import (this module loads no library of its own)."""
+
+
+def parse_clip(buf, at):
+    """Decode one representation: the clip kind, then its values.
+
+    Returns (clip, values, next offset). `clip` is a SINGLE member
+    of the clip enum and never a mask — you offer many and you
+    receive one — and 0 with no values is the universal empty
+    answer. Blobs are redeemed to bytes and released here."""
+    clip, _reserved, count, _pad = struct.unpack_from("<IIII", buf, at)
+    at += 16
+    values = []
+    for _ in range(count):
+        value, at = parse_value(buf, at)
+        if isinstance(value, BlobHandle):
+            value = occurrence_blob(value.handle)
+        values.append(value)
+    return clip, values, at
+
+
 def parse_occurrence(buf):
     """Decode one occurrence record (header included).
 
@@ -839,6 +862,10 @@ def parse_occurrence(buf):
             local_path, at = parse_value(buf, at)
             files.append((handle, name, local_path))
         return kind, dialog, [], files
+    if kind == OCC_CLIPBOARD_RESULT:
+        (request,) = struct.unpack_from("<Q", buf, 8)
+        clip, values, _at = parse_clip(buf, 16)
+        return kind, request, [], (clip, values)
     if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED):
         # Surface lifecycle records carry the surface id alone —
         # no key path, no payload (derived from the record shapes).
@@ -859,4 +886,7 @@ def parse_occurrence(buf):
     payload = None
     if kind in (OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED,):
         payload, at = parse_value(buf, at)
+    if kind in (OCC_PASTED,):
+        clip, values, at = parse_clip(buf, at)
+        payload = (clip, values)
     return kind, ident, keys, payload

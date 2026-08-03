@@ -345,6 +345,37 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    raise ValueError(f\"unknown value type {vtype}\")");
     c.line("");
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: the occurrence channel has no boundary that retires one
+    // (the guest takes records one at a time, and the direct-ring
+    // consumers move the head themselves), so it is released
+    // explicitly. Redeeming HERE, in the generated decoder, is what
+    // keeps a handle from ever reaching an app — a released handle is
+    // not something a guest should be able to hold.
+    c.line("occurrence_blob = None");
+    c.line("\"\"\"Redeem-and-release for occurrence blobs, installed by the runtime");
+    c.line("at import (this module loads no library of its own).\"\"\"");
+    c.line("");
+    c.line("");
+    c.line("def parse_clip(buf, at):");
+    c.line("    \"\"\"Decode one representation: the clip kind, then its values.");
+    c.line("");
+    c.line("    Returns (clip, values, next offset). `clip` is a SINGLE member");
+    c.line("    of the clip enum and never a mask — you offer many and you");
+    c.line("    receive one — and 0 with no values is the universal empty");
+    c.line("    answer. Blobs are redeemed to bytes and released here.\"\"\"");
+    c.line("    clip, _reserved, count, _pad = struct.unpack_from(\"<IIII\", buf, at)");
+    c.line("    at += 16");
+    c.line("    values = []");
+    c.line("    for _ in range(count):");
+    c.line("        value, at = parse_value(buf, at)");
+    c.line("        if isinstance(value, BlobHandle):");
+    c.line("            value = occurrence_blob(value.handle)");
+    c.line("        values.append(value)");
+    c.line("    return clip, values, at");
+    c.line("");
+    c.line("");
     c.line("def parse_occurrence(buf):");
     c.line("    \"\"\"Decode one occurrence record (header included).");
     c.line("");
@@ -386,6 +417,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            local_path, at = parse_value(buf, at)");
     c.line("            files.append((handle, name, local_path))");
     c.line("        return kind, dialog, [], files");
+    // The privileged read's one answer: a request id, then the clip.
+    // Its own arm for the file_dialog_result reason and then some — the
+    // generic tail would take the CLIP KIND for a path length, so a
+    // text answer (clip 1) would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
+        c.line("        (request,) = struct.unpack_from(\"<Q\", buf, 8)");
+        c.line("        clip, values, _at = parse_clip(buf, 16)");
+        c.line("        return kind, request, [], (clip, values)");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))
@@ -423,6 +464,20 @@ c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
         .join(", ");
     c.line(&format!("    if kind in ({with_payload},):"));
     c.line("        payload, at = parse_value(buf, at)");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is the same record as one on a live widget.
+    let pasted = crate::pasted_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !pasted.is_empty() {
+        c.line(&format!("    if kind in ({pasted},):"));
+        c.line("        clip, values, at = parse_clip(buf, at)");
+        c.line("        payload = (clip, values)");
+    }
     c.line("    return kind, ident, keys, payload");
 
     c.out

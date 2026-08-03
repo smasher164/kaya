@@ -150,6 +150,55 @@ check swift   bindings/swift/KayaApp.swift        a11y_hint "func setA11yHint\("
 check haskell bindings/haskell/KayaApp.hs         a11y_hint "A11yHint :: String -> Attr"
 check ocaml   bindings/ocaml/kaya_app.ml          a11y_hint "let set_a11y_hint \(Widget id\)"
 
+# THE CLIPBOARD SURFACE (DESIGN.md, Clipboard). Four points, and none
+# of them is a widget kind or a window prop, so nothing above can see
+# them: the copy record, the privileged read, the per-widget accept
+# list, and the paste hook. A binding shipping the clipboard wire-only
+# would leave apps in that language unable to copy anything at all,
+# and every other gate would pass.
+#
+# THE SPELLINGS DIFFER AND THE SEMANTICS DO NOT, which is the binding
+# convention (DESIGN.md): copy is a CHAIN where the language builds by
+# chaining, keyword arguments where it has them, and a record where
+# that is the idiom — but at-most-one-per-kind is structural in all
+# eight, never a duplicate check. `accepts` takes the kinds as VALUES
+# and joins them to the space-separated list the wire carries.
+check rust    crates/kaya/src/app.rs              copy "pub fn copy\(&mut self"
+check python  bindings/python/kaya/__init__.py    copy "^def copy\("
+check go      bindings/go/app.go                  copy "func \(tx \*Tx\) Copy\("
+check csharp  bindings/csharp/KayaApp.cs          copy "public CopyRef Copy\("
+check java    bindings/java/dev/kaya/KayaApp.java copy "public CopyRef copy\("
+check swift   bindings/swift/KayaApp.swift        copy "func copy\("
+check haskell bindings/haskell/KayaApp.hs         copy "^copy ::"
+check ocaml   bindings/ocaml/kaya_app.ml          copy "^let copy "
+
+check rust    crates/kaya/src/app.rs              read_clipboard "pub fn read_clipboard\(&mut self"
+check python  bindings/python/kaya/__init__.py    read_clipboard "^def read_clipboard\("
+check go      bindings/go/app.go                  read_clipboard "func \(tx \*Tx\) ReadClipboard\("
+check csharp  bindings/csharp/KayaApp.cs          read_clipboard "public ClipReadRef ReadClipboard\("
+check java    bindings/java/dev/kaya/KayaApp.java read_clipboard "public ClipReadRef readClipboard\("
+check swift   bindings/swift/KayaApp.swift        read_clipboard "func readClipboard\("
+check haskell bindings/haskell/KayaApp.hs         read_clipboard "^readClipboard ::"
+check ocaml   bindings/ocaml/kaya_app.ml          read_clipboard "^let read_clipboard "
+
+check rust    crates/kaya/src/app.rs              accepts "pub fn accepts\(self"
+check python  bindings/python/kaya/__init__.py    accepts "def accepts\(self, \*kinds\)"
+check go      bindings/go/app.go                  accepts "func \(w Widget\) Accepts\("
+check csharp  bindings/csharp/KayaApp.cs          accepts "public void SetAccepts\("
+check java    bindings/java/dev/kaya/KayaApp.java accepts "public Widget accepts\("
+check swift   bindings/swift/KayaApp.swift        accepts "func setAccepts\("
+check haskell bindings/haskell/KayaApp.hs         accepts "Accepts :: \[String\] -> Attr"
+check ocaml   bindings/ocaml/kaya_app.ml          accepts "^let set_accepts "
+
+check rust    crates/kaya/src/app.rs              on_paste "pub fn on_paste\("
+check python  bindings/python/kaya/__init__.py    on_paste "def on_paste\(self, fn\)"
+check go      bindings/go/app.go                  on_paste "func \(w Widget\) OnPaste\("
+check csharp  bindings/csharp/KayaApp.cs          on_paste "public void OnPaste\("
+check java    bindings/java/dev/kaya/KayaApp.java on_paste "public Widget onPaste\("
+check swift   bindings/swift/KayaApp.swift        on_paste "func onPaste\("
+check haskell bindings/haskell/KayaApp.hs         on_paste "^onPaste ::"
+check ocaml   bindings/ocaml/kaya_app.ml          on_paste "^let on_paste "
+
 # The menu construction surface (DESIGN.md, Menus): menu items are not
 # widget kinds, so the constructor loop above cannot see them — every
 # binding must spell the whole item vocabulary (menu, item/action,

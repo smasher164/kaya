@@ -320,6 +320,53 @@ pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
+/// Occurrences carrying ONE REPRESENTATION: records whose last three
+/// fields are `clip` (u32), a reserved u32, and a `value` Values block.
+/// That is `clipboard_result` and `pasted` today, and drag-and-drop
+/// when it lands — Android built onReceiveContent as one API for paste,
+/// drop and autofill, so the third trigger is the same payload.
+///
+/// DERIVED, on the id_only stance, because these two are the ONLY
+/// occurrences that ever carried bytes and every decoder meets the
+/// occurrence blob table here for the first time. A third one added by
+/// hand-copied lists would meet seven decoders that silently take its
+/// clip kind for a key-path length.
+fn representation_shaped(rec: &Record) -> bool {
+    let n = rec.fields.len();
+    n >= 3
+        && rec.fields[n - 3].name == "clip"
+        && matches!(rec.fields[n - 3].ty, kaya::spec::FieldTy::U32)
+        && matches!(rec.fields[n - 2].ty, kaya::spec::FieldTy::U32)
+        && rec.fields[n - 1].name == "value"
+        && matches!(rec.fields[n - 1].ty, kaya::spec::FieldTy::Values)
+}
+
+/// The representation-carrying occurrences that are CLICK-SHAPED: an
+/// identity tag (id + path_len + reserved, then the key path) with the
+/// clip after it. `pasted` — a paste onto a stamped row is the same
+/// event as a paste onto a live one, so the tag rides verbatim.
+pub(crate) fn pasted_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| representation_shaped(r) && r.fields.len() > 1 && r.fields[1].name == "path_len")
+        .map(|r| r.name)
+        .collect()
+}
+
+/// The representation-carrying occurrences that answer a REQUEST:
+/// `clipboard_result`, on the alert's grammar, with no key path and an
+/// empty answer meaning denied, absent, unfocused and
+/// nothing-we-accept alike.
+pub(crate) fn clip_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            representation_shaped(r) && !(r.fields.len() > 1 && r.fields[1].name == "path_len")
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()

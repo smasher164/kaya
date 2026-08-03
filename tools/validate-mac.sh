@@ -811,13 +811,14 @@ run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The clipboard scene: one clip in several representations, and the
-# privileged read. RUST-ONLY for now (a depth slice), and it drives
-# the platform's own clipboard tools as child processes — pbcopy,
-# pbpaste, osascript and sips — so every assertion crosses a process
-# boundary rather than reading back what kaya itself wrote.
+# privileged read. Still a DEPTH slice while the bindings fan out, and
+# it drives the platform's own clipboard tools as child processes —
+# pbcopy, pbpaste, osascript and sips — so every assertion crosses a
+# process boundary rather than reading back what kaya itself wrote.
 KAYA_SELFTEST_SCRIPT="$(scene_script clipboard)"
 export KAYA_SELFTEST_SCRIPT
 run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
+run clipboard-python-swiftui env KAYA_SELFTEST=clipboard python3 guests/python/clipboard.py
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

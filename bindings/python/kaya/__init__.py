@@ -388,6 +388,41 @@ class Widget:
         _records().append(wire.tx_set_a11y_label(self.id, str(label)))
         return self
 
+    def accepts(self, *kinds):
+        """Declare what this widget takes from a paste — the closed
+        kinds by name ("text", "html", "image", "files") plus any custom
+        format ids.
+
+        ONE DECLARATION, THREE JOBS: it drives whether the Paste command
+        is live while this widget is focused, it filters what can reach
+        the paste hook, and on Android it IS the native registration
+        (setOnReceiveContentListener takes the mime types on the view).
+        Per-widget because whether Paste should be enabled is the
+        INTERSECTION of what the clipboard offers and what the FOCUSED
+        target takes — a search field wants plain text, a rich editor
+        also wants images.
+
+        DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
+        declares nothing gets the platform's own insertion and reports
+        it through the ordinary change path, which is why a plain text
+        editor writes none of this and has working cut, copy and paste.
+        Returns the widget, so it chains with the a11y props.
+        """
+        _records().append(wire.tx_set_accepts(self.id, _accept_list(kinds)))
+        return self
+
+    def on_paste(self, fn):
+        """Take pasted content here: fn(clip) with the Representation
+        sum, or fn(*keys, clip) for a stamped copy.
+
+        COSTS NOTHING ON ANY PLATFORM, unlike read_clipboard: a paste is
+        a user gesture, so it is its own authorisation — iOS raises no
+        prompt and the focus rules are satisfied by construction. Only
+        fires for a widget that declared what it `accepts`. Returns the
+        widget, so it chains."""
+        _app._register(self, wire.OCC_PASTED, fn)
+        return self
+
     def context_menu(self):
         """The live-widget context anchor: `with target.context_menu():`
         declares the catalog — the same command vocabulary scoped to a
@@ -1126,6 +1161,212 @@ def _pick(multiple, filters, on_result, window):
     return dialog_id
 
 
+# --- The clipboard (DESIGN.md, Clipboard) --------------------------
+#
+# A clip is not a string: every host models it as ONE item available in
+# several types, with the consumer taking the richest it understands.
+# So COPY TAKES A RECORD — `copy(text=..., html=...)`, where at most one
+# per kind is structural rather than a duplicate check — and the two
+# answers are a SUM, because you offer many and receive one.
+#
+# kaya DERIVES NOTHING between representations. Whether list bullets
+# survive html-to-text is the app's decision, and a bad auto-derivation
+# degrades every paste into a plain field silently. Files are the one
+# exception, and the platforms make it: a file list also gets their own
+# text rendition of the paths.
+
+
+class Representation:
+    """One representation, arriving — the sum `copy` is the record of.
+
+    Nested constructors rather than five module-level names, so a match
+    reads the way the wire does and `Image` cannot be mistaken for the
+    `image()` widget:
+
+        match clip:
+            case None: ...                        # the universal empty
+            case kaya.Representation.Text(text): ...
+            case kaya.Representation.Files(files): ...
+    """
+
+    __slots__ = ()
+
+    class Text:
+        __slots__ = ("text",)
+        __match_args__ = ("text",)
+
+        def __init__(self, text):
+            self.text = text
+
+        def __repr__(self):
+            return f"Text({self.text!r})"
+
+    class Html:
+        __slots__ = ("html",)
+        __match_args__ = ("html",)
+
+        def __init__(self, html):
+            self.html = html
+
+        def __repr__(self):
+            return f"Html({self.html!r})"
+
+    class Image:
+        """Encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE — the
+        hosts convert freely between image types — so compare what the
+        image IS, never the bytes it arrived in."""
+
+        __slots__ = ("bytes",)
+        __match_args__ = ("bytes",)
+
+        def __init__(self, data):
+            self.bytes = data
+
+        def __repr__(self):
+            return f"Image({len(self.bytes)} bytes)"
+
+    class Files:
+        """PickedFile, plural INSIDE one representation — the same
+        nesting text/uri-list and CF_HDROP already have. A pasted file
+        is the picker's own capability arriving through a second door,
+        so it opens with the call that already exists."""
+
+        __slots__ = ("files",)
+        __match_args__ = ("files",)
+
+        def __init__(self, files):
+            self.files = files
+
+        def __repr__(self):
+            return f"Files({self.files!r})"
+
+    class Custom:
+        """An app-defined format, round-tripped verbatim."""
+
+        __slots__ = ("id", "bytes")
+        __match_args__ = ("id", "bytes")
+
+        def __init__(self, id, data):
+            self.id = id
+            self.bytes = data
+
+        def __repr__(self):
+            return f"Custom({self.id!r}, {len(self.bytes)} bytes)"
+
+
+def _representation(payload):
+    """Turn the decoder's (clip kind, values) into the sum, or None.
+
+    EMPTY IS THE UNIVERSAL NO, with kind 0: it covers a denied prompt on
+    iOS, an unfocused reader on Android or Wayland, an empty clipboard,
+    and content in no representation this read accepted. The guest is
+    not told which, because the platforms deliberately do not say.
+    """
+    clip, values = payload
+    if clip == wire.CLIP_TEXT:
+        return Representation.Text(values[0])
+    if clip == wire.CLIP_HTML:
+        return Representation.Html(values[0])
+    if clip == wire.CLIP_IMAGE:
+        return Representation.Image(values[0])
+    if clip == wire.CLIP_CUSTOM:
+        return Representation.Custom(values[0], values[1])
+    if clip == wire.CLIP_FILES:
+        # The picker's own three-per-file grouping, so a guest that
+        # decodes a dialog result decodes this with the same loop.
+        return Representation.Files([
+            PickedFile(values[i], values[i + 1], values[i + 2])
+            for i in range(0, len(values), 3)])
+    return None
+
+
+def _accept_list(kinds):
+    """Join an accept list: the closed kinds by name plus any custom
+    ids, space separated.
+
+    A LIST AND NOT A MASK, because half the set is open-ended. A custom
+    format that could be written and never accepted would be an escape
+    hatch that only opens outward, and round-tripping an app's own data
+    is the whole reason to have one. Ids reach every platform's registry
+    verbatim, so they carry no spaces — which is what makes the join
+    unambiguous, and what this refuses to let you break.
+    """
+    out = []
+    for kind in kinds:
+        kind = str(kind)
+        if not kind or " " in kind:
+            raise ValueError(
+                f"kaya: {kind!r} is not an accept-list entry — the closed "
+                "kinds are 'text', 'html', 'image' and 'files', and a "
+                "custom format id reaches the platform's own registry "
+                "verbatim, so it carries no spaces")
+        out.append(kind)
+    return " ".join(out)
+
+
+def copy(text=None, html=None, image=None, files=(), custom=None):
+    """Put ONE clip on the system clipboard, offered in as many
+    representations as you fill in.
+
+    A RECORD AND NOT A LIST: at most one per kind is structural here,
+    since naming `text` twice is not something the call can express.
+    `custom` is the one plural field with names — several app-defined
+    formats are legitimate — and takes a mapping of id to bytes.
+
+    `files` takes PickedFile handles: copying a file and picking one are
+    the same currency, so a picked file goes straight on and the bytes
+    never move through kaya. The wire order is kaya's, not this call's —
+    descending richness, which is preference order on every host that
+    has one.
+    """
+    reps = []
+    present = 0
+    custom = dict(custom or {})
+    files = list(files)
+    for ident, data in custom.items():
+        _accept_list([ident])  # an id with a space would not survive
+        reps.append(str(ident))
+        reps.append(wire.BlobHandle(runtime.register_blob(data)))
+    for picked in files:
+        reps.append(getattr(picked, "handle", picked))
+    if image is not None:
+        present |= wire.CLIP_IMAGE
+        reps.append(wire.BlobHandle(runtime.register_blob(image)))
+    if html is not None:
+        present |= wire.CLIP_HTML
+        reps.append(str(html))
+    if text is not None:
+        present |= wire.CLIP_TEXT
+        reps.append(str(text))
+    _records().append(wire.tx_copy(present, len(files), len(custom), reps))
+
+
+def read_clipboard(accepting, on_result=None):
+    """Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED
+    ONE, named for what it is rather than for pasting.
+
+    A user's paste arrives at the widget's hook and costs nothing; this
+    asks without a gesture, which the platforms have deliberately made
+    expensive: iOS 16 PROMPTS when the content came from another app and
+    blocks until the user answers, Android returns nothing unless the
+    app has focus, and Wayland delivers no offer to an unfocused client.
+    Reach for this to detect a URL or import from the clipboard, never
+    to implement Paste — that is the Paste command, and it is free.
+
+    `accepting` is the accept list; the answer carries the first match
+    by descending richness, so exactly one representation is ever
+    materialised. on_result(clip) fires exactly once, with the sum or
+    None, and the registration retires with it — the alert's grammar.
+    Returns the request id.
+    """
+    app = _app
+    request = app._next("clipboard")
+    if on_result is not None:
+        app._clipboard_handlers[request] = on_result
+    _records().append(wire.tx_read_clipboard(request, _accept_list(accepting)))
+    return request
+
+
 # --- Menus: the command vocabulary (DESIGN.md, Menus) --------------
 #
 # One item vocabulary, two anchors. The window bar rides the window
@@ -1310,6 +1551,20 @@ def _menu_seat(item):
 #: places this one in the application menu; every other host leaves the
 #: item where the app declared it.
 ROLE_SETTINGS = "settings"
+
+#: The three clipboard commands. They lower to the platform's own, act
+#: on the FOCUSED widget, and work out their own enablement from what
+#: the clipboard offers and what that widget accepts.
+#:
+#: GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
+#: widget knows what is selected, so an app cannot assemble the payload
+#: for "copy the selected text" out of the data layer. Copy of a
+#: selection is therefore necessarily a command, and Paste is its
+#: mirror. `kaya.copy` and `kaya.read_clipboard` are for overriding
+#: that default and for targets with no native behaviour.
+ROLE_CUT = "cut"
+ROLE_COPY = "copy"
+ROLE_PASTE = "paste"
 
 
 def _menu_require_catalog(scope):
@@ -1993,12 +2248,16 @@ class App:
     def __init__(self):
         global _app
         self._counters = {"signal": 0, "widget": 0, "collection": 0, "node": 0,
-                          "alert": 0, "menu_item": 0, "file_dialog": 0}
+                          "alert": 0, "menu_item": 0, "file_dialog": 0,
+                          "clipboard": 0}
         # Dispatch tables: (occurrence kind, id) per space — widget ids
         # and template-node ids collide numerically, so two dicts.
         self._widget_handlers = {}
         self._alert_handlers = {}
         self._file_dialog_handlers = {}
+        # Clipboard reads share the alert's request/result grammar and
+        # so its table shape: one-shot, keyed by request id.
+        self._clipboard_handlers = {}
         # Menu items are their own id space — their own table ("two
         # tables, always" — now N tables, still always), keyed by
         # (occurrence kind, item id).
@@ -2298,6 +2557,15 @@ class App:
                     self._dispatch(handler, [
                         PickedFile(h, n, p) for (h, n, p) in payload])
                 continue
+            if kind == wire.OCC_CLIPBOARD_RESULT:
+                # One-shot like the alert, and the request retires with
+                # it. EMPTY IS THE UNIVERSAL NO and arrives as None —
+                # denied, unfocused, absent and nothing-we-accept alike,
+                # because no platform says which.
+                handler = self._clipboard_handlers.pop(ident, None)
+                if handler is not None:
+                    self._dispatch(handler, _representation(payload))
+                continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):
                 # Menu occurrences key the menu-item table — their own
@@ -2331,7 +2599,15 @@ class App:
             if handler is None:
                 continue
             args = list(keys)
-            if payload is not None:
+            if kind == wire.OCC_PASTED:
+                # A paste rides a click tag verbatim, so it arrives on
+                # the ordinary widget/node path with the clip as its
+                # payload — one record kind, path_len deciding, exactly
+                # as a click on a stamped row is one record with a click
+                # on a live widget. Never empty: a paste that delivered
+                # nothing is not an occurrence.
+                args.append(_representation(payload))
+            elif payload is not None:
                 args.append(payload)
             # One handler dispatch: an exception crosses the build
             # boundary (which rolled the mirrors back and dropped the

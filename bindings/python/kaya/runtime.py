@@ -13,6 +13,7 @@ import os
 import pathlib
 import sys
 
+from . import wire
 from .wire import OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, parse_occurrence
 from .wire import SPEC_HASH
 
@@ -48,6 +49,14 @@ _lib.kaya_submit.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_submit.restype = None
 _lib.kaya_blob_register.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_blob_register.restype = ctypes.c_uint64
+# The occurrence blob table: a blob arriving in an OCCURRENCE is a
+# handle into a table with no boundary that retires it, so it is
+# released explicitly (unlike the apply channel's batch-local index).
+_lib.kaya_occurrence_blob.argtypes = [ctypes.c_uint64,
+                                      ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_occurrence_blob.restype = ctypes.POINTER(ctypes.c_uint8)
+_lib.kaya_occurrence_blob_release.argtypes = [ctypes.c_uint64]
+_lib.kaya_occurrence_blob_release.restype = None
 _lib.kaya_run.restype = ctypes.c_int32
 # Redeeming a picked file: the handle, the mode, and out-params for the
 # OS handle and seekability. Returns 0 on success (KAYA_OK).
@@ -60,6 +69,28 @@ _lib.kaya_open_picked.argtypes = [
 _lib.kaya_open_picked.restype = ctypes.c_int32
 
 _occ_record = ctypes.POINTER(ctypes.c_uint8)()
+
+
+def _occurrence_blob(handle):
+    """Redeem an occurrence blob for its bytes, and release it.
+
+    COPY THEN RELEASE, in that order, and both here: the pointer
+    borrows core memory that the release frees, and the generated
+    decoder calls this while decoding so no handle ever reaches an
+    app. Release is idempotent, so an already-dead handle costs
+    nothing rather than being an error the decoder must reason about.
+    """
+    length = ctypes.c_size_t(0)
+    data = _lib.kaya_occurrence_blob(handle, ctypes.byref(length))
+    payload = b"" if not data else ctypes.string_at(data, length.value)
+    _lib.kaya_occurrence_blob_release(handle)
+    return payload
+
+
+# Installed rather than imported: wire.py is generated and loads no
+# library of its own, so the redeemer reaches it from the side the
+# library lives on.
+wire.occurrence_blob = _occurrence_blob
 
 
 def submit(*records):
