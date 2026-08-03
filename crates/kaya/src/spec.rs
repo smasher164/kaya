@@ -154,7 +154,7 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // WHICH CLIP REPRESENTATIONS THIS WIDGET ACCEPTS: a space-separated
     // ACCEPT LIST — the closed kinds by name (`text`, `html`, `image`,
     // `files`) and any number of custom format ids, which are open by
-    // nature and so cannot be a mask. `"text html dev.kaya.note"` is a
+    // nature and so cannot be a mask. `"text html dev.kaya/note"` is a
     // whole declaration. Per-widget and not app-global, because whether
     // Paste should be live is the INTERSECTION of what the clipboard
     // offers and what the focused target takes: a search field wants
@@ -176,8 +176,12 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // custom id reaches every platform's own registry verbatim (a UTI on
     // Apple, RegisterClipboardFormat on Windows, a target atom on X11 and
     // Wayland, a MIME type on Android), which is kaya's narrow promise
-    // here, so ids carry no spaces. read_clipboard takes the same string
-    // for the same reason.
+    // here. The id's grammar is MIME-SHAPED — a slash, lowercase, no
+    // whitespace — validated at apply: GDK's serving path interns the
+    // requested type as a mime type, so a slashless id would be
+    // advertised and never served on GTK, and the same path lowercases
+    // (docs/clipboard-plan.md §5b finding 4). read_clipboard takes the
+    // same string for the same reason.
     ("accepts", 15, PropKind::Str),
 ];
 

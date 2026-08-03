@@ -213,6 +213,23 @@ if ! swaymsg -t get_seats 2>/dev/null | grep -q '"name"'; then
     exit 1
 fi
 
+# AND THE SEAT MUST STAY KEYBOARDLESS WHILE THE POOL RUNS. The seat
+# does need key events for the clipboard legs — Wayland charges an
+# input-event serial for TAKING the selection, freshly per copy,
+# because wlroots rejects a set_selection whose serial is older than
+# the current selection's and every wl-copy seed advances that
+# watermark (docs/clipboard-plan.md §5b finding 3, all measured). But
+# the fix is NOT a session-held virtual keyboard: with a keyboard on
+# the seat, keyboard focus becomes EXCLUSIVE, and eight pooled legs
+# share this one session — the moment a holder was added, three
+# unrelated legs failed `expect_focused` because only one window can
+# hold a real keyboard's focus (measured 2026-08-03; the holder-less
+# run of the same tree was ALL PASS). So the keyboard exists only
+# TRANSIENTLY, inside the per-step wtype tap the GTK stage runs
+# (gtk.rs, freshen_wayland_serial) — and only during clipboard legs,
+# which the drains below run ALONE, where a transient keyboard has no
+# neighbor to disturb.
+
 # Legs run in a background pool (KAYA_JOBS wide, KAYA_JOBS=1 for the
 # old serial behavior): xvfb-run -a gives each X11 leg its own display,
 # and Wayland clients share the one headless compositor. Verdicts print
@@ -843,6 +860,40 @@ for proto in x11 wayland; do
     run "$proto" layout-haskell env KAYA_SELFTEST=layout "$(hs_bin layout)"
     run "$proto" layout-java env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The clipboard scene: one clip in several representations, the
+    # privileged read, the paste split, and Paste as a standard
+    # command. Through a11y-leg.sh: its closing expect_ax is an AT-SPI
+    # read. THE LEGS ARE MUTUALLY EXCLUSIVE, ONE DRAIN EACH
+    # (docs/clipboard-plan.md §0d, the 2026-08-02 correction): there is
+    # one system clipboard per session, and legs writing it
+    # concurrently are processes assigning one variable — measured on
+    # mac, six of eight failed concurrently and the same eight passed
+    # serially. The leading drain also empties the pool of every other
+    # leg, so on wayland the serial primer's F24 tap (wtype, §5b
+    # finding 3) lands on the clipboard leg's own window and nobody
+    # else's.
+    drain
+    run "$proto" clipboard-rust env KAYA_SELFTEST=clipboard \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/clipboard"
+    drain
+    run "$proto" clipboard-python env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/clipboard.py
+    drain
+    run "$proto" clipboard-go env KAYA_SELFTEST=clipboard \
+        tools/linux/a11y-leg.sh /tmp/go-guests/clipboard
+    drain
+    run "$proto" clipboard-csharp env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    drain
+    run "$proto" clipboard-ocaml env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/clipboard.exe
+    drain
+    run "$proto" clipboard-haskell env KAYA_SELFTEST=clipboard \
+        tools/linux/a11y-leg.sh "$(hs_bin clipboard)"
+    drain
+    run "$proto" clipboard-java env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    drain
 done
 drain
 timing legs

@@ -1646,7 +1646,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             Step::ClipboardSeed(kind, arg) => {
                 // An action, silent like click — expect_clipboard or
                 // the guest's own read is what says whether it landed.
-                stage.clipboard_seed(kind, arg);
+                // Expanded HERE for the Rust backends, exactly as each
+                // interpreter expands in its own seed (KayaSwiftUI's
+                // kayaClipboardSeed): image and files seeds name the
+                // guest's scene files by $TMP/$PID token, and an
+                // unexpanded token is a literal path that exists
+                // nowhere (the trap expand_path's comment names).
+                stage.clipboard_seed(kind, &expand_path(arg));
                 None
             }
             Step::ExpectClipboard(kind, want) => Some(poll(|| {

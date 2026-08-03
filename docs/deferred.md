@@ -30,12 +30,18 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
-- **Clipboard — LANDED ON MAC 2026-08-02, fan-out outstanding.** The
-  protocol, the SwiftUI arms, the Rust surface, the scene and the three
-  edit roles are green on the mac lane; docs/clipboard-plan.md §1-§3
-  record what each slice decided and what the probes overturned. WHAT
-  REMAINS: the seven other bindings, the GTK/WinUI/Compose/iOS arms,
-  and the Android helper APK that gives that lane a foreign reader.
+- **Clipboard — LANDED ON MAC 2026-08-02, all eight bindings landed,
+  GTK arm written 2026-08-03; fan-out continues.** The protocol, the
+  SwiftUI arms, all eight binding surfaces with a guest each, the
+  three edit roles, the ratified custom-id grammar (mime-shaped —
+  docs/clipboard-plan.md §5b finding 4), and the GTK arm with its
+  wayland serial recipe (§5b finding 3) are in. WHAT REMAINS: the
+  WinUI/Compose/iOS arms and the Android helper APK that gives that
+  lane a foreign reader. FOR THE iOS ARM SPECIFICALLY: measure
+  UIPasteboard's charge for a SLASHED custom type before writing it —
+  macOS's two write APIs disagreed about one (NSPasteboardItem
+  rejects, the board-level path serves; §5b finding 4), and iOS may
+  fork the same way.
   The edit roles are no longer deferred — `cut`, `copy` and `paste`
   joined the closed role vocabulary beside `settings`.
 

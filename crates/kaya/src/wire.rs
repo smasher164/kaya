@@ -964,8 +964,9 @@ pub fn parse_accept_list(list: &str) -> (u32, Vec<&str>) {
 }
 
 /// An accept list names at least one representation and names none
-/// twice. `what` is the caller — the prop or the read — so the message
-/// says which declaration is wrong.
+/// twice, and every custom id it names is held to the id grammar.
+/// `what` is the caller — the prop or the read — so the message says
+/// which declaration is wrong.
 pub(crate) fn check_accept_list(list: &str, what: &str) {
     let tokens: Vec<&str> = list.split_whitespace().collect();
     assert!(
@@ -978,7 +979,43 @@ pub(crate) fn check_accept_list(list: &str, what: &str) {
             !tokens[..i].contains(token),
             "kaya: {what} names {token:?} twice — an accept list is a SET"
         );
+        if !CLIP_NAMES.iter().any(|(name, _)| name == token) {
+            check_custom_id(token, what);
+        }
     }
+}
+
+/// The custom-id grammar (DESIGN.md, Clipboard): MIME-SHAPED — a
+/// slash, lowercase, no whitespace. The slash and the case are GDK's
+/// measured charges, enforced at the root so they fail the same way on
+/// every platform: GDK's serving path interns the requested type as a
+/// mime type, so a slashless id is ADVERTISED AND NEVER SERVED on GTK
+/// — every reader can see it, none can get it, no error anywhere —
+/// and the same path lowercases, so a mixed-case id would surface
+/// lowercased there and verbatim on the other four platforms
+/// (docs/clipboard-plan.md §5b finding 4). Whitespace because accept
+/// lists are space-separated: an id with a space could never be
+/// accepted by name.
+pub(crate) fn check_custom_id(id: &str, what: &str) {
+    assert!(
+        id.contains('/'),
+        "kaya: {what} custom id {id:?} has no slash — a custom id is \
+         mime-shaped, like \"dev.kaya/note\": GDK serves only \
+         slash-bearing types, so this id would be advertised and never \
+         served on GTK"
+    );
+    assert!(
+        !id.contains(char::is_whitespace),
+        "kaya: {what} custom id {id:?} carries whitespace — accept lists \
+         are space-separated, so this id could never be accepted by name"
+    );
+    assert!(
+        !id.chars().any(|c| c.is_ascii_uppercase()),
+        "kaya: {what} custom id {id:?} is not lowercase — GDK lowercases \
+         mime types, so this id would surface as {:?} on GTK and \
+         verbatim everywhere else",
+        id.to_ascii_lowercase()
+    );
 }
 
 pub(crate) fn representation_kind(clip: Option<&crate::protocol::Representation>) -> u32 {
@@ -2336,7 +2373,7 @@ mod tests {
             Some(R::Html("<b>milk</b>".into())),
             Some(R::Image(crate::protocol::Blob(Arc::from(&b"PNG"[..])))),
             Some(R::Custom {
-                id: "dev.kaya.note".into(),
+                id: "dev.kaya/note".into(),
                 bytes: crate::protocol::Blob(Arc::from(&b"{}"[..])),
             }),
             Some(R::Files(vec![crate::protocol::PickedFile {

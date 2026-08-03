@@ -674,8 +674,9 @@ ONE KIND CANNOT BE SEEDED: a custom format, because no stock tool on
 any platform writes an app-defined type. That is not a hole — a custom
 format's whole specification is that it round-trips within the app and
 that kaya does nothing clever with the bytes, so the scene copies one
-and reads it back, with `pbpaste -Prefer dev.kaya.note` confirming from
-outside that the bytes really are there under that id.
+and reads it back, with `pbpaste -Prefer dev.kaya/note` confirming from
+outside that the bytes really are there under that id. (The id was
+`dev.kaya.note` when this slice landed; §5b finding 4 respelled it.)
 
 ### The image is a decoded size, never bytes
 
@@ -832,12 +833,12 @@ Python and OCaml install a redeemer into a module-level slot, and
 Haskell threads it as a function argument, which is that language's
 answer to the same problem and needs no global.
 
-## §5b — what the GDK probe measured (2026-08-02, partial)
+## §5b — what the GDK probe measured (2026-08-02, complete)
 
 tools/linux/gdkclipprobe, run under sway in the lane's own image
-against the same gtk4 crate the backend links. Two answers landed; the
-foreign half is BLOCKED on an open question that has to be settled
-before the arm is written.
+against the same gtk4 crate the backend links. Six probe runs; the
+foreign-reader blocker of the first run is RESOLVED (finding 3), and
+resolving it surfaced one more platform charge (finding 4).
 
 ### 1. A UNION PROVIDER REALLY DOES ADVERTISE ALL FOUR
 
@@ -863,36 +864,182 @@ no the design already defines, and the arm needs no bound of its own.
 (This was the question most likely to have forced a redesign — a
 hanging read would have meant a wedged leg and a timeout in the arm.)
 
-### 3. OPEN: A FOREIGN READER SEES NOTHING AT ALL
+### 3. RESOLVED: THE FOREIGN READER SAW NOTHING BECAUSE NO CLIENT CAN HOLD A SERIAL
 
-With wl-paste present and the same clipboard GDK has just described,
-every foreign read answers `Nothing is copied` — targets, text, html,
-image and custom alike. GDK thinks it set the content; the compositor
-hands a foreign client nothing.
+With wl-paste present and the same clipboard GDK had just described,
+every foreign read answered `Nothing is copied`. The mechanism, named
+by sway's own debug log (`sway -d`; the rejection is logged at DEBUG
+and invisible at the default level):
 
-THIS IS THE SAME FAMILY AS THE WESTON FINDING (§0e finding 1), and it
-must be settled before the arm is written, because it decides whether
-the linux legs can hold the foreign-reader standard every other lane
-holds. The candidates, in the order worth testing:
+    [wlr_data_device.c] Rejecting set_selection request,
+                        serial 0 was never given to client
 
-- **No seat, again.** The probe runs sway with
-  `WLR_LIBINPUT_NO_DEVICES=1`; a compositor with no input devices may
-  expose no seat, and a Wayland client cannot own a selection without
-  one. Check `wayland-info` for wl_seat, exactly as the Weston probe
-  did.
-- **No serial.** Wayland requires a recent input-event serial to set
-  the selection. A headless session that has delivered no input has no
-  serial to offer, and GTK would fail silently on the compositor side
-  while its own bookkeeping still reports the content set.
-- **The window never mapped.** `present()` is asynchronous; the probe
-  sets content immediately after. Setting the selection before the
-  surface is mapped and focused may be dropped.
+Wayland lets a client take the selection only by presenting a serial
+from an input event that client was sent. The lane's seat EXISTS —
+unlike Weston's headless, which advertises none — but with
+`WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1` its capability set
+is EMPTY: no keyboard, no pointer, therefore no input event, ever, for
+any client. GDK sends serial 0; wlroots drops the write and tells the
+client nothing; GDK's own bookkeeping still reports the content set.
+The three candidates, as measured:
+
+- **No seat**: ruled out — wl_seat is there (`seat0`, version 9),
+  capabilities blank. One level below the Weston finding, same family.
+- **The window never mapped**: ruled out — a mapped, settled window's
+  set was rejected identically.
+- **No serial**: confirmed, and dissected. A `wtype -M shift -m shift`
+  tap does NOT help (a modifier change is not a key event). Keyboard
+  ENTER does not help either: with a virtual keyboard held open the
+  focused window receives wl_keyboard.enter, whose serial GDK does not
+  spend on set_selection. ONE REAL KEY EVENT is what GDK banks: after
+  `wtype -k F24`, every foreign read answered with the content.
+
+THE RECIPE — revised twice; both revisions were bought by full lane
+runs, and the second one retired a piece of the first:
+
+- **A freshening F24 tap before EVERY step that can lead to a copy**
+  (gtk.rs, freshen_wayland_serial; the stage taps on click,
+  menu_activate and shortcut in scenes that armed the clipboard). The
+  first tap per process takes the press-hold-release form
+  (`wtype -P F24 -s 800 -p F24` — the press races GDK's late
+  wl_keyboard bind and is LOST, the release at +800ms lands after the
+  bind); later taps are a quick `wtype -k F24`. That is the WHOLE
+  recipe.
+- **NO session keyboard holder.** The obvious "make the seat real"
+  move — hold a virtual keyboard open for the lane's lifetime — was
+  tried and REGRESSED three unrelated legs the same day: with a
+  keyboard on the seat, keyboard focus is EXCLUSIVE, and the lane
+  pools eight legs in one sway session, so every leg but one lost
+  `expect_focused` (measured 2026-08-03; the identical tree with the
+  holder dead was ALL PASS, 426 legs). The tap's transient keyboard
+  is immune because the clipboard legs run ALONE between drains —
+  there is no neighbor to disturb while it exists. The anomalous seat
+  must STAY anomalous while the pool runs; the tap makes it real for
+  exactly the milliseconds a copy needs it.
+
+WHY ONE TAP IS NOT ENOUGH — the superseded-serial check, found by the
+first full lane run and confirmed in wlroots 0.18.2's own source
+(types/seat, wlr_seat_request_set_selection):
+
+    if (seat->selection_source &&
+            serial - seat->selection_serial > UINT32_MAX / 2) {
+        wlr_log(WLR_DEBUG, "Rejecting set_selection request, serial
+                indicates superseded ...");
+
+Every data-control write (each wl-copy seed) advances the seat's
+selection serial past any serial the guest already holds, so the
+guest's NEXT copy is rejected — silently, at DEBUG. And the failure
+COMPOUNDS, because of a GDK rule on the other side
+(gdkclipboard-wayland.c): a client with a live local claim IGNORES
+every incoming selection offer ("Ignoring clipboard offer for self")
+and waits for a `cancelled` that never comes — its source never
+became the seat selection, so nothing will ever cancel it. ONE
+dropped copy leaves the guest deaf to the clipboard for the rest of
+its life: reads answer from its own stale offer, pastes deliver
+nothing, and the enablement intersection is computed against a ghost.
+Measured end to end and then minimized: seed, tap, own-copy
+(accepted, foreign-visible), seed again — the guest's formats follow
+every step once the tap precedes each copy.
+
+F24 because it is bound to nothing and types nothing; the tap lands
+on the focused window, which during a serialised clipboard leg is the
+leg's own. The arm itself stays ordinary GDK — holder and tap are the
+LANE making a headless session deliver what any real session delivers
+continuously, not the backend working around the protocol.
 
 Note the shape of the failure, because it is the trap: GDK's own
-`formats()` reported everything correctly. A backend that verified its
-copy by asking GDK would have passed while nothing reached the
-clipboard — which is precisely why every assertion in this scene
-crosses a process boundary.
+`formats()` reported everything correctly, and there is no error
+channel on which GDK could learn the compositor declined. A backend
+that verified its copy by asking GDK would have passed while nothing
+reached the clipboard — which is precisely why every assertion in this
+scene crosses a process boundary.
+
+A second trap, paid for by a wedged probe run: `wl-paste --list-types`
+is answered by the COMPOSITOR from the offer, but reading DATA needs
+the owner's main loop to serve bytes. A probe that owned the selection
+and then waited synchronously on wl-paste deadlocked — reader waiting
+on the pipe, owner's loop blocked by the wait. The lane never has this
+shape (the foreign reader runs in the runner's process, not the
+guest's), but any in-process verification of a GDK copy would.
+
+The battery, once the selection was really held:
+
+- **html**: a foreign reader sees raw UTF-8 under bare `text/html`.
+  GDK adds NO `;charset=utf-8` alias for html (that aliasing is
+  text/plain-only), so the lane's reader must ask for the bare type.
+- **image**: `for_bytes("image/png")` round-trips BYTE-IDENTICAL
+  through a foreign read — the raw-bytes-under-the-type rule from
+  macOS (§1b finding 2) holds here too. Never GdkTexture, which
+  re-encodes.
+- **files**: `text/uri-list` with the RFC's CRLF separators and
+  trailing terminator round-trips; the reader is unbothered either
+  way.
+
+### 4. A CUSTOM ID WITHOUT A SLASH IS ADVERTISED AND NEVER SERVED
+
+The same battery's custom read answered EMPTY — zero bytes, exit 0, no
+error — while `image/png` through the same union served perfectly. The
+2x2 that isolated it ({sole, union} x {slashless, slashed}):
+
+    provider                     advertised   served
+    dev.kaya.note (sole)         yes          EMPTY
+    dev.kaya.note (union)        yes          EMPTY
+    application/x-kaya-note      yes          note=1
+    dev.kaya/note                yes          note=1   (sole AND union)
+
+The mechanism is GDK's, not the compositor's: the serving path interns
+the requested type through `gdk_intern_mime_type`, which returns NULL
+for any string without a `/` (and lowercases the rest — RFC 2048
+shape), so the transfer is dropped with the fd closed while the
+advertise path carries the raw string. A slashless custom id on GTK is
+therefore a type every reader can SEE and no reader can GET — the
+silent per-platform failure class the closed representation set exists
+to absorb, one layer down.
+
+The minimal slash satisfies it: `dev.kaya/note` — the scene's id with
+one character added — serves sole and in a union. Windows'
+`RegisterClipboardFormat` and Android's ClipDescription mime strings
+accept a slash by construction. macOS accepts it WITH A CHARGE that a
+snippet-level probe missed and the respelled lane run caught: the two
+write APIs disagree. `NSPasteboardItem.setData(forType:)` VALIDATES
+its type as a UTI — a slash is not legal in one — and DROPS the data
+with only a console log ("not a valid UTI string"), so the leg read
+the text fallback; the pasteboard-level `declareTypes` + `setData`
+path takes an arbitrary string verbatim, and `pbpaste` reads it back
+byte-identically. The mac arm therefore writes item 0 at BOARD level
+(kayaCopyToPasteboard), and the standing rule gains a sharper edge:
+probe the path THE ARM USES, not a path that answers the same
+question. The iOS arm must measure UIPasteboard's own charge for a
+slashed type before it is written. So the constraint remains
+one-directional — GTK alone refuses the slash's absence, and every
+platform has a verbatim-preserving way to serve its presence — and
+the resolution is an id-grammar rule at the root, not a GTK
+carve-out.
+
+RATIFIED (2026-08-02): a custom id MUST CONTAIN A SLASH AND BE
+LOWERCASE — mime-shaped, RFC 2048 — and the scene's id is respelled
+`dev.kaya/note`, the minimal edit that satisfies it. Lowercase is part
+of the rule because GDK canonicalizes with `g_ascii_strdown`: a
+mixed-case id would surface lowercased on GTK and verbatim everywhere
+else, a divergence invariant 1 forbids. The root validates the grammar
+at the chokepoint every binding funnels through and rejects a bad id
+naming this rule; the scene, the eight guests and DESIGN.md's custom
+paragraph carry the respelled id.
+
+### 5. THE SCENE'S EMBEDDED PNG HAD A BROKEN CRC, AND FOUR PLATFORMS NEVER NOTICED
+
+The first full linux lane run failed every image verdict with `""`.
+The 4x4 PNG every guest embeds — hand-spelled, per its own comment —
+carried an IDAT chunk whose CRC did not match its data (stored
+9407f98a, computed 40c116d4; the stream did not even inflate).
+`sips`, the mac lane's decoder, tolerates a bad CRC; the byte-compare
+probes only ever proved the bytes ROUND-TRIP; imagemagick's
+`identify`, this lane's decoder and the matrix's first strict one,
+rejects it. The constant is regenerated (a valid 77-byte 4x4 RGB) in
+all eight guests, and the GTK reader's image verdict now names the
+decoder's complaint instead of answering "" — bytes-present-but-
+undecodable must never read like an empty clipboard, which is how
+this hid for a full debugging round.
 
 ## §6 onwards — to be written
 

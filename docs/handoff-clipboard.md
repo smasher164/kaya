@@ -41,6 +41,37 @@ answer it REPLACED), §0e and §1b (what the probes measured), §1-§3
   per language that has a guest, and demands the java/csharp selector
   dispatch each scene.
 - The GDK probe exists and runs: tools/linux/gdkclipprobe.
+- 2026-08-02/03, the GTK slice: §5b finding 3 RESOLVED — the headless
+  seat delivers no input serial, and the serial charge is PER COPY,
+  not per leg (wlroots rejects a set_selection older than the current
+  selection's serial, every wl-copy seed advances that watermark, and
+  one dropped copy leaves a GDK client permanently deaf — §5b has the
+  whole chain). The lane's recipe: a freshening F24 tap before every
+  click/menu_activate/shortcut in armed scenes (gtk.rs,
+  freshen_wayland_serial) — and deliberately NO session keyboard
+  holder, which was tried and broke three unrelated pooled legs'
+  expect_focused (exclusive keyboard focus; §5b has the finding).
+  Resolving it surfaced finding 4 — GDK
+  never serves a slashless custom id — and the id grammar was
+  RATIFIED mime-shaped: the scene id is `dev.kaya/note`, validated at
+  the apply chokepoint with five negative tests watched failing. The
+  respell flushed out a macOS charge the snippet probe missed:
+  NSPasteboardItem validates types as UTIs and DROPS a slashed one,
+  so the mac arm now writes item 0 at pasteboard level (§5b finding 4
+  has both mechanisms). The first full lane run also caught finding
+  5: the guests' shared 4x4 PNG had a broken IDAT CRC that every
+  earlier decoder tolerated — regenerated in all eight guests, and
+  the GTK image verdict now names a decode failure instead of
+  answering "". THE GTK ARM IS WRITTEN: copy (union provider), read
+  (formats-driven, answered exactly once), accepts on the hub, the
+  paste split, the three roles with intersection enablement, the
+  AT-SPI field-name fallback to the Text interface (the macOS AXValue
+  chain, spelled AT-SPI), and the two harness verbs over
+  wl-copy/wl-paste and xclip. The linux legs are wired SERIALISED
+  (one drain each, both protocols, pinned by a new check-steps
+  barrier clause with self-tests) through a11y-leg.sh; the image
+  gained wl-clipboard, xclip, wtype and wayland-utils; probe-env
+  warns when a cached image predates that layer.
 
 ### 1. The seven other bindings — DONE
 
@@ -76,13 +107,16 @@ Each needs: the copy arm, the read arm answering exactly once, the
   all — §0e finding 1). The foreign reader/writer for the harness verbs
   is wl-copy/wl-paste. `check-gtk.sh` needs docker and is the only gate
   that compiles gtk.rs.
-  START AT docs/clipboard-plan.md §5b: the probe has already settled
-  the copy arm's structure (a union provider advertises all four
-  representations, custom mime included) and the read arm's grammar (an
-  unsatisfiable read fails fast, so no timeout is needed). IT ALSO
-  FOUND A BLOCKER: a foreign reader sees NOTHING while GDK reports the
-  content set. Settle that first — it decides whether the linux legs
-  can hold the foreign-reader standard at all.
+  START AT docs/clipboard-plan.md §5b: the probe settled the copy arm's
+  structure (a union provider advertises all four representations), the
+  read arm's grammar (an unsatisfiable read fails fast, no timeout),
+  and — 2026-08-02, findings 3 and 4 — the blocker: the headless seat
+  has no input devices, so no client could ever hold the serial
+  Wayland charges for taking the selection. The lane's fix is one
+  `wtype -P F24 -s 800 -p F24` primer per clipboard leg after its
+  window is up. Resolving it surfaced a GDK grammar rule: a custom id
+  needs a slash or it is advertised and never served, which forces an
+  id-grammar decision at the root (finding 4; maintainer's call).
 - **WinUI.** `CF_HTML` needs its offset header — bytes tagged
   `text/html` paste as garbage. Files are a `DROPFILES` struct with
   double-NUL-terminated wide strings.

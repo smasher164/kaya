@@ -27,7 +27,7 @@ click button#0
 expect label#0 "copied"
 expect_clipboard text "kaya clip"
 expect_clipboard html "<b>kaya</b> clip"
-expect_clipboard dev.kaya.note "note=1"
+expect_clipboard dev.kaya/note "note=1"
 
 # THE IMAGE IS A DECODED SIZE, never a byte count: every host
 # re-encodes freely between image types — macOS synthesizes tiff, jpeg,
@@ -44,7 +44,7 @@ expect_clipboard image "4x4"
 # with the bytes — and the foreign read above already confirmed the
 # bytes really are on the clipboard under that id.
 click button#1
-expect label#0 "custom dev.kaya.note note=1"
+expect label#0 "custom dev.kaya/note note=1"
 
 # ---- reading what another app put there ---------------------------
 #

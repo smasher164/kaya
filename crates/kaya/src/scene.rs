@@ -1163,6 +1163,10 @@ impl Scene {
                             "kaya: a custom clip representation needs an id — it is \
                              the name the format round-trips under"
                         );
+                        // The mime-shaped grammar, at the gate every
+                        // binding passes; the reasons live on the
+                        // check itself.
+                        crate::wire::check_custom_id(id, "copy");
                     }
                     // Resolve every file handle to what the PLATFORM
                     // calls that file, here and not in four backends:
@@ -3385,6 +3389,71 @@ mod tests {
             TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
             TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
         ]);
+    }
+
+    /// The custom-id grammar (DESIGN.md, Clipboard): mime-shaped — a
+    /// slash, lowercase, no whitespace. The slash is GDK's measured
+    /// charge: its serving path interns the requested type as a mime
+    /// type, so a slashless id is ADVERTISED AND NEVER SERVED on GTK,
+    /// with no error anywhere; the same path lowercases, so a
+    /// mixed-case id would surface differently there than everywhere
+    /// else (docs/clipboard-plan.md §5b finding 4). Checked at apply —
+    /// the one gate every binding passes — so a bad id fails HERE,
+    /// naming the rule, on every platform alike.
+    fn copy_of_custom(id: &str) -> TxOp {
+        TxOp::Copy(crate::protocol::Clip {
+            custom: vec![(
+                id.to_owned(),
+                crate::protocol::Blob(std::sync::Arc::from(&b"note=1"[..])),
+            )],
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn a_mime_shaped_custom_id_is_accepted() {
+        let mut scene = Scene::new();
+        scene.apply(vec![copy_of_custom("dev.kaya/note")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no slash")]
+    fn a_slashless_custom_id_fails_at_apply() {
+        let mut scene = Scene::new();
+        scene.apply(vec![copy_of_custom("dev.kaya.note")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not lowercase")]
+    fn an_uppercase_custom_id_fails_at_apply() {
+        let mut scene = Scene::new();
+        scene.apply(vec![copy_of_custom("Dev.Kaya/Note")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "carries whitespace")]
+    fn a_custom_id_with_a_space_fails_at_apply() {
+        // Accept lists are space-separated, so an id with a space
+        // could never be accepted by name — it would split in two.
+        let mut scene = Scene::new();
+        scene.apply(vec![copy_of_custom("dev.kaya/no te")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no slash")]
+    fn an_accept_list_holds_custom_ids_to_the_same_grammar() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::ReadClipboard {
+            request: 1,
+            accepting: "text dev.kaya.note".into(),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "offers no representation")]
+    fn an_empty_clip_fails_at_apply() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::Copy(crate::protocol::Clip::default())]);
     }
 
     #[test]

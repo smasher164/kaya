@@ -654,32 +654,47 @@ func kayaCopyToPasteboard(
         let urls = files.compactMap { URL(string: $0) }
         let board = NSPasteboard.general
         board.clearContents()
-        var items: [NSPasteboardItem] = []
-        let first = NSPasteboardItem()
+        // ITEM 0 GOES THROUGH THE PASTEBOARD-LEVEL PATH, NEVER
+        // NSPasteboardItem: the item path VALIDATES its type strings as
+        // UTIs, and a mime-shaped custom id — a slash, which GDK
+        // REQUIRES (docs/clipboard-plan.md §5b finding 4) — is "not a
+        // valid UTI string" there, so the data was DROPPED with only a
+        // console log to say so and the leg read the text fallback.
+        // The board-level declare/set path takes an arbitrary string
+        // verbatim and pbpaste reads it back byte-identically
+        // (measured 2026-08-02, the day the id grammar moved).
+        // Declared in descending richness, the canonical order.
+        var types: [NSPasteboard.PasteboardType] = custom.map { .init($0.0) }
+        if !urls.isEmpty { types.append(.fileURL) }
+        if image != nil { types.append(.png) }
+        if html != nil { types.append(.html) }
+        if text != nil || !urls.isEmpty { types.append(.string) }
+        board.declareTypes(types, owner: nil)
         for (id, bytes) in custom {
-            first.setData(bytes, forType: NSPasteboard.PasteboardType(id))
+            board.setData(bytes, forType: NSPasteboard.PasteboardType(id))
         }
         if let url = urls.first {
-            first.setString(url.absoluteString, forType: .fileURL)
+            board.setString(url.absoluteString, forType: .fileURL)
         }
         if let image {
-            first.setData(image, forType: .png)
+            board.setData(image, forType: .png)
         }
         if let html {
-            first.setString(html, forType: .html)
+            board.setString(html, forType: .html)
         }
         if let text {
-            first.setString(text, forType: .string)
+            board.setString(text, forType: .string)
         } else if !urls.isEmpty {
-            first.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+            board.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
         }
-        items.append(first)
+        // SEVERAL FILES MEANS SEVERAL ITEMS on this platform (§1b
+        // finding 3): each later file is its own appended item.
+        // writeObjects appends — clearContents above is the one clear.
         for url in urls.dropFirst() {
             let item = NSPasteboardItem()
             item.setString(url.absoluteString, forType: .fileURL)
-            items.append(item)
+            board.writeObjects([item])
         }
-        board.writeObjects(items)
     #else
         _ = (text, html, image, files, custom)
         kayaDepthStub("clipboard", on: "ios")

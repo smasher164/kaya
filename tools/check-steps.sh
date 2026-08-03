@@ -634,6 +634,82 @@ out="$(menu_serial tools/deploy-win.sh)" || {
     status=1
 }
 
+# THE CLIPBOARD LEGS ARE MUTUALLY EXCLUSIVE ON EVERY LANE
+# (docs/clipboard-plan.md §0d, the 2026-08-02 correction): there is one
+# system clipboard per session, and legs writing it concurrently are
+# processes assigning one variable — measured, six of eight failed
+# concurrently and the same eight passed serially. On wayland the
+# serial primer's F24 tap additionally needs the pool EMPTY so it
+# lands on the leg's own window (§5b finding 3). Pinned structurally,
+# the menus/filedialog precedent: every clipboard leg must have
+# `drain` as its nearest significant neighbor on BOTH sides, so a
+# parallelizing refactor — or a sweep adding one more language beside
+# it — cannot silently re-pool them. Continuation lines are joined
+# first, because a leg's command usually wraps.
+clipboard_serial() {
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+raw = (sys.stdin.read() if path == "-" else open(path).read()).splitlines()
+lines = []
+buf = ""
+for l in raw:
+    s = l.strip()
+    if buf:
+        s = buf + " " + s
+        buf = ""
+    if s.endswith("\\"):
+        buf = s[:-1].rstrip()
+        continue
+    lines.append(s)
+
+def significant(seq):
+    return [l for l in seq if l and not l.startswith("#")]
+
+bad = []
+seen = 0
+for n, line in enumerate(lines):
+    if not line.startswith("run "):
+        continue
+    if not re.search(r"clipboard-[a-z]", line):
+        continue
+    seen += 1
+    before = significant(lines[:n])
+    after = significant(lines[n + 1:])
+    if not before or before[-1] != "drain" or not after or after[0] != "drain":
+        bad.append(f"{path}:{n + 1}: {line[:60]} lacks the drain/run/drain barrier")
+if seen == 0:
+    bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself: two clipboard legs sharing the pool must
+# fail...
+if printf 'drain\nrun clipboard-rust-swiftui env X\nrun clipboard-python-swiftui env X\ndrain\n' \
+    | clipboard_serial - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (pooled clipboard legs passed)" >&2
+    exit 1
+fi
+# ...and so must a clipboard leg entering a pool that still holds
+# another scene's leg (the primer would tap that leg's window).
+if printf 'run layout-java env X\nrun clipboard-rust env X\ndrain\n' \
+    | clipboard_serial - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (undrained-before clipboard leg passed)" >&2
+    exit 1
+fi
+
+for runner in tools/validate-mac.sh tools/linux/run-suites.sh; do
+    out="$(clipboard_serial "$runner")" || {
+        echo "check-steps: $runner clipboard legs must run ALONE between drains (docs/clipboard-plan.md §0d — one system clipboard per session):" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
 # every scene there, so the leg selects one by name through
 # `--es KAYA_SELFTEST <scene>` and the guest matches it. A name the

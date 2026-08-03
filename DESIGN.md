@@ -1945,7 +1945,18 @@ set is also what lets a gate check every backend against every case.
 `custom` round-trips verbatim and kaya does nothing clever with it. The
 id reaches each platform's own registry unchanged — a UTI on Apple,
 `RegisterClipboardFormat` on Windows, a target atom on X11 and Wayland,
-a MIME type on Android — so it carries no spaces.
+a MIME type on Android. The id's grammar is MIME-SHAPED: it contains a
+slash, is lowercase, and carries no spaces, validated at the root. The
+slash is a measured platform charge, not taste: GDK's serving path
+interns the requested type as a mime type and a slashless id is
+ADVERTISED BUT NEVER SERVED — every reader can see it, no reader can
+get it, with no error anywhere (docs/clipboard-plan.md §5b finding 4).
+Lowercase because GDK canonicalizes case on the same path, and an id
+that surfaces lowercased on one platform and verbatim on four others
+is a divergence. No other platform objects: macOS round-trips a
+slashed id byte-identically through the lane's own foreign reader
+(measured), Windows registers any string, Android wants a mime type
+anyway.
 
 ### Copy takes a record. Paste returns a sum.
 

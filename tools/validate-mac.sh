@@ -817,6 +817,10 @@ run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/
 # process boundary rather than reading back what kaya itself wrote.
 KAYA_SELFTEST_SCRIPT="$(scene_script clipboard)"
 export KAYA_SELFTEST_SCRIPT
+# The leading drain completes the drain/run/drain bracket check-steps
+# pins on every runner's clipboard legs: one system clipboard per
+# session, so no clipboard leg may share the pool with anything.
+drain
 run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
 drain
 run clipboard-python-swiftui env KAYA_SELFTEST=clipboard python3 guests/python/clipboard.py

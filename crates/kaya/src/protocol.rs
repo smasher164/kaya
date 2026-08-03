@@ -939,14 +939,15 @@ pub enum Prop {
     /// What activating this control does — the platforms' hint, which
     /// every one of them defines as the result of an ACTION.
     A11yHint,
-    /// Which clip representations this widget accepts (F64 carrying a
-    /// mask over [`Clip`]). PER-WIDGET, because whether Paste should be
-    /// live is the intersection of what the clipboard offers and what
-    /// the focused target takes: a search field wants plain text, a
-    /// rich editor also wants images. Every platform asks exactly this
-    /// of the focused target, and Android's
-    /// `setOnReceiveContentListener` takes the accepted MIME types as
-    /// an argument on the view.
+    /// Which clip representations this widget accepts (Str carrying a
+    /// space-separated ACCEPT LIST — the closed kinds by name plus any
+    /// custom ids; a mask was the first cut and could name nothing
+    /// open). PER-WIDGET, because whether Paste should be live is the
+    /// intersection of what the clipboard offers and what the focused
+    /// target takes: a search field wants plain text, a rich editor
+    /// also wants images. Every platform asks exactly this of the
+    /// focused target, and Android's `setOnReceiveContentListener`
+    /// takes the accepted MIME types as an argument on the view.
     Accepts,
 }
 

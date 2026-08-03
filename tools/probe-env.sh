@@ -159,7 +159,18 @@ if docker info >/dev/null 2>&1; then
     # `docker images -q` over `image inspect`: the latter misreports
     # untagged lookups under some docker CLIs.
     if [ -n "$(docker images -q kaya-linux 2>/dev/null)" ]; then
-        report linux OK "docker up, image cached"
+        # A cached image can predate a Dockerfile layer, and the run
+        # that discovers it is a clipboard leg failing on a missing
+        # tool with the failure landing on whatever the guest asserted
+        # next. The clipboard tools are the youngest layer, so probing
+        # them names the fix early: rebuild the image.
+        if docker run --rm kaya-linux bash -c \
+            'command -v wl-copy && command -v xclip && command -v wtype && command -v identify' \
+            >/dev/null 2>&1; then
+            report linux OK "docker up, image cached"
+        else
+            report linux COLD "image cached but predates the clipboard tools layer — validate-linux rebuilds it"
+        fi
     else
         report linux COLD "docker up, image not built yet (first run builds it)"
     fi

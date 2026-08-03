@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::Receiver;
 
+use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -581,6 +582,11 @@ struct CoreState {
     /// clear it without borrowing CORE.
     #[cfg(feature = "harness")]
     context_trail: Rc<RefCell<Vec<(std::time::Instant, &'static str, Option<u64>)>>>,
+    /// The clipboard hub (see ClipboardHub): accepts lists, paste
+    /// tags, focus resolution, and the armed flag the harness's
+    /// serial primer consults. Rc'd because menu-role action handlers
+    /// reach it without borrowing CORE, the menus rule.
+    clipboard: Rc<ClipboardHub>,
     // None when attached... not yet on GTK; the app quits the loop.
     app: Option<gtk4::Application>,
 }
@@ -1140,6 +1146,12 @@ struct MenuItemState {
     /// desktop by design (DESIGN.md, Menus), so nothing here reads it.
     #[allow(dead_code)]
     primary: bool,
+    /// A standard-command role from the closed vocabulary ("" = none).
+    /// PLACEMENT is inert here (no dress-owned home), but the
+    /// clipboard roles change BEHAVIOR: activation performs the
+    /// command on the focused widget, and enablement folds in
+    /// role_enabled (refresh_clipboard_roles).
+    role: String,
     shortcut: String,
     parent: Option<u64>,
     children: Vec<u64>,
@@ -1332,7 +1344,18 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
     match item.kind {
         MenuItemKind::Action => {
             let action = gio::SimpleAction::new(&name, None);
+            let hub = core.clipboard.clone();
             action.connect_activate(move |_, _| {
+                // A clipboard role PERFORMS rather than reports: the
+                // item is the platform's own command acting on the
+                // focused widget, so no menu occurrence goes up (the
+                // mac arm's rule; DESIGN.md — gestures are commands).
+                // The role is read at ACTIVATION time because the
+                // prop lands after the action is minted.
+                let role = menus.borrow().items[&id].role.clone();
+                if hub.perform_role(&role) {
+                    return;
+                }
                 sink.send_menu_activated_tag(&tag);
             });
             Some(action)
@@ -2036,9 +2059,440 @@ fn menu_activation_route(
     }
 }
 
+// ---------------------------------------------------------------------
+// Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §5b for what
+// this platform was measured to charge).
+//
+// The COPY arm is one provider per populated representation, unioned —
+// the union advertises all of them, an arbitrary slash-bearing custom
+// mime included (measured; a SLASHLESS type is advertised and never
+// served, which is why the id grammar is validated at the root). The
+// READ arm consults formats() — the offer — and transfers exactly the
+// one representation it chooses, answering exactly once; an
+// unsatisfiable read answers NOW (measured: GDK fails it in 0ms).
+//
+// THE FAILURE THIS ARM CANNOT SEE: Wayland lets a client take the
+// selection only with an input-event serial, and a headless seat can
+// never deliver one — the compositor drops set_content SILENTLY while
+// GDK's own bookkeeping reports it set. Nothing here can check that;
+// the scene's foreign reader is the only honest observer, and the
+// harness primes one serial per leg (ensure_serial_primed) exactly so
+// an ordinary GDK arm works in a headless session the way it works in
+// a real one.
+// ---------------------------------------------------------------------
+
+/// Everything a menu-role activation needs WITHOUT borrowing CORE —
+/// the same rule the menus registry follows, and for the same reason:
+/// a stage verb activates actions while it holds the core borrow.
+struct ClipboardHub {
+    /// Accept lists by widget id (the accepts prop; empty = unset =
+    /// absent here). The paste split and Paste's enablement both read
+    /// it.
+    accepts: RefCell<HashMap<u64, String>>,
+    /// Identity tags by widget id — the same bytes clicks ride — so a
+    /// paste onto a stamped copy carries its noun without a second
+    /// registry.
+    tags: RefCell<HashMap<u64, Vec<u8>>>,
+    /// id -> (widget, is it an editable kind), for resolving which
+    /// kaya widget owns focus. Weak: destruction must not need this
+    /// map's cooperation.
+    widgets: RefCell<HashMap<u64, (glib::WeakRef<gtk4::Widget>, bool)>>,
+    sink: OccSink,
+    /// A clipboard surface appeared (accepts / copy / read): the
+    /// harness primes the wayland serial only for scenes that will
+    /// spend one.
+    armed: std::cell::Cell<bool>,
+}
+
+impl ClipboardHub {
+    fn new(sink: OccSink) -> Self {
+        ClipboardHub {
+            accepts: RefCell::new(HashMap::new()),
+            tags: RefCell::new(HashMap::new()),
+            widgets: RefCell::new(HashMap::new()),
+            sink,
+            armed: std::cell::Cell::new(false),
+        }
+    }
+
+    /// The kaya widget that owns focus: the DEEPEST registered widget
+    /// containing the toplevel's focus widget, because a GtkEntry
+    /// delegates to an internal GtkText (the entry itself is never the
+    /// focus widget) and every ancestor container "contains" the focus
+    /// too.
+    fn focused_widget_id(&self) -> Option<u64> {
+        use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+        let toplevels = gtk4::Window::toplevels();
+        let mut focus: Option<gtk4::Widget> = None;
+        for i in 0..gtk4::gio::prelude::ListModelExt::n_items(&toplevels) {
+            let Some(window) = gtk4::gio::prelude::ListModelExt::item(&toplevels, i)
+                .and_then(|o| o.downcast::<gtk4::Window>().ok())
+            else {
+                continue;
+            };
+            if let Some(f) = GtkWindowExt::focus(&window) {
+                if window.is_active() {
+                    focus = Some(f);
+                    break;
+                }
+                if focus.is_none() {
+                    focus = Some(f);
+                }
+            }
+        }
+        let focus = focus?;
+        let mut best: Option<(u64, u32)> = None;
+        for (id, (weak, _)) in self.widgets.borrow().iter() {
+            let Some(w) = weak.upgrade() else { continue };
+            if focus == w || focus.is_ancestor(&w) {
+                let mut depth = 0u32;
+                let mut p = w.parent();
+                while let Some(q) = p {
+                    depth += 1;
+                    p = q.parent();
+                }
+                if best.is_none_or(|(_, d)| depth > d) {
+                    best = Some((*id, depth));
+                }
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
+    /// Whether a clipboard role's command can act right now; a
+    /// non-role item answers true and pays nothing. THE SAME RULE AS
+    /// THE MAC ARM (kayaRoleEnabled), spelled GTK: paste is the
+    /// INTERSECTION of what the clipboard offers and what the focused
+    /// widget accepts — a widget that declared NOTHING still pastes
+    /// (the platform inserts), so an undeclared target enables on the
+    /// text offer alone. Cut and copy need a focused editable with a
+    /// selection to give; the widget's own action refuses the rest.
+    fn role_enabled(&self, role: &str) -> bool {
+        match role {
+            "cut" | "copy" => self
+                .focused_widget_id()
+                .is_some_and(|id| {
+                    self.widgets
+                        .borrow()
+                        .get(&id)
+                        .is_some_and(|(_, editable)| *editable)
+                }),
+            "paste" => {
+                let Some(id) = self.focused_widget_id() else {
+                    return false;
+                };
+                let Some(display) = gdk::Display::default() else {
+                    return false;
+                };
+                let formats = display.clipboard().formats();
+                let accepts =
+                    self.accepts.borrow().get(&id).cloned().unwrap_or_default();
+                if accepts.is_empty() {
+                    return clipboard_offers_text(&formats);
+                }
+                let (kinds, custom) = crate::wire::parse_accept_list(&accepts);
+                custom.iter().any(|id| formats.contain_mime_type(id))
+                    || (kinds & crate::wire::CLIP_FILES != 0
+                        && formats.contain_mime_type("text/uri-list"))
+                    || (kinds & crate::wire::CLIP_IMAGE != 0
+                        && formats.contain_mime_type("image/png"))
+                    || (kinds & crate::wire::CLIP_HTML != 0
+                        && formats.contain_mime_type("text/html"))
+                    || (kinds & crate::wire::CLIP_TEXT != 0
+                        && clipboard_offers_text(&formats))
+            }
+            _ => true,
+        }
+    }
+
+    /// Perform a clipboard role on the focused widget. Answers whether
+    /// it WAS one, so a plain action falls through to its own
+    /// dispatch.
+    ///
+    /// THE PASTE SPLIT, the rule the whole gesture layer turns on
+    /// (DESIGN.md): a widget that DECLARED what it accepts takes the
+    /// content itself — the same walk the privileged read makes,
+    /// delivered to the paste hook — while one that declared nothing
+    /// gets the platform's own insertion ("clipboard.paste", the
+    /// action GtkText's own accelerator activates) and its ordinary
+    /// change handler reports the result.
+    fn perform_role(self: &Rc<Self>, role: &str) -> bool {
+        use gtk4::prelude::WidgetExt;
+        let focused_native = || -> Option<gtk4::Widget> {
+            use gtk4::prelude::GtkWindowExt;
+            let toplevels = gtk4::Window::toplevels();
+            for i in 0..gtk4::gio::prelude::ListModelExt::n_items(&toplevels) {
+                use gtk4::prelude::Cast;
+                if let Some(f) = gtk4::gio::prelude::ListModelExt::item(&toplevels, i)
+                    .and_then(|o| o.downcast::<gtk4::Window>().ok())
+                    .and_then(|w| GtkWindowExt::focus(&w))
+                {
+                    return Some(f);
+                }
+            }
+            None
+        };
+        match role {
+            "cut" | "copy" => {
+                if let Some(f) = focused_native() {
+                    let _ = f.activate_action(&format!("clipboard.{role}"), None);
+                }
+                true
+            }
+            "paste" => {
+                let Some(id) = self.focused_widget_id() else {
+                    return true;
+                };
+                let accepts =
+                    self.accepts.borrow().get(&id).cloned().unwrap_or_default();
+                if accepts.is_empty() {
+                    if let Some(f) = focused_native() {
+                        let _ = f.activate_action("clipboard.paste", None);
+                    }
+                    return true;
+                }
+                let Some(display) = gdk::Display::default() else {
+                    return true;
+                };
+                let Some(tag) = self.tags.borrow().get(&id).cloned() else {
+                    return true;
+                };
+                let hub = self.clone();
+                materialize_clipboard(
+                    &display.clipboard(),
+                    &accepts,
+                    Box::new(move |clip| {
+                        // A paste that delivered nothing is not an
+                        // occurrence (the read owns the empty answer).
+                        let Some(clip) = clip else { return };
+                        let occurrence = match crate::wire::decode_click_tag(&tag) {
+                            Occurrence::ButtonClicked { id } => {
+                                Occurrence::Pasted { id, clip }
+                            }
+                            Occurrence::InstanceButtonClicked { node, path } => {
+                                Occurrence::InstancePasted { node, path, clip }
+                            }
+                            other => panic!(
+                                "kaya: a paste tag decoded to {other:?}, which is \
+                                 not a widget identity"
+                            ),
+                        };
+                        hub.sink.send(occurrence);
+                    }),
+                );
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether the offer includes text in any spelling a text read can
+/// take: the plain mime (with or without GDK's charset aliases) or a
+/// same-process string value.
+fn clipboard_offers_text(formats: &gdk::ContentFormats) -> bool {
+    formats.contain_mime_type("text/plain")
+        || formats.contain_mime_type("text/plain;charset=utf-8")
+        || formats.contains_type(glib::types::Type::STRING)
+}
+
+/// Recompute the clipboard roles' action enablement. THE MAC FINDING,
+/// spelled GTK (docs/clipboard-plan.md §3): enablement is the
+/// intersection of what the clipboard offers and what the focused
+/// widget accepts, and both move long after the bar was built. The
+/// GAction's enabled flag is what grays the row AND what refuses a
+/// harness activation, so this runs wherever enablement can change
+/// hands: focus moves, the clipboard changes, a role or accepts list
+/// lands, a copy goes out — and before a harness menu activation.
+/// menu_sync_enabled writes the STRUCTURAL enablement alone, so every
+/// site that calls it for a role-bearing tree follows with this.
+fn refresh_clipboard_roles(core: &CoreState) {
+    let reg = core.menus.borrow();
+    for (id, item) in &reg.items {
+        if !matches!(item.role.as_str(), "cut" | "copy" | "paste") {
+            continue;
+        }
+        let on =
+            menu_effective_enabled(&reg, *id) && core.clipboard.role_enabled(&item.role);
+        for action in &item.actions {
+            action.set_enabled(on);
+        }
+    }
+}
+
+/// Choose the RICHEST representation the clipboard offers that the
+/// accept list takes, transfer exactly that one, and answer exactly
+/// once — None for no intersection or a failed transfer, the
+/// universal no. Shared by the privileged read and the declared-paste
+/// delivery, because the two differ in their trigger and never in
+/// what they can materialize.
+///
+/// The chooser consults formats() — the OFFER — so no transfer runs
+/// for a representation nobody asked for, and the unsatisfiable case
+/// answers immediately (measured §5b: a GDK read of an unoffered type
+/// fails in 0ms, so no timeout lives here).
+///
+/// Descending clip value — custom (accept-list order), files, image,
+/// html, text — the canonical order (§1), which is preference order
+/// on every host that has one.
+fn materialize_clipboard(
+    clipboard: &gdk::Clipboard,
+    accepting: &str,
+    done: Box<dyn FnOnce(Option<crate::protocol::Representation>)>,
+) {
+    use crate::protocol::Representation as R;
+    let (kinds, custom) = crate::wire::parse_accept_list(accepting);
+    let formats = clipboard.formats();
+    if let Some(id) = custom
+        .iter()
+        .find(|id| formats.contain_mime_type(id))
+        .map(|id| (*id).to_owned())
+    {
+        let mime = id.clone();
+        read_clipboard_bytes(
+            clipboard,
+            &mime,
+            Box::new(move |bytes| {
+                done(bytes.map(|b| R::Custom {
+                    id,
+                    bytes: crate::protocol::Blob(std::sync::Arc::from(&b[..])),
+                }));
+            }),
+        );
+    } else if kinds & crate::wire::CLIP_FILES != 0
+        && formats.contain_mime_type("text/uri-list")
+    {
+        read_clipboard_bytes(
+            clipboard,
+            "text/uri-list",
+            Box::new(move |bytes| {
+                let Some(bytes) = bytes else { return done(None) };
+                // The RFC's grammar: CRLF separators (bare LF
+                // tolerated), comment lines start with '#'. Only
+                // file:// URIs become files — a pasted http link is
+                // not a file the receiver may open.
+                let text = String::from_utf8_lossy(&bytes);
+                let mut files = Vec::new();
+                for line in text.lines() {
+                    let line = line.trim_end_matches('\r');
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    let Ok((path, _)) = glib::filename_from_uri(line) else {
+                        continue;
+                    };
+                    let path = path.to_string_lossy().into_owned();
+                    let name = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    // The picker's capability, arriving through the
+                    // second door: the same registration the file
+                    // dialog result makes, so kaya_open_picked
+                    // redeems a pasted file identically.
+                    let handle = crate::capi::picked_register(std::sync::Arc::new(
+                        crate::protocol::PathSource {
+                            name: name.clone(),
+                            path: path.clone(),
+                        },
+                    ));
+                    files.push(crate::protocol::PickedFile {
+                        handle,
+                        name,
+                        local_path: path,
+                    });
+                }
+                done((!files.is_empty()).then_some(R::Files(files)));
+            }),
+        );
+    } else if kinds & crate::wire::CLIP_IMAGE != 0
+        && formats.contain_mime_type("image/png")
+    {
+        read_clipboard_bytes(
+            clipboard,
+            "image/png",
+            Box::new(move |bytes| {
+                done(bytes.map(|b| {
+                    R::Image(crate::protocol::Blob(std::sync::Arc::from(&b[..])))
+                }));
+            }),
+        );
+    } else if kinds & crate::wire::CLIP_HTML != 0 && formats.contain_mime_type("text/html")
+    {
+        // Raw UTF-8 under the bare type — measured: GDK adds no
+        // charset alias for html (that aliasing is text/plain-only).
+        read_clipboard_bytes(
+            clipboard,
+            "text/html",
+            Box::new(move |bytes| {
+                done(bytes
+                    .map(|b| R::Html(String::from_utf8_lossy(&b).into_owned())));
+            }),
+        );
+    } else if kinds & crate::wire::CLIP_TEXT != 0 && clipboard_offers_text(&formats) {
+        clipboard.read_text_async(gtk4::gio::Cancellable::NONE, move |res| {
+            done(match res {
+                Ok(Some(s)) => Some(R::Text(s.to_string())),
+                _ => None,
+            });
+        });
+    } else {
+        done(None);
+    }
+}
+
+/// One mime type's bytes off the clipboard, whole, then the callback —
+/// None for a failed transfer (the universal no; GDK fails an
+/// unservable read fast, measured §5b).
+fn read_clipboard_bytes(
+    clipboard: &gdk::Clipboard,
+    mime: &str,
+    done: Box<dyn FnOnce(Option<Vec<u8>>)>,
+) {
+    clipboard.read_async(
+        &[mime],
+        glib::Priority::DEFAULT,
+        gtk4::gio::Cancellable::NONE,
+        move |res| match res {
+            Ok((stream, _mime)) => read_stream_to_end(stream, Vec::new(), done),
+            Err(_) => done(None),
+        },
+    );
+}
+
+fn read_stream_to_end(
+    stream: gtk4::gio::InputStream,
+    mut acc: Vec<u8>,
+    done: Box<dyn FnOnce(Option<Vec<u8>>)>,
+) {
+    use gtk4::gio::prelude::InputStreamExt;
+    let again = stream.clone();
+    stream.read_bytes_async(
+        65536,
+        glib::Priority::DEFAULT,
+        gtk4::gio::Cancellable::NONE,
+        move |res| match res {
+            Ok(bytes) if bytes.is_empty() => done(Some(acc)),
+            Ok(bytes) => {
+                acc.extend_from_slice(&bytes);
+                read_stream_to_end(again, acc, done);
+            }
+            Err(_) => done(None),
+        },
+    );
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) {
     match op {
         ApplyOp::Create { id, kind, tag } => {
+            // The clipboard hub's copies, taken before the kind arms
+            // consume the tag: focus resolution wants every widget,
+            // paste delivery wants the identity tag (stamped copies
+            // carry their noun inside it), and the editable flag is
+            // cut/copy's enablement answer.
+            let clip_tag = tag.clone();
+            let clip_editable =
+                matches!(kind, WidgetKind::Entry | WidgetKind::Textarea);
             let native = match kind {
                 WidgetKind::Entry => {
                     // Uncontrolled: the widget owns its text; each edit
@@ -2241,6 +2695,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     NativeWidget::Image(picture)
                 }
             };
+            {
+                let weak = glib::WeakRef::new();
+                weak.set(Some(&native.widget()));
+                core.clipboard
+                    .widgets
+                    .borrow_mut()
+                    .insert(id.0, (weak, clip_editable));
+                if let Some(tag) = clip_tag {
+                    core.clipboard.tags.borrow_mut().insert(id.0, tag);
+                }
+            }
             core.widgets.insert(id, native);
         }
         ApplyOp::MoveChild {
@@ -2274,6 +2739,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
         ApplyOp::Destroy { id } => {
+            // The clipboard hub forgets the widget with it (the weak
+            // ref would go stale on its own; the maps must not grow).
+            core.clipboard.widgets.borrow_mut().remove(&id.0);
+            core.clipboard.tags.borrow_mut().remove(&id.0);
+            core.clipboard.accepts.borrow_mut().remove(&id.0);
             // A destroyed anchor takes its context attachment with it
             // (menu ITEMS are never destroyed): the popover unparents
             // BEFORE the widget leaves its container, this
@@ -2549,6 +3019,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     checked: false,
                     value: 0.0,
                     primary: false,
+                    role: String::new(),
                     shortcut: String::new(),
                     parent: None,
                     children: Vec::new(),
@@ -2635,8 +3106,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // The inherited AND lands on every descendant's
                     // REAL action; no model rebuild — enablement is
                     // live action state. Enablement writes never emit.
-                    let reg = core.menus.borrow();
-                    menu_sync_enabled(&reg, item.0);
+                    {
+                        let reg = core.menus.borrow();
+                        menu_sync_enabled(&reg, item.0);
+                    }
+                    // menu_sync_enabled wrote STRUCTURAL enablement
+                    // alone, which would un-gray a role item whose
+                    // clipboard half says no — the role factor goes
+                    // back on top.
+                    refresh_clipboard_roles(core);
                 }
                 MenuProp::Checked => {
                     // QUIET (the echo doctrine): set_state never fires
@@ -2698,17 +3176,122 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // dress has none).
                 }
                 MenuProp::Role => {
-                    // A standard-command role is a placement REQUEST
-                    // this host has nowhere to honor: there is no
-                    // dress-owned application menu here, so the item
-                    // stays exactly where the app declared it.
+                    // PLACEMENT is a request this host has nowhere to
+                    // honor — no dress-owned application menu — so the
+                    // item stays exactly where the app declared it.
+                    // BEHAVIOR is not: a clipboard role's activation
+                    // performs the standard command on the focused
+                    // widget, and its enablement is the offer/accepts
+                    // intersection, so the role is recorded and the
+                    // role items resync now.
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .role = crate::protocol::prop_str(&value).to_owned();
+                    refresh_clipboard_roles(core);
                 }
             }
         }
 
-        // The clipboard's depth slice is SwiftUI on mac
-        // (docs/clipboard-plan.md); this backend has not reached it.
-        ApplyOp::Copy(_) | ApplyOp::ReadClipboard { .. } => crate::depth_stub("clipboard"),
+        ApplyOp::Copy(clip) => {
+            core.clipboard.armed.set(true);
+            // One provider per populated representation, unioned: the
+            // union advertises all of them (measured §5b — it does not
+            // let the last provider win, and GTK mints the text
+            // aliases and texture shapes for free).
+            let mut providers: Vec<gdk::ContentProvider> = Vec::new();
+            // Descending clip value — custom, files, image, html,
+            // text — the canonical order (§1): a backend offers the
+            // values in the order it is handed them and is right.
+            for (id, bytes) in &clip.custom {
+                providers.push(gdk::ContentProvider::for_bytes(
+                    id,
+                    &glib::Bytes::from(&bytes.0[..]),
+                ));
+            }
+            if !clip.files.is_empty() {
+                // text/uri-list with the RFC's CRLF separators and
+                // trailing terminator (measured: the foreign reader
+                // is unbothered either way, so the RFC spelling
+                // stands).
+                let mut uris = String::new();
+                for path in &clip.files {
+                    match glib::filename_to_uri(path, None) {
+                        Ok(uri) => {
+                            uris.push_str(&uri);
+                            uris.push_str("\r\n");
+                        }
+                        Err(e) => panic!(
+                            "kaya: copy carries file locator {path:?} that does \
+                             not name a filesystem path: {e}"
+                        ),
+                    }
+                }
+                providers.push(gdk::ContentProvider::for_bytes(
+                    "text/uri-list",
+                    &glib::Bytes::from_owned(uris.into_bytes()),
+                ));
+            }
+            if let Some(png) = &clip.image {
+                // RAW BYTES UNDER THE TYPE, never GdkTexture: the
+                // texture re-encodes on demand and the bytes stop
+                // round-tripping (the macOS writeObjects lesson,
+                // measured again here — byte-identical through a
+                // foreign read, §5b).
+                providers.push(gdk::ContentProvider::for_bytes(
+                    "image/png",
+                    &glib::Bytes::from(&png.0[..]),
+                ));
+            }
+            if let Some(html) = &clip.html {
+                // Raw UTF-8 under the bare type; GDK adds no charset
+                // alias for html (measured §5b), and the lane's
+                // foreign reader asks for the bare type.
+                providers.push(gdk::ContentProvider::for_bytes(
+                    "text/html",
+                    &glib::Bytes::from_owned(html.clone().into_bytes()),
+                ));
+            }
+            if let Some(text) = &clip.text {
+                use gtk4::glib::prelude::ToValue;
+                // A string VALUE, not bytes: GTK derives the
+                // text/plain spellings and charset aliases from it.
+                providers.push(gdk::ContentProvider::for_value(&text.to_value()));
+            }
+            let provider = if providers.len() == 1 {
+                providers.remove(0)
+            } else {
+                gdk::ContentProvider::new_union(&providers)
+            };
+            let clipboard = gtk4::prelude::WidgetExt::display(&core.window).clipboard();
+            if let Err(e) = clipboard.set_content(Some(&provider)) {
+                // This error is LOCAL bookkeeping only. The failure
+                // that matters — the compositor rejecting the
+                // selection for want of an input serial — is silent
+                // BY DESIGN and only the scene's foreign reader can
+                // see it (§5b finding 3; the harness primes a serial
+                // per leg so it does not happen on the lane).
+                panic!("kaya: clipboard set_content failed: {e}");
+            }
+            refresh_clipboard_roles(core);
+        }
+        ApplyOp::ReadClipboard { request, accepting } => {
+            core.clipboard.armed.set(true);
+            let clipboard = gtk4::prelude::WidgetExt::display(&core.window).clipboard();
+            let sink = core.occurrences.clone();
+            materialize_clipboard(
+                &clipboard,
+                &accepting,
+                Box::new(move |clip| {
+                    // Answered exactly once; None IS an answer — the
+                    // universal no (denied, absent, unfocused, and
+                    // nothing-accepted alike).
+                    sink.send(Occurrence::ClipboardResult { request, clip });
+                }),
+            );
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // GNOME's own picker: gtk::FileDialog (4.10+), presented on
             // the requesting window and answered exactly once through
@@ -3012,6 +3595,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (w, Prop::A11yId, Value::Str(id)) => {
                     use gtk4::prelude::WidgetExt;
                     w.widget().set_widget_name(id.as_str());
+                }
+                // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the
+                // list drives the paste split and Paste's enablement,
+                // both read off the hub. Kind-agnostic like the
+                // universal props — the scene validated the string.
+                // Empty means unset, the universal prop rule.
+                (_, Prop::Accepts, Value::Str(list)) => {
+                    if list.is_empty() {
+                        core.clipboard.accepts.borrow_mut().remove(&id.0);
+                    } else {
+                        core.clipboard.accepts.borrow_mut().insert(id.0, list);
+                    }
+                    core.clipboard.armed.set(true);
+                    refresh_clipboard_roles(core);
                 }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
@@ -3483,6 +4080,37 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 open_context: Rc::new(RefCell::new(None)),
                 #[cfg(feature = "harness")]
                 context_trail: Rc::new(RefCell::new(Vec::new())),
+                clipboard: {
+                    let hub = Rc::new(ClipboardHub::new(occ_tx.clone()));
+                    // Enablement moves when the clipboard or the focus
+                    // does (the mac finding, §3) — and BOTH signals can
+                    // fire mid-apply while CORE is borrowed (set_content
+                    // raises changed synchronously; grab_focus runs in a
+                    // SetProp arm), so each defers to an idle rather than
+                    // re-borrowing here and now.
+                    let defer = || {
+                        glib::idle_add_local_once(|| {
+                            CORE.with_borrow(|core| {
+                                if let Some(core) = core.as_ref() {
+                                    refresh_clipboard_roles(core);
+                                }
+                            });
+                        });
+                    };
+                    if let Some(display) = gtk4::gdk::Display::default() {
+                        let refresh = defer;
+                        display.clipboard().connect_changed(move |_| refresh());
+                    }
+                    {
+                        use gtk4::prelude::ObjectExt;
+                        let refresh = defer;
+                        window
+                            .connect_notify_local(Some("focus-widget"), move |_, _| {
+                                refresh()
+                            });
+                    }
+                    hub
+                },
                 window_veto: {
                     let veto = std::rc::Rc::new(RefCell::new(HashMap::new()));
                     {
@@ -3545,8 +4173,174 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
 #[cfg(feature = "harness")]
 struct GtkStage;
 
+/// Which session this process is presenting on — mirrors GDK's own
+/// choice at startup: an explicit GDK_BACKEND wins, else wayland when
+/// a display is offered.
+#[cfg(feature = "harness")]
+fn linux_wayland_session() -> bool {
+    match std::env::var("GDK_BACKEND") {
+        Ok(b) if b.contains("wayland") => true,
+        Ok(b) if !b.is_empty() => false,
+        _ => std::env::var("WAYLAND_DISPLAY").is_ok(),
+    }
+}
+
+/// The foreign clipboard WRITER: wl-copy / xclip, a child process with
+/// its own connection. `mime` None lets the tool declare its own
+/// standard text targets. Content rides stdin — no quoting layer.
+#[cfg(feature = "harness")]
+fn foreign_clip_write(mime: Option<&str>, bytes: Vec<u8>) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut command = if linux_wayland_session() {
+        let mut c = Command::new("wl-copy");
+        if let Some(mime) = mime {
+            c.args(["-t", mime]);
+        }
+        c
+    } else {
+        let mut c = Command::new("xclip");
+        c.args(["-selection", "clipboard"]);
+        if let Some(mime) = mime {
+            c.args(["-t", mime]);
+        }
+        c
+    };
+    let mut child = command
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|e| {
+            panic!(
+                "kaya: clipboard_seed cannot run the foreign writer: {e} — the lane \
+                 image installs wl-clipboard and xclip"
+            )
+        });
+    child
+        .stdin
+        .take()
+        .expect("stdin was piped")
+        .write_all(&bytes)
+        .expect("kaya: the foreign clipboard writer closed its stdin early");
+    let status = child.wait().expect("kaya: the foreign clipboard writer vanished");
+    assert!(
+        status.success(),
+        "kaya: the foreign clipboard writer exited {status}"
+    );
+}
+
+/// The foreign TARGETS list, for seed verification: what another
+/// process can see is offered, not what anyone's bookkeeping claims.
+#[cfg(feature = "harness")]
+fn foreign_clip_targets() -> String {
+    let out = if linux_wayland_session() {
+        std::process::Command::new("wl-paste")
+            .arg("--list-types")
+            .output()
+    } else {
+        std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+            .output()
+    };
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(_) => String::new(),
+    }
+}
+
+/// The foreign clipboard READER, one type's bytes; empty on a failed
+/// transfer or an empty clipboard.
+#[cfg(feature = "harness")]
+fn foreign_clip_read(mime: &str) -> Vec<u8> {
+    let out = if linux_wayland_session() {
+        std::process::Command::new("wl-paste")
+            .args(["-n", "-t", mime])
+            .output()
+    } else {
+        std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", mime, "-o"])
+            .output()
+    };
+    match out {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => Vec::new(),
+    }
+}
+
+/// The first freshening tap of this process has completed (its slow
+/// press-hold-release form; later taps take the quick form).
+#[cfg(feature = "harness")]
+static CLIPBOARD_TAPPED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Wayland charges an input-event serial for TAKING the selection, and
+/// the charge is not one-time (docs/clipboard-plan.md §5b finding 3,
+/// all of it measured): the lane's headless seat has no input devices,
+/// so no client ever earns a serial on its own, AND wlroots rejects a
+/// set_selection whose serial is older than the current selection's —
+/// every wl-copy seed advances that watermark, so a serial obtained
+/// once goes stale the moment a seed lands. The rejection is silent
+/// (DEBUG-level log; GDK still records a local claim), and a GDK
+/// client with a live local claim IGNORES incoming offers and waits
+/// for a `cancelled` that never comes, so ONE dropped copy leaves the
+/// guest deaf to the clipboard for the rest of its life.
+///
+/// So the harness taps a virtual-keyboard F24 before EVERY step that
+/// can lead to a copy: each tap hands the focused client a serial
+/// newer than any seed's. The FIRST tap uses the press-hold-release
+/// form — the press races GDK's late wl_keyboard bind and is lost,
+/// the release at +800ms lands after the bind; later taps take the
+/// quick form, the keyboard being bound by then. The keyboard exists
+/// only for the tap's own lifetime ON PURPOSE: a session-held virtual
+/// keyboard makes keyboard focus EXCLUSIVE across the compositor, and
+/// the lane pools eight legs in one session — adding a holder broke
+/// three unrelated legs' expect_focused the day it was tried
+/// (2026-08-03). A transient keyboard during a SERIALISED clipboard
+/// leg has no neighbor to disturb.
+///
+/// HARNESS MACHINERY, deliberately: the arm stays ordinary GDK, and a
+/// real session delivers real input continuously. F24 because it is
+/// bound to nothing and types nothing; during a serialised clipboard
+/// leg the focused window is the leg's own.
+#[cfg(feature = "harness")]
+fn freshen_wayland_serial() {
+    use std::sync::atomic::Ordering;
+    if !linux_wayland_session() {
+        return;
+    }
+    let first = !CLIPBOARD_TAPPED.swap(true, Ordering::SeqCst);
+    let args: &[&str] = if first {
+        &["-P", "F24", "-s", "800", "-p", "F24"]
+    } else {
+        &["-k", "F24"]
+    };
+    let out = std::process::Command::new("wtype")
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "kaya: the wayland serial tap needs wtype: {e} — the lane image \
+                 installs it (docs/clipboard-plan.md §5b finding 3)"
+            )
+        });
+    assert!(
+        out.status.success(),
+        "kaya: wtype failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[cfg(feature = "harness")]
 impl GtkStage {
+    /// Freshen the wayland serial before a step that can lead to a
+    /// copy — but only in scenes that will SPEND one (the hub arms
+    /// when a clipboard surface appears), so the other two hundred
+    /// legs pay nothing.
+    fn prime_if_clipboard_scene() {
+        if Self::on_main(|core| core.clipboard.armed.get()) {
+            freshen_wayland_serial();
+        }
+    }
+
     /// The mutable twin of on_main, for stage actions that reconcile
     /// core-owned state (select_section's user route).
     fn on_main_mut<T: Send + 'static>(
@@ -3587,10 +4381,20 @@ impl GtkStage {
 #[cfg(feature = "harness")]
 impl crate::harness::Stage for GtkStage {
     fn menu_activate(&self, path: &str) {
+        // A role item may cut or copy, which spends the wayland
+        // serial (see prime_if_clipboard_scene).
+        Self::prime_if_clipboard_scene();
         let path = path.to_owned();
         Self::on_main(move |core| {
             use gtk4::gio::prelude::ActionExt;
             use gtk4::glib::prelude::ToVariant;
+            // THE HARNESS-ACTIVATION REFRESH (the mac finding, §3):
+            // enablement is recomputed at the two moments it can
+            // change hands — chrome about to present, and a harness
+            // activation. The GAction's enabled flag refuses a
+            // disabled activation natively, so it must be CURRENT
+            // before the route resolves.
+            refresh_clipboard_roles(core);
             // An OPEN context menu owns resolution EXCLUSIVELY while
             // presented — no bar fallback (the interpreters' rule).
             let open = *core.open_context.borrow();
@@ -3989,8 +4793,12 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn shortcut(&self, spelling: &str) {
+        // Same two reasons as menu_activate: the chord may land on a
+        // role item.
+        Self::prime_if_clipboard_scene();
         let spelling = spelling.to_owned();
         Self::on_main(move |core| {
+            refresh_clipboard_roles(core);
             // The platform's own table: the application accelerator
             // map that set_accels_for_action filled — the exact table
             // GtkApplicationWindow's accel controller walks for a
@@ -4049,6 +4857,9 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn click(&self, t: crate::harness::Target) {
+        // A click's handler may copy, and a copy spends the wayland
+        // serial the headless session never delivered on its own.
+        Self::prime_if_clipboard_scene();
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.buttons.len());
             core.buttons[i].emit_clicked();
@@ -4679,16 +5490,138 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
-    /// The foreign reader and writer. THE STUB IS A CALL, so
-    /// check-stubs sees it: this backend has no clipboard yet, and a
-    /// leg wired against it would otherwise seed nothing and compare
-    /// against an empty string that looks like a real answer.
-    fn clipboard_seed(&self, _kind: &str, _argument: &str) {
-        crate::depth_stub("clipboard")
+    /// The foreign writer: wl-copy (wayland) or xclip (x11), a child
+    /// process with its own connection — nothing kaya wrote serves the
+    /// content. AND IT WAITS UNTIL THE CONTENT IS REALLY THERE (the
+    /// osascript lesson, §3): wl-copy forks a server and its exit does
+    /// not mean the offer landed, so the seed polls the foreign
+    /// TARGETS until the seeded type is listed. A seed that does not
+    /// verify makes everything after it race.
+    fn clipboard_seed(&self, kind: &str, argument: &str) {
+        let expected: &str = match kind {
+            "text" => {
+                // No explicit type: the platform tool declares its own
+                // standard text target set, exactly as a real app's
+                // copy would.
+                foreign_clip_write(None, argument.as_bytes().to_vec());
+                if linux_wayland_session() {
+                    "text/plain"
+                } else {
+                    "UTF8_STRING"
+                }
+            }
+            "html" => {
+                foreign_clip_write(Some("text/html"), argument.as_bytes().to_vec());
+                "text/html"
+            }
+            "image" => {
+                let bytes = std::fs::read(argument).unwrap_or_else(|e| {
+                    panic!("kaya: clipboard_seed image cannot read {argument:?}: {e}")
+                });
+                foreign_clip_write(Some("image/png"), bytes);
+                "image/png"
+            }
+            "files" => {
+                let uri = glib::filename_to_uri(argument, None).unwrap_or_else(|e| {
+                    panic!("kaya: clipboard_seed files: {argument:?} is not a path: {e}")
+                });
+                foreign_clip_write(Some("text/uri-list"), format!("{uri}\r\n").into_bytes());
+                "text/uri-list"
+            }
+            custom => panic!(
+                "kaya: clipboard_seed cannot write {custom:?} from outside the app — \
+                 no stock tool writes an app-defined format, and a helper kaya wrote \
+                 would be foreign in name only"
+            ),
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if foreign_clip_targets().contains(expected) {
+                return;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("kaya: clipboard_seed {kind} never appeared on the clipboard");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
-    fn clipboard_read(&self, _kind: &str) -> String {
-        crate::depth_stub("clipboard")
+    /// The foreign reader: wl-paste or xclip -o, one representation.
+    /// Text, html and custom answer the content; files answers the
+    /// FIRST file's basename (parity with pbpaste, which exposes one);
+    /// an image answers its DECODED SIZE via imagemagick's identify —
+    /// a foreign decoder, because hosts re-encode freely and a byte
+    /// count is a different number on every lane (§2). Empty when the
+    /// clipboard holds nothing of that kind.
+    fn clipboard_read(&self, kind: &str) -> String {
+        match kind {
+            // On x11 the text target every owner serves is
+            // UTF8_STRING (the convention); on wayland it is the
+            // plain mime (measured in the GDK probe's target list).
+            "text" => {
+                let target = if linux_wayland_session() {
+                    "text/plain"
+                } else {
+                    "UTF8_STRING"
+                };
+                String::from_utf8_lossy(&foreign_clip_read(target)).into_owned()
+            }
+            "html" => String::from_utf8_lossy(&foreign_clip_read("text/html")).into_owned(),
+            "files" => {
+                let raw = foreign_clip_read("text/uri-list");
+                let text = String::from_utf8_lossy(&raw);
+                let Some(line) = text
+                    .lines()
+                    .map(|l| l.trim_end_matches('\r'))
+                    .find(|l| !l.is_empty() && !l.starts_with('#'))
+                else {
+                    return String::new();
+                };
+                match glib::filename_from_uri(line) {
+                    Ok((path, _)) => path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    Err(_) => String::new(),
+                }
+            }
+            "image" => {
+                let bytes = foreign_clip_read("image/png");
+                if bytes.is_empty() {
+                    return String::new();
+                }
+                let scratch = std::env::temp_dir()
+                    .join(format!("kaya-clipread-{}.png", std::process::id()));
+                if std::fs::write(&scratch, &bytes).is_err() {
+                    return String::new();
+                }
+                let out = std::process::Command::new("identify")
+                    .args(["-format", "%wx%h"])
+                    .arg(&scratch)
+                    .output();
+                let _ = std::fs::remove_file(&scratch);
+                match out {
+                    Ok(o) if o.status.success() => {
+                        String::from_utf8_lossy(&o.stdout).trim().to_owned()
+                    }
+                    // BYTES-PRESENT-BUT-UNDECODABLE IS NOT "NOTHING",
+                    // and it must not read like it: a broken embedded
+                    // asset once hid behind "" here for a full lane
+                    // run, because every other platform's decoder was
+                    // lenient about a bad IDAT CRC and this lane's
+                    // identify is the matrix's first strict one. The
+                    // failure text names the decoder's own complaint
+                    // so the verdict line carries the cause.
+                    Ok(o) => format!(
+                        "<{} bytes of image/png that identify rejects: {}>",
+                        bytes.len(),
+                        String::from_utf8_lossy(&o.stderr).trim()
+                    ),
+                    Err(e) => format!("<identify failed to run: {e}>"),
+                }
+            }
+            custom => String::from_utf8_lossy(&foreign_clip_read(custom)).into_owned(),
+        }
     }
 
     fn goto_directory(&self, path: &str) {
@@ -5195,6 +6128,21 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
             .ok()?;
         let me = std::process::id();
         let mut found: Vec<(atspi::Role, String, String)> = Vec::new();
+        /// The Text interface's content at the same bus node — what a
+        /// screen reader actually speaks for an unlabeled field.
+        async fn text_content(node: &AccessibleProxy<'_>) -> Option<String> {
+            use atspi::proxy::text::TextProxy;
+            let proxy = TextProxy::builder(node.inner().connection())
+                .destination(node.inner().destination().to_owned())
+                .ok()?
+                .path(node.inner().path().to_owned())
+                .ok()?
+                .build()
+                .await
+                .ok()?;
+            let len = proxy.character_count().await.ok()?;
+            proxy.get_text(0, len).await.ok()
+        }
         // Depth-first over OUR application only. Roles are matched on
         // the enum, not a localized name string.
         async fn walk(
@@ -5208,6 +6156,18 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
             if let (Ok(role), Ok(name), Ok(description)) =
                 (node.get_role().await, node.name().await, node.description().await)
             {
+                // A text field with no authored label publishes an
+                // EMPTY name; its content lives on the Text interface,
+                // and that content is what a screen reader speaks for
+                // it. The macOS reader's fallback chain ends in
+                // AXValue for the same reason (description -> title ->
+                // value there; name -> Text content here), so
+                // `field/<its text>` reads the same on both platforms.
+                let name = if name.is_empty() && role == atspi::Role::Text {
+                    text_content(&node).await.unwrap_or(name)
+                } else {
+                    name
+                };
                 out.push((role, name, description));
             }
             let Ok(children) = node.get_children().await else {

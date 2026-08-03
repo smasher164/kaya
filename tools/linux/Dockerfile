@@ -120,4 +120,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libadwaita-1-dev gir1.2-adw-1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Clipboard (docs/clipboard-plan.md §5b): the foreign reader/writer
+# pair for both sessions — wl-copy/wl-paste on wayland, xclip on x11 —
+# because every clipboard assertion crosses a process boundary;
+# wayland-info, the seat probe's tool; and wtype, the virtual-keyboard
+# tap that hands a headless-sway client the input serial Wayland
+# charges for taking the selection (finding 3 — without it every GDK
+# copy is silently dropped by the compositor). The image's imagemagick
+# (identify, above) is the foreign decoder for image verdicts.
+#
+# A trailing layer on purpose, per the note above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wl-clipboard xclip wtype wayland-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work
