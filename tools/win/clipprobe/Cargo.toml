@@ -1,0 +1,21 @@
+# See src/main.rs for what this measures and why it exists.
+#
+# Standalone and excluded from the workspace, the way dialogprobe is: a
+# probe must not be able to move the library's dependency graph. The
+# `windows` version tracks crates/kaya's so the probe measures what the
+# backend would see — the arm will add Win32_System_DataExchange and
+# Win32_System_Memory to crates/kaya's feature list, and this probe is
+# the measurement that justifies them.
+[package]
+name = "clipprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+] }

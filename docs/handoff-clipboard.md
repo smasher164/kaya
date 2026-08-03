@@ -117,9 +117,24 @@ Each needs: the copy arm, the read arm answering exactly once, the
   window is up. Resolving it surfaced a GDK grammar rule: a custom id
   needs a slash or it is advertised and never served, which forces an
   id-grammar decision at the root (finding 4; maintainer's call).
-- **WinUI.** `CF_HTML` needs its offset header — bytes tagged
-  `text/html` paste as garbage. Files are a `DROPFILES` struct with
-  double-NUL-terminated wide strings.
+- **WinUI — ARM WRITTEN 2026-08-03, measured first (docs/
+  clipboard-plan.md §6).** Classic Win32, not WinRT (SetContent
+  demands foreground; the custom-format write bridge is undocumented;
+  no persistence without Flush). The probe (tools/win/clipprobe)
+  proved all five representations both directions through stock
+  PowerShell 5.1, including the slashed custom atom VERBATIM and
+  persistence past process exit. The traps that would have burned:
+  every ssh connection is its OWN clipboard (window station per
+  logon — everything clipboard runs in session 1, the harness verbs
+  as guest children); `Get-Clipboard -TextFormatType Html` corrupts
+  non-ASCII (ANSI decode — use PresentationCore); `SetData` with a
+  string rides WPF's serialized-object path (MemoryStream for exact
+  bytes); Microsoft's own CF_HTML example is arithmetically wrong
+  (construct with 10-digit fixed-width offsets, parse with
+  digits-then-stop); PNG-only clips are invisible to DIB consumers
+  (deliberate cut, §6). The legs run serialised in deploy-win's
+  serial tail, pinned by check-steps' barrier clause in deploy-win's
+  own vocabulary.
 - **Compose.** Images cannot be bytes: `ClipData` carries a
   `content://` URI, so the backend stands up a provider. Reads return
   nothing without focus, which is why the foreign side has to be a real

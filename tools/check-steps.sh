@@ -646,12 +646,12 @@ out="$(menu_serial tools/deploy-win.sh)" || {
 # parallelizing refactor — or a sweep adding one more language beside
 # it — cannot silently re-pool them. Continuation lines are joined
 # first, because a leg's command usually wraps.
-clipboard_serial() {
+clipboard_serial() { # path leg_regex barrier_word
     python3 -c '
 import re
 import sys
 
-path = sys.argv[1]
+path, leg_pattern, barrier = sys.argv[1], sys.argv[2], sys.argv[3]
 raw = (sys.stdin.read() if path == "-" else open(path).read()).splitlines()
 lines = []
 buf = ""
@@ -671,39 +671,58 @@ def significant(seq):
 bad = []
 seen = 0
 for n, line in enumerate(lines):
-    if not line.startswith("run "):
-        continue
-    if not re.search(r"clipboard-[a-z]", line):
+    if not re.match(leg_pattern, line):
         continue
     seen += 1
     before = significant(lines[:n])
     after = significant(lines[n + 1:])
-    if not before or before[-1] != "drain" or not after or after[0] != "drain":
-        bad.append(f"{path}:{n + 1}: {line[:60]} lacks the drain/run/drain barrier")
+    if not before or before[-1] != barrier or not after or after[0] != barrier:
+        bad.append(f"{path}:{n + 1}: {line[:60]} lacks the {barrier}/run/{barrier} barrier")
 if seen == 0:
     bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
-' "$1"
+' "$1" "$2" "$3"
 }
+
+# Each runner spells its pool differently, so the rule is checked in
+# each runner's own vocabulary.
+MAC_LEG='run .*clipboard-[a-z]'
+WIN_LEG='run_suite clipboard_[a-z]'
 
 # The guard guards itself: two clipboard legs sharing the pool must
 # fail...
 if printf 'drain\nrun clipboard-rust-swiftui env X\nrun clipboard-python-swiftui env X\ndrain\n' \
-    | clipboard_serial - >/dev/null; then
+    | clipboard_serial - "$MAC_LEG" drain >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (pooled clipboard legs passed)" >&2
     exit 1
 fi
-# ...and so must a clipboard leg entering a pool that still holds
-# another scene's leg (the primer would tap that leg's window).
+# ...a clipboard leg entering a pool that still holds another scene's
+# leg (on wayland the primer would tap that leg's window)...
 if printf 'run layout-java env X\nrun clipboard-rust env X\ndrain\n' \
-    | clipboard_serial - >/dev/null; then
+    | clipboard_serial - "$MAC_LEG" drain >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (undrained-before clipboard leg passed)" >&2
     exit 1
 fi
+# ...and the deploy-win spelling, which the first cut of this gate
+# missed in FOUR independent ways (run_suite vs run, underscore vs
+# dash, drain_suites vs drain, and the file not being in the loop) —
+# a barrier that exists in one runner's vocabulary silently exempts
+# every other runner.
+if printf 'run_suite clipboard_rust\nrun_suite clipboard_python\ndrain_suites\n' \
+    | clipboard_serial - "$WIN_LEG" drain_suites >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (pooled deploy-win clipboard legs passed)" >&2
+    exit 1
+fi
 
-for runner in tools/validate-mac.sh tools/linux/run-suites.sh; do
-    out="$(clipboard_serial "$runner")" || {
+for spec in "tools/validate-mac.sh|$MAC_LEG|drain" \
+    "tools/linux/run-suites.sh|$MAC_LEG|drain" \
+    "tools/deploy-win.sh|$WIN_LEG|drain_suites"; do
+    runner="${spec%%|*}"
+    rest="${spec#*|}"
+    leg="${rest%%|*}"
+    barrier="${rest#*|}"
+    out="$(clipboard_serial "$runner" "$leg" "$barrier")" || {
         echo "check-steps: $runner clipboard legs must run ALONE between drains (docs/clipboard-plan.md §0d — one system clipboard per session):" >&2
         echo "$out" >&2
         status=1

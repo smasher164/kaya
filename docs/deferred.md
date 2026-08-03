@@ -30,18 +30,22 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
-- **Clipboard — LANDED ON MAC 2026-08-02, all eight bindings landed,
-  GTK arm written 2026-08-03; fan-out continues.** The protocol, the
-  SwiftUI arms, all eight binding surfaces with a guest each, the
-  three edit roles, the ratified custom-id grammar (mime-shaped —
-  docs/clipboard-plan.md §5b finding 4), and the GTK arm with its
-  wayland serial recipe (§5b finding 3) are in. WHAT REMAINS: the
-  WinUI/Compose/iOS arms and the Android helper APK that gives that
-  lane a foreign reader. FOR THE iOS ARM SPECIFICALLY: measure
+- **Clipboard — mac + all eight bindings + GTK (2026-08-03) + WinUI
+  (2026-08-03) green; fan-out continues.** The protocol, the SwiftUI
+  arms, all eight binding surfaces with a guest each, the three edit
+  roles, the ratified custom-id grammar (mime-shaped —
+  docs/clipboard-plan.md §5b finding 4), the GTK arm with its wayland
+  serial recipe (§5b finding 3), and the WinUI arm on classic Win32
+  with its measured ledger (§6: per-connection ssh clipboards, the
+  CF_HTML construction/parse pair, the MemoryStream rule, the
+  PNG-vs-DIB cut, the stowed-exception activation refresh) are in.
+  Lane counts: mac 232, linux 426, windows 145. WHAT REMAINS: the
+  Compose arm + the Android helper APK that gives that lane a foreign
+  reader, then the iOS arm — and for iOS SPECIFICALLY: measure
   UIPasteboard's charge for a SLASHED custom type before writing it —
   macOS's two write APIs disagreed about one (NSPasteboardItem
   rejects, the board-level path serves; §5b finding 4), and iOS may
-  fork the same way.
+  fork the same way. Then validate-all for the milestone.
   The edit roles are no longer deferred — `cut`, `copy` and `paste`
   joined the closed role vocabulary beside `settings`.
 

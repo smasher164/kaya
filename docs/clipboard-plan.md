@@ -1097,13 +1097,123 @@ decoder's complaint instead of answering "" — bytes-present-but-
 undecodable must never read like an empty clipboard, which is how
 this hid for a full debugging round.
 
-## §6 onwards — to be written
+## §6 — what Windows actually charges (measured 2026-08-03)
 
-The fan-out continues: three more backends, the Android helper APK,
-then the matrix.
+tools/win/clipprobe, run in the VM's interactive session against the
+same `windows` crate version the backend links, with stock Windows
+PowerShell 5.1 as the foreign half of every assertion. One probe run
+answered everything; the arm followed the same afternoon.
 
-Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering
-and the paste hook, Cut/Copy/Paste as standard commands (the gesture
-layer §0 argued the data layer cannot replace), the Rust binding, the
-scene. Then the fan-out — seven more bindings, three more backends, the
-Android helper APK — and the matrix.
+### 1. EVERY SSH CONNECTION IS ITS OWN CLIPBOARD
+
+Not "session 0 vs the console": each ssh logon gets a fresh window
+station (`Service-0x0-…$`), hence a fresh, empty clipboard — a value
+written in one connection reads back null in the next. So neither the
+seeds nor the reads may run over ssh. The guest runs in session 1
+(deploy-win launches through `schtasks /it`), so the harness verbs
+spawn PowerShell as CHILDREN OF THE GUEST and share the one real
+clipboard; the probe orchestrates both halves inside one /it task for
+the same reason.
+
+### 2. CLASSIC WIN32, NOT WinRT DataTransfer
+
+Three charges disqualify the modern API for a harness-driven app:
+`Clipboard.SetContent` is documented to work "only when the
+application is in the foreground", which a matrix leg cannot promise;
+the WinRT→Win32 bridge for a CUSTOM format id is documented only in
+the read direction (and Microsoft records the write side of that
+bridge as asymmetric); and SetContent's data dies with the process
+unless flushed. Classic `OpenClipboard`/`EmptyClipboard`/
+`SetClipboardData` — five formats in ONE open, descending clip value —
+has none of them: measured, all five representations read back
+byte-exact through foreign stock tooling AFTER THE SETTER EXITED, and
+`RegisterClipboardFormatW("dev.kaya/note")` registers the ratified
+slashed id and reads its name back VERBATIM. Reads are synchronous
+pulls, so "answered exactly once" needs no async bridge on this
+backend.
+
+### 3. CF_HTML, BOTH DIRECTIONS, AND THE DOCS ARE WRONG
+
+Microsoft's own worked example is arithmetically broken (its fragment
+offsets mix two relative bases beside two absolute ones) — construct,
+never pattern-match. The arm builds the header with 10-DIGIT
+FIXED-WIDTH offsets, which is what makes the header length a constant
+rather than a fixpoint; the read side carries the equal and opposite
+parser (StartFragment/EndFragment BYTE offsets into the payload),
+because kaya's html representation is the raw fragment and a paste
+must never hand the guest a header it did not write. The parser is
+proven against a header we did not build: PowerShell 5.1's
+`Set-Clipboard -AsHtml` — which, contrary to every web source
+(they describe `Clipboard.SetText`, a different code path), emits a
+CORRECT header with 9-digit space-padded offsets.
+
+Two foreign-reader traps, measured: `Get-Clipboard -TextFormatType
+Html` decodes the UTF-8 payload with the ANSI code page and corrupts
+non-ASCII irreversibly — the harness reads html through
+PresentationCore's `[Windows.Clipboard]::GetText(Html)` instead. And
+`[Windows.Clipboard]::SetData` with a STRING rides WPF's
+serialized-object path (a 16-byte GUID + BinaryFormatter blob) that
+round-trips inside PowerShell while every other reader sees garbage —
+a MemoryStream writes the exact bytes. Both are the false-green shape
+invariant 4 exists for.
+
+### 4. IMAGE: THE "PNG" REGISTERED FORMAT, AND A DELIBERATE CUT
+
+Raw PNG bytes ride the `"PNG"` registered format (the Firefox/clip
+convention), byte-exact both directions — the same
+seed-writes-what-the-arm-reads shape wl-copy takes on linux. The
+foreign verdict is a REAL decode (GDI+ `Image::FromStream` → WxH),
+though a lenient one: BOTH stock decoders (GDI+ and WPF) accept the
+broken-CRC png of §5b finding 5, so the strict-decoder property lives
+on the linux lane alone. THE CUT: a PNG-only clip is invisible to
+DIB-path consumers (`Get-Clipboard -Format Image` answers null) —
+offering CF_DIB would mean DECODING the png in the arm, and the
+closed set's image is encoded bytes everywhere. Recorded as
+deliberate, the same closed-world choice as GTK reading only
+image/png.
+
+### 5. THE REST OF THE LEDGER
+
+- **Files**: DROPFILES is a 20-byte struct (pFiles=20, fWide=1) +
+  UTF-16 NUL-terminated paths + one extra NUL; round-trips through
+  `Set-Clipboard -LiteralPath` / `-Format FileDropList` both ways. A
+  pasted file registers into the SAME picked table the file dialog
+  fills, so `kaya_open_picked` redeems it identically.
+- **Text**: CF_UNICODETEXT, UTF-16LE + NUL. Guest strings are written
+  VERBATIM (LF stays LF — measured: `Get-Clipboard -Raw` preserves
+  it) and reads normalize CRLF→LF at the boundary, the same `lf`
+  discipline every TextBox string already rides.
+- **PowerShell is PINNED to 5.1** (`powershell.exe`), and the edition
+  is ASSERTED inside every harness script: pwsh has neither
+  `-Format`/`-TextFormatType` nor `-AsHtml`/`-LiteralPath`, and the
+  capabilities vanish SILENTLY there. The VM has no pwsh today; the
+  guard is for the day someone installs it.
+- **GlobalSize may exceed the written length** (the allocator rounds
+  up), so self-delimiting formats trust their own delimiters and a
+  custom format's bytes are whatever the allocation says — the
+  platform's own grammar for them, verbatim per the design.
+- **Enablement**: the intersection is recomputed INLINE at every
+  activation (menu_user_activate), plus on focus and
+  WM_CLIPBOARDUPDATE listeners for the chrome — the mac finding's
+  refresh rule with this platform's own change signal. AND BEFORE A
+  HARNESS ACTIVATION, where it is load-bearing beyond a grayed row:
+  the harness invokes through the item's automation peer, and
+  `Invoke()` on a still-disabled item THROWS inside a dispatcher
+  callback — a stowed exception, exit 0xC000027B, process gone. The
+  focus listeners refresh on a DEFERRED tick, so a
+  focus-then-activate script races it; the first full lane run lost
+  exactly one leg of five to that race (rust, the fastest), and the
+  refresh at the activation site is what closed it — the same fix,
+  for a harder failure, than macOS's inert-item version of this
+  finding.
+- **The UIA field-name fallback**: a WinUI TextBox publishes an EMPTY
+  Name and serves its content through ValuePattern, so the ax read
+  falls back to the field's value — the macOS AXValue / GTK AT-SPI
+  Text chain, spelled WinUI.
+
+## §7 onwards — to be written
+
+The fan-out continues: Compose + the Android helper APK, then the
+iOS arm (measure UIPasteboard's charge for a slashed custom type
+FIRST — §5b finding 4's two macOS write paths are the warning), then
+the full matrix.

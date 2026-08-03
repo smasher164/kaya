@@ -95,6 +95,12 @@ for arg in "$@"; do
         menus_rust|menus_python|menus_go|menus_csharp|menus_java) SUITE="$arg" ;;
         filedialog_rust|filedialog_python|filedialog_go|filedialog_csharp|filedialog_java) SUITE="$arg" ;;
         commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
+        clipboard_rust|clipboard_python|clipboard_go|clipboard_csharp|clipboard_java) SUITE="$arg" ;;
+        # These two were wired as legs without arms here, so a single
+        # leg could not be re-run in isolation — the one-leg-repeatedly
+        # loop is the only practical way to characterise a rare flake.
+        background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
+        stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -1199,6 +1205,27 @@ case "$SUITE" in
         run_suite commands_csharp
         drain_suites
         run_suite commands_java
+        drain_suites
+        # The clipboard scene: one clip in several representations, the
+        # privileged read, the paste split, and Paste as a standard
+        # command. THE LEGS ARE MUTUALLY EXCLUSIVE, ONE DRAIN EACH
+        # (docs/clipboard-plan.md §0d, the 2026-08-02 correction): there
+        # is one system clipboard per session, and legs writing it
+        # concurrently are processes assigning one variable — measured
+        # on mac, six of eight failed concurrently and the same eight
+        # passed serially. NOT the menus reason: menu_activate here
+        # drives the real invoke pipeline, no chord is injected — the
+        # same barrier, a different cause. check-steps pins the
+        # drain/run/drain shape on each leg.
+        run_suite clipboard_rust
+        drain_suites
+        run_suite clipboard_python
+        drain_suites
+        run_suite clipboard_go
+        drain_suites
+        run_suite clipboard_csharp
+        drain_suites
+        run_suite clipboard_java
         drain_suites
         ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;

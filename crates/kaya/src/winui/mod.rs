@@ -296,6 +296,15 @@ struct CoreState {
     /// Coalesced per drain: any op touching the command surface sets
     /// it; one rebuild follows the batch.
     menus_touched: bool,
+    /// Accept lists by widget id (the accepts prop; empty = unset =
+    /// absent here). The paste split and Paste's enablement both read
+    /// it. The root admits the prop on entries and textareas
+    /// (scene.rs), whose identity tags entry_tags already carries.
+    accepts: HashMap<u64, String>,
+    /// A clipboard surface appeared (accepts / copy / read): the
+    /// refresh sites consult it, so the scenes that never touch the
+    /// clipboard pay nothing for the role recomputation.
+    clipboard_armed: bool,
 }
 
 /// One section's materialized state: the pane Grid (the mount
@@ -337,6 +346,12 @@ struct MenuModel {
     checked: bool,
     value: f64,
     primary: bool,
+    /// A standard-command role from the closed vocabulary ("" =
+    /// none). PLACEMENT is inert here (no dress-owned application
+    /// menu), but the clipboard roles change BEHAVIOR: activation
+    /// performs the command on the focused widget, and enablement
+    /// folds in role_enabled (refresh_clipboard_roles).
+    role: String,
     shortcut: String,
     children: Vec<u64>,
     parent: Option<u64>,
@@ -366,6 +381,20 @@ impl MenuNative {
             MenuNative::Action(i) => i.IsEnabled(),
             MenuNative::Toggle(i) => i.IsEnabled(),
             MenuNative::Option(i) => i.IsEnabled(),
+        }
+    }
+
+    /// The write side of the same flag — what refresh_clipboard_roles
+    /// stamps the intersection enablement through. The rebuild writes
+    /// structural enablement alone, so every rebuild is followed by a
+    /// role refresh.
+    fn set_enabled(&self, on: bool) -> windows_core::Result<()> {
+        match self {
+            MenuNative::Bar(i) => i.SetIsEnabled(on),
+            MenuNative::Sub(i) => i.SetIsEnabled(on),
+            MenuNative::Action(i) => i.SetIsEnabled(on),
+            MenuNative::Toggle(i) => i.SetIsEnabled(on),
+            MenuNative::Option(i) => i.SetIsEnabled(on),
         }
     }
 }
@@ -434,6 +463,28 @@ pub(crate) fn ring_doorbell() {
     if let Some(dispatcher) = DISPATCHER.get() {
         let handler = DispatcherQueueHandler::new(|| {
             drain_transactions();
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+    }
+}
+
+/// Recompute the clipboard roles' enablement ONE TICK LATER. The
+/// callers are event handlers that can fire while CORE is borrowed —
+/// a Focus() inside apply raises GotFocus, and the WNDPROC re-enters
+/// CORE by construction — so neither may borrow here and now (the
+/// close_window precedent). The tick defers past whatever borrow is
+/// live.
+fn defer_role_refresh() {
+    if let Some(dispatcher) = DISPATCHER.get() {
+        let handler = DispatcherQueueHandler::new(|| {
+            CORE.with_borrow(|core| {
+                if let Some(core) = core.as_ref() {
+                    if core.clipboard_armed {
+                        refresh_clipboard_roles(core);
+                    }
+                }
+            });
             Ok(())
         });
         let _ = dispatcher.0.TryEnqueue(&handler);
@@ -2312,6 +2363,12 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
             core.menu_shortcuts.insert(m.shortcut.clone(), id);
         }
     }
+    // The rebuild stamped STRUCTURAL enablement alone onto the fresh
+    // natives, which would un-gray a role item whose clipboard half
+    // says no — the role factor goes back on top.
+    if core.clipboard_armed {
+        refresh_clipboard_roles(core);
+    }
     Ok(())
 }
 
@@ -2591,7 +2648,16 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
         };
         let kind = model.kind;
         let was_checked = model.checked;
+        let role = model.role.clone();
         if !menu_effective_enabled(core, item) {
+            return;
+        }
+        // A DISABLED ROLE ITEM IS INERT beyond the structural AND: the
+        // intersection half lives on the native's IsEnabled, which
+        // this route does not consult — so it is recomputed here, the
+        // same freshness rule the harness activation applies (the mac
+        // finding, docs/clipboard-plan.md §3).
+        if matches!(role.as_str(), "cut" | "copy" | "paste") && !role_enabled(core, &role) {
             return;
         }
         let noun = match attachment {
@@ -2602,6 +2668,14 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
         };
         match kind {
             MenuItemKind::Action => {
+                // A clipboard role PERFORMS rather than reports: the
+                // item is the platform's own command acting on the
+                // focused widget, so no menu occurrence goes up (the
+                // rule every arm shares; DESIGN.md — gestures are
+                // commands).
+                if perform_clipboard_role(core, &role) {
+                    return;
+                }
                 core.occurrences.send(if noun.is_empty() {
                     Occurrence::MenuActivated { item: MenuItemId(item) }
                 } else {
@@ -2805,6 +2879,422 @@ fn menu_probe() {
     }
 }
 
+// ---------------------------------------------------------------------
+// Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §6 for what
+// this platform was measured to charge — tools/win/clipprobe).
+//
+// CLASSIC WIN32, DELIBERATELY. WinRT DataTransfer's SetContent is
+// documented to work "only when the application is in the foreground",
+// which a matrix leg cannot promise; its custom-format bridge to Win32
+// atoms is documented only in the read direction; and its content dies
+// with the process unless flushed. Classic SetClipboardData has none
+// of those charges — measured: five formats set in one open outlive
+// the setter's exit and read back byte-exact through stock PowerShell,
+// and RegisterClipboardFormatW carries the ratified slashed custom id
+// VERBATIM (atom name reads back "dev.kaya/note").
+//
+// Reads are synchronous pulls here, so "answered exactly once" needs
+// no async bridge on this backend: the arm chooses the richest
+// offered∩accepted format off the ENUMERATED offer and reads it in
+// one open.
+// ---------------------------------------------------------------------
+
+const CF_UNICODETEXT: u32 = 13;
+const CF_HDROP: u32 = 15;
+
+fn clip_register(name: &str) -> u32 {
+    let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        windows::Win32::System::DataExchange::RegisterClipboardFormatW(
+            windows_core::PCWSTR(wide.as_ptr()),
+        )
+    }
+}
+
+/// Open with a bounded retry: the clipboard is a global lock, and
+/// another process holding it answers with an error, not a wait.
+fn clip_open_retry() -> windows_core::Result<()> {
+    let mut last = Ok(());
+    for attempt in 0..10 {
+        last = unsafe { windows::Win32::System::DataExchange::OpenClipboard(None) };
+        if last.is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20 * (attempt + 1)));
+    }
+    last
+}
+
+fn clip_set_bytes(format: u32, bytes: &[u8]) -> windows_core::Result<()> {
+    unsafe {
+        let hglobal = windows::Win32::System::Memory::GlobalAlloc(
+            windows::Win32::System::Memory::GMEM_MOVEABLE,
+            bytes.len().max(1),
+        )?;
+        let p = windows::Win32::System::Memory::GlobalLock(hglobal);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), p as *mut u8, bytes.len());
+        let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
+        windows::Win32::System::DataExchange::SetClipboardData(
+            format,
+            Some(windows::Win32::Foundation::HANDLE(hglobal.0)),
+        )?;
+        Ok(())
+    }
+}
+
+fn clip_available(format: u32) -> bool {
+    unsafe { windows::Win32::System::DataExchange::IsClipboardFormatAvailable(format).is_ok() }
+}
+
+/// One format's bytes, inside an already-open clipboard. GlobalSize
+/// may exceed the written length (the allocator rounds up), so
+/// self-delimiting formats must trust their own delimiters; a custom
+/// format's bytes are whatever the allocation says, which is the
+/// platform's own grammar for them.
+fn clip_get_bytes(format: u32) -> Option<Vec<u8>> {
+    unsafe {
+        let handle = windows::Win32::System::DataExchange::GetClipboardData(format).ok()?;
+        let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0);
+        let size = windows::Win32::System::Memory::GlobalSize(hglobal);
+        let p = windows::Win32::System::Memory::GlobalLock(hglobal);
+        if p.is_null() {
+            return None;
+        }
+        let bytes = std::slice::from_raw_parts(p as *const u8, size).to_vec();
+        let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
+        Some(bytes)
+    }
+}
+
+fn clip_utf16z(s: &str) -> Vec<u8> {
+    s.encode_utf16()
+        .chain(std::iter::once(0))
+        .flat_map(|u| u.to_le_bytes())
+        .collect()
+}
+
+/// CF_HTML with 10-digit fixed-width offsets. Fixed width is what
+/// makes the header length a CONSTANT rather than a fixpoint; pad
+/// while computing but print unpadded and every offset is silently
+/// short. Microsoft's own doc example is arithmetically wrong (its
+/// fragment offsets mix two relative bases) — this construction is
+/// verified byte-exact against a worked example and round-trips
+/// through PresentationCore's own reader (tools/win/clipprobe).
+fn build_cf_html(fragment: &str) -> Vec<u8> {
+    const HEADER_LEN: usize = 105;
+    const PREFIX: &str = "<html>\r\n<body>\r\n<!--StartFragment-->";
+    const SUFFIX: &str = "<!--EndFragment-->\r\n</body>\r\n</html>";
+    let start_fragment = HEADER_LEN + PREFIX.len();
+    let end_fragment = start_fragment + fragment.len();
+    let end_html = end_fragment + SUFFIX.len();
+    let header = format!(
+        "Version:0.9\r\nStartHTML:{HEADER_LEN:010}\r\nEndHTML:{end_html:010}\r\nStartFragment:{start_fragment:010}\r\nEndFragment:{end_fragment:010}\r\n"
+    );
+    debug_assert!(header.len() == HEADER_LEN, "the CF_HTML header stopped being a constant");
+    let mut out = header.into_bytes();
+    out.extend_from_slice(PREFIX.as_bytes());
+    out.extend_from_slice(fragment.as_bytes());
+    out.extend_from_slice(SUFFIX.as_bytes());
+    out
+}
+
+/// The read side's equal and opposite parser: kaya's html
+/// representation is the raw fragment, so a CF_HTML payload — whose
+/// header kaya may not have written — is sliced by its own
+/// StartFragment/EndFragment BYTE offsets. Proven against a foreign
+/// header with different padding than ours (PowerShell 5.1's -AsHtml
+/// pads to 9 digits with trailing spaces; digits-then-stop parses
+/// both).
+fn parse_cf_html(payload: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&payload[..payload.len().min(400)]).into_owned();
+    let grab = |key: &str| -> Option<usize> {
+        let at = head.find(key)? + key.len();
+        head[at..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse()
+            .ok()
+    };
+    let start = grab("StartFragment:")?;
+    let end = grab("EndFragment:")?;
+    if start >= end || end > payload.len() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&payload[start..end]).into_owned())
+}
+
+/// DROPFILES: the 20-byte struct (pFiles=20, pt={0,0}, fNC=0,
+/// fWide=1), then UTF-16 paths each NUL-terminated, then one extra
+/// NUL — measured round-tripping through Explorer's own
+/// FileDropList reader.
+fn build_dropfiles(paths: &[String]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&20u32.to_le_bytes());
+    out.extend_from_slice(&0i32.to_le_bytes());
+    out.extend_from_slice(&0i32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    for path in paths {
+        out.extend_from_slice(&clip_utf16z(path));
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+fn parse_dropfiles(bytes: &[u8]) -> Vec<String> {
+    if bytes.len() < 20 {
+        return Vec::new();
+    }
+    let p_files = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+    let f_wide = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+    if f_wide == 0 {
+        // An ANSI list is legal but nothing modern writes one; a
+        // foreign ANSI writer would surface here as an empty answer
+        // rather than mojibake.
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut at = p_files;
+    loop {
+        let mut units = Vec::new();
+        while at + 1 < bytes.len() {
+            let u = u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+            at += 2;
+            if u == 0 {
+                break;
+            }
+            units.push(u);
+        }
+        if units.is_empty() {
+            break;
+        }
+        out.push(String::from_utf16_lossy(&units));
+    }
+    out
+}
+
+/// Choose the RICHEST representation the clipboard offers that the
+/// accept list takes, read exactly that one, and answer — None for no
+/// intersection, the universal no. Shared by the privileged read and
+/// the declared-paste delivery, because the two differ in their
+/// trigger and never in what they can materialize. Descending clip
+/// value — custom (accept-list order), files, image, html, text — the
+/// canonical order (§1).
+fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::protocol::Representation>> {
+    use crate::protocol::Representation as R;
+    let (kinds, custom) = crate::wire::parse_accept_list(accepting);
+    let chosen_custom = custom
+        .iter()
+        .map(|id| (id.to_string(), clip_register(id)))
+        .find(|(_, format)| clip_available(*format));
+    let png = clip_register("PNG");
+    let html = clip_register("HTML Format");
+
+    clip_open_retry()?;
+    let answer = (|| {
+        if let Some((id, format)) = chosen_custom {
+            return clip_get_bytes(format).map(|bytes| R::Custom {
+                id,
+                bytes: crate::protocol::Blob(std::sync::Arc::from(&bytes[..])),
+            });
+        }
+        if kinds & crate::wire::CLIP_FILES != 0 && clip_available(CF_HDROP) {
+            let paths = clip_get_bytes(CF_HDROP).map(|b| parse_dropfiles(&b)).unwrap_or_default();
+            let files: Vec<_> = paths
+                .into_iter()
+                .map(|path| {
+                    let name = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    // The picker's capability arriving through the
+                    // second door: the same registration the file
+                    // dialog result makes, so kaya_open_picked
+                    // redeems a pasted file identically.
+                    let handle = crate::capi::picked_register(std::sync::Arc::new(
+                        crate::protocol::PathSource { name: name.clone(), path: path.clone() },
+                    ));
+                    crate::protocol::PickedFile { handle, name, local_path: path }
+                })
+                .collect();
+            return (!files.is_empty()).then_some(R::Files(files));
+        }
+        if kinds & crate::wire::CLIP_IMAGE != 0 && clip_available(png) {
+            return clip_get_bytes(png)
+                .map(|b| R::Image(crate::protocol::Blob(std::sync::Arc::from(&b[..]))));
+        }
+        if kinds & crate::wire::CLIP_HTML != 0 && clip_available(html) {
+            return clip_get_bytes(html).and_then(|b| parse_cf_html(&b)).map(R::Html);
+        }
+        if kinds & crate::wire::CLIP_TEXT != 0 && clip_available(CF_UNICODETEXT) {
+            return clip_get_bytes(CF_UNICODETEXT).map(|bytes| {
+                let units: Vec<u16> = bytes
+                    .chunks_exact(2)
+                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .take_while(|&u| u != 0)
+                    .collect();
+                // The lf boundary: clipboard text is CRLF by Windows
+                // convention, guest strings are LF everywhere.
+                R::Text(lf(String::from_utf16_lossy(&units)))
+            });
+        }
+        None
+    })();
+    unsafe { windows::Win32::System::DataExchange::CloseClipboard()? };
+    Ok(answer)
+}
+
+/// The focused editable widget, if any: the root admits `accepts` on
+/// entries and textareas alone (scene.rs), and a TextBox IS its own
+/// focus target here — no GtkText delegation to walk.
+fn focused_editable_id(core: &CoreState) -> Option<u64> {
+    let focused = |field: &TextBox| {
+        field
+            .FocusState()
+            .map(|s| s != FocusState::Unfocused)
+            .unwrap_or(false)
+    };
+    for (i, field) in core.entries.iter().enumerate() {
+        if focused(field) {
+            return Some(core.entry_ids[i]);
+        }
+    }
+    for (i, field) in core.textareas.iter().enumerate() {
+        if focused(field) {
+            return Some(core.textarea_ids[i]);
+        }
+    }
+    None
+}
+
+fn editable_by_id(core: &CoreState, id: u64) -> Option<TextBox> {
+    if let Some(i) = core.entry_ids.iter().position(|&e| e == id) {
+        return Some(core.entries[i].clone());
+    }
+    core.textarea_ids
+        .iter()
+        .position(|&t| t == id)
+        .map(|i| core.textareas[i].clone())
+}
+
+/// Whether a clipboard role's command can act right now; a non-role
+/// item answers true and pays nothing. THE SAME RULE AS THE OTHER
+/// ARMS (kayaRoleEnabled, gtk's role_enabled): paste is the
+/// INTERSECTION of what the clipboard offers and what the focused
+/// widget accepts — a widget that declared NOTHING still pastes (the
+/// platform inserts), so an undeclared target enables on the text
+/// offer alone. Cut and copy need a focused editable.
+/// IsClipboardFormatAvailable needs no open, so this is cheap enough
+/// for every refresh site.
+fn role_enabled(core: &CoreState, role: &str) -> bool {
+    match role {
+        "cut" | "copy" => focused_editable_id(core).is_some(),
+        "paste" => {
+            let Some(id) = focused_editable_id(core) else {
+                return false;
+            };
+            let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
+            if accepts.is_empty() {
+                return clip_available(CF_UNICODETEXT);
+            }
+            let (kinds, custom) = crate::wire::parse_accept_list(&accepts);
+            custom.iter().any(|id| clip_available(clip_register(id)))
+                || (kinds & crate::wire::CLIP_FILES != 0 && clip_available(CF_HDROP))
+                || (kinds & crate::wire::CLIP_IMAGE != 0 && clip_available(clip_register("PNG")))
+                || (kinds & crate::wire::CLIP_HTML != 0
+                    && clip_available(clip_register("HTML Format")))
+                || (kinds & crate::wire::CLIP_TEXT != 0 && clip_available(CF_UNICODETEXT))
+        }
+        _ => true,
+    }
+}
+
+/// Recompute the clipboard roles' enablement onto the REAL chrome.
+/// THE MAC FINDING, spelled WinUI (docs/clipboard-plan.md §3):
+/// enablement is the intersection of what the clipboard offers and
+/// what the focused widget accepts, and both move long after the bar
+/// was built. menu_user_activate refuses a disabled item natively, so
+/// this runs wherever enablement can change hands: a role or accepts
+/// list lands, a copy goes out, the clipboard or the focus changes,
+/// the coalesced rebuild restamps structural enablement — and before
+/// a harness activation.
+fn refresh_clipboard_roles(core: &CoreState) {
+    for (&id, model) in &core.menu_models {
+        if !matches!(model.role.as_str(), "cut" | "copy" | "paste") {
+            continue;
+        }
+        let on = menu_effective_enabled(core, id) && role_enabled(core, model.role.as_str());
+        for ((_, native_id), native) in &core.menu_natives {
+            if *native_id == id {
+                let _ = native.set_enabled(on);
+            }
+        }
+    }
+}
+
+/// Perform a clipboard role on the focused widget. Answers whether it
+/// WAS one, so a plain action falls through to its own dispatch.
+///
+/// THE PASTE SPLIT (DESIGN.md): a widget that DECLARED what it
+/// accepts takes the content itself — the same materialization walk
+/// as the privileged read, delivered to the paste hook — while one
+/// that declared nothing gets the platform's own insertion
+/// (TextBox::PasteFromClipboard, the method its own context menu
+/// calls) and its ordinary change path reports the result. The
+/// swallow counter is NOT bumped for that insertion: a paste acts
+/// like the user, and the field's TextChanged is the report.
+fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
+    match role {
+        "cut" | "copy" => {
+            if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id))
+            {
+                let _ = if role == "cut" {
+                    field.CutSelectionToClipboard()
+                } else {
+                    field.CopySelectionToClipboard()
+                };
+            }
+            true
+        }
+        "paste" => {
+            let Some(id) = focused_editable_id(core) else {
+                return true;
+            };
+            let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
+            if accepts.is_empty() {
+                if let Some(field) = editable_by_id(core, id) {
+                    let _ = field.PasteFromClipboard();
+                }
+                return true;
+            }
+            let clip = match materialize_clipboard(&accepts) {
+                Ok(Some(clip)) => clip,
+                // A paste that delivered nothing is not an occurrence
+                // (the read owns the empty answer).
+                _ => return true,
+            };
+            let tag = core
+                .entry_tags
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| crate::wire::click_tag(id, &[]));
+            let occurrence = match crate::wire::decode_click_tag(&tag) {
+                Occurrence::ButtonClicked { id } => Occurrence::Pasted { id, clip },
+                Occurrence::InstanceButtonClicked { node, path } => {
+                    Occurrence::InstancePasted { node, path, clip }
+                }
+                other => panic!(
+                    "kaya: a paste tag decoded to {other:?}, which is not a widget identity"
+                ),
+            };
+            core.occurrences.send(occurrence);
+            true
+        }
+        _ => false,
+    }
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -2859,6 +3349,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
+                    // Paste's enablement is the offer/accepts
+                    // intersection AT THE FOCUSED WIDGET, so focus
+                    // moving hands it over — deferred a tick, because
+                    // a programmatic Focus() inside apply raises this
+                    // while CORE is borrowed.
+                    let focus_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.GotFocus(&focus_handler)?;
+                    let blur_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.LostFocus(&blur_handler)?;
                     core.entries.push(field.clone());
                     core.entry_ids.push(id.0);
                     core.entry_swallow.insert(id.0, swallow);
@@ -3036,6 +3541,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
+                    // Same focus-handoff refresh as the entry (paste
+                    // enablement follows the focused editable).
+                    let focus_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.GotFocus(&focus_handler)?;
+                    let blur_handler = RoutedEventHandler::new(move |_, _| {
+                        defer_role_refresh();
+                        Ok(())
+                    });
+                    field.LostFocus(&blur_handler)?;
                     core.textareas.push(field.clone());
                     core.textarea_ids.push(id.0);
                     core.entry_swallow.insert(id.0, swallow);
@@ -3448,6 +3965,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     checked: false,
                     value: 0.0,
                     primary: false,
+                    role: String::new(),
                     shortcut: String::new(),
                     children: Vec::new(),
                     parent: None,
@@ -3512,18 +4030,69 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // rows carry no icon in this lowering (the section
                 // Icon precedent: accepted, day-one slot).
                 MenuProp::Icon => {}
-                // A standard-command role is a placement REQUEST that
-                // this host has nowhere to honor: there is no
-                // dress-owned application menu here, so the item stays
-                // exactly where the app declared it (DESIGN.md, Menus).
-                MenuProp::Role => {}
+                // PLACEMENT is a request this host has nowhere to
+                // honor — no dress-owned application menu — so the
+                // item stays exactly where the app declared it
+                // (DESIGN.md, Menus). BEHAVIOR is not: a clipboard
+                // role's activation performs the standard command on
+                // the focused widget, and its enablement is the
+                // offer/accepts intersection, so the role is recorded
+                // and the role items resync now.
+                MenuProp::Role => {
+                    model.role = crate::protocol::prop_str(&value).to_owned();
+                    refresh_clipboard_roles(core);
+                }
             }
             core.menus_touched = true;
         }
 
-        // The clipboard's depth slice is SwiftUI on mac
-        // (docs/clipboard-plan.md); this backend has not reached it.
-        ApplyOp::Copy(_) | ApplyOp::ReadClipboard { .. } => crate::depth_stub("clipboard"),
+        ApplyOp::Copy(clip) => {
+            core.clipboard_armed = true;
+            // Five formats in ONE open, descending clip value —
+            // custom, files, image, html, text — the canonical order
+            // (§1), which is preference (first-set) order on this
+            // host. EmptyClipboard makes this process the owner;
+            // classic SetClipboardData is immediate rendering, so the
+            // content outlives the process with no Flush of any kind
+            // (measured, tools/win/clipprobe).
+            clip_open_retry()?;
+            unsafe { windows::Win32::System::DataExchange::EmptyClipboard()? };
+            let result: windows_core::Result<()> = (|| {
+                for (id, bytes) in &clip.custom {
+                    clip_set_bytes(clip_register(id), &bytes.0)?;
+                }
+                if !clip.files.is_empty() {
+                    clip_set_bytes(CF_HDROP, &build_dropfiles(&clip.files))?;
+                }
+                if let Some(png) = &clip.image {
+                    // Raw bytes under the "PNG" registered format —
+                    // the Firefox/clip convention, byte-exact both
+                    // ways (measured). CF_DIB is a deliberate cut: it
+                    // would mean decoding the PNG here, and the
+                    // closed set's image is ENCODED BYTES everywhere.
+                    clip_set_bytes(clip_register("PNG"), &png.0)?;
+                }
+                if let Some(html) = &clip.html {
+                    clip_set_bytes(clip_register("HTML Format"), &build_cf_html(html))?;
+                }
+                if let Some(text) = &clip.text {
+                    clip_set_bytes(CF_UNICODETEXT, &clip_utf16z(text))?;
+                }
+                Ok(())
+            })();
+            unsafe { windows::Win32::System::DataExchange::CloseClipboard()? };
+            result?;
+            refresh_clipboard_roles(core);
+        }
+        ApplyOp::ReadClipboard { request, accepting } => {
+            core.clipboard_armed = true;
+            // Answered exactly once; None IS an answer — the
+            // universal no (denied, absent, unfocused and
+            // nothing-accepted alike). Win32 reads are synchronous
+            // pulls, so no async bridge lives here.
+            let clip = materialize_clipboard(&accepting)?;
+            core.occurrences.send(Occurrence::ClipboardResult { request, clip });
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
             // means by a file picker.
@@ -3817,6 +4386,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         &element,
                         &windows_core::HSTRING::from(hint.as_str()),
                     )?;
+                }
+                // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard):
+                // the list drives the paste split and Paste's
+                // enablement. Kind-agnostic like the universal props
+                // — the root already restricted it to editables and
+                // validated the string. Empty means unset, the
+                // universal prop rule.
+                (_, Prop::Accepts, Value::Str(list)) => {
+                    if list.is_empty() {
+                        core.accepts.remove(&id.0);
+                    } else {
+                        core.accepts.insert(id.0, list);
+                    }
+                    core.clipboard_armed = true;
+                    refresh_clipboard_roles(core);
                 }
                 (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
@@ -4370,6 +4954,7 @@ impl IWindowNative {
 }
 
 const WM_CLOSE: u32 = 0x0010;
+const WM_CLIPBOARDUPDATE: u32 = 0x031D;
 const GWLP_WNDPROC: i32 = -4;
 
 thread_local! {
@@ -4394,6 +4979,12 @@ unsafe extern "system" fn kaya_wndproc(
     let Some((id, original)) = entry else {
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     };
+    if msg == WM_CLIPBOARDUPDATE {
+        // Deferred, never a borrow here: the WNDPROC re-enters CORE
+        // by construction (the close path's rule).
+        defer_role_refresh();
+        return unsafe { CallWindowProcW(original, hwnd, msg, wparam, lparam) };
+    }
     if msg == WM_CLOSE {
         let tearing = CORE.with_borrow(|core| {
             core.as_ref()
@@ -4440,6 +5031,12 @@ fn subclass(window: &Window, id: u64) -> windows_core::Result<()> {
         KAYA_WNDPROCS.with_borrow_mut(|m| {
             m.insert(hwnd, (id, original));
         });
+        // Paste's enablement moves when the clipboard does, and the
+        // system's own change signal is WM_CLIPBOARDUPDATE — a
+        // format listener, not the ancient viewer chain. Registered
+        // on every kaya window; the deferred refresh no-ops in
+        // scenes that never armed the clipboard.
+        AddClipboardFormatListener(hwnd);
     }
     Ok(())
 }
@@ -4478,6 +5075,10 @@ unsafe extern "system" {
     // reason).
     fn SetForegroundWindow(hwnd: isize) -> i32;
     fn GetForegroundWindow() -> isize;
+    /// The clipboard-change signal Paste's enablement follows
+    /// (WM_CLIPBOARDUPDATE to every registered listener). Raw beside
+    /// its WNDPROC consumers, matching this block's convention.
+    fn AddClipboardFormatListener(hwnd: isize) -> i32;
     fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
     fn CallWindowProcW(
         prev: isize,
@@ -4720,6 +5321,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             menu_shortcuts: HashMap::new(),
             open_context: None,
             menus_touched: false,
+            accepts: HashMap::new(),
+            clipboard_armed: false,
         });
     });
 
@@ -4732,6 +5335,44 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
 /// dispatcher. Programmatic SetIsChecked/SetText/SetValue raise the
 /// real event paths; clicks emit the button's stored tag, the same
 /// bytes the pointer path would.
+/// PowerShell single-quoted literal: the only escape is '' for '.
+#[cfg(feature = "harness")]
+fn ps_quote(s: &str) -> String {
+    s.replace('\'', "''")
+}
+
+/// The foreign clipboard tool's one entry: powershell.exe, PINNED —
+/// pwsh silently lacks the entire clipboard cmdlet surface this lane
+/// uses (-AsHtml, -LiteralPath, -Format, -TextFormatType), so the
+/// edition is asserted INSIDE the script; a future shell swap fails
+/// loudly here instead of reading empty (the guard, not a memory).
+/// Runs on the harness thread — a child process on the app thread
+/// would trip the stall watchdog.
+#[cfg(feature = "harness")]
+fn run_powershell(script: &str) -> String {
+    let guarded = format!(
+        "$ErrorActionPreference='Stop'; if ($PSVersionTable.PSEdition -ne 'Desktop') {{ Write-Output 'KAYA_WRONG_EDITION'; exit 1 }}; {script}"
+    );
+    let out = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &guarded,
+        ])
+        .output()
+        .unwrap_or_else(|e| panic!("kaya: the foreign clipboard tool needs powershell.exe: {e}"));
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        !stdout.contains("KAYA_WRONG_EDITION"),
+        "kaya: powershell resolved to a non-Desktop edition — the clipboard \
+         cmdlet surface differs there (docs/clipboard-plan.md §6)"
+    );
+    stdout
+}
+
 #[cfg(feature = "harness")]
 struct WinUiStage;
 
@@ -4822,6 +5463,18 @@ impl crate::harness::Stage for WinUiStage {
         // BEFORE invoking, keep the flyout handle through Closed, and
         // await it before another open may start. No sleeps.
         let wait = Self::on_ui_mut(move |core| {
+            // THE HARNESS-ACTIVATION REFRESH (the mac finding, §3),
+            // and here it is load-bearing beyond a grayed row: the
+            // invoke pipeline goes through the item's automation
+            // peer, and Invoke() on a still-disabled item THROWS
+            // inside a dispatcher callback — a stowed exception,
+            // 0xC000027B, process gone. Focus changes refresh
+            // enablement on a DEFERRED tick, so without this a
+            // focus-then-activate script races that tick (measured:
+            // the clipboard scene's first Edit>Paste, rust leg).
+            if core.clipboard_armed {
+                refresh_clipboard_roles(core);
+            }
             let (roots, flyout, attachment) = match &core.open_context {
                 Some((widget, flyout)) => (
                     core.context_roots.get(widget).cloned().unwrap_or_default(),
@@ -5102,7 +5755,31 @@ impl crate::harness::Stage for WinUiStage {
                 eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} for {target:?}");
                 "unknown"
             };
-            Ok(format!("{role}/{}", peer.GetName()?))
+            let name = peer.GetName()?.to_string();
+            // A text field with no authored label publishes an EMPTY
+            // UIA Name — its content lives on the ValuePattern, and
+            // that value is what a screen reader speaks for it. The
+            // same fallback chain the other platforms take (macOS
+            // description -> title -> AXValue; GTK name -> AT-SPI Text
+            // content), so `field/<its text>` reads the same
+            // everywhere. The TextBox's Text IS the value the peer's
+            // ValueProvider serves; reading it here stays inside the
+            // platform's own property surface.
+            let name = if name.is_empty()
+                && matches!(target.kind, K::Entry | K::Textarea)
+            {
+                match target.kind {
+                    K::Entry => try_resolve(target.index, core.entries.len())
+                        .map(|i| lf(core.entries[i].Text().map(|t| t.to_string()).unwrap_or_default()))
+                        .unwrap_or_default(),
+                    _ => try_resolve(target.index, core.textareas.len())
+                        .map(|i| lf(core.textareas[i].Text().map(|t| t.to_string()).unwrap_or_default()))
+                        .unwrap_or_default(),
+                }
+            } else {
+                name
+            };
+            Ok(format!("{role}/{name}"))
         })
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
@@ -5342,7 +6019,15 @@ impl crate::harness::Stage for WinUiStage {
         // (docs/traps.md: menu legs run serially for this verb).
         let owned = Self::on_ui_read({
             let spec = spec.clone();
-            move |core| Ok(core.menu_shortcuts.contains_key(&spec))
+            move |core| {
+                // Same freshness rule as menu_activate: the chord may
+                // land on a role item whose enablement is a deferred
+                // tick stale.
+                if core.clipboard_armed {
+                    refresh_clipboard_roles(core);
+                }
+                Ok(core.menu_shortcuts.contains_key(&spec))
+            }
         })
         .unwrap_or(false);
         // A chord no catalog item owns is a SCRIPT error, said out
@@ -6198,16 +6883,114 @@ impl crate::harness::Stage for WinUiStage {
         }
     }
 
-    /// The foreign reader and writer. THE STUB IS A CALL, so
-    /// check-stubs sees it: this backend has no clipboard yet, and a
-    /// leg wired against it would otherwise seed nothing and compare
-    /// against an empty string that looks like a real answer.
-    fn clipboard_seed(&self, _kind: &str, _argument: &str) {
-        crate::depth_stub("clipboard")
+    /// The foreign WRITER: Windows PowerShell 5.1 as a child of this
+    /// process — the guest runs in the interactive session (deploy-win
+    /// launches through schtasks /it), so its children share the ONE
+    /// real clipboard; an ssh-spawned tool would get a per-connection
+    /// window station with a clipboard of its own (measured,
+    /// docs/clipboard-plan.md §6). 5.1 and never pwsh: -AsHtml,
+    /// -LiteralPath, -Format and -TextFormatType all vanish silently
+    /// there — the script asserts the edition rather than assuming.
+    ///
+    /// AND IT WAITS UNTIL THE CONTENT IS REALLY THERE (the osascript
+    /// lesson, §3): the script polls the pasteboard's own Contains*
+    /// after writing and prints KAYA_SEEDED only when the seed is
+    /// visible; a seed that does not verify makes everything after it
+    /// race.
+    fn clipboard_seed(&self, kind: &str, argument: &str) {
+        let script = match kind {
+            "text" => format!(
+                "Set-Clipboard -Value '{a}'; \
+                 foreach ($i in 1..50) {{ if ((Get-Clipboard -Raw) -eq '{a}') {{ 'KAYA_SEEDED'; exit }} ; Start-Sleep -Milliseconds 100 }}; 'KAYA_SEED_LOST'",
+                a = ps_quote(argument)
+            ),
+            "html" => format!(
+                "Add-Type -AssemblyName PresentationCore; \
+                 Set-Clipboard -Value '{a}' -AsHtml; \
+                 foreach ($i in 1..50) {{ if ([Windows.Clipboard]::ContainsText([Windows.TextDataFormat]::Html)) {{ 'KAYA_SEEDED'; exit }}; Start-Sleep -Milliseconds 100 }}; 'KAYA_SEED_LOST'",
+                a = ps_quote(argument)
+            ),
+            "image" => format!(
+                // Raw PNG bytes under the \"PNG\" registered format —
+                // the same shape wl-copy -t image/png seeds on linux:
+                // the seed writes the type the arm reads, and the
+                // MemoryStream form writes EXACT bytes (a plain
+                // string or object would ride WPF's serialized-object
+                // path that only PowerShell can read back).
+                "Add-Type -AssemblyName PresentationCore; \
+                 $b = [IO.File]::ReadAllBytes('{a}'); \
+                 $ms = New-Object IO.MemoryStream (,$b); \
+                 [Windows.Clipboard]::SetData('PNG', $ms); \
+                 foreach ($i in 1..50) {{ if ([Windows.Clipboard]::ContainsData('PNG')) {{ 'KAYA_SEEDED'; exit }}; Start-Sleep -Milliseconds 100 }}; 'KAYA_SEED_LOST'",
+                a = ps_quote(argument)
+            ),
+            "files" => format!(
+                "Add-Type -AssemblyName PresentationCore; \
+                 Set-Clipboard -LiteralPath '{a}'; \
+                 foreach ($i in 1..50) {{ if ([Windows.Clipboard]::ContainsFileDropList()) {{ 'KAYA_SEEDED'; exit }}; Start-Sleep -Milliseconds 100 }}; 'KAYA_SEED_LOST'",
+                a = ps_quote(argument)
+            ),
+            custom => panic!(
+                "kaya: clipboard_seed cannot write {custom:?} from outside the app — \
+                 no stock tool writes an app-defined format, and a helper kaya wrote \
+                 would be foreign in name only"
+            ),
+        };
+        let out = run_powershell(&script);
+        assert!(
+            out.contains("KAYA_SEEDED"),
+            "kaya: clipboard_seed {kind} never appeared on the clipboard: {out}"
+        );
     }
 
-    fn clipboard_read(&self, _kind: &str) -> String {
-        crate::depth_stub("clipboard")
+    /// The foreign READER, per kind: text via Get-Clipboard -Raw;
+    /// html via PresentationCore's GetText(Html) — NEVER Get-Clipboard
+    /// -TextFormatType, which decodes the UTF-8 payload with the ANSI
+    /// code page and corrupts non-ASCII irreversibly — with the
+    /// CF_HTML fragment sliced out host-side by the same parser the
+    /// arm uses; an image as its DECODED size through GDI+ (a real
+    /// foreign decode of the PNG bytes, though a lenient one: both
+    /// stock decoders accept a bad IDAT CRC, so the strict-decoder
+    /// property lives on the linux lane alone — measured); files as
+    /// the first entry's basename (pbpaste parity); custom as the
+    /// exact bytes via GetData's MemoryStream.
+    fn clipboard_read(&self, kind: &str) -> String {
+        match kind {
+            "text" => lf(run_powershell(
+                "$t = Get-Clipboard -Raw; if ($null -ne $t) { $t }",
+            ))
+            .trim_end_matches('\n')
+            .to_owned(),
+            "html" => {
+                let raw = run_powershell(
+                    "Add-Type -AssemblyName PresentationCore; \
+                     [Windows.Clipboard]::GetText([Windows.TextDataFormat]::Html)",
+                );
+                parse_cf_html(raw.as_bytes()).unwrap_or_default()
+            }
+            "image" => run_powershell(
+                "Add-Type -AssemblyName PresentationCore; Add-Type -AssemblyName System.Drawing; \
+                 $ms = [Windows.Clipboard]::GetData('PNG'); \
+                 if ($ms) { try { $i = [System.Drawing.Image]::FromStream($ms); \"$($i.Width)x$($i.Height)\" } catch { \"<$($ms.Length) bytes of PNG that GDI+ rejects>\" } }",
+            )
+            .trim()
+            .to_owned(),
+            "files" => run_powershell(
+                "$fd = Get-Clipboard -Format FileDropList; \
+                 if ($fd) { ($fd | Select-Object -First 1).Name }",
+            )
+            .trim()
+            .to_owned(),
+            custom => run_powershell(&format!(
+                "Add-Type -AssemblyName PresentationCore; \
+                 $ms = [Windows.Clipboard]::GetData('{}'); \
+                 if ($ms) {{ $b = New-Object byte[] $ms.Length; [void]$ms.Read($b, 0, $ms.Length); [Text.Encoding]::UTF8.GetString($b) }}",
+                ps_quote(custom)
+            ))
+            .trim_end_matches("\r\n")
+            .trim_end_matches('\n')
+            .to_owned(),
+        }
     }
 
     fn goto_directory(&self, path: &str) {

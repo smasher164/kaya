@@ -52,6 +52,20 @@ windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Foundation_Collections",
     "Win32_System_Com",
+    # The clipboard arm: classic Win32, DELIBERATELY — measured
+    # 2026-08-03 (docs/clipboard-plan.md §6). WinRT DataTransfer's
+    # SetContent works "only when the application is in the
+    # foreground", which a matrix leg cannot promise; its custom-format
+    # bridge to Win32 atoms is documented only in the read direction;
+    # and its content dies with the process unless flushed. Classic
+    # SetClipboardData has none of those charges: five formats set in
+    # one open outlive the process and read back byte-exact through
+    # stock PowerShell (tools/win/clipprobe). DataExchange is
+    # OpenClipboard/SetClipboardData/RegisterClipboardFormatW;
+    # Memory is the GlobalAlloc/GlobalLock family clipboard handles
+    # ride on.
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
 # NO Win32_UI_Accessibility, DELIBERATELY, and this is a wall rather
 # than a preference. UI Automation cannot be used against the Shell's
 # file dialog from a guest process: attaching any automation client
