@@ -832,6 +832,68 @@ Python and OCaml install a redeemer into a module-level slot, and
 Haskell threads it as a function argument, which is that language's
 answer to the same problem and needs no global.
 
+## §5b — what the GDK probe measured (2026-08-02, partial)
+
+tools/linux/gdkclipprobe, run under sway in the lane's own image
+against the same gtk4 crate the backend links. Two answers landed; the
+foreign half is BLOCKED on an open question that has to be settled
+before the arm is written.
+
+### 1. A UNION PROVIDER REALLY DOES ADVERTISE ALL FOUR
+
+`gdk_content_provider_new_union` of text + html + image + custom leaves
+the clipboard advertising, by GDK's own account:
+
+    gchararray GdkTexture GdkPixbuf text/html image/png dev.kaya.note
+    text/plain;charset=utf-8 text/plain;charset=ANSI_X3.4-1968 text/plain
+
+So the union does not let the last provider win, an ARBITRARY custom
+mime type is accepted verbatim (`dev.kaya.note` is there), and GTK adds
+the text aliases and the texture/pixbuf shapes for free. That is the
+copy arm's structure settled: build one provider per populated
+representation, union them, set once.
+
+### 2. AN UNSATISFIABLE READ FAILS FAST — THE ARM NEEDS NO TIMEOUT
+
+`read_async` for a type nothing offers answered in **0ms** with
+`Err("No compatible formats to transfer clipboard contents.")`. It does
+not hang. So the async-to-answered-exactly-once bridge is
+straightforward: Err maps to the empty answer, which is the universal
+no the design already defines, and the arm needs no bound of its own.
+(This was the question most likely to have forced a redesign — a
+hanging read would have meant a wedged leg and a timeout in the arm.)
+
+### 3. OPEN: A FOREIGN READER SEES NOTHING AT ALL
+
+With wl-paste present and the same clipboard GDK has just described,
+every foreign read answers `Nothing is copied` — targets, text, html,
+image and custom alike. GDK thinks it set the content; the compositor
+hands a foreign client nothing.
+
+THIS IS THE SAME FAMILY AS THE WESTON FINDING (§0e finding 1), and it
+must be settled before the arm is written, because it decides whether
+the linux legs can hold the foreign-reader standard every other lane
+holds. The candidates, in the order worth testing:
+
+- **No seat, again.** The probe runs sway with
+  `WLR_LIBINPUT_NO_DEVICES=1`; a compositor with no input devices may
+  expose no seat, and a Wayland client cannot own a selection without
+  one. Check `wayland-info` for wl_seat, exactly as the Weston probe
+  did.
+- **No serial.** Wayland requires a recent input-event serial to set
+  the selection. A headless session that has delivered no input has no
+  serial to offer, and GTK would fail silently on the compositor side
+  while its own bookkeeping still reports the content set.
+- **The window never mapped.** `present()` is asynchronous; the probe
+  sets content immediately after. Setting the selection before the
+  surface is mapped and focused may be dropped.
+
+Note the shape of the failure, because it is the trap: GDK's own
+`formats()` reported everything correctly. A backend that verified its
+copy by asking GDK would have passed while nothing reached the
+clipboard — which is precisely why every assertion in this scene
+crosses a process boundary.
+
 ## §6 onwards — to be written
 
 The fan-out continues: three more backends, the Android helper APK,

@@ -27,7 +27,22 @@ answer it REPLACED), §0e and §1b (what the probes measured), §1-§3
 
 ## What remains, in the order to do it
 
-### 1. The seven other bindings
+### 0. DONE SINCE THIS MAP WAS WRITTEN
+
+- The occurrence floor no longer caps a record (it aborted the process
+  above 208 bytes of payload; docs/traps.md).
+- ALL EIGHT BINDINGS and their guests: copy, read, `accepts`,
+  `on_paste`, the sum. validate-mac ALL PASS, 232 legs.
+- The scene is in SCENES on all three runners; the mac legs are
+  SERIALISED, one drain each (see the warning below).
+- The accept vocabulary is named in every binding (`ACCEPT_TEXT` and
+  friends, spelled the way that binding spells `ROLE_*`).
+- Two gates added, both watched failing: check-steps now demands a leg
+  per language that has a guest, and demands the java/csharp selector
+  dispatch each scene.
+- The GDK probe exists and runs: tools/linux/gdkclipprobe.
+
+### 1. The seven other bindings — DONE
 
 Every one needs the same five things. Sweep with an explicit
 do/can't/defer verdict per language (CLAUDE.md invariant 2):
@@ -59,8 +74,15 @@ Each needs: the copy arm, the read arm answering exactly once, the
 
 - **GTK/wayland.** The compositor is sway (Weston has NO clipboard at
   all — §0e finding 1). The foreign reader/writer for the harness verbs
-  is wl-copy/wl-paste, already in the container. `check-gtk.sh` needs
-  docker and is the only gate that compiles gtk.rs.
+  is wl-copy/wl-paste. `check-gtk.sh` needs docker and is the only gate
+  that compiles gtk.rs.
+  START AT docs/clipboard-plan.md §5b: the probe has already settled
+  the copy arm's structure (a union provider advertises all four
+  representations, custom mime included) and the read arm's grammar (an
+  unsatisfiable read fails fast, so no timeout is needed). IT ALSO
+  FOUND A BLOCKER: a foreign reader sees NOTHING while GDK reports the
+  content set. Settle that first — it decides whether the linux legs
+  can hold the foreign-reader standard at all.
 - **WinUI.** `CF_HTML` needs its offset header — bytes tagged
   `text/html` paste as garbage. Files are a `DROPFILES` struct with
   double-NUL-terminated wide strings.
