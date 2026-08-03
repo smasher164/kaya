@@ -70,6 +70,35 @@ let kaya_blob_register =
   foreign ~from:lib "kaya_blob_register"
     (string @-> size_t @-> returning uint64_t)
 
+let kaya_occurrence_blob =
+  foreign ~from:lib "kaya_occurrence_blob"
+    (uint64_t @-> ptr size_t @-> returning (ptr char))
+
+let kaya_occurrence_blob_release =
+  foreign ~from:lib "kaya_occurrence_blob_release" (uint64_t @-> returning void)
+
+(* Redeem an occurrence blob for its bytes, and release it. Installed
+   into the generated wire module, which opens no library of its own.
+
+   COPY THEN RELEASE, in that order: the pointer borrows core memory
+   that the release frees. A blob arriving in an OCCURRENCE is a handle
+   into a table with no boundary that retires one — unlike the apply
+   channel's batch-local index, which the next batch supersedes — so the
+   decoder is what has to let go of it, while decoding, before any
+   handle can reach an app. *)
+let occurrence_blob handle =
+  let len = allocate size_t (Unsigned.Size_t.of_int 0) in
+  let data = kaya_occurrence_blob (Unsigned.UInt64.of_int64 handle) len in
+  let n = Unsigned.Size_t.to_int !@len in
+  let out =
+    if is_null data || n = 0 then ""
+    else String.init n (fun i -> !@(data +@ i))
+  in
+  kaya_occurrence_blob_release (Unsigned.UInt64.of_int64 handle);
+  out
+
+let () = Kaya_wire.occurrence_blob := occurrence_blob
+
 let kaya_open_picked =
   foreign ~from:lib ~release_runtime_lock:true "kaya_open_picked"
     (uint64_t @-> uint32_t @-> ptr int64_t @-> ptr uint32_t @-> returning int32_t)

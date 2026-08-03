@@ -838,6 +838,34 @@ and every C guest. Doing it inside a feature milestone would mix a
 mechanical sweep into changes that need to be readable. Take it on its
 own, with the C guests compiled and the whole matrix run after.
 
+### The accessibility walk visits every window twice
+
+`kayaAxKids` in swift/KayaSwiftUI.swift gathers an element's children
+from three attributes and deduplicates only the third:
+
+    var out = windows + children                 // no dedup
+    for n in nav where !out.contains(where: { CFEqual($0, n) }) { ... }
+
+An `AXApplication` publishes the same window under BOTH `AXWindows` and
+`AXChildren`, so `out` holds it twice and every walk descends the whole
+window subtree twice. Visible directly in a `KAYA_AX_TRACE=1` dump as
+two identical `AXWindow id=main.KayaRoot-1-AppWindow-1` subtrees
+(observed 2026-08-02 on the clipboard scene).
+
+WHY IT IS WORTH FIXING rather than shrugging at: AX cost is this
+subsystem's documented hazard, not a micro-optimisation. Announcing
+`AXEnhancedUserInterface` makes AppKit rebuild its accessibility
+hierarchy and drive a full layout pass, which on 2026-07-25 put legs
+past their 120s timeout under the 8-wide pool while the same binary
+passed standalone. Every `expect_ax` pays the walk, and halving it is
+one line: extend the `CFEqual` dedup to cover `windows + children`.
+
+WHY IT IS NOT DONE HERE: it changes the SwiftUI interpreter's shared
+read path, which every accessibility assertion on mac and iOS depends
+on, in the middle of a clipboard milestone. It wants its own slice with
+the a11y scene and the full matrix behind it — and a before/after read
+count, so the saving is measured rather than assumed.
+
 ## Testing / infrastructure
 
 - ~~**Python's lifecycle handlers ran outside a transaction**~~ — FIXED

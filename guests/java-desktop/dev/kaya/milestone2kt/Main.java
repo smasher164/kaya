@@ -68,6 +68,9 @@ public final class Main {
             case "filedialog":
                 app = FileDialog::app;
                 break;
+            case "clipboard":
+                app = Clipboard::app;
+                break;
             case "nav":
                 app = Nav::app;
                 break;

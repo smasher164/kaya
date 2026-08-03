@@ -40,6 +40,17 @@ object KayaRing {
     @JvmStatic external fun blobRegister(data: ByteArray): Long
 
     /**
+     * Redeem an occurrence blob for its bytes, and release it — called
+     * by the generated decoder, never by a guest.
+     *
+     * A blob arriving in an OCCURRENCE is a handle into a table with no
+     * boundary that retires one, unlike the apply channel's batch-local
+     * index, so the decoder lets go of it while decoding and no handle
+     * ever reaches an app.
+     */
+    @JvmStatic external fun occurrenceBlob(handle: Long): ByteArray
+
+    /**
      * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
      * with `seekable[0]` set to 1 when it supports random access.
      *

@@ -376,6 +376,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("  in");
     c.line("  (v, next)");
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app.
+    c.line("(* Redeem-and-release for occurrence blobs, installed by the runtime");
+    c.line("   at load (this module opens no library of its own). *)");
+    c.line("let occurrence_blob : (int64 -> string) ref =");
+    c.line("  ref (fun _ -> failwith \"kaya: no occurrence-blob redeemer installed\")");
+    c.line("");
+    c.line("(* Decode one representation at [at]: the clip kind, then its values.");
+    c.line("   Blobs are redeemed to their bytes and RELEASED here, so no handle");
+    c.line("   ever reaches an app. The kind is a SINGLE member of the clip enum");
+    c.line("   and never a mask (you offer many and you receive one); 0 with no");
+    c.line("   values is the universal empty answer. *)");
+    c.line("let parse_clip byte at =");
+    c.line("  let clip = u32_at byte at in");
+    c.line("  let count = u32_at byte (at + 8) in");
+    c.line("  let at = ref (at + 16) in");
+    c.line("  let out = ref [] in");
+    c.line("  for _ = 1 to count do");
+    c.line("    let v, next = parse_value byte !at in");
+    c.line("    let v = match v with Blob h -> Str (!occurrence_blob h) | v -> v in");
+    c.line("    out := v :: !out;");
+    c.line("    at := next");
+    c.line("  done;");
+    c.line("  (clip, List.rev !out, !at)");
+    c.line("");
     c.line("(* Decode one occurrence record (header included) through the byte");
     c.line("   accessor. Some (kind, id, keys, payload) — keys is [] when id is");
     c.line("   a widget id, else id is a template node id and keys is the copy's");
@@ -396,7 +424,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    if kind = occ_kind_alert_result");
     c.line("    then");
     c.line("      (* The alert's one answer: id + u32 choice (the alert_choice values). *)");
-    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))))");
+    c.line("      Some (kind, Int64.of_int id, [], Some (I64 (Int64.of_int (u32_at byte 16))), None)");
     // The picker's answer is a LIST OF RECORDS, and no single `value`
     // can carry one — so the three values per file ride the VALUES
     // slot, flattened, and kaya_app regroups them in threes. The
@@ -415,8 +443,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        out := v :: !out;");
     c.line("        at := next");
     c.line("      done;");
-    c.line("      Some (kind, Int64.of_int id, List.rev !out, None)");
+    c.line("      Some (kind, Int64.of_int id, List.rev !out, None, None)");
     c.line("    end");
+    // The privileged read's one answer. Its own arm for the
+    // file_dialog_result reason and then some: the generic tail would
+    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!("    else if kind = occ_kind_{name}"));
+        c.line("    then begin");
+        c.line("      let clip, values, _ = parse_clip byte 16 in");
+        c.line("      Some (kind, Int64.of_int id, [], None, Some (clip, values))");
+        c.line("    end");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))
@@ -425,7 +464,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    (* Surface lifecycle records carry the surface id alone");
     c.line("       ( derived from the record shapes ). *)");
     c.line(&format!("    else if {id_only}"));
-    c.line("    then Some (kind, Int64.of_int id, [], None)");
+    c.line("    then Some (kind, Int64.of_int id, [], None, None)");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind = occ_kind_{n}"))
@@ -440,7 +479,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        ( kind,");
         c.line("          Int64.of_int (u32_at byte 16),");
         c.line("          [],");
-        c.line("          Some (I64 (Int64.of_int id)) )");
+        c.line("          Some (I64 (Int64.of_int id)),\n          None )");
     }
     c.line("    else begin");
     c.line("    let path_len = u32_at byte 16 in");
@@ -461,7 +500,26 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        Some (fst (parse_value byte !at))");
     c.line("      else None");
     c.line("    in");
-    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload)");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    c.line("    let clip =");
+    let pasted = crate::pasted_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind = occ_kind_{n}"))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if pasted.is_empty() {
+        c.line("      None");
+    } else {
+        c.line(&format!("      if {pasted} then"));
+        c.line("        let clip, values, _ = parse_clip byte !at in");
+        c.line("        Some (clip, values)");
+        c.line("      else None");
+    }
+    c.line("    in");
+    c.line("    Some (kind, Int64.of_int id, List.rev !keys, payload, clip)");
     c.line("    end");
     c.line("  end");
     c.out

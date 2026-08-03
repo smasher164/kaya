@@ -77,5 +77,16 @@ public final class KayaRing {
      */
     public static native long blobRegister(byte[] data);
 
+    /**
+     * Redeem an occurrence blob for its bytes, and release it — called
+     * by the generated decoder, never by a guest.
+     *
+     * A blob arriving in an OCCURRENCE is a handle into a table with no
+     * boundary that retires one, unlike the apply channel's batch-local
+     * index, so the decoder lets go of it while decoding and no handle
+     * ever reaches an app.
+     */
+    public static native byte[] occurrenceBlob(long handle);
+
     private KayaRing() {}
 }

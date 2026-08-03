@@ -823,6 +823,8 @@ run clipboard-go-swiftui env KAYA_SELFTEST=clipboard target/go-guests/clipboard
 run clipboard-swift-swiftui env KAYA_SELFTEST=clipboard target/swift-guests/clipboard
 run clipboard-csharp-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
+run clipboard-java-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

@@ -445,6 +445,52 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        }");
     c.line("    }");
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app.
+    c.line("    /** One representation as the decoder hands it over: the clip");
+    c.line("     * kind, and its values with blobs already redeemed to byte[].");
+    c.line("     * The sum itself is the hand-written tier\'s — this is the");
+    c.line("     * taste-free shape the wire carries.");
+    c.line("     *");
+    c.line("     * <p>kind is a SINGLE member of the clip enum and never a mask");
+    c.line("     * (you offer many and you receive one); 0 with no values is the");
+    c.line("     * universal empty answer. */");
+    c.line("    public static final class ClipValues {");
+    c.line("        public final int kind;");
+    c.line("        public final List<Object> values;");
+    c.line("");
+    c.line("        ClipValues(int kind, List<Object> values) {");
+    c.line("            this.kind = kind;");
+    c.line("            this.values = values;");
+    c.line("        }");
+    c.line("    }");
+    c.line("");
+    c.line("    /** Decode a representation at {@code at}: the clip kind, then");
+    c.line("     * its Values block. Blobs are redeemed and RELEASED here.");
+    c.line("     * {@code next[0]} receives the offset past the block. */");
+    c.line("    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {");
+    c.line("        int kind = b.getInt(at);");
+    c.line("        int count = b.getInt(at + 8);");
+    c.line("        at += 16;");
+    c.line("        List<Object> values = new ArrayList<>(count);");
+    c.line("        for (int i = 0; i < count; i++) {");
+    c.line("            int vtype = b.getInt(at);");
+    c.line("            int vlen = b.getInt(at + 4);");
+    c.line("            switch (vtype) {");
+    c.line("                case VALUE_I64: values.add(b.getLong(at + 8)); break;");
+    c.line("                case VALUE_BLOB: values.add(KayaRing.occurrenceBlob(b.getLong(at + 8))); break;");
+    c.line("                default:");
+    c.line("                    values.add(new String(rec, at + 8, vlen, StandardCharsets.UTF_8));");
+    c.line("            }");
+    c.line("            at += 8 + ((vlen + 7) & ~7);");
+    c.line("        }");
+    c.line("        next[0] = at;");
+    c.line("        return new ClipValues(kind, values);");
+    c.line("    }");
+    c.line("");
     c.line("    /** Decode one occurrence record (header included); null for pad");
     c.line("     * or unknown kinds. */");
     c.line("    public static Occ parseOccurrence(byte[] rec) {");
@@ -493,6 +539,19 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            return new Occ(kind, id, java.util.List.of(), files);");
     c.line("        }");
+    // The privileged read's one answer. Its own arm for the
+    // file_dialog_result reason and then some: the generic tail would
+    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "        if (kind == OCC_KIND_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line("            return new Occ(kind, id, java.util.List.of(),");
+        c.line("                    parseClip(rec, b, 16, new int[1]));");
+        c.line("        }");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
@@ -549,6 +608,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                    payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);");
     c.line("            }");
     c.line("        }");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    let pasted = crate::pasted_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !pasted.is_empty() {
+        c.line(&format!("        if ({pasted}) {{"));
+        c.line("            payload = parseClip(rec, b, at, new int[1]);");
+        c.line("        }");
+    }
     c.line("        return new Occ(kind, id, keys, payload);");
     c.line("    }");
     c.line("");

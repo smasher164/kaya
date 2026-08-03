@@ -45,6 +45,22 @@ public final class KayaApp {
      * host leaves the item where the app declared it. */
     public static final String ROLE_SETTINGS = "settings";
 
+    /** The three clipboard commands. They lower to the platform's own,
+     * act on the FOCUSED widget, and work out their own enablement from
+     * what the clipboard offers and what that widget accepts.
+     *
+     * <p>GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
+     * the widget knows what is selected, so an app cannot assemble the
+     * payload for "copy the selected text" out of the data layer. Copy
+     * of a selection is therefore necessarily a command, and Paste is
+     * its mirror. copy() and readClipboard() are for overriding that
+     * default and for targets with no native behaviour. */
+    public static final String ROLE_CUT = "cut";
+
+    public static final String ROLE_COPY = "copy";
+
+    public static final String ROLE_PASTE = "paste";
+
     /**
      * A container's cross-axis child placement (the align spec enum;
      * wire values pinned by the generated KayaWire constants).
@@ -88,6 +104,14 @@ public final class KayaApp {
             new java.util.HashMap<>();
     private long nextAlert;
     private long nextFileDialog;
+    // Clipboard reads share the alert's request/result grammar and so
+    // its table shape: one-shot, keyed by request id.
+    private final java.util.Map<Long, BiConsumer<Tx, Representation>> clipboardReads =
+            new java.util.HashMap<>();
+    private final java.util.Map<Long, BiConsumer<Tx, Representation>> widgetPastes =
+            new java.util.HashMap<>();
+    private final java.util.Map<Long, PasteHandler> nodePastes = new java.util.HashMap<>();
+    private long nextClipboardRead;
     final java.util.Map<Long, Consumer<Tx>> windowClosed = new java.util.HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
@@ -117,6 +141,14 @@ public final class KayaApp {
      * the entry's new text. */
     public interface ChangeHandler {
         void accept(Tx tx, List<Object> keys, String text);
+    }
+
+    /** A template widget's paste handler: the stamped copy's keys, then
+     * the one representation that arrived. A paste onto a stamped row
+     * is the same event as a paste onto a live one, exactly as a click
+     * is. */
+    public interface PasteHandler {
+        void accept(Tx tx, List<Object> keys, Representation clip);
     }
 
     /** A template checkbox's toggle handler: the stamped copy's keys,
@@ -295,6 +327,97 @@ public final class KayaApp {
      * re-opening it actually works, which measurement puts at the
      * three desktops and neither phone (DESIGN.md, File dialogs).
      */
+    /** One representation, arriving — the sum a copy is the record of.
+     *
+     * <p>Java has sealed interfaces and records, so this is one of each
+     * and a switch is the elimination. YOU OFFER MANY AND YOU RECEIVE
+     * ONE, and the two shapes say so: a record of five optional fields
+     * would invite a guest to check five where four are structurally
+     * always empty. */
+    public sealed interface Representation {
+        record Text(String value) implements Representation {}
+
+        record Html(String value) implements Representation {}
+
+        /** Encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE —
+         * the hosts convert freely between image types — so compare
+         * what the image IS, never the bytes it arrived in. */
+        record Image(byte[] bytes) implements Representation {}
+
+        /** Files, plural INSIDE one representation — the same nesting
+         * text/uri-list and CF_HDROP already have. A pasted file is the
+         * picker's own capability arriving through a second door, so it
+         * opens with the call that already exists. */
+        record Files(java.util.List<PickedFile> value) implements Representation {}
+
+        /** An app-defined format, round-tripped verbatim. */
+        record Custom(String id, byte[] bytes) implements Representation {}
+    }
+
+    /** Turn the decoder's kind-and-values into the sum, or null.
+     *
+     * <p>EMPTY IS THE UNIVERSAL NO: null covers a denied prompt on iOS,
+     * an unfocused reader on Android or Wayland, an empty clipboard,
+     * and content in no representation this read accepted. The guest is
+     * not told which, because the platforms deliberately do not say. */
+    static Representation representation(Object payload) {
+        if (!(payload instanceof KayaWire.ClipValues clip)) {
+            return null;
+        }
+        java.util.List<Object> v = clip.values;
+        return switch (clip.kind) {
+            case KayaWire.CLIP_TEXT -> new Representation.Text(clipString(v, 0));
+            case KayaWire.CLIP_HTML -> new Representation.Html(clipString(v, 0));
+            case KayaWire.CLIP_IMAGE -> new Representation.Image(clipBytes(v, 0));
+            case KayaWire.CLIP_CUSTOM ->
+                    new Representation.Custom(clipString(v, 0), clipBytes(v, 1));
+            case KayaWire.CLIP_FILES -> {
+                // The picker's own three-per-file grouping, so a guest
+                // that decodes a dialog result decodes this with the
+                // same loop.
+                java.util.List<PickedFile> files = new java.util.ArrayList<>();
+                for (int i = 0; i + 2 < v.size(); i += 3) {
+                    long handle = v.get(i) instanceof Long h ? h : 0L;
+                    files.add(new PickedFile(
+                            handle, clipString(v, i + 1), clipString(v, i + 2)));
+                }
+                yield new Representation.Files(files);
+            }
+            default -> null;
+        };
+    }
+
+    private static String clipString(java.util.List<Object> values, int i) {
+        return i < values.size() && values.get(i) instanceof String s ? s : "";
+    }
+
+    private static byte[] clipBytes(java.util.List<Object> values, int i) {
+        return i < values.size() && values.get(i) instanceof byte[] b ? b : new byte[0];
+    }
+
+    /** Join an accept list: the closed kinds by name plus any custom
+     * ids, space separated.
+     *
+     * <p>A LIST AND NOT A MASK, because half the set is open-ended. A
+     * custom format that could be written and never accepted would be
+     * an escape hatch that only opens outward, and round-tripping an
+     * app's own data is the whole reason to have one. Ids reach every
+     * platform's registry verbatim, so they carry no spaces — which is
+     * what makes the join unambiguous, and what this refuses to let you
+     * break. */
+    static String acceptList(String... kinds) {
+        for (String kind : kinds) {
+            if (kind == null || kind.isEmpty() || kind.contains(" ")) {
+                throw new IllegalArgumentException(
+                        "kaya: \"" + kind + "\" is not an accept-list entry — the "
+                        + "closed kinds are \"text\", \"html\", \"image\" and "
+                        + "\"files\", and a custom format id reaches the platform's "
+                        + "own registry verbatim, so it carries no spaces");
+            }
+        }
+        return String.join(" ", kinds);
+    }
+
     public record PickedFile(long handle, String name, String localPath) {
         /**
          * Redeem the handle for a real stream, plus whether it seeks.
@@ -364,6 +487,154 @@ public final class KayaApp {
             }
             tx.emit(KayaWire.txShowFileDialog(
                     window, id, multiple ? 1 : 0, filters.toArray()));
+            return id;
+        }
+    }
+
+    /** The copy chain: a clip record under construction. Each method
+     * fills one representation, and send() puts it on the clipboard.
+     *
+     * <p>A RECORD AND NOT A LIST is the whole shape — at most one per
+     * kind is structural, since a second text() replaces the field
+     * rather than needing a duplicate check the root has to run. */
+    public static final class CopyRef {
+        private final Tx tx;
+        private String text;
+        private String html;
+        private byte[] image;
+        private final java.util.List<Long> files = new java.util.ArrayList<>();
+        private final java.util.List<Object[]> custom = new java.util.ArrayList<>();
+
+        CopyRef(Tx tx) {
+            this.tx = tx;
+        }
+
+        public CopyRef text(String value) {
+            this.text = value;
+            return this;
+        }
+
+        public CopyRef html(String value) {
+            this.html = value;
+            return this;
+        }
+
+        /** Encoded image bytes — the same currency the image property
+         * takes. */
+        public CopyRef image(byte[] bytes) {
+            this.image = bytes;
+            return this;
+        }
+
+        /** Offer a picked file, the picker's own capability put
+         * straight on the clipboard. The bytes never move through
+         * kaya. */
+        public CopyRef file(PickedFile f) {
+            files.add(f.handle());
+            return this;
+        }
+
+        /** An app-defined format, round-tripped verbatim. The id
+         * reaches every platform's own registry unchanged — a UTI on
+         * Apple, RegisterClipboardFormat on Windows, a target atom on
+         * X11 and Wayland, a MIME type on Android — so it carries no
+         * spaces, and kaya does nothing clever with the bytes. */
+        public CopyRef custom(String id, byte[] bytes) {
+            acceptList(id);
+            custom.add(new Object[] {id, bytes});
+            return this;
+        }
+
+        /** Put the clip on the system clipboard. The wire order is
+         * kaya's, not this chain's — descending richness, which is
+         * preference order on every host that has one. */
+        public void send() {
+            int present = 0;
+            java.util.List<Object> values = new java.util.ArrayList<>();
+            for (Object[] pair : custom) {
+                values.add(pair[0]);
+                values.add(new KayaWire.BlobHandle(
+                        KayaRing.blobRegister((byte[]) pair[1])));
+            }
+            for (long handle : files) {
+                values.add(handle);
+            }
+            if (image != null) {
+                present |= KayaWire.CLIP_IMAGE;
+                values.add(new KayaWire.BlobHandle(KayaRing.blobRegister(image)));
+            }
+            if (html != null) {
+                present |= KayaWire.CLIP_HTML;
+                values.add(html);
+            }
+            if (text != null) {
+                present |= KayaWire.CLIP_TEXT;
+                values.add(text);
+            }
+            tx.emit(KayaWire.txCopy(
+                    present, files.size(), custom.size(), values.toArray()));
+        }
+    }
+
+    /** The read chain: which representations this read can use, and the
+     * request id its one answer arrives under. */
+    public static final class ClipReadRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private final java.util.List<String> accepting = new java.util.ArrayList<>();
+        private BiConsumer<Tx, Representation> onResult;
+
+        ClipReadRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        public ClipReadRef text() {
+            return accept("text");
+        }
+
+        public ClipReadRef html() {
+            return accept("html");
+        }
+
+        public ClipReadRef image() {
+            return accept("image");
+        }
+
+        public ClipReadRef files() {
+            return accept("files");
+        }
+
+        /** Accept an app-defined format by id. Custom formats are tried
+         * FIRST, in the order named: an app's own format round-trips
+         * its data losslessly, which is the only reason to have one. */
+        public ClipReadRef custom(String formatId) {
+            return accept(formatId);
+        }
+
+        private ClipReadRef accept(String kind) {
+            accepting.add(kind);
+            return this;
+        }
+
+        /** Bind the one-shot handler to THIS request. The answer is
+         * null when the clipboard had nothing this read accepted — and
+         * null equally when the read was denied or the app was
+         * unfocused, because no platform says which. */
+        public ClipReadRef onResult(BiConsumer<Tx, Representation> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        /** Send the request, returning its id. */
+        public long send() {
+            if (onResult != null) {
+                app.clipboardReads.put(id, onResult);
+            }
+            tx.emit(KayaWire.txReadClipboard(
+                    id, acceptList(accepting.toArray(new String[0]))));
             return id;
         }
     }
@@ -970,6 +1241,33 @@ public final class KayaApp {
                     + " — use Tx.setA11yHint inside a live transaction");
             }
             tx.setA11yHint(this, hint);
+            return this;
+        }
+
+        /** Declare what this widget takes from a paste — the closed
+         * kinds by name ("text", "html", "image", "files") plus any
+         * custom format ids.
+         *
+         * <p>ONE DECLARATION, THREE JOBS: it drives whether the Paste
+         * command is live while this widget is focused, it filters what
+         * can reach the paste hook, and on Android it IS the native
+         * registration (setOnReceiveContentListener takes the mime
+         * types on the view). Per-widget because whether Paste should
+         * be enabled is the INTERSECTION of what the clipboard offers
+         * and what the FOCUSED target takes.
+         *
+         * <p>DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget
+         * that declares nothing gets the platform's own insertion and
+         * reports it through the ordinary change path, which is why a
+         * plain text editor writes none of this and has working cut,
+         * copy and paste. */
+        public Widget accepts(String... kinds) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: accepts on a widget outside its build transaction"
+                    + " — use Tx.setAccepts inside a live transaction");
+            }
+            tx.setAccepts(this, kinds);
             return this;
         }
 
@@ -2067,6 +2365,44 @@ public final class KayaApp {
             return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, false);
         }
 
+        // --- The clipboard (DESIGN.md, Clipboard) ------------------
+        //
+        // A clip is not a string: every host models it as ONE item
+        // available in several types, with the consumer taking the
+        // richest it understands. So COPY TAKES A RECORD — spelled as a
+        // chain here, where a second text() replaces the field rather
+        // than needing a duplicate check — and the two answers are a
+        // SUM.
+
+        /** Begin a clip: fill in as many representations as the app
+         * wants to offer, and send() puts it on the system clipboard. */
+        public CopyRef copy() {
+            return new CopyRef(this);
+        }
+
+        /** Begin the privileged read — THE ONE NAMED FOR WHAT IT IS
+         * rather than for pasting.
+         *
+         * <p>A user's paste arrives at the widget's hook and costs
+         * nothing; this asks without a gesture, which the platforms
+         * have deliberately made expensive: iOS 16 PROMPTS when the
+         * content came from another app and blocks until the user
+         * answers, Android returns nothing unless the app has focus,
+         * and Wayland delivers no offer to an unfocused client. Reach
+         * for this to detect a URL or import from the clipboard, never
+         * to implement Paste — that is the Paste command, and it is
+         * free. */
+        public ClipReadRef readClipboard() {
+            return new ClipReadRef(this, KayaApp.this, ++nextClipboardRead);
+        }
+
+        /** Declare what a widget takes from a paste — the dynamic path;
+         * the declarative spelling is the accepts chain at
+         * construction. */
+        public void setAccepts(Widget w, String... kinds) {
+            emit(KayaWire.txSetAccepts(w.id, acceptList(kinds)));
+        }
+
         public WindowRef createWindow(long id) {
             emit(KayaWire.txCreateWindow(id));
             return new WindowRef(this, KayaApp.this, id);
@@ -2467,6 +2803,24 @@ public final class KayaApp {
         return out;
     }
 
+    /** Take pasted content at a live widget.
+     *
+     * <p>COSTS NOTHING ON ANY PLATFORM, unlike readClipboard: a paste
+     * is a user gesture, so it is its own authorisation — iOS raises no
+     * prompt and the focus rules are satisfied by construction. Only
+     * fires for a widget that declared what it accepts. */
+    public void onPaste(Widget w, BiConsumer<Tx, Representation> handler) {
+        widgetPastes.put(w.id, handler);
+    }
+
+    /** A paste onto a stamped copy: the handler also receives the
+     * copy's key path, outermost first. One record kind, the path
+     * deciding — exactly as a click on a stamped row is one record with
+     * a click on a live widget. */
+    public void onPaste(Node n, PasteHandler handler) {
+        nodePastes.put(n.id, handler);
+    }
+
     /** Register a click handler for a live widget. */
     public void onClick(Widget w, Consumer<Tx> handler) {
         widgetHandlers.put(w.id, handler);
@@ -2779,6 +3133,31 @@ public final class KayaApp {
                     java.util.List<PickedFile> files =
                             (java.util.List<PickedFile>) occ.payload;
                     dispatch(tx -> handler.accept(tx, files));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_CLIPBOARD_RESULT) {
+                // One-shot like the alert, and the request retires with
+                // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
+                // denied, unfocused, absent and nothing-we-accept
+                // alike, because no platform says which.
+                BiConsumer<Tx, Representation> handler = clipboardReads.remove(occ.id);
+                if (handler != null) {
+                    Representation clip = representation(occ.payload);
+                    dispatch(tx -> handler.accept(tx, clip));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_PASTED && occ.keys.isEmpty()) {
+                // A paste rides a click tag verbatim, so it arrives on
+                // the ordinary widget/node split. Never empty: a paste
+                // that delivered nothing is not an occurrence.
+                BiConsumer<Tx, Representation> handler = widgetPastes.get(occ.id);
+                Representation clip = representation(occ.payload);
+                if (handler != null && clip != null) {
+                    dispatch(tx -> handler.accept(tx, clip));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_PASTED) {
+                PasteHandler handler = nodePastes.get(occ.id);
+                Representation clip = representation(occ.payload);
+                if (handler != null && clip != null) {
+                    dispatch(tx -> handler.accept(tx, occ.keys, clip));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED && occ.keys.isEmpty()) {
                 // Menu occurrences key the menu-item tables — their

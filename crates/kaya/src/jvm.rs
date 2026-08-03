@@ -70,6 +70,11 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 fn_ptr: ring_blob_register as *mut _,
             },
             NativeMethod {
+                name: "occurrenceBlob".into(),
+                sig: "(J)[B".into(),
+                fn_ptr: ring_occurrence_blob as *mut _,
+            },
+            NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: ring_spec_hash as *mut _,
@@ -139,6 +144,37 @@ extern "system" fn ring_blob_register(
         .convert_byte_array(&data)
         .expect("kaya: reading the blob bytes failed");
     (unsafe { crate::capi::kaya_blob_register(bytes.as_ptr(), bytes.len()) }) as jlong
+}
+
+/// KayaRing.occurrenceBlob: redeem an occurrence blob for its bytes,
+/// and release it.
+///
+/// COPY THEN RELEASE, in that order: the pointer borrows core memory
+/// that the release frees. A blob arriving in an OCCURRENCE is a handle
+/// into a table with no boundary that retires one — unlike the apply
+/// channel's batch-local index, which the next batch supersedes — so
+/// the decoder is what has to let go of it, while decoding, before any
+/// handle can reach an app.
+///
+/// SHARED, NOT DESKTOP-ONLY, like openPicked: the JVM guest tier is ONE
+/// tier, and a pasted image is bytes on either JVM.
+extern "system" fn ring_occurrence_blob<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    handle: jlong,
+) -> JByteArray<'a> {
+    let mut len = 0usize;
+    let data = unsafe { crate::capi::kaya_occurrence_blob(handle as u64, &mut len) };
+    let bytes: &[u8] = if data.is_null() || len == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(data, len) }
+    };
+    let out = env
+        .byte_array_from_slice(bytes)
+        .expect("kaya: handing over the occurrence blob failed");
+    unsafe { crate::capi::kaya_occurrence_blob_release(handle as u64) };
+    out
 }
 
 /// The desktop bootstrap: dev.kaya.KayaRing.attach()'s name-resolved

@@ -1229,6 +1229,47 @@ public final class KayaWire {
         }
     }
 
+    /** One representation as the decoder hands it over: the clip
+     * kind, and its values with blobs already redeemed to byte[].
+     * The sum itself is the hand-written tier's — this is the
+     * taste-free shape the wire carries.
+     *
+     * <p>kind is a SINGLE member of the clip enum and never a mask
+     * (you offer many and you receive one); 0 with no values is the
+     * universal empty answer. */
+    public static final class ClipValues {
+        public final int kind;
+        public final List<Object> values;
+
+        ClipValues(int kind, List<Object> values) {
+            this.kind = kind;
+            this.values = values;
+        }
+    }
+
+    /** Decode a representation at {@code at}: the clip kind, then
+     * its Values block. Blobs are redeemed and RELEASED here.
+     * {@code next[0]} receives the offset past the block. */
+    public static ClipValues parseClip(byte[] rec, ByteBuffer b, int at, int[] next) {
+        int kind = b.getInt(at);
+        int count = b.getInt(at + 8);
+        at += 16;
+        List<Object> values = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int vtype = b.getInt(at);
+            int vlen = b.getInt(at + 4);
+            switch (vtype) {
+                case VALUE_I64: values.add(b.getLong(at + 8)); break;
+                case VALUE_BLOB: values.add(KayaRing.occurrenceBlob(b.getLong(at + 8))); break;
+                default:
+                    values.add(new String(rec, at + 8, vlen, StandardCharsets.UTF_8));
+            }
+            at += 8 + ((vlen + 7) & ~7);
+        }
+        next[0] = at;
+        return new ClipValues(kind, values);
+    }
+
     /** Decode one occurrence record (header included); null for pad
      * or unknown kinds. */
     public static Occ parseOccurrence(byte[] rec) {
@@ -1269,6 +1310,10 @@ public final class KayaWire {
             }
             return new Occ(kind, id, java.util.List.of(), files);
         }
+        if (kind == OCC_KIND_CLIPBOARD_RESULT) {
+            return new Occ(kind, id, java.util.List.of(),
+                    parseClip(rec, b, 16, new int[1]));
+        }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
         if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED) {
@@ -1305,6 +1350,9 @@ public final class KayaWire {
                 default:
                     payload = new String(rec, at + 8, plen, StandardCharsets.UTF_8);
             }
+        }
+        if (kind == OCC_KIND_PASTED) {
+            payload = parseClip(rec, b, at, new int[1]);
         }
         return new Occ(kind, id, keys, payload);
     }

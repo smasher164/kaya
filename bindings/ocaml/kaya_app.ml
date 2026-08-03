@@ -77,6 +77,26 @@ type instance = {
    desktops and neither phone (DESIGN.md, File dialogs). *)
 type picked_file = { handle : int64; name : string; local_path : string }
 
+(* One representation, arriving — the sum a copy is the record of.
+   OCaml has a real sum, so this is a variant and a match is the
+   elimination.
+
+   YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
+   record here would invite a guest to check five fields where four are
+   structurally always empty.
+
+   Bytes ride as [string], OCaml's own binary buffer. [Image] may be a
+   RE-ENCODE of what was copied — the hosts convert freely between image
+   types — so compare what the image IS, never the bytes it arrived in.
+   [Files] is plural INSIDE one representation, the same nesting
+   text/uri-list and CF_HDROP already have. *)
+type representation =
+  | Text of string
+  | Html of string
+  | Image of string
+  | Files of picked_file list
+  | Custom of string * string
+
 type app = {
   (* Work handed over by other threads, waiting to run as transactions
      on the app thread. THE ONLY FIELD HERE TOUCHED FROM ANOTHER
@@ -114,6 +134,12 @@ type app = {
   mutable next_alert : int64;
   file_dialog_handlers : (int64, picked_file list -> unit) Hashtbl.t;
   mutable next_file_dialog : int64;
+  (* Clipboard reads share the alert's request/result grammar and so
+     its table shape: one-shot, keyed by request id. *)
+  clipboard_handlers : (int64, representation option -> unit) Hashtbl.t;
+  mutable next_clipboard_read : int64;
+  widget_pastes : (int64, representation -> unit) Hashtbl.t;
+  node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
@@ -220,6 +246,10 @@ let create () =
     next_alert = 0L;
     file_dialog_handlers = Hashtbl.create 4;
     next_file_dialog = 0L;
+    clipboard_handlers = Hashtbl.create 4;
+    next_clipboard_read = 0L;
+    widget_pastes = Hashtbl.create 4;
+    node_pastes = Hashtbl.create 4;
     window_closed = Hashtbl.create 8;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
@@ -1191,6 +1221,122 @@ let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
 let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:false ?on_result ()
 
+(* --- The clipboard (DESIGN.md, Clipboard) ---------------------------
+
+   A clip is not a string: every host models it as ONE item available in
+   several types, with the consumer taking the richest it understands.
+   So COPY TAKES A RECORD — optional labelled arguments being how OCaml
+   spells one, and what makes at-most-one-per-kind structural rather
+   than a duplicate check — and the two answers are a SUM.
+
+   kaya DERIVES NOTHING between representations. Whether list bullets
+   survive html-to-text is the app's decision, and a bad
+   auto-derivation degrades every paste into a plain field silently. *)
+
+(* Join an accept list: the closed kinds by name plus any custom ids,
+   space separated.
+
+   A LIST AND NOT A MASK, because half the set is open-ended. A custom
+   format that could be written and never accepted would be an escape
+   hatch that only opens outward, and round-tripping an app's own data
+   is the whole reason to have one. Ids reach every platform's registry
+   verbatim, so they carry no spaces — which is what makes the join
+   unambiguous, and what this refuses to let you break. *)
+let accept_list kinds =
+  List.iter
+    (fun kind ->
+      if kind = "" || String.contains kind ' ' then
+        invalid_arg
+          (Printf.sprintf
+             "kaya: %S is not an accept-list entry — the closed kinds are \
+              \"text\", \"html\", \"image\" and \"files\", and a custom format \
+              id reaches the platform's own registry verbatim, so it carries \
+              no spaces"
+             kind))
+    kinds;
+  String.concat " " kinds
+
+(* Put ONE clip on the system clipboard, offered in as many
+   representations as the call fills in.
+
+   [files] takes picked-file handles: copying a file and picking one are
+   the same currency, so a picked file goes straight on and the bytes
+   never move through kaya. [custom] is the one plural field with names,
+   since several app-defined formats are legitimate.
+
+   The wire order is kaya's, not this call's — descending richness,
+   which is preference order on every host that has one. *)
+let copy ?text ?html ?image ?(files = []) ?(custom = []) () =
+  let tx = the_tx () in
+  let present = ref 0 in
+  let values = ref [] in
+  let add v = values := v :: !values in
+  List.iter
+    (fun (id, bytes) ->
+      ignore (accept_list [ id ]);
+      add (Kaya_wire.Str id);
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    custom;
+  List.iter (fun (f : picked_file) -> add (Kaya_wire.I64 f.handle)) files;
+  Option.iter
+    (fun bytes ->
+      present := !present lor Kaya_wire.clip_image;
+      add (Kaya_wire.Blob (Kaya_runtime.register_blob (Bytes.of_string bytes))))
+    image;
+  Option.iter
+    (fun html ->
+      present := !present lor Kaya_wire.clip_html;
+      add (Kaya_wire.Str html))
+    html;
+  Option.iter
+    (fun text ->
+      present := !present lor Kaya_wire.clip_text;
+      add (Kaya_wire.Str text))
+    text;
+  emit tx
+    (Kaya_wire.tx_copy !present (List.length files) (List.length custom)
+       (List.rev !values))
+
+(* Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE,
+   named for what it is rather than for pasting.
+
+   A user's paste arrives at the widget's hook and costs nothing; this
+   asks without a gesture, which the platforms have deliberately made
+   expensive: iOS 16 PROMPTS when the content came from another app and
+   blocks until the user answers, Android returns nothing unless the app
+   has focus, and Wayland delivers no offer to an unfocused client.
+   Reach for this to detect a URL or import from the clipboard, never to
+   implement Paste — that is the Paste command, and it is free.
+
+   [on_result] fires exactly once with [Some rep] or [None], and the
+   registration retires with it — the alert's grammar. *)
+let read_clipboard ?on_result accepting =
+  let tx = the_tx () in
+  let app = tx.app in
+  app.next_clipboard_read <- Int64.add app.next_clipboard_read 1L;
+  let id = app.next_clipboard_read in
+  Option.iter (fun f -> Hashtbl.replace app.clipboard_handlers id f) on_result;
+  emit tx (Kaya_wire.tx_read_clipboard id (Kaya_wire.Str (accept_list accepting)));
+  id
+
+(* Declare what a widget takes from a paste — the closed kinds by name
+   ("text", "html", "image", "files") plus any custom format ids.
+
+   ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
+   live while this widget is focused, it filters what can reach the
+   paste hook, and on Android it IS the native registration
+   (setOnReceiveContentListener takes the mime types on the view).
+   Per-widget because whether Paste should be enabled is the
+   INTERSECTION of what the clipboard offers and what the FOCUSED target
+   takes.
+
+   DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that declares
+   nothing gets the platform's own insertion and reports it through the
+   ordinary change path, which is why a plain text editor writes none of
+   this and has working cut, copy and paste. *)
+let set_accepts (Widget id) kinds =
+  emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
+
 let alert_cancel = Kaya_wire.alert_choice_cancel
 
 
@@ -1409,6 +1555,20 @@ let set_menu_primary (MenuItem id) on =
    places this one in the application menu, and every other host leaves
    the item where the app declared it. *)
 let role_settings = "settings"
+
+(* The three clipboard commands. They lower to the platform's own, act
+   on the FOCUSED widget, and work out their own enablement from what
+   the clipboard offers and what that widget accepts.
+
+   GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
+   widget knows what is selected, so an app cannot assemble the payload
+   for "copy the selected text" out of the data layer. Copy of a
+   selection is therefore necessarily a command, and Paste is its
+   mirror. [copy] and [read_clipboard] are for overriding that default
+   and for targets with no native behaviour. *)
+let role_cut = "cut"
+let role_copy = "copy"
+let role_paste = "paste"
 
 (* Declare a retained action a standard command (actions only —
    root-checked). Uniform declaration, per-host placement; a role never
@@ -1755,6 +1915,23 @@ let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit) =
 (* Register a change handler for a live entry: the widget owns its text
    and reports each edit here; the app folds the text into its own
    state — there is no read-back, by doctrine. *)
+(* Take pasted content at a live widget.
+
+   COSTS NOTHING ON ANY PLATFORM, unlike [read_clipboard]: a paste is a
+   user gesture, so it is its own authorisation — iOS raises no prompt
+   and the focus rules are satisfied by construction. Only fires for a
+   widget that declared what it accepts. *)
+let on_paste app (Widget id) (handler : representation -> unit) =
+  Hashtbl.replace app.widget_pastes id handler
+
+(* A paste onto a stamped copy: the handler also receives the copy's key
+   path, outermost first. One record kind, the path deciding — exactly
+   as a click on a stamped row is one record with a click on a live
+   widget. *)
+let on_paste_node app (Node id)
+    (handler : Kaya_wire.value list -> representation -> unit) =
+  Hashtbl.replace app.node_pastes id handler
+
 let on_change app (Widget id) (handler : string -> unit) =
   Hashtbl.replace app.widget_changes id handler
 
@@ -1793,6 +1970,36 @@ let drain_posted app =
   Mutex.unlock app.post_lock;
   List.iter (fun program -> dispatch app program) batch
 
+(* Turn the decoder's kind-and-values into the sum, or None.
+
+   EMPTY IS THE UNIVERSAL NO: None covers a denied prompt on iOS, an
+   unfocused reader on Android or Wayland, an empty clipboard, and
+   content in no representation this read accepted. The guest is not
+   told which, because the platforms deliberately do not say. *)
+let representation_of clip =
+  match clip with
+  | None -> None
+  | Some (kind, values) ->
+      let str i =
+        match List.nth_opt values i with Some (Kaya_wire.Str s) -> s | _ -> ""
+      in
+      if kind = Kaya_wire.clip_text then Some (Text (str 0))
+      else if kind = Kaya_wire.clip_html then Some (Html (str 0))
+      else if kind = Kaya_wire.clip_image then Some (Image (str 0))
+      else if kind = Kaya_wire.clip_custom then Some (Custom (str 0, str 1))
+      else if kind = Kaya_wire.clip_files then begin
+        (* The picker's own three-per-file grouping, so a guest that
+           decodes a dialog result decodes this with the same loop. *)
+        let rec regroup = function
+          | Kaya_wire.I64 h :: Kaya_wire.Str name :: Kaya_wire.Str local_path
+            :: rest ->
+              { handle = h; name; local_path } :: regroup rest
+          | _ -> []
+        in
+        Some (Files (regroup values))
+      end
+      else None
+
 let dispatch_loop app =
   (* Claim the thread before the first occurrence: every build after
      this point must happen here. *)
@@ -1805,7 +2012,7 @@ let dispatch_loop app =
     match Kaya_runtime.poll_occurrence () with
     | None ->
         if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
-    | Some (kind, id, keys, payload) ->
+    | Some (kind, id, keys, payload, clip) ->
         (if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->
@@ -1893,6 +2100,32 @@ let dispatch_loop app =
                Hashtbl.remove app.file_dialog_handlers id;
                dispatch app (fun () -> handler files)
            | None -> ())
+         else if kind = Kaya_wire.occ_kind_clipboard_result then
+           (* One-shot like the alert, and the request retires with it.
+              EMPTY IS THE UNIVERSAL NO and arrives as None — denied,
+              unfocused, absent and nothing-we-accept alike, because no
+              platform says which. *)
+           (match Hashtbl.find_opt app.clipboard_handlers id with
+           | Some handler ->
+               let answer = representation_of clip in
+               Hashtbl.remove app.clipboard_handlers id;
+               dispatch app (fun () -> handler answer)
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_pasted then
+           (* A paste rides a click tag verbatim, so it arrives on the
+              ordinary widget/node split — one record kind, the key path
+              deciding. Never empty: a paste that delivered nothing is
+              not an occurrence. *)
+           (match (representation_of clip, keys) with
+           | None, _ -> ()
+           | Some rep, [] ->
+               (match Hashtbl.find_opt app.widget_pastes id with
+               | Some handler -> dispatch app (fun () -> handler rep)
+               | None -> ())
+           | Some rep, keys ->
+               (match Hashtbl.find_opt app.node_pastes id with
+               | Some handler -> dispatch app (fun () -> handler keys rep)
+               | None -> ()))
          else if kind = Kaya_wire.occ_kind_menu_activated then
            (* Menu occurrences key the menu-item tables — their own id
               space, so neither widget nor node ids can collide with
