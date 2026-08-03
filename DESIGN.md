@@ -1804,13 +1804,22 @@ not loosen, by implementation accident.
 ### Standard commands
 
 A command may declare itself a STANDARD command with `role`, from a
-closed vocabulary holding one value in v1: `settings`. The declaration
-is uniform and its PLACEMENT is each host's business — macOS shows the
-settings command in the application menu, where users press
-Command-comma to look for it, and every other host leaves the item
-exactly where the app declared it. This is the same shape as the
+closed vocabulary: `settings`, `cut`, `copy`, `paste`. The declaration
+is uniform and what the host does with it is the host's business —
+macOS shows the settings command in the application menu, where users
+press Command-comma to look for it, and every other host leaves the
+item exactly where the app declared it. This is the same shape as the
 phone-promotion hint: one uniform bit, lowered per platform, inert
 where it does not apply.
+
+The three clipboard roles do the other thing a role can do: they hand
+the item's BEHAVIOUR to the platform. Such an item lowers to the host's
+own command, acts on the FOCUSED widget, emits no occurrence of its
+own, and configures its own enablement — kaya computes that from what
+the clipboard offers and what the focused widget declared it accepts,
+rather than handing the app a signal to compute it with. See the
+Clipboard section for why copy of a selection has to be a command at
+all.
 
 Two rules keep the vocabulary from becoming a placement grammar. One
 item per role per app, judged at the root: the host that relocates a
@@ -1911,6 +1920,123 @@ of being re-decided per binding.
 - **A toolbar grammar is not on the roadmap.** It is admitted only if
   an artifact demands semantics that adaptive menu promotion cannot
   express.
+
+## Clipboard (ratified 2026-08-02)
+
+The full argument, the probe results and the build order live in
+docs/clipboard-plan.md. What follows is the shape and the reasons that
+outlive the milestone.
+
+### A clip is not a string
+
+Every host models the clipboard as ONE item available in several types,
+with the consumer taking the richest it understands. kaya's set is
+closed — `text`, `html`, `image`, `files` — plus `custom(id, bytes)` as
+the escape hatch.
+
+Closed because the lowering per representation is not a rename but real
+work only kaya can absorb: `CF_HTML` mandates a header carrying byte
+offsets, Android's `ClipData` cannot carry image bytes at all and needs
+a `content://` provider, and files are three unrelated encodings
+(`CF_HDROP`'s struct, `text/uri-list`, file URLs). An open MIME map
+would push all of it onto guest authors in eight languages. A closed
+set is also what lets a gate check every backend against every case.
+
+`custom` round-trips verbatim and kaya does nothing clever with it. The
+id reaches each platform's own registry unchanged — a UTI on Apple,
+`RegisterClipboardFormat` on Windows, a target atom on X11 and Wayland,
+a MIME type on Android — so it carries no spaces.
+
+### Copy takes a record. Paste returns a sum.
+
+You offer many and you receive one, and the shapes say so. A record
+makes at-most-one-per-kind structural instead of a runtime duplicate
+check; a sum makes it structural that four of five fields would always
+be empty on the receiving side.
+
+kaya DERIVES NOTHING between representations. Whether list bullets
+survive html-to-text is the app's decision, and a bad auto-derivation
+silently degrades every paste into a plain field. The one exception is
+a file list, which also gets the platform's own text rendition of the
+paths: universal convention, no judgment in it.
+
+The wire order is DESCENDING CLIP VALUE — custom (16), files (8), image
+(4), html (2), text (1) — which is descending richness and is
+preference order on every host that has one. A backend offers the
+values in the order it reads them and is right.
+
+### Reading is a request, not a property read
+
+Every platform is converging on "reading is a user-authorised action":
+iOS 16 prompts for another app's content, Android returns nothing
+without focus, Wayland delivers no offer to an unfocused client. So
+`read_clipboard` is a request answered exactly once, on the alert's
+grammar, and an EMPTY answer covers denied, absent, unfocused and
+nothing-we-accept alike. The guest is not told which, because the
+platforms deliberately do not say.
+
+macOS is the measured exception: it does not prompt (2026-08-02, macOS
+26.5.2, bundled and unbundled alike).
+
+### Gestures are commands. Content is data.
+
+kaya has no selection API, so an app cannot construct the payload for
+"copy the selected text" itself — only the widget knows what is
+selected. Copy of a selection is therefore necessarily a COMMAND, and
+Paste is its mirror; they live in the standard-command vocabulary.
+
+The data layer (`copy`, `read_clipboard`, `on_paste`) is for overriding
+that default and for targets with no native behaviour.
+
+THE PASTE SPLIT: a widget that declared what it `accepts` takes the
+content itself, through its paste hook; one that declared nothing gets
+the platform's own insertion and reports it through the ordinary change
+path. A plain text editor writes none of this and works.
+
+### Acceptance is per-widget, and it is a list
+
+Whether Paste should be live is the INTERSECTION of what the clipboard
+offers and what the FOCUSED target accepts — a search field wants plain
+text, a rich editor also wants images. Every platform asks exactly this
+of the focused target (`canPerformAction` on Apple, and Android's
+`setOnReceiveContentListener` takes the accepted MIME types as an
+argument ON THE VIEW).
+
+`accepts` is a space-separated ACCEPT LIST — the closed kinds by name
+plus any custom ids — and not a mask, because a mask can name four
+things and nothing else. A custom format that could be written and
+never accepted would be an escape hatch that only opens outward, and
+round-tripping an app's own data is the whole reason to have one.
+`read_clipboard` takes the same string.
+
+The focus restriction is not a problem here, which is worth writing
+down because it looks like one: Wayland and Android only let you know
+while you are focused, and you only NEED to know while you are focused,
+because that is the only time your menu can open.
+
+### Files are the file dialog's capability
+
+`text/uri-list`, `CF_HDROP`, `public.file-url` and `ClipData.newUri`
+are all "a reference to a file the receiver may open" — exactly what
+the picker returns and what `kaya_open_picked` redeems. One capability,
+two doors, and the bytes never move through kaya in either.
+
+The two channels spell it differently on purpose: a guest names a file
+by the handle it can open, a backend needs the platform's own
+reference, and the core resolves one to the other at lowering, where
+the picked table lives.
+
+### Deliberately out
+
+- **Lazy rendering.** What needs it is images and files, and file
+  references already solve it by never moving bytes. It would add a
+  callback the platform can block on, arriving on the app thread at a
+  moment kaya does not control.
+- **Multiple items per clip.** iOS, macOS and Android support it;
+  Windows, X11 and Wayland do not. One clip, with "three files" living
+  INSIDE one representation.
+- **The X11/Wayland PRIMARY selection.** No analogue on the other four
+  targets, so it would be a Linux-only verb.
 
 ## Accessibility (the universal props, landed 2026-07-25)
 

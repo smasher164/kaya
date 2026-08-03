@@ -30,6 +30,17 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
+- **Clipboard — LANDED ON MAC 2026-08-02, fan-out outstanding.** The
+  protocol, the SwiftUI arms, the Rust surface, the scene and the three
+  edit roles are green on the mac lane; docs/clipboard-plan.md §1-§3
+  record what each slice decided and what the probes overturned. WHAT
+  REMAINS: the seven other bindings, the GTK/WinUI/Compose/iOS arms,
+  and the Android helper APK that gives that lane a foreign reader.
+  The edit roles are no longer deferred — `cut`, `copy` and `paste`
+  joined the closed role vocabulary beside `settings`.
+
+  The original entry follows, for the reasoning it carries.
+
 - **Clipboard** — the next editor prerequisite, and the one that
   unblocks the most: the edit roles (cut/copy/paste) are inert without
   it, while undo/redo, find and dirty-state titles do not depend on it.
@@ -49,10 +60,10 @@ own the state (see the undo note in this file).
   - files on the clipboard ARE the file-dialog capability, so a picked
     file goes straight on and a pasted one opens with the call that
     already exists.
-  Four probes stand between the plan and any code (§0d): Weston and
-  out-of-process reads, iOS's paste prompt against simctl-seeded
-  content, Android reads with no shell command, and whether the legs
-  must serialise for focus.
+  Four probes stood between the plan and any code (§0d); all four have
+  reported, and §0e/§1b record what they found — including the two
+  assumptions they overturned (Weston has no clipboard at all, and
+  macOS does not prompt).
 - **GAP — the stall diagnostic DESIGN promises is not implemented.**
   DESIGN's threading section says it comes free from the transport:
   "the core reads the app's log-consumer cursor, and undrained for N
