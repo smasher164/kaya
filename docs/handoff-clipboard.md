@@ -82,6 +82,19 @@ clipboard, so the outside process must be a real app. Without it the
 Android legs would verify kaya against kaya — a check that cannot fail
 for the reason the design exists.
 
+## WHEN YOU WRITE A BACKEND'S LEGS, SERIALISE THEM
+
+There is one system clipboard per session, so clipboard legs cannot run
+concurrently with each other on ANY lane — they would be eight
+processes writing one variable. validate-mac gives each leg its own
+`drain`; the linux and windows runners need the same when their legs
+land (docs/clipboard-plan.md §0d, the 2026-08-02 correction, has the
+measurement: six of eight failed concurrently, 8/8 serially).
+
+check-stubs keeps you honest in the meantime: `clipboard` is already in
+every runner's SCENES, and the legs may only be wired once that
+runner's backend stops depth-stubbing the feature.
+
 ## Traps, all of which failed silently first
 
 - **Enablement is not a build-time fact.** It is the intersection of

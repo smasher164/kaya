@@ -452,6 +452,35 @@ for lang, selector in SELECTORS:
             bad.append(
                 f'{selector}: scene "{scene}" is in SCENES but the {lang} '
                 "selector never dispatches it — the guest is unreachable")
+# A GUEST THAT EXISTS BUT NO LEG RUNS IS INVISIBLE TO EVERY OTHER GATE.
+# wired() above demands only that a scene has SOME leg, so one language
+# covers for all of them: clipboard shipped with working OCaml and
+# Haskell guests that validate-mac never executed, and nothing noticed
+# — the sugar gate checks bindings, the sweep above checks that guest
+# FILES exist, and `run clipboard-` matched the rust leg.
+#
+# mac only, deliberately: this runner names every leg
+# `<scene>-<lang>-swiftui`, so the expectation is exact. The other
+# runners have their own naming and their own backend-stub carve-outs;
+# widening this without them would be guesswork, not a guard.
+mac = pathlib.Path("tools/validate-mac.sh").read_text()
+m = re.search(r'^SCENES="([^"]+)"', mac, re.M)
+stubbed = pathlib.Path("swift/KayaSwiftUI.swift").read_text()
+for scene in (m.group(1).split() if m else []):
+    if f'epthStub("{scene}", on: "macos")' in stubbed:
+        continue
+    for lang, pat in LANGS + [("rust", "guests/rust/{s}.rs")]:
+        if not pathlib.Path(pat.format(s=scene, S=scene.capitalize())).exists():
+            continue
+        # milestone2's legs drop the scene prefix — they ARE the
+        # unprefixed originals, the same exception wired() carries.
+        leg = f"run {lang}-swiftui" if scene == "milestone2" else \
+            f"run {scene}-{lang}-swiftui"
+        if leg not in mac:
+            bad.append(
+                f'tools/validate-mac.sh: scene "{scene}" has a {lang} guest but '
+                f'no leg runs it (wanted "{leg}")')
+
 for b in bad:
     print(f"check-steps: {b}", file=sys.stderr)
 sys.exit(1 if bad else 0)

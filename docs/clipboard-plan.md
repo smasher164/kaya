@@ -504,6 +504,34 @@ It still stands for ANDROID, where an unfocused reader gets nothing and
 there is no data-control equivalent. Whatever option finding 3 settles
 on has to keep the focused app focused for the length of the read.
 
+### CORRECTION (2026-08-02): THIS FINDING ASKED THE WRONG QUESTION
+
+The reasoning above is about READING — who may observe the selection,
+and whether observing it disturbs a neighbour. That part holds. What it
+missed is WRITING, and writing is what actually breaks:
+
+THERE IS ONE SYSTEM CLIPBOARD PER SESSION. Every clipboard leg seeds
+it, copies to it, and reads it back. Eight legs doing that concurrently
+are eight processes assigning to one variable, on EVERY lane, whatever
+the compositor does about focus and whatever data-control makes
+passive.
+
+Measured on mac the moment the scene left DEPTH_SCENES and eight
+languages ran at once: six of eight failed. The failures name the
+mechanism — the ocaml leg seeded "from another app", read text back,
+and got "pasted by hand", which is another leg's seed; others read
+"empty" where their own custom format should have been, or "" for an
+image a neighbour had overwritten. The same eight, one at a time: 8/8.
+
+So the clipboard legs are MUTUALLY EXCLUSIVE ON EVERY LANE, and the
+serialisation is not a workaround for a platform quirk — it is the only
+way the assertions mean anything, because a leg must read the clipboard
+that leg wrote. validate-mac gives each leg its own drain. The linux
+and windows runners have `clipboard` in SCENES but no leg blocks yet
+(their backends still depth-stub it, which check-stubs enforces); THE
+LEGS MUST BE SERIALISED THE SAME WAY WHEN THEY ARE WRITTEN, and the
+Android lane needs it for finding 3's reason on top of this one.
+
 ## §1 — the protocol (landed)
 
 The vocabulary, both directions, with nothing platform-specific in it.
