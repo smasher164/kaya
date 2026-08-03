@@ -68,6 +68,8 @@ mod commands;
 mod a11y;
 #[path = "filedialog.rs"]
 mod filedialog;
+#[path = "clipboard.rs"]
+mod clipboard;
 
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
@@ -110,6 +112,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("commands") => commands::app(ctx),
         Ok("a11y") => a11y::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
+        Ok("clipboard") => clipboard::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

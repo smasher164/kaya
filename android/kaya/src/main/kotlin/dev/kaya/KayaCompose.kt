@@ -1,11 +1,17 @@
 package dev.kaya
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Environment
+import android.os.PersistableBundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Base64
 import android.util.Log
 import android.view.KeyEvent
 import android.webkit.MimeTypeMap
@@ -211,12 +217,20 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
 // NO depthStub HERE ANY MORE, and its absence is the statement: the
 // Compose backend materializes every scene in tools/scenes, so the
-// helper had no caller left and dead code kept "for later" is exactly
-// what check-detekt exists to reject. The convention itself is not
-// gone — tools/lib/hand-rolled-stubs.py fails any refusal written in a
-// backend's own words and names the call to write instead, and
-// KayaSwiftUI still carries a live one for iOS. Re-add it here the day
-// this backend has to refuse something.
+// helper has no caller left and dead code kept "for later" is exactly
+// what a reader has to reason about for nothing. The convention itself
+// is not gone — tools/lib/hand-rolled-stubs.py fails any refusal
+// written in a backend's own words and names the call to write
+// instead, and KayaSwiftUI still carries a live one for iOS. Re-add it
+// here the day this backend has to refuse something.
+//
+// AND THE DELETION IS DELIBERATE RATHER THAN AUTOMATIC. The helper
+// lived here through the clipboard depth slice, refusing two apply ops
+// and two harness verbs, and when the arms landed it went back to
+// having no callers — silently, because it was `internal` and
+// tools/detekt.yml only enables UnusedPrivateClass/Member/Property. No
+// gate would have said a word. This paragraph is the reminder that the
+// last call site's removal is what obliges the next one.
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -233,6 +247,19 @@ object KayaSceneModel {
     // walks it into the platform focus system, and expect_focused
     // reads it back.
     var focusedId by mutableStateOf<Long?>(null)
+    /// A counter bumped whenever what the system clipboard OFFERS may
+    /// have moved (a copy went out, a foreign seed landed). It carries
+    /// no information; reading it is what SUBSCRIBES a composition to
+    /// clipboard changes.
+    ///
+    /// It exists because the clipboard is not snapshot state and
+    /// OnPrimaryClipChangedListener cannot stand in for one: dispatch
+    /// is itself focus-gated, per listener, with no catch-up callback
+    /// on regaining focus (docs/clipboard-plan.md §7, measured in
+    /// ClipboardService's own source). So enablement is RE-DERIVED
+    /// rather than pushed — at activation, on focus change (focusedId
+    /// and accepts are both observable already), and here.
+    var clipboardGeneration by mutableStateOf(0)
     // The live modal alert (one per process): identity + spec for the
     // M3 dialog and the runner's reads; null = none. The fields
     // change together with alertId, which is the recomposition key.
@@ -385,6 +412,51 @@ class KayaContextAttachment {
     var noun: ByteArray = ByteArray(0)
 }
 
+/**
+ * One representation as this side holds it, before it crosses to the
+ * core. FLATTENED at the boundary rather than marshalled as a struct —
+ * [KayaPresent.emitClipboardResult] and [KayaPresent.emitPasted] take
+ * the fields as parallel arguments, exactly as emitFileDialogResult
+ * takes parallel arrays, and the JNI thunk assembles the C struct.
+ *
+ * Which field carries what is the closed sum's spelling here: text and
+ * html ride `text`, an image rides `bytes`, a CUSTOM format's id rides
+ * `text` with its payload in `bytes`, and files ride `locators` (the
+ * documents' own `content://` URIs) beside `names` of the same length.
+ */
+internal class KayaClipValue(
+    val clip: Int,
+    val text: String = "",
+    val bytes: ByteArray = ByteArray(0),
+    val locators: Array<String> = emptyArray(),
+    val names: Array<String> = emptyArray(),
+)
+
+/**
+ * Split an accept list into the closed kinds it names and the custom
+ * ids it names, in the order the list gave them.
+ *
+ * The mirror of wire.rs's parse_accept_list (and of KayaSwiftUI's
+ * kayaParseAcceptList): the STRING is the contract, so a second reading
+ * of it would be a second contract. A token that is not one of the four
+ * closed names IS a custom format id — the set is half open-ended,
+ * which is why an accept list is not a mask.
+ */
+internal fun kayaParseAcceptList(list: String): Pair<Int, List<String>> {
+    var kinds = 0
+    val custom = ArrayList<String>()
+    for (token in list.split(' ', '\t', '\n').filter { it.isNotEmpty() }) {
+        when (token) {
+            "text" -> kinds = kinds or KayaCompose.CLIP_TEXT
+            "html" -> kinds = kinds or KayaCompose.CLIP_HTML
+            "image" -> kinds = kinds or KayaCompose.CLIP_IMAGE
+            "files" -> kinds = kinds or KayaCompose.CLIP_FILES
+            else -> custom.add(token)
+        }
+    }
+    return Pair(kinds, custom)
+}
+
 object KayaCompose {
     // Pinned to the KAYA_APPLY_* / KAYA_KIND_* / KAYA_VALUE_* constants
     // in kaya.h.
@@ -409,8 +481,8 @@ object KayaCompose {
     private const val APPLY_PRESENT_ALERT = 11
     private const val APPLY_PRESENT_FILE_DIALOG = 24
 
-    /** The clipboard pair. Declared with the rest of the apply
-     * vocabulary; the arms that act on them are the next slice. */
+    /** The clipboard pair: a copy going out, and the privileged read
+     * asking for one back. */
     private const val APPLY_COPY = 25
     private const val APPLY_READ_CLIPBOARD = 26
     private const val APPLY_PUSH_ENTRY = 12
@@ -519,6 +591,33 @@ object KayaCompose {
     private const val VALUE_F64 = 3
     private const val VALUE_STR = 4
     private const val VALUE_BLOB = 5
+
+    /**
+     * The clip representation masks (wire.rs's CLIP_*). BIT POSITIONS,
+     * not an ordinal: a copy carries several at once and a widget
+     * accepts several, so both ride as a mask. Their descending order —
+     * custom, files, image, html, text — is the CANONICAL one, which is
+     * richness order and therefore preference order (wire.rs,
+     * write_clip_fields).
+     *
+     * A PRIVATE MIRROR, like KayaSwiftUI's (kayaClipText … kayaClipCustom).
+     * check-verbs' general constant sweep matches the
+     * APPLY_/KIND_/PROP_/COMMAND_/VALUE_/MENU_KIND_/MPROP_ prefixes and
+     * stops, so this family had nothing holding it to the Rust at all;
+     * it is now pinned by that gate's own clip_mirrors clause, name and
+     * value together, against crates/kaya/src/wire.rs. Every rust-native
+     * backend reads the source instead (gtk.rs says
+     * `crate::wire::CLIP_FILES` and the compiler holds it there), which
+     * an interpreter cannot — and the drift would be SILENT: `present
+     * and CLIP_IMAGE` against a copy that spells image 8 reads the FILES
+     * slot as a picture, and the leg fails describing the wrong content
+     * one layer away from the wrong constant.
+     */
+    internal const val CLIP_TEXT = 1
+    internal const val CLIP_HTML = 2
+    internal const val CLIP_IMAGE = 4
+    internal const val CLIP_FILES = 8
+    internal const val CLIP_CUSTOM = 16
 
     /**
      * Start the pump and mount the interpreter. Call from onCreate when
@@ -655,6 +754,35 @@ object KayaCompose {
                     KayaPresent.blobData(handle)?.let { blobs[handle] = it }
                 }
             }
+            // COPY CARRIES BLOBS TOO — the image, and every custom
+            // format's bytes — and they die with the batch exactly as a
+            // prop's do. WITHOUT THIS ARM THE MISS IS SILENT: the
+            // handles resolve to null on the UI thread, the copy ships
+            // text and html only, and nothing anywhere names the cause.
+            // (KayaSwiftUI had to add exactly this arm, for exactly
+            // this reason.)
+            //
+            // Walked GENERICALLY off the header's slot count rather
+            // than by representation: the header says how many values
+            // follow, and a value that is not a blob is skipped by the
+            // same arithmetic. Absolute reads, so the record cursor
+            // above is untouched.
+            if (kind == APPLY_COPY) {
+                val body = start + 8
+                val slots = b.getInt(body + 16)
+                var at = body + 24
+                repeat(slots) {
+                    val type = b.getInt(at)
+                    val len = b.getInt(at + 4)
+                    if (type == VALUE_BLOB) {
+                        val handle = b.getLong(at + 8)
+                        KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+                    }
+                    // Values self-pad to 8 (wire.rs, write_value).
+                    at += 8 + len
+                    if (at % 8 != 0) at += 8 - at % 8
+                }
+            }
             b.position(start + size)
         }
         return blobs
@@ -721,7 +849,17 @@ object KayaCompose {
                         PROP_ACCEPTS ->
                             // The ACCEPT LIST verbatim: kind names and
                             // custom ids, space separated. Not a mask —
-                            // half the set is open-ended.
+                            // half the set is open-ended. Stored
+                            // unparsed, exactly as the mac and GTK arms
+                            // store it, because the STRING is the
+                            // contract: kayaParseAcceptList splits it at
+                            // each use (the paste split, and Paste's
+                            // enablement), and a second stored form
+                            // would be a second contract. EMPTY IS
+                            // UNSET, and it is not the same as "takes
+                            // nothing": an undeclared widget still
+                            // pastes, through the platform's own
+                            // insertion.
                             KayaSceneModel.nodes[id]!!.accepts = readString(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
@@ -780,13 +918,43 @@ object KayaCompose {
                 // this interpreter disagree — fail loudly.
                 APPLY_CREATE_WINDOW -> error("kaya: aux window apply on a capability-less host")
                 APPLY_DESTROY_WINDOW -> error("kaya: aux window apply on a capability-less host")
-                // The clipboard's depth slice is SwiftUI on mac
-                // (docs/clipboard-plan.md). Refusing IN THIS BACKEND'S
-                // OWN WORDS rather than falling through: an unhandled
-                // apply op is silently dropped, and a scene that copied
-                // nothing would read as a kaya bug rather than as a
-                // backend that has not got there.
-                APPLY_COPY, APPLY_READ_CLIPBOARD -> depthStub("clipboard")
+                APPLY_COPY -> {
+                    // { u32 present; u32 file_count; u32 custom_count;
+                    // u32 reserved; u32 slots; u32 reserved } then a
+                    // Values block in the CANONICAL ORDER: custom
+                    // pairs, files, image, html, text — descending clip
+                    // value, which is descending richness. Read in that
+                    // order and the preference order is right for free.
+                    val present = b.int
+                    val fileCount = b.int
+                    val customCount = b.int
+                    b.int // reserved
+                    b.int // slots — the prefetch walk's business
+                    b.int // reserved
+                    val custom = ArrayList<Pair<String, ByteArray>>(customCount)
+                    repeat(customCount) {
+                        val id = readString(b)
+                        // The bytes rode as a batch-local handle; the
+                        // pump prefetched them before the table turned
+                        // over (see collectBlobs).
+                        custom.add(Pair(id, blobs[readBlobHandle(b)] ?: ByteArray(0)))
+                    }
+                    // LOCATORS, not kaya handles — and on this platform
+                    // a locator IS the `content://` URI the document
+                    // already has (android.rs, UriSource::locator).
+                    val files = (0 until fileCount).map { readString(b) }
+                    val image =
+                        if (present and CLIP_IMAGE != 0) blobs[readBlobHandle(b)] else null
+                    val html = if (present and CLIP_HTML != 0) readString(b) else null
+                    val text = if (present and CLIP_TEXT != 0) readString(b) else null
+                    kayaCopyToClipboard(text, html, image, files, custom)
+                }
+                APPLY_READ_CLIPBOARD -> {
+                    // { u64 request } then one Str: the accept list.
+                    val request = b.long
+                    val accepting = readString(b)
+                    kayaAnswerClipboardRead(request, accepting)
+                }
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
                     val dialog = b.long
@@ -986,7 +1154,16 @@ object KayaCompose {
                         // A standard-command role. Android has no
                         // application menu to relocate into, so the
                         // item stays exactly where the app declared it
-                        // — the role is recorded, never materialized.
+                        // — but the role CHANGES BEHAVIOR, and that
+                        // half is not cosmetic: activation performs
+                        // cut/copy/paste on the focused widget instead
+                        // of reporting to the app
+                        // (kayaPerformClipboardRole), and enablement
+                        // becomes the intersection of what the
+                        // clipboard offers and what the focused widget
+                        // accepts (kayaRoleEnabled). Snapshot state, so
+                        // a role arriving after the bar was built
+                        // recomposes the rows that read it.
                         MPROP_ROLE -> item.role = readString(b)
                         MPROP_ICON -> {
                             // The image-source path's twin: a
@@ -1458,6 +1635,647 @@ object KayaCompose {
      */
     internal fun pickerContext(): ComponentActivity? = mountedActivity
 
+    // -----------------------------------------------------------------
+    // Clipboard (DESIGN.md, Clipboard; docs/clipboard-plan.md §7 for
+    // what this platform was measured to charge).
+    //
+    // The COPY arm builds ONE ClipData BY HAND — every offered mime
+    // listed in the description explicitly, because newHtmlText
+    // advertises text/html ALONE and a consumer gating on text/plain
+    // would see nothing. ClipData.Item carries text, an html string, a
+    // Uri or an Intent and NO byte array at any API level, so the image
+    // and every custom format ride `content://` URIs served by this
+    // app's own provider; the payloads are spilled to disk at copy time
+    // because a provider is created on demand and may be restarted into
+    // a fresh process long after this one is gone, while the clip in
+    // system_server holds nothing but the URI string.
+    //
+    // The READ arm consults the DESCRIPTION for the offer, materializes
+    // exactly the one representation it chooses, and answers exactly
+    // once; a null primary clip is simply the empty answer.
+    //
+    // MATERIALIZE INSIDE THE READ, ALWAYS. The read grant
+    // ClipboardService issues to a pasting package is revoked the
+    // moment the clip changes (measured cross-package, §7), so a
+    // stashed URI answers SecurityException later. Nothing here holds
+    // one past the call that opened it.
+    // -----------------------------------------------------------------
+
+    /**
+     * SystemUI's overlay-suppression extra. Honoured when the device is
+     * an emulator or the clip's source is the shell — it exists so the
+     * emulator's own clipboard bridge does not flash the API 33+ copy
+     * preview — so on a real device this is inert and production
+     * behavior is exactly what it was. On the lane it is the difference
+     * between a system window sitting over the surface the harness is
+     * asserting against for several seconds and not (§7 finding 4;
+     * every helper seed carries it too).
+     */
+    private const val CLIP_SUPPRESS_OVERLAY = "com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY"
+
+    /// The lane's FOREIGN clipboard app: a separate package, uid and
+    /// process using the ordinary ClipboardManager API. See
+    /// tools/android/cliphelper.
+    private const val HELPER_PACKAGE = "dev.kaya.cliphelper"
+    private const val HELPER_SEED_ACTION = "dev.kaya.cliphelper.SEED"
+    private const val HELPER_SEED_RECEIVER = "dev.kaya.cliphelper.SeedReceiver"
+    private const val HELPER_READ_ACTION = "dev.kaya.cliphelper.READ"
+    private const val HELPER_READ_RECEIVER = "dev.kaya.cliphelper.ReadReceiver"
+
+    /// Every helper answer is prefixed, so a result that is merely the
+    /// broadcast's initial data — which is what comes back when nothing
+    /// received it at all — cannot be mistaken for content.
+    private const val HELPER_RESULT_PREFIX = "KAYAHELPER "
+
+    /// Five seconds, the same bound the mac and GTK arms give their
+    /// foreign tools.
+    private const val CLIP_TIMEOUT_MS = 5_000L
+
+    /**
+     * Put one clip on the system clipboard.
+     *
+     * ONE ClipData, its ClipDescription listing every offered mime in
+     * the canonical order — custom ids, text/uri-list, image/png,
+     * text/html, text/plain, which is descending clip value and so
+     * descending richness. Built by hand for two reasons measured in
+     * AOSP's own source: `newHtmlText` advertises text/html and never
+     * text/plain, and `addItem(item)` does not touch the type list at
+     * all (only the resolver overload does, and it would re-derive
+     * types this arm already knows).
+     *
+     * ITEM 0 CARRIES TEXT AND HTML INLINE, and three separate things
+     * want it that way round: most foreign readers look at item 0
+     * alone, `coerceToText` answers the EMPTY STRING for a
+     * content:// item (contradicting its own javadoc), and SystemUI
+     * previews item 0.
+     */
+    private fun kayaCopyToClipboard(
+        text: String?,
+        html: String?,
+        image: ByteArray?,
+        files: List<String>,
+        custom: List<Pair<String, ByteArray>>,
+    ) {
+        val activity = mountedActivity ?: error("kaya: a copy with no mounted activity")
+        val mimes = ArrayList<String>()
+        custom.forEach { mimes.add(it.first) }
+        if (files.isNotEmpty()) mimes.add(ClipDescription.MIMETYPE_TEXT_URILIST)
+        if (image != null) mimes.add("image/png")
+        if (html != null) mimes.add(ClipDescription.MIMETYPE_TEXT_HTML)
+        if (text != null) mimes.add(ClipDescription.MIMETYPE_TEXT_PLAIN)
+        val description = ClipDescription("kaya", mimes.toTypedArray())
+        description.extras = PersistableBundle().apply {
+            putBoolean(CLIP_SUPPRESS_OVERLAY, true)
+        }
+
+        val items = ArrayList<ClipData.Item>()
+        if (text != null || html != null) {
+            // The plain text must be supplied whenever html is (the
+            // Item constructor enforces it), so an html-only clip
+            // carries an empty string beside it.
+            items.add(ClipData.Item(text ?: "", html))
+        }
+        // The last clip's payloads go first: the platform never says a
+        // clip was replaced, so a shorter clip would otherwise leave a
+        // richer one's slots on disk under names it does not advertise.
+        KayaClipProvider.clear(activity)
+        custom.forEachIndexed { i, pair ->
+            KayaClipProvider.customPayload(activity, i).writeBytes(pair.second)
+            // The id is the GUEST's own string and nothing on this path
+            // validates or normalizes a mime type, so it rides beside
+            // the bytes verbatim for the provider's getType to answer.
+            KayaClipProvider.customMimeSidecar(activity, i).writeText(pair.first)
+            items.add(ClipData.Item(KayaClipProvider.customUri(activity, i)))
+        }
+        // A FILE LOCATOR IS ALREADY THE DOCUMENT'S OWN `content://` URI
+        // on this platform (android.rs, UriSource::locator), so a file
+        // item names THE DOCUMENT and never a copy of it through this
+        // app's provider. Three things follow, and each is a reason:
+        // the paster gets the document's real type and display name
+        // rather than a flat one this app invented; a pasted file stays
+        // the SAME capability the picker returns; and the copy arm
+        // never reads a file's bytes on the main thread, which an
+        // arbitrarily large document would stall. kaya may re-grant a
+        // URI it holds, which is the ordinary "share what you picked"
+        // path.
+        files.forEach { items.add(ClipData.Item(Uri.parse(it))) }
+        if (image != null) {
+            KayaClipProvider.imagePayload(activity).writeBytes(image)
+            items.add(ClipData.Item(KayaClipProvider.imageUri(activity)))
+        }
+        check(items.isNotEmpty()) {
+            "kaya: a copy record carrying no representation reached the interpreter"
+        }
+        val clip = ClipData(description, items[0])
+        // The no-resolver overload deliberately: the description above
+        // IS the offer, and the resolver overload would append types
+        // derived from a provider round-trip per item.
+        for (i in 1 until items.size) clip.addItem(items[i])
+        activity.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+        kayaClipboardChanged()
+    }
+
+    /// Answer a privileged read EXACTLY ONCE. `clip == 0` is the
+    /// universal no — denied, absent, unfocused and nothing-accepted
+    /// alike, which no platform tells apart and this one does not
+    /// pretend to.
+    private fun kayaAnswerClipboardRead(request: Long, accepting: String) {
+        val value = kayaMaterializeClipboard(accepting)
+        if (value == null) {
+            KayaPresent.emitClipboardResult(
+                request, 0, "", ByteArray(0), emptyArray(), emptyArray())
+        } else {
+            KayaPresent.emitClipboardResult(
+                request, value.clip, value.text, value.bytes, value.locators, value.names)
+        }
+    }
+
+    /**
+     * Choose the RICHEST representation the clipboard offers that the
+     * accept list takes, materialize exactly that one, and answer —
+     * null for no intersection, the universal no. Shared by the
+     * privileged read and by the declared-paste delivery, because the
+     * two differ in their trigger and never in what they can
+     * materialize.
+     *
+     * Descending clip value — custom (in accept-list order), files,
+     * image, html, text.
+     *
+     * MAIN THREAD, like every other apply arm; the menu route reaches
+     * it from composition or from an onUi hop.
+     */
+    private fun kayaMaterializeClipboard(accepting: String): KayaClipValue? {
+        val activity = mountedActivity ?: return null
+        val cm = activity.getSystemService(ClipboardManager::class.java) ?: return null
+        val resolver = activity.contentResolver
+        val (kinds, custom) = kayaParseAcceptList(accepting)
+        val clip = cm.primaryClip ?: return null
+        val description = clip.description
+        val items = (0 until clip.itemCount).map { clip.getItemAt(it) }
+
+        // The description's mime list is a SNAPSHOT taken at copy time;
+        // ContentResolver.getType is the live answer, and it is the one
+        // SystemUI's own overlay uses. Both are consulted: the
+        // description says what is OFFERED, the resolver says which
+        // item carries it.
+        for (id in custom) {
+            if (!description.hasMimeType(id)) continue
+            for (item in items) {
+                val uri = item.uri ?: continue
+                if (resolver.getType(uri) != id) continue
+                val bytes = kayaUriBytes(resolver, uri) ?: continue
+                return KayaClipValue(CLIP_CUSTOM, text = id, bytes = bytes)
+            }
+        }
+        if (kinds and CLIP_FILES != 0) {
+            // A URI item IS a file here: the picker's capability
+            // arriving through a second door, and the core wraps each
+            // locator in the source that opens it — so the guest
+            // redeems a pasted document exactly as it redeems a picked
+            // one.
+            val locators = ArrayList<String>()
+            val names = ArrayList<String>()
+            for (item in items) {
+                val uri = item.uri ?: continue
+                if (uri.scheme != ContentResolver.SCHEME_CONTENT) continue
+                // AN IMAGE RIDES A content:// DOCUMENT ON THIS PLATFORM
+                // TOO. Without this line an image clip would answer a
+                // files-only read, which no sibling arm does — macOS
+                // reads NSURL objects, GTK requires text/uri-list — and
+                // a divergence in what a read ANSWERS is the kind the
+                // scene cannot see, because both sides would be kaya.
+                if (resolver.getType(uri)?.startsWith("image/") == true) continue
+                locators.add(uri.toString())
+                names.add(kayaDocumentName(resolver, uri))
+            }
+            if (locators.isNotEmpty()) {
+                return KayaClipValue(
+                    CLIP_FILES,
+                    locators = locators.toTypedArray(),
+                    names = names.toTypedArray())
+            }
+        }
+        if (kinds and CLIP_IMAGE != 0) {
+            for (item in items) {
+                val uri = item.uri ?: continue
+                if (resolver.getType(uri) != "image/png") continue
+                val bytes = kayaUriBytes(resolver, uri) ?: continue
+                return KayaClipValue(CLIP_IMAGE, bytes = bytes)
+            }
+        }
+        if (kinds and CLIP_HTML != 0 &&
+            description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)
+        ) {
+            // Verbatim: htmlText is a plain String field the platform
+            // neither sanitizes nor re-serializes.
+            val html = items.firstNotNullOfOrNull { it.htmlText }
+            if (html != null) return KayaClipValue(CLIP_HTML, text = html)
+        }
+        if (kinds and CLIP_TEXT != 0 &&
+            description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+        ) {
+            // coerceToText is what a platform text view's own paste
+            // reads, so this is the same string a foreign editor would
+            // receive.
+            val plain = items.firstOrNull()?.coerceToText(activity)?.toString()
+            if (!plain.isNullOrEmpty()) return KayaClipValue(CLIP_TEXT, text = plain)
+        }
+        return null
+    }
+
+    /// The clipboard's current OFFER — the description, never the data.
+    /// Deliberately: only `getPrimaryClip` raises the platform's access
+    /// notification and notes the app op, while the description and
+    /// hasPrimaryClip merely check it, so deciding enablement costs
+    /// nothing and says nothing about the app. It is focus-gated the
+    /// same way, and null while unfocused is the honest "cannot say".
+    private fun kayaClipboardOffer(): ClipDescription? {
+        // A SUBSCRIBING READ, and looking pointless is exactly what it
+        // is for: the clipboard is not snapshot state, so without this
+        // a Paste row rendered before the clip arrived would stay grey
+        // until something unrelated recomposed. See
+        // KayaSceneModel.clipboardGeneration.
+        @Suppress("UNUSED_EXPRESSION")
+        KayaSceneModel.clipboardGeneration
+        val activity = mountedActivity ?: return null
+        return activity.getSystemService(ClipboardManager::class.java)?.primaryClipDescription
+    }
+
+    /// What the clipboard offers may have moved. Every site that can
+    /// move it comes through here — a copy going out, a foreign seed
+    /// landing — and the rows that read enablement recompose. Focus
+    /// changes need no bump: focusedId and the accepts prop are both
+    /// observable already, so a focus move recomposes them anyway.
+    private fun kayaClipboardChanged() {
+        KayaSceneModel.clipboardGeneration += 1
+    }
+
+    /// A document's display name — OpenableColumns is the picker
+    /// capability's Android spelling, and a pasted document answers it
+    /// exactly as a picked one does. Never the last path segment when
+    /// the provider will say: that segment is the document id, which is
+    /// a path fragment on ExternalStorage and an opaque key elsewhere.
+    private fun kayaDocumentName(resolver: ContentResolver, uri: Uri): String {
+        try {
+            resolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0) {
+                    val name = c.getString(i)
+                    if (!name.isNullOrEmpty()) return name
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("kaya", "kaya: naming the pasted $uri failed: $e")
+        }
+        return uri.lastPathSegment ?: ""
+    }
+
+    /// One `content://` item's bytes, whole, inside the read that owns
+    /// the grant. Null for a transfer the platform refused — the
+    /// universal no, one representation at a time.
+    private fun kayaUriBytes(resolver: ContentResolver, uri: Uri): ByteArray? =
+        try {
+            resolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (e: Exception) {
+            Log.w("kaya", "kaya: reading the pasted $uri failed: $e")
+            null
+        }
+
+    /**
+     * Whether a clipboard role's command can act right now; a non-role
+     * item answers true and pays nothing.
+     *
+     * THE SAME RULE AS THE MAC AND GTK ARMS, spelled Compose: paste is
+     * the INTERSECTION of what the clipboard offers and what the
+     * focused widget accepts — and a widget that declared NOTHING still
+     * pastes, because the platform inserts and the change handler
+     * reports it, so an undeclared target enables on the text offer
+     * alone. Cut and copy need a focused editable to take a selection
+     * from; the field's own action refuses the rest.
+     *
+     * NOT A BUILD-TIME FACT: both halves move long after the bar was
+     * built. Every affordance on this host reads
+     * kayaMenuEffectivelyEnabled, which ends here, so rendered rows,
+     * shortcuts, expect_menu and the activation gate all see one
+     * answer.
+     */
+    internal fun kayaRoleEnabled(role: String): Boolean {
+        when (role) {
+            "cut", "copy" -> {
+                val id = KayaSceneModel.focusedId ?: return false
+                return KayaSceneModel.entryWidgets.any { it.id == id } ||
+                    KayaSceneModel.textareas.any { it.id == id }
+            }
+            "paste" -> {
+                val id = KayaSceneModel.focusedId ?: return false
+                val node = KayaSceneModel.nodes[id] ?: return false
+                val offer = kayaClipboardOffer() ?: return false
+                if (node.accepts.isEmpty()) {
+                    return offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                }
+                val (kinds, custom) = kayaParseAcceptList(node.accepts)
+                if (custom.any { offer.hasMimeType(it) }) return true
+                return (kinds and CLIP_FILES != 0 &&
+                    offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST)) ||
+                    (kinds and CLIP_IMAGE != 0 && offer.hasMimeType("image/png")) ||
+                    (kinds and CLIP_HTML != 0 &&
+                        offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) ||
+                    (kinds and CLIP_TEXT != 0 &&
+                        offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN))
+            }
+            else -> return true
+        }
+    }
+
+    /**
+     * Perform a clipboard role on the focused widget. Answers whether
+     * it WAS one, so a plain action falls through to its own dispatch.
+     *
+     * THE PASTE SPLIT, and it is the rule the whole gesture layer turns
+     * on (DESIGN.md): a widget that DECLARED what it accepts takes the
+     * content itself — kaya reads the clipboard and delivers it to the
+     * paste hook — while one that declared nothing gets the platform's
+     * own insertion and its ordinary change handler reports the result.
+     * A plain text editor writes none of this and works.
+     */
+    internal fun kayaPerformClipboardRole(role: String): Boolean {
+        when (role) {
+            "cut", "copy" -> {
+                kayaEditFocusedText(role)
+                return true
+            }
+            "paste" -> {
+                val id = KayaSceneModel.focusedId ?: return true
+                val node = KayaSceneModel.nodes[id] ?: return true
+                if (node.accepts.isEmpty()) {
+                    // THE PLATFORM'S OWN INSERTION, spelled the way
+                    // COMMAND_CLEAR is: this host has no responder
+                    // chain and the MODEL owns the field's text, so
+                    // the insertion is a write into the model plus the
+                    // same emission the TextField's own change would
+                    // make. Appended, because kaya has no selection API
+                    // and this lowering hands Compose a String rather
+                    // than a TextFieldValue — the end of the field is
+                    // the only caret position the model knows, and it
+                    // is where Compose leaves the caret after a
+                    // programmatic write.
+                    val pasted = kayaClipboardPlainText() ?: return true
+                    node.text = kayaLf(node.text + pasted)
+                    KayaPresent.emitTextChanged(node.tag, node.text)
+                    return true
+                }
+                // The same walk the privileged read makes, and
+                // deliberately the same code. A paste that delivered
+                // nothing is NOT an occurrence — the read owns the
+                // empty answer — which is also what kaya_emit_pasted
+                // asserts on the other side.
+                val value = kayaMaterializeClipboard(node.accepts) ?: return true
+                KayaPresent.emitPasted(
+                    node.tag, value.clip, value.text, value.bytes, value.locators, value.names)
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    /// The plain text a platform text view's own paste would insert.
+    private fun kayaClipboardPlainText(): String? {
+        val activity = mountedActivity ?: return null
+        val cm = activity.getSystemService(ClipboardManager::class.java) ?: return null
+        val clip = cm.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        return clip.getItemAt(0).coerceToText(activity).toString().ifEmpty { null }
+    }
+
+    /**
+     * Cut and Copy, acting on the FOCUSED FIELD'S SELECTION through the
+     * one selection-level hook this interpreter's fields have.
+     *
+     * kaya holds no caret and no selection: the lowering hands Compose
+     * the `String` / `onValueChange` overload, so there is no
+     * TextFieldValue to read a range out of — which is exactly why
+     * these had to be platform COMMANDS rather than something an app
+     * assembles out of the data layer. What Compose does publish is
+     * SemanticsActions.CutText / CopyText on the field's own node,
+     * present only while a selection exists, and invoking one runs
+     * BasicTextField's own cut/copy — the same action the platform's
+     * text toolbar and TalkBack invoke. That is this host's responder
+     * chain: the platform's command reaching the platform's selection,
+     * with nothing of kaya's invented in between.
+     *
+     * A field with no selection publishes neither action and the role
+     * then does nothing, exactly as a responder chain that refuses
+     * does. MAIN THREAD ONLY — Compose owns its semantics tree from the
+     * thread that lays out, and reading it from the harness thread is a
+     * hard crash rather than a wrong answer (see kayaAx).
+     */
+    private fun kayaEditFocusedText(role: String) {
+        val activity = mountedActivity ?: return
+        val view = kayaComposeRoot(activity.window.decorView) ?: return
+        val owner = (view as RootForTest).semanticsOwner
+        val node = kayaFocusedSemanticsNode(owner.rootSemanticsNode) ?: return
+        val action =
+            if (role == "cut") node.config.getOrNull(SemanticsActions.CutText)
+            else node.config.getOrNull(SemanticsActions.CopyText)
+        action?.action?.invoke()
+    }
+
+    /// The merged semantics node that holds focus — the platform's own
+    /// answer, not the model's mirror, because the command has to act
+    /// on whatever the platform will actually cut from.
+    private fun kayaFocusedSemanticsNode(node: SemanticsNode, depth: Int = 0): SemanticsNode? {
+        if (depth > 64) return null
+        if (node.config.getOrNull(SemanticsProperties.Focused) == true) return node
+        for (child in node.children) {
+            kayaFocusedSemanticsNode(child, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Put content on the clipboard FROM OUTSIDE THIS APP, through the
+     * helper APK — a separate package, uid and process using the
+     * ordinary ClipboardManager API (tools/android/cliphelper).
+     *
+     * FOREIGN ON PURPOSE, and it is the whole value of this verb: the
+     * lowerings are the hard part, and a check where kaya reads what
+     * kaya wrote parses its own malformed lowering perfectly happily.
+     * Android has no `cmd clipboard` and no host-side path that carries
+     * more than text (§7), so the outside process has to be a real app.
+     *
+     * The seed never moves focus: background WRITES are unrestricted
+     * (`case OP_WRITE_CLIPBOARD: allowed = true`, unchanged across API
+     * 10..15 and confirmed on this pool), so a plain BroadcastReceiver
+     * is enough.
+     *
+     * AND IT WAITS UNTIL THE CONTENT IS REALLY THERE, twice: the
+     * ordered broadcast's result says the helper ran and what it did,
+     * and then this polls THIS process's own view of the offer until
+     * the seeded type shows up. A verb that returns before its own work
+     * is visible makes every step after it race — measured first on
+     * macOS, where osascript's exit did not mean the pasteboard had
+     * settled and one run in three read empty.
+     */
+    private fun kayaClipboardSeed(kind: String, argument: String) {
+        val arg = kayaExpandPath(argument)
+        val extras = android.os.Bundle()
+        val expected: String
+        val payload: ByteArray
+        when (kind) {
+            "text" -> {
+                payload = arg.toByteArray()
+                expected = ClipDescription.MIMETYPE_TEXT_PLAIN
+            }
+            "html" -> {
+                payload = arg.toByteArray()
+                expected = ClipDescription.MIMETYPE_TEXT_HTML
+            }
+            "image" -> {
+                payload = kayaSeedFile(kind, arg)
+                expected = "image/png"
+            }
+            "files" -> {
+                payload = kayaSeedFile(kind, arg)
+                // The helper serves the seeded bytes from its own
+                // provider under this display name, which is what the
+                // guest reads back through OpenableColumns.
+                extras.putString("name", java.io.File(arg).name)
+                expected = ClipDescription.MIMETYPE_TEXT_URILIST
+            }
+            else -> error(
+                "kaya: clipboard_seed cannot write \"$kind\" from outside the app — " +
+                    "no stock tool writes an app-defined format, and a helper kaya " +
+                    "wrote would be foreign in name only")
+        }
+        extras.putString("kind", kind)
+        // Base64 so binary is first-class: the same string crosses a
+        // shell (`am broadcast --es`) and a binder extra unchanged, and
+        // no quoting layer can corrupt a byte.
+        extras.putString("b64", Base64.encodeToString(payload, Base64.NO_WRAP))
+        // THE OFFERED TYPE ALONE IS NOT A VERIFICATION, and this is
+        // where that could have gone quietly wrong: the clip the seed
+        // REPLACES may advertise the same type — kaya's own copy offers
+        // text/plain and the scene's next step seeds text — so a poll on
+        // the mime would be satisfied by the very clip the seed was
+        // meant to displace. That is a check that cannot fail. The
+        // service stamps every installed clip, so the question asked
+        // below is the discriminating one: a DIFFERENT clip, offering
+        // what was asked for.
+        val before = kayaClipboardOffer()?.timestamp ?: 0L
+        val answer = kayaHelperCall(HELPER_SEED_ACTION, HELPER_SEED_RECEIVER, extras)
+        check(answer != null && answer.startsWith(HELPER_RESULT_PREFIX)) {
+            "kaya: clipboard_seed $kind: the helper answered ${answer ?: "nothing"} — " +
+                "$HELPER_PACKAGE is the lane's foreign clipboard app and must be installed"
+        }
+        val deadline = System.nanoTime() + CLIP_TIMEOUT_MS * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            val offer = kayaClipboardOffer()
+            if (offer != null && offer.timestamp != before && offer.hasMimeType(expected)) {
+                kayaClipboardChanged()
+                return
+            }
+            Thread.sleep(10)
+        }
+        error("kaya: clipboard_seed $kind never appeared on the clipboard")
+    }
+
+    private fun kayaSeedFile(kind: String, path: String): ByteArray {
+        val file = java.io.File(path)
+        check(file.isFile) {
+            "kaya: clipboard_seed $kind cannot read \"$path\" — the guest writes the " +
+                "scene's files before it shows anything, so a missing one means the " +
+                "path never expanded or the two sides disagree on the scene root"
+        }
+        return file.readBytes()
+    }
+
+    /**
+     * Read the clipboard back FROM OUTSIDE this app, in one
+     * representation. Empty when it holds nothing of that kind.
+     *
+     * THE HELPER READS WITHOUT TOUCHING THE GUEST'S FOCUS, which is
+     * what lets this verb sit between two clicks: it owns the selected
+     * input method for the length of the lane run, and ClipboardService
+     * admits the default IME's reads before it ever checks focus (§7
+     * finding 1, and the same branch exempts it from the access
+     * notification). The guest stays frontmost throughout.
+     */
+    private fun kayaClipboardRead(kind: String): String {
+        val extras = android.os.Bundle()
+        // The closed kinds by name; ANYTHING ELSE IS A CUSTOM FORMAT
+        // ID, which rides as the mime the helper asks the resolver for.
+        if (kind == "text" || kind == "html" || kind == "image" || kind == "files") {
+            extras.putString("kind", kind)
+        } else {
+            extras.putString("kind", "custom")
+            extras.putString("mime", kind)
+        }
+        val answer = kayaHelperCall(HELPER_READ_ACTION, HELPER_READ_RECEIVER, extras)
+        // A SENTINEL VALUE, never a silent empty string: "" is a real
+        // answer here (an unsatisfiable read), so a helper that never
+        // ran must not be able to look like one. The comparison fails
+        // with this text in hand and names its own cause.
+        if (answer == null || !answer.startsWith(HELPER_RESULT_PREFIX)) {
+            return "<$HELPER_PACKAGE never answered>"
+        }
+        return answer.removePrefix(HELPER_RESULT_PREFIX)
+    }
+
+    /**
+     * One ordered broadcast to the helper, and its answer.
+     *
+     * An ordered broadcast's result data is a synchronous, host-free
+     * channel — `am broadcast` prints it on stdout and a result
+     * receiver gets it app-to-app — which is what lets these two verbs
+     * stay symmetric with every other lane's: no adb round trip, no
+     * runner involvement, no logcat scraping with its stale-line
+     * hazard.
+     *
+     * AN EXPLICIT COMPONENT, always. An implicit broadcast has not
+     * reached a manifest receiver since API 26, and the
+     * stopped-package exclusion AMS adds unconditionally applies to
+     * implicit broadcasts only — so naming the class reaches a helper
+     * that has never been launched (measured, §7), and no warm-up
+     * launch is needed.
+     *
+     * RUNS OFF THE MAIN THREAD, deliberately: this blocks on another
+     * process while the result receiver is dispatched on main, so
+     * waiting inside an onUi hop would deadlock on the very thread the
+     * answer needs. The harness thread is where every verb already
+     * runs, and kayaFileDialogDrive documents the same rule.
+     */
+    private fun kayaHelperCall(
+        action: String,
+        receiver: String,
+        extras: android.os.Bundle,
+    ): String? {
+        val activity = mountedActivity ?: error("kaya: a clipboard verb with no mounted activity")
+        val intent = Intent(action)
+            .setClassName(HELPER_PACKAGE, receiver)
+            .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            .putExtras(extras)
+        val done = java.util.concurrent.CountDownLatch(1)
+        var answer: String? = null
+        activity.sendOrderedBroadcast(
+            intent,
+            null,
+            object : android.content.BroadcastReceiver() {
+                override fun onReceive(context: android.content.Context, received: Intent?) {
+                    answer = resultData
+                    done.countDown()
+                }
+            },
+            null,
+            0,
+            null,
+            null,
+        )
+        if (!done.await(CLIP_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            return null
+        }
+        return answer
+    }
+
     private fun kayaWidgetTarget(spec: String): KayaNode? {
         val kind = spec.substringBefore('#')
         val registry = when (kind) {
@@ -1547,16 +2365,27 @@ object KayaCompose {
      * derived name is the free-by-construction half of the wrap-native
      * bet, an authored one overrides it).
      *
-     * Both properties are LISTS after merging, because merging is what
-     * gathers a control's own text plus its descendants'. Joined with a
-     * space: a service reads them as one utterance.
+     * The first two properties are LISTS after merging, because merging
+     * is what gathers a control's own text plus its descendants'.
+     * Joined with a space: a service reads them as one utterance.
+     *
+     * THE THIRD SOURCE IS THE FIELD'S OWN VALUE, and every other
+     * backend already chains to it under a different name: macOS falls
+     * through to kAXValueAttribute, GTK to the AT-SPI Text interface,
+     * WinUI to ValuePattern. A Compose TextField's edited content lives
+     * in EditableText and NOT in Text — `Text` carries the
+     * label/placeholder, which this lowering passes neither — so a
+     * field named by nothing but what the user typed read back as
+     * `field/` until this arm existed. The accessibility scene never
+     * caught it because both of its field reads name the widget through
+     * a11y_label; the clipboard scene's does not.
      */
     private fun kayaAxName(node: SemanticsNode): String {
         val described = node.config.getOrNull(SemanticsProperties.ContentDescription)
         if (!described.isNullOrEmpty()) return described.joinToString(" ")
         val text = node.config.getOrNull(SemanticsProperties.Text)
         if (!text.isNullOrEmpty()) return text.joinToString(" ") { it.text }
-        return ""
+        return node.config.getOrNull(SemanticsProperties.EditableText)?.text ?: ""
     }
 
     private fun kayaComposeRoot(v: android.view.View): android.view.View? {
@@ -2030,16 +2859,41 @@ object KayaCompose {
                             }
                         }
                     }
-                    "clipboard_seed", "expect_clipboard" -> {
-                        // Android's foreign reader and writer is the
-                        // helper APK: an unfocused app gets nothing back
-                        // from ClipboardManager, so the outside process
-                        // has to be a real one and cannot be a shell
-                        // tool. Refusing in this backend's own words —
-                        // a verb that silently did nothing would seed no
-                        // content and then compare against an empty
-                        // string that reads like a real answer.
-                        depthStub("clipboard")
+                    "clipboard_seed" -> {
+                        // An action, silent like click — expect_clipboard
+                        // or the guest's own read is what says whether it
+                        // landed. Android's foreign writer is the helper
+                        // APK: there is no `cmd clipboard` and no
+                        // host-side path that carries more than text, so
+                        // the outside process has to be a real app.
+                        //
+                        // OFF THE MAIN THREAD, where every verb already
+                        // runs: this blocks on another process, and the
+                        // ordered broadcast's result lands on main.
+                        if (parts.size > 2) {
+                            kayaClipboardSeed(parts[1], quoted(parts.drop(2)))
+                        } else {
+                            failures.add("clipboard_seed wants a kind and its content")
+                        }
+                    }
+                    "expect_clipboard" -> {
+                        if (parts.size > 2) {
+                            val kind = parts[1]
+                            val want = quoted(parts.drop(2))
+                            // POLLED by the generic expect wrapper below:
+                            // the copy went out on the apply pump, so the
+                            // clipboard changes a moment after the click
+                            // that asked for it.
+                            val got = kayaClipboardRead(kind)
+                            if (got == want) {
+                                observed.add("clipboard $kind \"$got\"")
+                            } else {
+                                failures.add(
+                                    "the clipboard's $kind reads \"$got\", wanted \"$want\"")
+                            }
+                        } else {
+                            failures.add("expect_clipboard wants a kind and the expected content")
+                        }
                     }
                     "file_dialog_goto" -> {
                         // Silent like click: the observable is where the
@@ -2717,28 +3571,16 @@ object KayaCompose {
  * Guest-visible text uses LF as its line separator on every platform
  * (strings are compared byte-for-byte across languages). The model
  * owns this backend's text, so normalization happens at every WRITE
- * into it — user edits and pastes through onValueChange, the wire's
- * property write, the harness's set_text — and reads need none.
- */
-/**
- * The one spelling of "this backend has not reached that scene yet",
- * the Kotlin twin of Rust's `depth_stub` and Swift's `kayaDepthStub`.
+ * into it — user edits through onValueChange, the wire's property
+ * write, the harness's set_text, and the platform-insertion half of the
+ * paste split (which writes the model directly, so no onValueChange
+ * runs) — and reads need none.
  *
- * A CALL AND NOT A SENTENCE, which is the whole point: check-stubs and
- * check-steps both READ this call — one refuses a runner that wires a
- * scene's legs while the backend is still here, the other stops
- * demanding those legs — and a backend that refuses in its own words is
- * invisible to both. The convention was a free-form string for four
- * milestones and no backend ever wrote it, so the gate could only ever
- * pass. This interpreter had no such helper until the clipboard needed
- * one.
+ * NOT on the delivered half of the paste split, deliberately: content
+ * handed to the app's own paste hook crosses as a REPRESENTATION and
+ * not as this field's text, and the mac and GTK arms hand it over
+ * unnormalized too.
  */
-internal fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on this backend — " +
-            "it is a depth slice; see CLAUDE.md's sequencing"
-    )
-
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 
@@ -3691,14 +4533,23 @@ fun kayaPromotedActions(): List<KayaMenuItem> {
 
 /** Effective enablement: an item is reachable only while it AND every
  * ancestor grouping node is enabled — the inherited-disabled read
- * expect_menu asserts, and what lifts when the ancestor re-enables. */
+ * expect_menu asserts, and what lifts when the ancestor re-enables —
+ * AND, for a standard command, only while its role can act.
+ *
+ * The role factor is not a build-time fact: it is the intersection of
+ * what the clipboard offers and what the focused widget accepts, and
+ * both move long after the bar was built (docs/clipboard-plan.md §3).
+ * It goes here because every affordance on this host already reads this
+ * one helper — bar actions, overflow rows, drill-ins, context rows,
+ * shortcuts, expect_menu, and the activation gate — so one clause
+ * reaches all of them and none of them can disagree. */
 fun kayaMenuEffectivelyEnabled(item: KayaMenuItem): Boolean {
     var cur: KayaMenuItem? = item
     while (cur != null) {
         if (!cur.enabled) return false
         cur = cur.parent
     }
-    return true
+    return KayaCompose.kayaRoleEnabled(item.role)
 }
 
 /**
@@ -3714,7 +4565,17 @@ fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
     // the native menu behavior, uniform across the routes.
     if (!kayaMenuEffectivelyEnabled(item)) return
     when (item.kind) {
-        KayaCompose.MENU_KIND_ACTION -> KayaPresent.emitMenuActivated(item.id, noun)
+        KayaCompose.MENU_KIND_ACTION -> {
+            // A ROLE ITEM IS THE PLATFORM'S COMMAND, not the app's
+            // action: it acts on the focused widget and emits nothing of
+            // its own, because there is nothing for the app to decide.
+            // kaya has no selection API, which is exactly why these had
+            // to be commands. Enablement was re-derived one line above,
+            // live — that is this host's "refresh before a harness
+            // activation", satisfied by construction.
+            if (KayaCompose.kayaPerformClipboardRole(item.role)) return
+            KayaPresent.emitMenuActivated(item.id, noun)
+        }
         KayaCompose.MENU_KIND_TOGGLE -> {
             item.checked = !item.checked
             KayaPresent.emitMenuToggled(item.id, noun, item.checked)

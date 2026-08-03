@@ -27,7 +27,206 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-python3 - <<'EOF'
+# --- THE CLIP MASKS: the vocabulary the sweep below cannot see. -------
+#
+# That sweep matches APPLY_|KIND_|PROP_|COMMAND_|VALUE_|MENU_KIND_|MPROP_
+# and stops, so wire.rs's five clip masks (CLIP_TEXT/HTML/IMAGE/FILES/
+# CUSTOM — BIT POSITIONS, not an ordinal) are copied into both
+# interpreters with nothing pinning either copy to the Rust. Every other
+# backend reads the source: gtk.rs says `crate::wire::CLIP_FILES` and
+# the compiler holds it there. An interpreter cannot, and the drift is
+# SILENT — `present and CLIP_IMAGE` against a copy that spells image 8
+# reads the FILES slot as a picture, so the leg fails describing the
+# wrong content one layer away from the constant that is wrong.
+#
+# NAME AND VALUE TOGETHER, because half a mirror is the whole bug: a
+# copy carrying all five names at four right values compiles, runs and
+# ships one wrong kind.
+#
+# A FUNCTION, not another clause in the heredoc, so the rule can be
+# pointed at a PERTURBED copy of a mirror. A rule nobody has watched
+# refuse is a rule nobody knows fires (CLAUDE.md, invariant 3), and this
+# tree has had two negative tests pass vacuously against patterns that
+# never matched their file at all. The self-tests below are that watch.
+#
+# The canonical paths live twice — python's defaults (which name the
+# mirrors in every message, so a stdin stand-in still reports the file
+# it stands in for) and the shell's variables (which the self-tests
+# read). Both copies are exercised on every run: a wrong shell path
+# fails the perturbation count, a wrong python default fails the real
+# call with "cannot read".
+CLIP_WIRE="crates/kaya/src/wire.rs"
+CLIP_SWIFT="swift/KayaSwiftUI.swift"
+CLIP_KOTLIN="android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+clip_mirrors() { # [wire swift kotlin]; any path may be "-" for stdin
+    python3 -c '
+import re
+import sys
+
+WIRE = "crates/kaya/src/wire.rs"
+SWIFT = "swift/KayaSwiftUI.swift"
+KOTLIN = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+
+srcs = sys.argv[1:] or [WIRE, SWIFT, KOTLIN]
+bad = []
+
+
+def read(src, label):
+    """One mirror text. A path of "-" is stdin (how the self-tests feed
+    a drifted copy). A path that is not there is a FAILURE naming both
+    it and the mirror it stands in for, never a skip: the gate has to
+    fail while the second copy is unwritten, which is what holds the
+    remaining work open."""
+    if src == "-":
+        return sys.stdin.read()
+    try:
+        return open(src).read()
+    except OSError as exc:
+        bad.append("cannot read " + src + " for " + label + " (" + str(exc.strerror)
+                   + "): the mirror this rule pins is not there")
+        return None
+
+
+wire, swift, kotlin = [read(s, l) for s, l in zip(srcs, [WIRE, SWIFT, KOTLIN])]
+
+rows = re.findall(r"pub const (CLIP_[A-Z_0-9]+): u\d+ = (\d+);", wire or "")
+if wire is not None and not rows:
+    bad.append("no CLIP_* constants extracted from " + WIRE + ": the gate itself broke")
+
+for const, value in rows:
+    camel = "".join(w.capitalize() for w in const.split("_")[1:])
+    # Swift spells this family file-scope and kaya-prefixed
+    # (`private let kayaClipImage: UInt32 = 4`); its other wire mirrors
+    # drop the prefix (`applyCopy`), so both spellings pass and the
+    # message names the one the file carries today.
+    if swift is not None and not re.search(
+            r"let (?:kayaClip" + camel + r"|clip" + camel + r")\b[^=\n]*=\s*" + value + r"\b", swift):
+        bad.append(const + " = " + value + ": expected `let kayaClip" + camel
+                   + " ... = " + value + "` in " + SWIFT)
+    # Kotlin spells every wire mirror with the Rust name verbatim
+    # (`private const val APPLY_COPY = 25`), optionally typed. The
+    # lookahead rather than \b so a suffixed literal (4u, 4L) counts
+    # while 4 still does not match 40.
+    if kotlin is not None and not re.search(
+            r"\b" + const + r"\b\s*(?::\s*\w+\s*)?=\s*" + value + r"(?![0-9])", kotlin):
+        bad.append(const + " = " + value + ": expected `" + const + " = " + value
+                   + "` in " + KOTLIN)
+
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
+clip_status=0
+clip_out="$(clip_mirrors)" || {
+    echo "check-verbs: the CLIP_* mirrors do not match crates/kaya/src/wire.rs — both interpreters carry PRIVATE copies and nothing else pins them, so a drifted value ships a wrong clip kind silently:" >&2
+    echo "$clip_out" >&2
+    clip_status=1
+}
+
+# THE GUARD GUARDS ITSELF, in both directions and on BOTH mirrors.
+#
+# Each half is perturbed out of the REAL file, in a scratch copy piped
+# back through the rule, so what is proven is that the pattern matches
+# the spelling that file actually carries. A fixture would only ever
+# prove the pattern matches the fixture — which is how the wayland seat
+# guard's negative test passed VACUOUSLY TWICE against a pattern that
+# never matched its file at all.
+#
+# A PERTURBATION THAT DID NOT APPLY PROVES NOTHING, so the substitution
+# count is printed and checked before the copy is used at all.
+#
+# AND THE REFUSAL IS SCORED, NOT JUST COUNTED. An exit code alone is
+# satisfied by any unrelated finding — with the Kotlin mirror unwritten,
+# the drifted SWIFT copy failed for the MISSING KOTLIN COPY and a
+# status-only test read that as success (measured while writing this).
+# So each half scores what the perturbation INTRODUCED over the real
+# check's own findings: `named/total`, and the only passing score is
+# 1/1. The left number is the refusal (the drift must be seen); the
+# right is the accept direction (nothing else may move, so a rule that
+# refused everything fails too). Baseline-relative, because a genuinely
+# drifted mirror is not a broken guard and must not report as one — the
+# absolute count said otherwise, measured. A clause that simply PASSED
+# the drifted copy scores 0/0 and fails this the same way, which is why
+# there is no separate exit-code clause: that one is the vacuous shape.
+#
+# These run AFTER the real check above, so a mirror that is missing
+# entirely reports as a missing mirror rather than as a perturbation
+# that would not apply.
+T="$(mktemp -d)"
+trap 'rm -rf "$T"' EXIT
+
+# <source> <regex around the value> <replacement> <scratch copy>
+perturb() {
+    python3 -c '
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+drifted, n = re.subn(sys.argv[2], lambda m: m.group(1) + sys.argv[3], text)
+open(sys.argv[4], "w").write(drifted)
+print(n)
+' "$@"
+}
+
+# <findings from the drifted copy> <findings from the real check> <regex>
+introduced() {
+    python3 -c '
+import re
+import sys
+
+baseline = set(l for l in sys.argv[2].splitlines() if l.strip())
+new = [l for l in sys.argv[1].splitlines() if l.strip() and l not in baseline]
+named = [l for l in new if re.search(sys.argv[3], l)]
+print(str(len(named)) + "/" + str(len(new)))
+' "$@"
+}
+
+hits="$(perturb "$CLIP_SWIFT" '(let kayaClipImage\b[^=\n]*=\s*)4\b' 5 "$T/drifted.swift")"
+if [ "$hits" != 1 ]; then
+    echo "check-verbs: SELF-TEST FAIL (the kayaClipImage perturbation applied $hits times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+    exit 1
+fi
+drift="$(clip_mirrors "$CLIP_WIRE" - "$CLIP_KOTLIN" <"$T/drifted.swift")"
+score="$(introduced "$drift" "$clip_out" "^CLIP_IMAGE = 4: expected .* in swift/KayaSwiftUI\.swift$")"
+if [ "$score" != "1/1" ]; then
+    echo "check-verbs: SELF-TEST FAIL (drifting kayaClipImage to 5 scored $score named/introduced findings, want 1/1)" >&2
+    exit 1
+fi
+
+# The Kotlin half, a DIFFERENT constant so neither half can be passing
+# on a hardcoded one. The modifier is not part of the rule (the file
+# says `internal const val`, the sweep below spells its own constants
+# `private const val`), so the perturbation matches from the name on.
+hits="$(perturb "$CLIP_KOTLIN" '(\bCLIP_FILES\b\s*(?::\s*\w+\s*)?=\s*)8\b' 9 "$T/drifted.kt")"
+if [ "$hits" != 1 ]; then
+    echo "check-verbs: SELF-TEST FAIL (the CLIP_FILES perturbation applied $hits times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+    exit 1
+fi
+drift="$(clip_mirrors "$CLIP_WIRE" "$CLIP_SWIFT" - <"$T/drifted.kt")"
+score="$(introduced "$drift" "$clip_out" "^CLIP_FILES = 8: expected .* in .*KayaCompose\.kt$")"
+if [ "$score" != "1/1" ]; then
+    echo "check-verbs: SELF-TEST FAIL (drifting CLIP_FILES to 9 scored $score named/introduced findings, want 1/1)" >&2
+    exit 1
+fi
+
+# An ABSENT mirror is a failure that NAMES IT, never a skip — the state
+# this rule was in for the hours between the two mirrors being written,
+# and the one where a skip would have been most tempting. The message is
+# itself the refusal: a line in the findings is what makes the exit
+# nonzero, so there is nothing to check twice.
+gone="$(clip_mirrors "$CLIP_WIRE" "$CLIP_SWIFT" "$T/no-such-mirror.kt")"
+case "$gone" in
+    *"cannot read"*"KayaCompose.kt"*) ;;
+    *)
+        echo "check-verbs: SELF-TEST FAIL (an absent Kotlin mirror failed without naming it): $gone" >&2
+        exit 1
+        ;;
+esac
+
+KAYA_CLIP_MIRRORS="$clip_status" python3 - <<'EOF'
+import os
 import pathlib
 import re
 import sys
@@ -258,5 +457,11 @@ if failures:
     for f in failures:
         print(f"check-verbs: {f}", file=sys.stderr)
     sys.exit(1)
-print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + spec hash against 2 interpreters)")
+# The CLIP_* mirrors are checked by clip_mirrors(), which ran first and
+# printed its own findings. Its verdict is read here rather than left to
+# the shell so there is exactly ONE verdict line: an OK printed beside a
+# failing clause is the shape a reader believes.
+if os.environ["KAYA_CLIP_MIRRORS"] != "0":
+    sys.exit(1)
+print(f"check-verbs: OK ({len(verbs)} verbs, {len(rows)} constants + the CLIP_* mirrors + spec hash against 2 interpreters)")
 EOF

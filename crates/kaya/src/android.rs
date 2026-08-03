@@ -165,6 +165,18 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_file_dialog_result as *mut _,
             },
             NativeMethod {
+                name: "emitClipboardResult".into(),
+                sig: "(JILjava/lang/String;[B[Ljava/lang/String;[Ljava/lang/String;)V"
+                    .into(),
+                fn_ptr: present_emit_clipboard_result as *mut _,
+            },
+            NativeMethod {
+                name: "emitPasted".into(),
+                sig: "([BILjava/lang/String;[B[Ljava/lang/String;[Ljava/lang/String;)V"
+                    .into(),
+                fn_ptr: present_emit_pasted as *mut _,
+            },
+            NativeMethod {
                 name: "emitEntryPopped".into(),
                 sig: "(J)V".into(),
                 fn_ptr: present_emit_entry_popped as *mut _,
@@ -432,6 +444,151 @@ extern "system" fn present_emit_file_dialog_result(
             cstrings.len(),
         )
     };
+}
+
+/// One representation, unpacked from the six scalars Kotlin sent and
+/// LENT to the C struct for the length of one call — the JNI spelling
+/// of the SwiftUI backend's kayaWithRepresentation.
+///
+/// FLATTENED RATHER THAN BUILT IN KOTLIN, the shape
+/// emitFileDialogResult already set: a KayaRepresentation assembled on
+/// the JVM side would be a second copy of the layout to keep in step
+/// with capi.rs, so the scalars cross and the struct is built here,
+/// once, for both entries.
+///
+/// `clip` 0 crosses as a NULL representation — the universal no, which
+/// the read may answer and a paste may not.
+///
+/// ONE STRING ARGUMENT carries text, html AND a custom format's id, so
+/// the struct's `text` and `id` name the same buffer and `clip` decides
+/// which of them the core reads. That is the flattening's premise
+/// stated in pointers: a kind reads exactly the fields it names, and
+/// the other fields are not merely unused but never looked at.
+fn with_representation<'local, T>(
+    env: &mut JNIEnv<'local>,
+    clip: jint,
+    text: JString<'local>,
+    bytes: JByteArray<'local>,
+    locators: jni::objects::JObjectArray<'local>,
+    names: jni::objects::JObjectArray<'local>,
+    body: impl FnOnce(*const crate::capi::KayaRepresentation) -> T,
+) -> T {
+    if clip == 0 {
+        return body(std::ptr::null());
+    }
+    let text: String = env
+        .get_string(&text)
+        .map(|s| s.into())
+        .expect("kaya: reading the clipboard answer's text failed");
+    let payload = env
+        .convert_byte_array(&bytes)
+        .expect("kaya: reading the clipboard answer's bytes failed");
+    let read = |env: &mut JNIEnv, array: &jni::objects::JObjectArray, i: i32| -> String {
+        let Ok(item) = env.get_object_array_element(array, i) else {
+            return String::new();
+        };
+        env.get_string(&JString::from(item))
+            .map(|s| s.into())
+            .unwrap_or_default()
+    };
+    let count = env.get_array_length(&locators).unwrap_or(0);
+    let named = env.get_array_length(&names).unwrap_or(0);
+    assert_eq!(
+        count, named,
+        "kaya: a clipboard answer carries {count} locators and {named} names"
+    );
+    // A files answer WITH NO FILES is a caller bug and not the empty
+    // answer: the empty answer is clip 0, and the other backends drop
+    // to it rather than reporting a files representation nobody can
+    // open (gtk.rs's materialize_clipboard, and Swift's walk).
+    assert!(
+        clip as u32 != crate::wire::CLIP_FILES || count > 0,
+        "kaya: a clipboard answer names files and carries none — the empty \
+         answer is clip 0"
+    );
+    let mut owned = Vec::with_capacity(count as usize);
+    for i in 0..count {
+        owned.push((read(env, &locators, i), read(env, &names, i)));
+    }
+    // The C entry reads borrowed pointers for the length of the call,
+    // so every CString has to outlive the pointer vectors — the same
+    // two-pass shape emitFileDialogResult's thunk documents.
+    let text = std::ffi::CString::new(text).unwrap_or_default();
+    let cstrings: Vec<(std::ffi::CString, std::ffi::CString)> = owned
+        .iter()
+        .map(|(l, n)| {
+            (
+                std::ffi::CString::new(l.as_str()).unwrap_or_default(),
+                std::ffi::CString::new(n.as_str()).unwrap_or_default(),
+            )
+        })
+        .collect();
+    let locator_ptrs: Vec<*const std::os::raw::c_char> =
+        cstrings.iter().map(|(l, _)| l.as_ptr()).collect();
+    let name_ptrs: Vec<*const std::os::raw::c_char> =
+        cstrings.iter().map(|(_, n)| n.as_ptr()).collect();
+    let rep = crate::capi::KayaRepresentation {
+        clip: clip as u32,
+        text: text.as_ptr(),
+        id: text.as_ptr(),
+        bytes: payload.as_ptr(),
+        len: payload.len(),
+        locators: locator_ptrs.as_ptr(),
+        names: name_ptrs.as_ptr(),
+        count: cstrings.len(),
+    };
+    body(&rep)
+}
+
+/// KayaPresent.emitClipboardResult: the privileged read's one answer.
+/// `clip` 0 is the universal no — denied, unfocused, empty, or nothing
+/// the request accepted, which no platform tells apart — and the
+/// request retires either way. kaya_emit_clipboard_result's JNI
+/// spelling.
+extern "system" fn present_emit_clipboard_result<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: jlong,
+    clip: jint,
+    text: JString<'local>,
+    bytes: JByteArray<'local>,
+    locators: jni::objects::JObjectArray<'local>,
+    names: jni::objects::JObjectArray<'local>,
+) {
+    with_representation(&mut env, clip, text, bytes, locators, names, |rep| unsafe {
+        crate::capi::kaya_emit_clipboard_result(request as u64, rep)
+    });
+}
+
+/// KayaPresent.emitPasted: content arriving at a widget because the
+/// USER pasted. The tag rides verbatim, exactly as emitMenuActivated's
+/// noun does — one identity for a live widget and a stamped copy.
+///
+/// A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE, so a 0 `clip`
+/// is refused HERE, naming the Kotlin entry, rather than in the C one
+/// naming a struct the interpreter never built.
+/// kaya_emit_pasted's JNI spelling.
+extern "system" fn present_emit_pasted<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    tag: JByteArray<'local>,
+    clip: jint,
+    text: JString<'local>,
+    bytes: JByteArray<'local>,
+    locators: jni::objects::JObjectArray<'local>,
+    names: jni::objects::JObjectArray<'local>,
+) {
+    let tag = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the paste tag failed");
+    assert_ne!(
+        clip, 0,
+        "kaya: KayaPresent.emitPasted was handed no representation — a paste \
+         that delivered nothing is not an occurrence"
+    );
+    with_representation(&mut env, clip, text, bytes, locators, names, |rep| unsafe {
+        crate::capi::kaya_emit_pasted(tag.as_ptr(), tag.len(), rep)
+    });
 }
 
 /// KayaPresent.emitEntryPopped: the user's back gesture popped an

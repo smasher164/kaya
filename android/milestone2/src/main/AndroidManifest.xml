@@ -1,5 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- THE CLIPBOARD SCENE'S FOREIGN APP, named here because a package
+         this one cannot SEE is a package it cannot broadcast to. On
+         targetSdk 30+ ActivityManagerService resolves receivers through
+         PackageManagerInternal.queryIntentReceivers WITH THE CALLER'S
+         UID, so app-visibility filtering applies to an explicit
+         component too and the broadcast simply finds nothing to deliver
+         to. Silently: an ordered broadcast with no receiver still runs
+         the sender's result receiver, with the initial code, which reads
+         exactly like a helper that answered nothing.
+
+         Every cell in docs/clipboard-plan.md §7 was measured from the
+         SHELL uid (adb), which holds QUERY_ALL_PACKAGES and never needed
+         this — app-to-app is the path the arm actually takes, and it is
+         the one this covers.
+
+         Harness-only, so it is declared here and not in the kaya
+         library's manifest — the same call the accessibility service
+         below makes, for the same reason. -->
+    <queries>
+        <package android:name="dev.kaya.cliphelper" />
+    </queries>
     <application
         android:label="kaya milestone 0"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

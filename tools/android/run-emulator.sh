@@ -147,6 +147,31 @@ if ! adb -s "$TABLET_SERIAL" get-state 2>/dev/null | grep -q device; then
         -gpu swiftshader_indirect -port "$TABLET_PORT" \
         >"$ROOT/target/emu-$TABLET_PORT.log" 2>&1 &
 fi
+# THE LANE'S FOREIGN CLIPBOARD APP. Every assertion in the clipboard
+# scene crosses a process boundary on purpose (tools/scenes/clipboard.steps):
+# a check where kaya reads what kaya wrote parses its own malformed
+# lowering perfectly happily. This host has no `cmd clipboard` and no
+# host-side path worth the name, so the outside process is an APK —
+# tools/android/cliphelper, which seeds the clipboard FROM THE
+# BACKGROUND (writes were never focus-gated) and reads it back as the
+# DEFAULT IME, whose reads ClipboardService admits before it ever checks
+# focus. The guest therefore keeps window focus for the whole leg and
+# nothing has to be handed back (docs/clipboard-plan.md §7 finding 1).
+#
+# A SEPARATE GRADLE BUILD from android/'s, deliberately: a harness-only
+# APK must never be one `assemble` away from the module graph the apps
+# ship. Built HERE because it needs no device and the pool above is
+# still booting — the cost hides inside the wait below.
+CLIPHELPER_PKG=dev.kaya.cliphelper
+CLIPHELPER_IME="$CLIPHELPER_PKG/.HelperIme"
+CLIPHELPER_APK="$ROOT/tools/android/cliphelper/app/build/outputs/apk/debug/app-debug.apk"
+(cd "$ROOT/tools/android/cliphelper" && gradle --console=plain -q :app:assembleDebug) || exit 1
+if [ ! -f "$CLIPHELPER_APK" ]; then
+    echo "run-emulator: the clipboard helper build produced no apk at" >&2
+    echo "  $CLIPHELPER_APK" >&2
+    exit 1
+fi
+
 for serial in "${SERIALS[@]}" "$TABLET_SERIAL"; do
     boot_wait "$serial"
 done
@@ -207,7 +232,91 @@ fi
 # before the next gradle build rewrites the APK a queued leg would
 # install.
 LEGS_DIR="$(mktemp -d)"
-trap 'rm -rf "$LEGS_DIR"' EXIT
+# THE POOL STAYS WARM ACROSS RUNS (nothing kills it at exit), so every
+# device-global switch this run flips has to come back off. The default
+# IME below is per-user state: left selected it hands the next run — and
+# anyone who opens this emulator by hand — a keyboard nobody chose. In
+# the trap and not at the end of the script because a failed leg, a ^C
+# and a `set -e` abort all leave the same mess.
+CLIPHELPER_IME_ON=()
+kaya_teardown() {
+    rm -rf "$LEGS_DIR"
+    local serial
+    for serial in ${CLIPHELPER_IME_ON[@]+"${CLIPHELPER_IME_ON[@]}"}; do
+        adb -s "$serial" shell ime reset >/dev/null 2>&1 || true
+    done
+}
+trap kaya_teardown EXIT
+
+# THE HELPER LANDS ON EVERY POOL DEVICE BEFORE ANY LEG RUNS, and both
+# halves are VERIFIED rather than assumed. An absent helper turns every
+# clipboard leg into a seed whose latch times out with nothing anywhere
+# naming the cause; an `ime set` that did not take turns every foreign
+# read into a null — and null is also what an empty clipboard, a denied
+# read and a locked device answer, so the leg would fail three removes
+# from the reason. Loud here, once, beats ambiguous there, every leg.
+#
+# NOT ON THE TABLET: it carries one leg (listdetail) and no clipboard
+# leg may land there — it is the one device with no slot lock, so two
+# legs on it would share one clipboard. check-steps pins that.
+cliphelper_prepare() { # serial
+    local serial="$1" tries=0 current=''
+    if ! adb -s "$serial" install -r "$CLIPHELPER_APK" >/dev/null; then
+        echo "run-emulator: could not install $CLIPHELPER_PKG on $serial" >&2
+        return 1
+    fi
+    if ! adb -s "$serial" shell pm list packages 2>/dev/null | tr -d '\r' \
+        | grep -qx "package:$CLIPHELPER_PKG"; then
+        echo "run-emulator: $CLIPHELPER_PKG is not on $serial after an install that" >&2
+        echo "  reported success — every clipboard leg would seed into nothing" >&2
+        return 1
+    fi
+    # BOUNDED WAIT, because the input method service is registered
+    # asynchronously after the install: `ime enable` on its heels answers
+    # "Unknown id" and the `ime set` behind it then silently keeps the
+    # previous keyboard. Same shape and same reason as the accessibility
+    # bind wait below.
+    while [ "$tries" -lt 50 ]; do
+        if adb -s "$serial" shell ime list -a -s 2>/dev/null | tr -d '\r' \
+            | grep -qF "$CLIPHELPER_PKG/"; then
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 0.2
+    done
+    # Neither of these is the check — the poll below is, and it catches
+    # every way they can fail plus the ones that report success. They are
+    # explicitly non-fatal so that stays true whatever `set -e` context a
+    # future caller puts this function in; their own complaint ("Unknown
+    # input method ... cannot be selected") still reaches stderr.
+    adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
+    adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
+    # AND IT MUST ACTUALLY BE THE SELECTED ONE. `ime set` returns before
+    # the setting settles, and the gate that reads it is consulted much
+    # later, inside a leg — so poll the setting ClipboardService itself
+    # reads (Settings.Secure DEFAULT_INPUT_METHOD, compared by PACKAGE)
+    # rather than sleeping and hoping.
+    tries=0
+    while [ "$tries" -lt 50 ]; do
+        current="$(adb -s "$serial" shell settings get secure default_input_method \
+            2>/dev/null | tr -d '\r')"
+        case "$current" in
+            "$CLIPHELPER_PKG/"*) return 0 ;;
+        esac
+        tries=$((tries + 1))
+        sleep 0.2
+    done
+    echo "run-emulator: $CLIPHELPER_IME did not become the default IME on $serial" >&2
+    echo "  (default_input_method reads \"$current\") — the helper's reads would" >&2
+    echo "  answer null, which is what an empty clipboard answers too" >&2
+    return 1
+}
+for serial in "${SERIALS[@]}"; do
+    cliphelper_prepare "$serial" || exit 1
+    CLIPHELPER_IME_ON+=("$serial")
+done
+timing cliphelper
+
 leg_names=()
 leg_pids=()
 # The tablet's leg is tracked apart from the pool's. If it rode
@@ -641,6 +750,34 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity commands \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    # The clipboard scene: one clip in several representations, the
+    # privileged read, the paste split, and Paste as a standard command.
+    # The foreign process on the other side of every assertion is
+    # dev.kaya.cliphelper, installed and made the default IME on every
+    # pool device above; the guest reaches it by ordered broadcast, with
+    # no adb round trip and nothing per-leg to arrange here.
+    #
+    # NO DRAIN BRACKET, and that is a measured difference from the other
+    # three lanes rather than an omission. The rule those lanes spell
+    # with drain is that a leg must read the clipboard THAT LEG WROTE
+    # (docs/clipboard-plan.md §0d, the 2026-08-02 correction: one system
+    # clipboard per session, and eight legs writing it concurrently are
+    # eight processes assigning one variable — six of eight failed).
+    # HERE A SESSION IS A DEVICE, NOT THE LANE: the pool is separate
+    # emulators, each with its own ClipboardService, and §7 finding 4
+    # measured the emulator-host clipboard bridge severed in both
+    # directions, so nothing joins them — not even the mac lane's
+    # pbcopy under validate-all. run_apk's slot lock already gives a leg
+    # its device for the leg's whole duration, which is this runner's
+    # spelling of the same exclusion. A drain bracket would exclude
+    # NOTHING on top of that (there is one clipboard leg per suite
+    # block), so it would be a barrier that cannot fail for the reason
+    # it exists; check-steps pins the property that can — the leg rides
+    # run_apk, and run_apk still claims a device.
+    run_apk clipboard-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity clipboard \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
     drain
     timing legs-compose
 fi
@@ -766,6 +903,13 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity commands \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    # The clipboard scene through the JVM binding (see the compose leg,
+    # including why this lane's clipboard legs need no drain bracket:
+    # each rides its own emulator, which is its own clipboard session).
+    run_apk clipboard-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity clipboard \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
     drain
     timing legs-jvm
 fi

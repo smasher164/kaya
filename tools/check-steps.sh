@@ -729,6 +729,107 @@ for spec in "tools/validate-mac.sh|$MAC_LEG|drain" \
     }
 done
 
+# THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE,
+# not a gap somebody should close by reflex. What §0d's correction
+# actually requires is that a leg read the clipboard THAT LEG WROTE; the
+# desktop lanes get there by emptying the pool, because their legs share
+# one session. This lane's pool is separate emulators, each with its own
+# ClipboardService, and §7 finding 4 measured the emulator-host clipboard
+# bridge severed in both directions — so a session here is a DEVICE, and
+# run_apk's slot lock, which holds one emulator for a leg's whole
+# duration, is this runner's spelling of the same exclusion.
+#
+# A drain bracket on top of that would be a barrier that CANNOT FAIL for
+# the reason it exists — there is one clipboard leg per suite block, so
+# it would exclude nothing, and a gate satisfiable without exercising
+# the real thing is a bug in the gate (CLAUDE.md invariant 4). So this
+# checks the two things that CAN go wrong instead: a clipboard leg that
+# stops riding run_apk (the tablet is the live temptation — one device,
+# no lock, and legs on it would share its clipboard), and a run_apk that
+# stops claiming a device, which would silently turn the first clause
+# into a rule about a word.
+clipboard_device() { # path
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+
+seen = 0
+for n, line in enumerate(text.splitlines(), 1):
+    m = re.match(r"([A-Za-z_][A-Za-z_0-9]*)\s+(clipboard-[a-z0-9]+)\b", line.strip())
+    if m is None:
+        continue
+    seen += 1
+    if m.group(1) != "run_apk":
+        bad.append(f"{path}:{n}: {m.group(2)} rides {m.group(1)}, not run_apk — only "
+                   f"run_apk claims an emulator for the whole leg, and two clipboard "
+                   f"legs on one device share that device clipboard")
+if seen == 0:
+    bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
+
+start = text.find("run_apk() {")
+end = text.find("run_apk_tablet() {")
+if start < 0 or end < start:
+    bad.append(f"{path}: run_apk()/run_apk_tablet() are not where this gate looks — "
+               f"the runner shape moved and the check went vacuous")
+else:
+    body = text[start:end]
+    for claim in ("mkdir \"$LEGS_DIR/.dev-", "rmdir \"$LEGS_DIR/.dev-"):
+        if claim in body:
+            continue
+        bad.append(f"{path}: run_apk no longer does `{claim}...`, so a leg no longer "
+                   f"holds its emulator alone — on this lane that lock IS the "
+                   f"clipboard exclusion (docs/clipboard-plan.md §0d, §7 finding 4)")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself in the ANDROID spelling, and on the REASON
+# rather than the exit code: this gate family has twice passed a
+# perturbation vacuously (docs/traps.md), and a negative test whose
+# failure comes from somewhere else proves nothing about the clause it
+# claims to cover.
+android_device_selftest() { # sample want-fragment label
+    local out
+    out="$(printf '%b' "$1" | clipboard_device -)" && {
+        echo "check-steps: SELF-TEST FAIL ($3 passed)" >&2
+        exit 1
+    }
+    case "$out" in
+        *"$2"*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($3 failed for another reason: $out)" >&2
+            exit 1
+            ;;
+    esac
+}
+ANDROID_POOL='run_apk() {\nif mkdir "$LEGS_DIR/.dev-$i"; then\nfi\nrmdir "$LEGS_DIR/.dev-$slot"\n}\nrun_apk_tablet() {\n'
+# A clipboard leg on the lockless tablet must fail...
+android_device_selftest "run_apk_tablet clipboard-compose apk act clipboard\n$ANDROID_POOL" \
+    "not run_apk" "a clipboard leg on the tablet"
+# ...a run_apk that stopped claiming a device must fail...
+android_device_selftest 'run_apk clipboard-compose apk act clipboard\nrun_apk() {\nserial="${SERIALS[$i]}"\n}\nrun_apk_tablet() {\n' \
+    "holds its emulator alone" "an unlocked run_apk"
+# ...an unwired scene must fail...
+android_device_selftest "$ANDROID_POOL" "no clipboard leg found" "a runner with no clipboard leg"
+# ...and the well-formed shape must PASS, or the three above are failing
+# for a reason that has nothing to do with what they claim to test.
+if ! printf '%b' "run_apk clipboard-compose apk act clipboard\n$ANDROID_POOL" \
+    | clipboard_device - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a well-formed android clipboard leg was refused)" >&2
+    exit 1
+fi
+
+out="$(clipboard_device tools/android/run-emulator.sh)" || {
+    echo "check-steps: an android clipboard leg must own its emulator for the whole leg (docs/clipboard-plan.md §0d, §7 finding 4 — one clipboard per emulator session, and the slot lock is this lane's drain):" >&2
+    echo "$out" >&2
+    status=1
+}
+
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
 # every scene there, so the leg selects one by name through
 # `--es KAYA_SELFTEST <scene>` and the guest matches it. A name the

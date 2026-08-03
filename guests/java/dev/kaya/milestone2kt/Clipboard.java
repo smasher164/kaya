@@ -90,6 +90,20 @@ final class Clipboard {
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
+        // THE PHONES USE THE SHARED COLLECTIONS, exactly as the rust
+        // guest does (guests/rust/clipboard.rs, scene_root): the
+        // OUTSIDE process — the Android helper app — has to reach
+        // these files too, and no app can see another app's private
+        // cache. A JVM guest has no cfg(), so Android is detected by
+        // the specification vendor. Missed on the first android run:
+        // the interpreter expanded $TMP to the shared Documents
+        // collection while this guest wrote to the cache dir, and the
+        // seed died on the path the two sides disagreed about.
+        if (System.getProperty("java.specification.vendor", "")
+                .contains("Android")) {
+            String ext = System.getenv("EXTERNAL_STORAGE");
+            tmp = (ext == null || ext.isEmpty() ? "/sdcard" : ext) + "/Documents";
+        }
         Path dir = Paths.get(tmp, "kaya-clip-" + pid());
         try {
             Files.createDirectories(dir);

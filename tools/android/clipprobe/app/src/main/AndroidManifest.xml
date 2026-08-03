@@ -26,6 +26,11 @@
                 <action android:name="dev.kaya.clipprobe.READ"/>
             </intent-filter>
         </receiver>
+        <receiver android:name=".FdReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="dev.kaya.clipprobe.FD"/>
+            </intent-filter>
+        </receiver>
         <!-- Never shown, never bound: being the DEFAULT IME is what
              exempts this package's reads from the focus gate. -->
         <service

@@ -37,7 +37,7 @@ A() { adb -s "$SERIAL" "$@"; }
 seed() { A shell am broadcast -a dev.kaya.clipprobe.SEED -n "$PKG/.SeedReceiver" "$@" | grep -E "data=|Broadcast"; }
 read_clip() { A shell am broadcast -a dev.kaya.clipprobe.READ -n "$PKG/.ReadReceiver" "$@" | grep -E "data=|Broadcast"; }
 
-cd "$HERE"
+cd "$HERE" || exit 1
 gradle --console=plain -q :app:assembleDebug
 mkdir -p "$OUT"
 

@@ -97,6 +97,9 @@ GATES = {
     "check-sugar-surface": ["crates", "bindings"],
     "check-universal-props": ["crates", "bindings", "swift", "android"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
+    # The JNI registration cross-check reads the two rust registration
+    # modules, the Kotlin classes and the desktop Java class.
+    "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],
     "check-stubs": ["crates", "swift", "android"],
     # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
     # else outside android/.

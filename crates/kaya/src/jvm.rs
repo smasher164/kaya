@@ -16,8 +16,14 @@
 //! (attach takes the Activity anchor Android requires), Java in
 //! bindings/java-desktop (attach takes nothing; run exists) — and
 //! registration matches by name+signature against whichever class
-//! loaded this library, so drift on either side fails loudly at
-//! attach, on that platform, not at first use.
+//! loaded this library. That check runs one way only: an entry the
+//! CLASS lacks fails loudly at attach, but a native the class declares
+//! and no list registers waits silently for its first caller (which is
+//! how openPicked died on Android's first pasted file, months after
+//! the desktops shipped it). tools/check-jni.sh closes the other
+//! direction: every native/external declaration in the two KayaRing
+//! classes and KayaPresent must have a registration entry here or in
+//! android.rs, checked statically, both ways.
 
 use jni::objects::{JByteArray, JClass};
 use jni::sys::{jint, jlong};
@@ -88,6 +94,16 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             // and a picked file is redeemable from either JVM. On
             // Android this lands on the source that opens through the
             // ContentResolver; on the desktops, on the path source.
+            // (This entry once sat in register_desktop_natives with
+            // this comment already here promising otherwise, and the
+            // first Android caller — the clipboard scene's pasted
+            // file — died at first use. check-jni.sh now compares
+            // every class's native surface against these lists.)
+            NativeMethod {
+                name: "openPicked".into(),
+                sig: "(JI[I)Ljava/io/FileDescriptor;".into(),
+                fn_ptr: ring_open_picked as *mut _,
+            },
         ],
     )
 }
@@ -196,18 +212,11 @@ fn register_desktop_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaRing")?;
     env.register_native_methods(
         &class,
-        &[
-            NativeMethod {
-                name: "run".into(),
-                sig: "()I".into(),
-                fn_ptr: ring_run as *mut _,
-            },
-            NativeMethod {
-                name: "openPicked".into(),
-                sig: "(JI[I)Ljava/io/FileDescriptor;".into(),
-                fn_ptr: ring_open_picked as *mut _,
-            },
-        ],
+        &[NativeMethod {
+            name: "run".into(),
+            sig: "()I".into(),
+            fn_ptr: ring_run as *mut _,
+        }],
     )
 }
 
@@ -257,10 +266,19 @@ extern "system" fn ring_open_picked(
     let build = |env: &mut JNIEnv| -> jni::errors::Result<jni::sys::jobject> {
         let class = env.find_class("java/io/FileDescriptor")?;
         let fd = env.new_object(&class, "()V", &[])?;
-        // Unix (and sockets on Windows) carry the int `fd`; Windows
-        // regular files carry the long `handle` instead. Both fields
-        // exist on every platform's FileDescriptor; only one is live.
-        if cfg!(windows) {
+        // Three spellings of the same private int, one per runtime.
+        // OpenJDK's field is `fd`, except Windows regular files, which
+        // ride the long `handle` instead. ART's FileDescriptor is
+        // libcore's and names the field `descriptor` — a non-SDK member
+        // behind hidden-API enforcement, MEASURED admitted on the
+        // API-35 image (tools/android/clipprobe FdReceiver: field
+        // settable, and a hand-built descriptor reads real bytes).
+        // Poking it is what the platform's own jniCreateFileDescriptor
+        // does; if a future image blocks it, the successor is the NDK's
+        // AFileDescriptor_create (API 31+), and this throws loudly.
+        if cfg!(target_os = "android") {
+            env.set_field(&fd, "descriptor", "I", jni::objects::JValue::Int(raw as jint))?;
+        } else if cfg!(windows) {
             env.set_field(&fd, "handle", "J", jni::objects::JValue::Long(raw))?;
         } else {
             env.set_field(&fd, "fd", "I", jni::objects::JValue::Int(raw as jint))?;

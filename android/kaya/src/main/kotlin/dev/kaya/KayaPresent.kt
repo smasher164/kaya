@@ -55,8 +55,67 @@ object KayaPresent {
     )
 
     /**
+     * The privileged read's one answer, FLATTENED — the representation
+     * crosses as scalars rather than as a struct, the way
+     * [emitFileDialogResult] flattens the picker's answer, because a
+     * struct would have to be built on both sides of the JNI boundary
+     * and agreed on twice.
+     *
+     * [clip] is ONE of the wire's CLIP_* values, never a mask — and 0
+     * is the universal no (denied, unfocused, empty, or nothing the
+     * request accepted), which every platform reports the same way
+     * because none of them says which. [clip] alone decides which
+     * argument carries the payload: text and html ride [text], an
+     * image rides [bytes], a custom format rides its id in [text] and
+     * its bytes in [bytes], and files ride parallel [locators]
+     * (`content://` URI strings) and [names] (their display names).
+     * The arguments the kind does not name pass "" and empty arrays.
+     *
+     * The request retires here: answer exactly once, and answering
+     * empty is always correct. kaya_emit_clipboard_result's JNI
+     * spelling.
+     */
+    @JvmStatic external fun emitClipboardResult(
+        request: Long,
+        clip: Int,
+        text: String,
+        bytes: ByteArray,
+        locators: Array<String>,
+        names: Array<String>,
+    )
+
+    /**
+     * Content arriving at a widget because the USER pasted. [tag] is
+     * the widget's own click-tag bytes, handed back verbatim — the
+     * same identity [emitClicked] and [emitTextChanged] ride, so a
+     * stamped copy's paste needs no second entry.
+     *
+     * The payload flattens exactly as [emitClipboardResult]'s does,
+     * with one difference: A PASTE THAT DELIVERED NOTHING IS NOT AN
+     * OCCURRENCE, so [clip] is never 0 here. The empty answer belongs
+     * to the read, which asked and may be refused; a paste that
+     * reached a widget already carries content by definition. The core
+     * refuses a 0 rather than inventing an empty occurrence.
+     *
+     * kaya_emit_pasted's JNI spelling.
+     */
+    @JvmStatic external fun emitPasted(
+        tag: ByteArray,
+        clip: Int,
+        text: String,
+        bytes: ByteArray,
+        locators: Array<String>,
+        names: Array<String>,
+    )
+
+    /**
      * Redeem a picked URI: `openFileDescriptor(uri, mode)` then
      * `detachFd`, returning the descriptor the guest now owns.
+     *
+     * A PASTED FILE COMES THROUGH HERE TOO, and that is the point of
+     * the shared shape: [emitPasted]'s and [emitClipboardResult]'s
+     * `locators` register the same source the picker's do, so the
+     * guest redeems a file it pasted exactly as one it picked.
      *
      * CALLED FROM THE CORE, not from Kotlin — the one native method that
      * runs the other way. It exists because a handle is redeemable more

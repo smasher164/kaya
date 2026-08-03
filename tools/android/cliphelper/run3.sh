@@ -22,7 +22,6 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
 SERIAL="${1:-emulator-5558}"
 HELPER=dev.kaya.cliphelper
 PROBE=dev.kaya.clipprobe
@@ -32,7 +31,7 @@ helper_read() { A shell am broadcast -a dev.kaya.cliphelper.READ -n "$HELPER/.Re
 helper_seed() { A shell am broadcast -a dev.kaya.cliphelper.SEED -n "$HELPER/.SeedReceiver" "$@" | grep -E "data="; }
 probe_read() { A shell am broadcast -a dev.kaya.clipprobe.READ -n "$PROBE/.ReadReceiver" "$@" | grep -E "data="; }
 
-cd "$HERE"
+cd "$HERE" || exit 1
 gradle --console=plain -q :app:assembleDebug
 (cd "$HERE/../clipprobe" && gradle --console=plain -q :app:assembleDebug)
 
@@ -64,7 +63,6 @@ echo "$CUSTOM_LINE"
 helper_read --es kind image
 
 echo "== C4: the C3 URI after the clip changes (cross-package revocation) =="
-CUSTOM_URI="$(printf '%s' "$CUSTOM_LINE" | grep -oE 'content://[^ "]+' | head -1)"
 probe_seed --es kind text --es payload "c4-clip-changed"
 helper_read --es kind reopen --es uri "content://dev.kaya.clipprobe/custom"
 

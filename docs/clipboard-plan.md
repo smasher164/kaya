@@ -1211,7 +1211,7 @@ image/png.
   falls back to the field's value — the macOS AXValue / GTK AT-SPI
   Text chain, spelled WinUI.
 
-## §7 — what Android actually charges (measured 2026-08-03; arm pending)
+## §7 — what Android actually charges (measured 2026-08-03; arm written same day)
 
 Two probe campaigns — tools/android/clipprobe/run2.sh (same-package)
 and tools/android/cliphelper/run3.sh (cross-package, the one that
@@ -1287,9 +1287,59 @@ android module serving its copies' byte payloads; the seed/read
 verbs orchestrating the helper over ordered broadcasts; the
 EditableText fallback in kayaAxName (the same field-value gap GTK
 and WinUI each had, third platform running); the roles + paste
-split mirroring the other arms; and the CLIP_* constants, which
-check-verbs' sweep does not cover — the clause worth adding while
-the second mirror copy is written.
+split mirroring the other arms; and the CLIP_* constants — whose
+check-verbs clause LANDED with the arm (clip_mirrors: both
+interpreters' private copies pinned to wire.rs, self-tested).
+
+### 6. WHAT THE FIRST LANE RUNS CAUGHT (integration, 2026-08-03)
+
+Two failures, both in clipboard-jvm, both invisible to every fast
+gate because each needed a REAL android JVM process walking a path
+nothing had walked before.
+
+- **The shared Java guest lacked the rust guest's android
+  scene_root branch.** The interpreter materializes file payloads
+  under shared Documents; the Java guest wrote its expectation
+  against the app cache dir, and the seed died on the disagreed
+  path. The guests' platform branches must move in lockstep — a
+  platform branch added to one guest is a sweep obligation across
+  all eight, same as any binding surface.
+
+- **The first pasted file on the android JVM tier hit an
+  UnsatisfiedLinkError: KayaRing.openPicked had no implementation.**
+  The entry sat in jvm.rs's `register_desktop_natives`
+  (cfg'd off android) while the SHARED list carried a comment
+  promising it was shared — and both KayaRing classes declared it.
+  JNI's attach-time check runs ONE WAY: an entry the class lacks
+  fails loudly at attach, but a natively-declared method no list
+  registers waits SILENTLY for its first caller. filedialog has no
+  jvm leg on android (the picker rides KayaPresent.openPickedUri),
+  so the clipboard scene's pasted file was the first caller ever,
+  months after the desktops shipped the same method.
+
+  Fixing the registration exposed the second charge, measured
+  before writing the arm's branch (tools/android/clipprobe,
+  FdReceiver): ART's `java.io.FileDescriptor` is libcore's, and the
+  int field is `descriptor`, not OpenJDK's `fd` — a non-SDK member,
+  but hidden-API enforcement ADMITS it on the API-35 image (field
+  settable, `setInt$` callable, and a hand-built descriptor reads
+  real bytes end-to-end: F1/F2/F3 all ok). Poking it is what the
+  platform's own jniCreateFileDescriptor does; if a future image
+  blocks it, the successor is the NDK's `AFileDescriptor_create`
+  (API 31+), and the failure would be a loud IOException at the
+  paste, caught by this leg.
+
+  The guard is tools/check-jni.sh (keyed, in validate-mac's gate
+  block): every native/external declaration in KayaRing.kt,
+  KayaPresent.kt, Kaya.kt and KayaRing.java must have a
+  registration entry or a Java_dev_kaya_* export on ITS tier's
+  attach path, and every registered name must be declared where its
+  list targets — both directions, statically, with four negative
+  self-tests each proving its perturbation applied before demanding
+  red. The sweep verdict for the other seven bindings: no other
+  tier HAS a hand-kept registration list — their native surfaces
+  are generated from the spec and pinned by gen-bindings/gen-header
+  — so the gate covers the one mechanism that can drift this way.
 
 ## §8 onwards — to be written
 

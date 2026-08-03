@@ -109,6 +109,7 @@ tools/check-build-id.sh || exit 1
 tools/check-keyed.sh || exit 1
 tools/keyed.sh check-pins -- tools/check-pins.sh || exit 1
 tools/keyed.sh check-verbs -- tools/check-verbs.sh || exit 1
+tools/keyed.sh check-jni -- tools/check-jni.sh || exit 1
 tools/keyed.sh check-stubs -- tools/check-stubs.sh || exit 1
 tools/keyed.sh check-compose -- tools/check-compose.sh || exit 1
 tools/keyed.sh check-detekt -- tools/check-detekt.sh || exit 1

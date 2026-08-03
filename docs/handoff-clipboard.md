@@ -135,10 +135,40 @@ Each needs: the copy arm, the read arm answering exactly once, the
   (deliberate cut, §6). The legs run serialised in deploy-win's
   serial tail, pinned by check-steps' barrier clause in deploy-win's
   own vocabulary.
-- **Compose.** Images cannot be bytes: `ClipData` carries a
-  `content://` URI, so the backend stands up a provider. Reads return
-  nothing without focus, which is why the foreign side has to be a real
-  app — see below.
+- **Compose — ARM WRITTEN 2026-08-03, measured first (docs/
+  clipboard-plan.md §7).** Byte payloads ride content:// URIs off
+  KayaClipProvider (authority `${applicationId}.clip` — a literal
+  authority collides when both APKs install; the provider's companion
+  API is the only spelling of paths and URIs). The foreign side is
+  dev.kaya.cliphelper: seeds from the background (writes are not
+  focus-gated), reads as the DEFAULT IME (ClipboardService admits the
+  default IME before it checks focus — the guest keeps the foreground
+  the whole time), every seed carrying the overlay-suppression extra.
+  The interpreter orchestrates it app-to-app over ordered broadcasts
+  (the app manifests carry <queries> for it). The grant traps are
+  measured: per-paste grants are REVOKED on clip change — materialize
+  inside the read, never stash a URI. Legs ride one emulator each
+  (own session, own clipboard — no drain bracket needed, and
+  check-steps' android clause enforces the exclusion in the runner's
+  own vocabulary). The CLIP_* mirrors are now gate-pinned
+  (check-verbs clip_mirrors). Two integration lessons from the
+  first lane runs (both invisible to every fast gate; §7.6 has the
+  full chain): the shared Java guest lacked the rust guest's
+  android scene_root branch (shared Documents, not the cache dir)
+  and the seed died on the disagreed path — the guests' platform
+  branches must move in lockstep with the interpreters' $TMP. And
+  the FIRST pasted file on the android JVM tier hit an
+  UnsatisfiedLinkError: KayaRing.openPicked sat in the desktop-only
+  registration list under a comment promising it was shared,
+  because JNI's attach check runs one way and a
+  declared-but-unregistered native waits silently for its first
+  caller. The fix rode a measured charge — ART's FileDescriptor int
+  field is `descriptor`, not `fd` (tools/android/clipprobe
+  FdReceiver; admitted on API 35) — and the guard is
+  tools/check-jni.sh: every native/external declaration registered
+  on its tier's attach path, both directions, statically, four
+  negative self-tests. THE LANE IS GREEN: 50 legs, both clipboard
+  legs PASS, 2026-08-03.
 - **iOS.** `UIPasteboard`, and the read PROMPTS for another app's
   content (§0e finding 2). The leg has to drive the prompt, the way
   the picker leg drives the panel (tools/ios/simdrive). Seeding is
