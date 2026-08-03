@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x2ed696ff6043310c
+	SpecHash uint64 = 0x408bcf69e0ad2bfd
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -567,12 +567,11 @@ func TxCopy(present uint32, fileCount uint32, customCount uint32, reps []any) []
 	return endRecord(b)
 }
 
-// TxReadClipboard: Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
-func TxReadClipboard(request uint64, accepting uint32) []byte {
+// TxReadClipboard: Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+func TxReadClipboard(request uint64, accepting any) []byte {
 	b := beginRecord(txReadClipboard)
 	b = binary.LittleEndian.AppendUint64(b, request)
-	b = binary.LittleEndian.AppendUint32(b, accepting)
-	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, accepting)
 	return endRecord(b)
 }
 
@@ -1025,7 +1024,7 @@ func TxBindA11yHintElement(widgetID uint64, level uint32, field uint32) []byte {
 }
 
 // TxSetAccepts: set_property with a constant accepts value.
-func TxSetAccepts(widgetID uint64, accepts float64) []byte {
+func TxSetAccepts(widgetID uint64, accepts string) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropAccepts)

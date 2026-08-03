@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x2ed696ff6043310c
+let kayaSpecHash: UInt64 = 0x408bcf69e0ad2bfd
 
 struct KayaTx {
     var bytes = Data()
@@ -396,12 +396,11 @@ struct KayaTx {
         self.end(start)
     }
 
-    /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
-    mutating func readClipboard(_ request: UInt64, _ accepting: UInt32) {
+    /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+    mutating func readClipboard(_ request: UInt64, _ accepting: KayaValue) {
         let start = self.begin(UInt16(KAYA_TX_READ_CLIPBOARD))
         self.u64(request)
-        self.u32(accepting)
-        self.u32(0)
+        self.value(accepting)
         self.end(start)
     }
 
@@ -854,12 +853,12 @@ struct KayaTx {
     }
 
     /// set_property with a constant accepts value.
-    mutating func setAccepts(_ widgetId: UInt64, _ accepts: Double) {
+    mutating func setAccepts(_ widgetId: UInt64, _ accepts: String) {
         let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ACCEPTS))
         self.u32(UInt32(KAYA_SOURCE_CONST))
-        self.value(.f64(accepts))
+        self.value(.str(accepts))
         self.end(start)
     }
 

@@ -1086,6 +1086,15 @@ typedef struct KayaHostApi {
   void (*emit_menu_toggled)(uint64_t, const uint8_t*, uintptr_t, uint8_t);
   void (*emit_menu_value_changed)(uint64_t, const uint8_t*, uintptr_t, double);
   /**
+   * The clipboard's two answers. `emit_clipboard_result` takes the
+   * request id and a KayaRepresentation, NULL being the universal
+   * no; `emit_pasted` takes the widget's click tag verbatim and the
+   * representation that arrived, which is never absent — a paste
+   * that delivered nothing is not an occurrence.
+   */
+  void (*emit_clipboard_result)(uint64_t, const struct KayaRepresentation*);
+  void (*emit_pasted)(const uint8_t*, uintptr_t, const struct KayaRepresentation*);
+  /**
    * The stall watchdog's reading, for `expect_stall`. A READ rather
    * than an emit, and it rides the vtable for the same reason every
    * emit does: a direct symbol binds whichever kaya the loader

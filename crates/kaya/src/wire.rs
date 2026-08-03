@@ -704,8 +704,7 @@ pub fn decode_transaction_with_blobs(
             TX_COPY => TxOp::Copy(read_clip(&mut r)),
             TX_READ_CLIPBOARD => {
                 let request = r.u64();
-                let accepting = r.u32();
-                let _reserved = r.u32();
+                let accepting = clip_str(Some(r.value()), "accept list");
                 TxOp::ReadClipboard { request, accepting }
             }
             TX_SHOW_FILE_DIALOG => {
@@ -936,6 +935,50 @@ pub(crate) fn pasted_body(tag: &[u8], clip: &crate::protocol::Representation) ->
     b.extend_from_slice(&0u32.to_le_bytes());
     write_representation(&mut b, Some(clip));
     b
+}
+
+/// The four closed kinds, by the names an accept list spells them —
+/// the same names the `clip` enum uses, so there is one vocabulary and
+/// not a wire spelling beside a guest spelling.
+pub const CLIP_NAMES: &[(&str, u32)] = &[
+    ("text", CLIP_TEXT),
+    ("html", CLIP_HTML),
+    ("image", CLIP_IMAGE),
+    ("files", CLIP_FILES),
+];
+
+/// Split an accept list into the closed kinds it names and the custom
+/// ids it names. ONE PARSER, used by the root's check, by every
+/// rust-native backend, and mirrored by each interpreter — the string
+/// is the contract, so a second reading of it is a second contract.
+pub fn parse_accept_list(list: &str) -> (u32, Vec<&str>) {
+    let mut kinds = 0;
+    let mut custom = Vec::new();
+    for token in list.split_whitespace() {
+        match CLIP_NAMES.iter().find(|(name, _)| *name == token) {
+            Some((_, bit)) => kinds |= bit,
+            None => custom.push(token),
+        }
+    }
+    (kinds, custom)
+}
+
+/// An accept list names at least one representation and names none
+/// twice. `what` is the caller — the prop or the read — so the message
+/// says which declaration is wrong.
+pub(crate) fn check_accept_list(list: &str, what: &str) {
+    let tokens: Vec<&str> = list.split_whitespace().collect();
+    assert!(
+        !tokens.is_empty(),
+        "kaya: {what} names no representation — an empty accept list can \
+         only ever answer empty, so it is a typo rather than a request"
+    );
+    for (i, token) in tokens.iter().enumerate() {
+        assert!(
+            !tokens[..i].contains(token),
+            "kaya: {what} names {token:?} twice — an accept list is a SET"
+        );
+    }
 }
 
 pub(crate) fn representation_kind(clip: Option<&crate::protocol::Representation>) -> u32 {
@@ -1320,13 +1363,12 @@ impl Writer {
                 })
             }
             ApplyOp::Copy(clip) => self.record(APPLY_COPY, |b, blobs| {
-                write_clip(b, clip, blobs);
+                write_clip_out(b, clip, blobs);
             }),
             ApplyOp::ReadClipboard { request, accepting } => {
-                self.record(APPLY_READ_CLIPBOARD, |b, _| {
+                self.record(APPLY_READ_CLIPBOARD, |b, blobs| {
                     b.extend_from_slice(&request.to_le_bytes());
-                    b.extend_from_slice(&accepting.to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, &Value::Str(accepting.clone()), blobs);
                 })
             }
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
@@ -1627,10 +1669,9 @@ impl Writer {
                 write_clip(b, clip, blobs);
             }),
             TxOp::ReadClipboard { request, accepting } => {
-                self.record(TX_READ_CLIPBOARD, |b, _| {
+                self.record(TX_READ_CLIPBOARD, |b, blobs| {
                     b.extend_from_slice(&request.to_le_bytes());
-                    b.extend_from_slice(&accepting.to_le_bytes());
-                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, &Value::Str(accepting.clone()), blobs);
                 })
             }
             TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
@@ -1858,50 +1899,103 @@ fn write_clip(
     clip: &crate::protocol::Clip,
     blobs: &mut Vec<std::sync::Arc<[u8]>>,
 ) {
+    let files: Vec<Value> = clip
+        .files
+        .iter()
+        .map(|handle| Value::I64(handle.0 as i64))
+        .collect();
+    write_clip_fields(
+        b,
+        clip.text.as_deref(),
+        clip.html.as_deref(),
+        clip.image.as_ref(),
+        &files,
+        &clip.custom,
+        blobs,
+    );
+}
+
+/// The apply channel's twin: the same header, the same order, files
+/// spelled as the platform's own LOCATORS rather than kaya handles —
+/// the one difference between what a guest names and what a backend
+/// can put on a clipboard.
+fn write_clip_out(
+    b: &mut Vec<u8>,
+    clip: &crate::protocol::ClipOut,
+    blobs: &mut Vec<std::sync::Arc<[u8]>>,
+) {
+    let files: Vec<Value> = clip
+        .files
+        .iter()
+        .map(|locator| Value::Str(locator.clone()))
+        .collect();
+    write_clip_fields(
+        b,
+        clip.text.as_deref(),
+        clip.html.as_deref(),
+        clip.image.as_ref(),
+        &files,
+        &clip.custom,
+        blobs,
+    );
+}
+
+/// The header and the canonical order, once. Both channels come
+/// through here so the order cannot drift between them; only the file
+/// slot's spelling differs, and the caller has already made it.
+fn write_clip_fields(
+    b: &mut Vec<u8>,
+    text: Option<&str>,
+    html: Option<&str>,
+    image: Option<&crate::protocol::Blob>,
+    files: &[Value],
+    custom: &[(String, crate::protocol::Blob)],
+    blobs: &mut Vec<std::sync::Arc<[u8]>>,
+) {
     let mut present = 0u32;
-    if clip.text.is_some() {
+    if text.is_some() {
         present |= CLIP_TEXT;
     }
-    if clip.html.is_some() {
+    if html.is_some() {
         present |= CLIP_HTML;
     }
-    if clip.image.is_some() {
+    if image.is_some() {
         present |= CLIP_IMAGE;
     }
-    if !clip.files.is_empty() {
+    if !files.is_empty() {
         present |= CLIP_FILES;
     }
-    if !clip.custom.is_empty() {
+    if !custom.is_empty() {
         present |= CLIP_CUSTOM;
     }
     b.extend_from_slice(&present.to_le_bytes());
-    b.extend_from_slice(&(clip.files.len() as u32).to_le_bytes());
-    b.extend_from_slice(&(clip.custom.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(files.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(custom.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     // The count the Values field needs: one slot per single-valued
     // representation present, one per file, two per custom pair.
-    let slots = clip.text.iter().count()
-        + clip.html.iter().count()
-        + clip.image.iter().count()
-        + clip.files.len()
-        + clip.custom.len() * 2;
+    let slots = text.iter().count()
+        + html.iter().count()
+        + image.iter().count()
+        + files.len()
+        + custom.len() * 2;
     b.extend_from_slice(&(slots as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
-    for (id, bytes) in &clip.custom {
+    for (id, bytes) in custom {
         write_value(b, &Value::Str(id.clone()), blobs);
         write_value(b, &Value::Blob(bytes.clone()), blobs);
     }
-    for handle in &clip.files {
-        write_value(b, &Value::I64(handle.0 as i64), blobs);
+    for file in files {
+        write_value(b, file, blobs);
     }
-    if let Some(image) = &clip.image {
+    if let Some(image) = image {
         write_value(b, &Value::Blob(image.clone()), blobs);
     }
-    if let Some(html) = &clip.html {
-        write_value(b, &Value::Str(html.clone()), blobs);
+    if let Some(html) = html {
+        write_value(b, &Value::Str(html.to_owned()), blobs);
     }
-    if let Some(text) = &clip.text {
-        write_value(b, &Value::Str(text.clone()), blobs);
+    if let Some(text) = text {
+        write_value(b, &Value::Str(text.to_owned()), blobs);
     }
 }
 

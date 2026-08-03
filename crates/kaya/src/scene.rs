@@ -404,10 +404,10 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint => ValueType::Str,
-        // A MASK over the clip enum, carried in the numeric slot like
-        // every other scalar. Not an enum-typed slot: a widget accepts
-        // a SET, and align (the only enum prop) carries exactly one.
-        Prop::Accepts => ValueType::F64,
+        // An ACCEPT LIST: the closed kinds by name plus any custom
+        // format ids, space separated. Not a mask and not an enum slot
+        // — a widget accepts a SET, and half that set is open-ended.
+        Prop::Accepts => ValueType::Str,
     }
 }
 
@@ -717,6 +717,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             cols.is_finite() && *cols >= 1.0 && cols.fract() == 0.0,
             "kaya: a grid's columns is an integral count >= 1, got {cols}"
         );
+    }
+    // The accept list's own domain: at least one token, no token twice.
+    // "You structurally cannot declare text twice" was the promise the
+    // set shape made, and a string carrier keeps it only if the root
+    // checks — so it checks, once, where the answer is the same in all
+    // eight languages.
+    if let (Prop::Accepts, Value::Str(list)) = (prop, value) {
+        crate::wire::check_accept_list(list, "accepts");
     }
     // Same argument as grow's domain: a negative gap has no reading
     // under "8 units between adjacent children", and every backend
@@ -1142,7 +1150,22 @@ impl Scene {
                              the name the format round-trips under"
                         );
                     }
-                    out.push(ApplyOp::Copy(clip));
+                    // Resolve every file handle to what the PLATFORM
+                    // calls that file, here and not in four backends:
+                    // this is where the picked table lives, and the
+                    // two Rust-native backends would otherwise need a
+                    // C entry to ask.
+                    out.push(ApplyOp::Copy(crate::protocol::ClipOut {
+                        text: clip.text,
+                        html: clip.html,
+                        image: clip.image,
+                        files: clip
+                            .files
+                            .iter()
+                            .map(|handle| crate::capi::picked_locator(*handle))
+                            .collect(),
+                        custom: clip.custom,
+                    }));
                 }
                 TxOp::ReadClipboard { request, accepting } => {
                     // ACCEPTING NOTHING CANNOT SUCCEED, so it is an
@@ -1150,11 +1173,7 @@ impl Scene {
                     // answers empty — the empty answer means denied or
                     // absent, and conflating the two would hide a typo
                     // behind a legitimate outcome.
-                    assert!(
-                        accepting != 0,
-                        "kaya: read_clipboard accepts no representation — pass a \
-                         mask of the kinds this read can use"
-                    );
+                    crate::wire::check_accept_list(&accepting, "read_clipboard");
                     out.push(ApplyOp::ReadClipboard { request, accepting });
                 }
                 TxOp::PushEntry { window, entry } => {

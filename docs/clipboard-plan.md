@@ -575,6 +575,56 @@ the first fourteen, which said nothing about a fifteenth: two new
 occurrences passed it without touching it. It compares the whole list
 now, and was watched failing.
 
+## §1b — what macOS actually charges (measured 2026-08-02)
+
+tools/mac/clipprobe, run both as a bare binary and as a bundled app.
+
+### 1. THIS HOST DOES NOT PROMPT, and that was the assumption to check
+
+§0 recorded macOS as "heading the same way" as iOS 16 — a permission
+alert for reading another app's content. On macOS 26.5.2 there is none:
+a read of content `pbcopy` had just written answered in **0-1 ms**, with
+the content, bundled and unbundled alike, first read and second. So the
+mac read leg needs no prompt driving, unlike the iOS one.
+
+The cheap queries (`changeCount`, `types`, `canReadObject`) report
+foreign content too, which is what the Paste-enablement answer needs.
+
+### 2. PNG BYTES ROUND-TRIP; writeObjects(NSImage) LOSES THEM
+
+`setData(png, forType: .png)` comes back byte-identical (3426 in, 3426
+out) and the system SYNTHESIZES a `public.tiff` for consumers that want
+one — plus jpeg, gif, bmp, jp2 and avif, all on demand.
+
+`writeObjects(NSImage)` declares `public.tiff` and NOTHING ELSE. A guest
+that handed over a PNG would get a re-encode back, and any consumer
+asking for png would find nothing. So the arm sets raw bytes under the
+type, and never wraps them in an NSImage.
+
+### 3. SEVERAL FILES MEANS SEVERAL ITEMS
+
+kaya's clip is one item in several types; macOS models several files as
+several `NSPasteboardItem`s. Measured: item 0 carrying every
+single-valued type plus the first file URL, with one item per remaining
+file, satisfies both — `readObjects(NSURL)` sees every file and
+`pbpaste` still sees the text.
+
+### 4. THE LANE'S FOREIGN READER IS TWO TOOLS, not one
+
+`pbpaste -Prefer <uti>` reads text, html and CUSTOM formats
+(`{"note":1}` came back under `dev.kaya.probe.note`) — but answers
+NOTHING for `public.png`; it is a text tool. `osascript -e 'clipboard
+info'` lists every type with its byte count, images included, but knows
+only AppleScript's own classes and never sees a custom one.
+
+So the mac legs verify text/html/custom through pbpaste and the image
+through `clipboard info`. Neither is kaya reading what kaya wrote.
+
+### 5. WRITES DO NOT NEED THE MAIN THREAD
+
+Measured from a global queue: the write took, the change count moved,
+and the read back agreed. The apply pump can write directly.
+
 ## §2 onwards — to be written
 
 Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering

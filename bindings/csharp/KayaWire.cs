@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x2ed696ff6043310c;
+    public const ulong SpecHash = 0x408bcf69e0ad2bfd;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -592,13 +592,12 @@ static class KayaWire
         return Finish(stream, w, TxKindCopy);
     }
 
-    /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
-    public static byte[] TxReadClipboard(ulong request, uint accepting)
+    /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+    public static byte[] TxReadClipboard(ulong request, object accepting)
     {
         var w = Begin(out var stream);
         w.Write(request);
-        w.Write(accepting);
-        w.Write(0u);
+        EncodeValue(w, accepting);
         return Finish(stream, w, TxKindReadClipboard);
     }
 
@@ -953,7 +952,7 @@ static class KayaWire
     }
 
     /// set_property with a constant accepts value.
-    public static byte[] TxSetAccepts(ulong widgetId, double accepts)
+    public static byte[] TxSetAccepts(ulong widgetId, string accepts)
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropAccepts); w.Write(SourceConst);

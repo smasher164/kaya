@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x2ed696ff6043310c
+specHash = 0x408bcf69e0ad2bfd
 
 valueBool :: Word32
 valueBool = 1
@@ -528,9 +528,9 @@ txShowFileDialog window dialog multiple filters = wireRecord txKindShowFileDialo
 txCopy :: Word32 -> Word32 -> Word32 -> [Value] -> Builder
 txCopy present fileCount customCount reps = wireRecord txKindCopy (word32LE present <> word32LE fileCount <> word32LE customCount <> word32LE 0 <> encodeValues reps)
 
--- Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
-txReadClipboard :: Word64 -> Word32 -> Builder
-txReadClipboard request accepting = wireRecord txKindReadClipboard (word64LE request <> word32LE accepting <> word32LE 0)
+-- Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
+txReadClipboard :: Word64 -> Value -> Builder
+txReadClipboard request accepting = wireRecord txKindReadClipboard (word64LE request <> encodeValue accepting)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -799,10 +799,10 @@ txBindA11yHintElement widgetId level field = wireRecord txKindSetProperty
     <> word32LE level <> word32LE field)
 
 -- set_property with a constant accepts value.
-txSetAccepts :: Word64 -> Double -> Builder
+txSetAccepts :: Word64 -> String -> Builder
 txSetAccepts widgetId accepts = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAccepts <> word32LE sourceConst
-    <> encodeValue (VF64 accepts))
+    <> encodeValue (VStr accepts))
 
 -- set_property with a signal-bound accepts value.
 txBindAccepts :: Word64 -> Word64 -> Builder

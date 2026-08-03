@@ -127,6 +127,18 @@ pub trait PickedSource: Send + Sync {
     fn name(&self) -> &str;
     /// Empty unless re-opening this name actually works.
     fn local_path(&self) -> &str;
+    /// WHAT THE PLATFORM CALLS THIS FILE — a path on the desktops, a
+    /// `content://` URI on Android, a security-scoped URL string on
+    /// iOS. Never empty, unlike `local_path`, because every platform
+    /// has SOME name for a file it handed over; it is just not always
+    /// one anybody else can reopen.
+    ///
+    /// Exists because a copied file goes on the clipboard as the
+    /// platform's own reference (`public.file-url`, `text/uri-list`,
+    /// `CF_HDROP`, `ClipData.newUri`), and the backend holds a kaya
+    /// handle rather than a URL. The core resolves it once, at
+    /// lowering, so no backend needs a table lookup of its own.
+    fn locator(&self) -> &str;
 }
 
 /// The three desktops' source: a path is the capability, so the open is
@@ -238,6 +250,12 @@ impl PickedSource for PathSource {
     fn local_path(&self) -> &str {
         &self.path
     }
+
+    /// A path IS the capability on the desktops, so the locator and
+    /// the re-openable name are the same string.
+    fn locator(&self) -> &str {
+        &self.path
+    }
 }
 
 /// An alert's one answer. The wire carries a u32: action indices, or
@@ -302,6 +320,26 @@ pub struct Clip {
     /// The SAME capability the picker returns, so a picked file goes
     /// straight on and a pasted one opens with the call that exists.
     pub files: Vec<PickedId>,
+    pub custom: Vec<(String, Blob)>,
+}
+
+/// The same clip, one step later: what a BACKEND receives.
+///
+/// Identical to [`Clip`] except in the files field, and the difference
+/// is the whole reason it exists. A guest names a file by CAPABILITY —
+/// the handle the picker minted, which it can open — while a backend
+/// needs the platform's own reference to put on a clipboard: a file
+/// URL, a `content://` URI, a path inside a `DROPFILES` struct. The
+/// core resolves handle to locator ONCE, at lowering, where the picked
+/// table lives; otherwise all four backends would carry a lookup and
+/// the two Rust-native ones would need a C entry to do it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ClipOut {
+    pub text: Option<String>,
+    pub html: Option<String>,
+    pub image: Option<Blob>,
+    /// What the platform calls each file (PickedSource::locator).
+    pub files: Vec<String>,
     pub custom: Vec<(String, Blob)>,
 }
 
@@ -1102,7 +1140,7 @@ pub enum TxOp {
     Copy(Clip),
     /// Read the clipboard outside any paste gesture — the privileged
     /// one; see the spec record for what the platforms charge.
-    ReadClipboard { request: u64, accepting: u32 },
+    ReadClipboard { request: u64, accepting: String },
     /// Push a navigation entry onto `window`'s stack (no capability
     /// gate — every host materializes a serial stack natively).
     /// Materializes covered/incoming; mounting a root into it
@@ -1244,9 +1282,9 @@ pub enum ApplyOp {
     /// lowering per representation — CF_HTML's offset header, Android's
     /// content:// URI for an image, CF_HDROP's struct — which is the
     /// whole reason the representation set is closed.
-    Copy(Clip),
+    Copy(ClipOut),
     /// Answer a privileged read with the first accepted representation.
-    ReadClipboard { request: u64, accepting: u32 },
+    ReadClipboard { request: u64, accepting: String },
     /// Push a navigation entry onto the window's stack, hidden until
     /// a mount presents it. The covered root stays alive.
     PushEntry { window: WindowId, entry: WindowId },

@@ -102,6 +102,14 @@ impl crate::protocol::PickedSource for UrlSource {
     fn local_path(&self) -> &str {
         ""
     }
+
+    /// The backend's own name for the URL it is holding — unusable as
+    /// a path (that is what local_path's emptiness says), and exactly
+    /// what the backend needs handed back to put the file on a
+    /// pasteboard.
+    fn locator(&self) -> &str {
+        &self.locator
+    }
 }
 
 /// The presentation-side functions handed to a guest-language backend.
@@ -165,6 +173,15 @@ pub struct KayaHostApi {
     pub emit_menu_activated: unsafe extern "C" fn(u64, *const u8, usize),
     pub emit_menu_toggled: unsafe extern "C" fn(u64, *const u8, usize, u8),
     pub emit_menu_value_changed: unsafe extern "C" fn(u64, *const u8, usize, f64),
+    /// The clipboard's two answers. `emit_clipboard_result` takes the
+    /// request id and a KayaRepresentation, NULL being the universal
+    /// no; `emit_pasted` takes the widget's click tag verbatim and the
+    /// representation that arrived, which is never absent — a paste
+    /// that delivered nothing is not an occurrence.
+    pub emit_clipboard_result:
+        unsafe extern "C" fn(u64, *const crate::capi::KayaRepresentation),
+    pub emit_pasted:
+        unsafe extern "C" fn(*const u8, usize, *const crate::capi::KayaRepresentation),
     /// The stall watchdog's reading, for `expect_stall`. A READ rather
     /// than an emit, and it rides the vtable for the same reason every
     /// emit does: a direct symbol binds whichever kaya the loader
@@ -233,6 +250,8 @@ pub(crate) fn run() -> i32 {
         emit_menu_activated: crate::capi::kaya_emit_menu_activated,
         emit_menu_toggled: crate::capi::kaya_emit_menu_toggled,
         emit_menu_value_changed: crate::capi::kaya_emit_menu_value_changed,
+        emit_clipboard_result: crate::capi::kaya_emit_clipboard_result,
+        emit_pasted: crate::capi::kaya_emit_pasted,
         stalled_ms: crate::capi::kaya_stalled_ms,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =

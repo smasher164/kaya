@@ -257,6 +257,12 @@ impl crate::protocol::PickedSource for UriSource {
     fn local_path(&self) -> &str {
         ""
     }
+
+    /// The `content://` URI, which IS what Android calls this file —
+    /// what ClipData.newUri carries and what a receiving app resolves.
+    fn locator(&self) -> &str {
+        &self.uri
+    }
 }
 
 /// KayaPresent.openPickedUri: `openFileDescriptor(uri, mode)` then

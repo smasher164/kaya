@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x2ed696ff6043310cL;
+    public static final long SPEC_HASH = 0x408bcf69e0ad2bfdL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -540,12 +540,11 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
-    public static byte[] txReadClipboard(long request, int accepting) {
+    /** Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
+    public static byte[] txReadClipboard(long request, Object accepting) {
         ByteBuffer b = begin(TX_KIND_READ_CLIPBOARD);
         b.putLong(request);
-        b.putInt(accepting);
-        b.putInt(0);
+        encodeValue(b, accepting);
         return finish(b);
     }
 
@@ -872,7 +871,7 @@ public final class KayaWire {
     }
 
     /** set_property with a constant accepts value. */
-    public static byte[] txSetAccepts(long widgetId, double accepts) {
+    public static byte[] txSetAccepts(long widgetId, String accepts) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_ACCEPTS).putInt(SOURCE_CONST);
         encodeValue(b, accepts);

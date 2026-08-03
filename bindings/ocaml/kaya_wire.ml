@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x2ed696ff6043310cL
+let spec_hash = 0x408bcf69e0ad2bfdL
 
 let value_bool = 1
 let value_i64 = 2
@@ -471,12 +471,11 @@ let tx_copy present file_count custom_count reps =
       Buffer.add_int32_le b 0l;
       encode_values b reps)
 
-(* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. *)
+(* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. *)
 let tx_read_clipboard request accepting =
   finish tx_kind_read_clipboard (fun b ->
       Buffer.add_int64_le b request;
-      Buffer.add_int32_le b (Int32.of_int accepting);
-      Buffer.add_int32_le b 0l)
+      encode_value b accepting)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -848,7 +847,7 @@ let tx_set_accepts widget_id accepts =
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_accepts);
       Buffer.add_int32_le b (Int32.of_int source_const);
-      encode_value b (F64 accepts))
+      encode_value b (Str accepts))
 
 (* set_property with a signal-bound accepts value. *)
 let tx_bind_accepts widget_id signal_id =

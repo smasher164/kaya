@@ -151,8 +151,11 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // the gesture, while TalkBack prefixes "double tap to", so only the
     // verb phrase reads correctly on both.
     ("a11y_hint", 14, PropKind::Str),
-    // WHICH CLIP REPRESENTATIONS THIS WIDGET ACCEPTS, as a mask over
-    // the `clip` enum. Per-widget and not app-global, because whether
+    // WHICH CLIP REPRESENTATIONS THIS WIDGET ACCEPTS: a space-separated
+    // ACCEPT LIST — the closed kinds by name (`text`, `html`, `image`,
+    // `files`) and any number of custom format ids, which are open by
+    // nature and so cannot be a mask. `"text html dev.kaya.note"` is a
+    // whole declaration. Per-widget and not app-global, because whether
     // Paste should be live is the INTERSECTION of what the clipboard
     // offers and what the focused target takes: a search field wants
     // plain text, a rich editor also wants images. Every platform asks
@@ -165,7 +168,17 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // it filters what can ever reach the widget's paste hook, and on
     // Android it IS the native registration. Text widgets default to
     // text alone.
-    ("accepts", 15, PropKind::F64),
+    //
+    // A STRING AND NOT A MASK, which the first cut had: a mask can name
+    // the four closed kinds and NOTHING ELSE, and a custom format that
+    // can be written but never accepted is not an escape hatch at all —
+    // the whole point of one is an app round-tripping its own data. A
+    // custom id reaches every platform's own registry verbatim (a UTI on
+    // Apple, RegisterClipboardFormat on Windows, a target atom on X11 and
+    // Wayland, a MIME type on Android), which is kaya's narrow promise
+    // here, so ids carry no spaces. read_clipboard takes the same string
+    // for the same reason.
+    ("accepts", 15, PropKind::Str),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -817,15 +830,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             name: "read_clipboard",
             fields: &[
                 f("request", FieldTy::U64),
-                f("accepting", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("accepting", FieldTy::Value),
             ],
             payload: None,
             doc: "Read the clipboard OUTSIDE any paste gesture, on the \
-                  alert's request/result grammar. `accepting` is a mask \
-                  over the `clip` enum; the answer carries the first \
-                  match by canonical richness, so exactly one \
-                  representation is ever materialised. THIS IS THE \
+                  alert's request/result grammar. `accepting` is an \
+                  ACCEPT LIST, the same space-separated Str the widget \
+                  prop carries: the closed kinds by name plus any custom \
+                  ids, which are open and so could never be a mask. The \
+                  answer carries the first match by canonical richness, \
+                  so exactly one representation is ever materialised. THIS IS THE \
                   PRIVILEGED ONE, and it is named for what it is rather \
                   than for pasting. A user's paste arrives at the \
                   widget's hook and costs nothing; this asks without a \
@@ -1117,24 +1131,31 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   in the order it reads them and needs no table of its \
                   own. Blob values are batch-local out-table handles \
                   here, resolved with kaya_blob_data like any other \
-                  apply-side blob; file values are picked handles, whose \
-                  bytes never move through kaya at all.",
+                  apply-side blob.\n\n\
+                  FILES ARE STR LOCATORS ON THIS CHANNEL and I64 picked \
+                  handles on the tx one — the single difference between \
+                  the twins, and it is the difference between what a \
+                  GUEST names (a capability it can open) and what a \
+                  BACKEND needs (a file URL, a content:// URI, a path \
+                  inside a DROPFILES struct). The core resolves it once, \
+                  where the picked table lives. The bytes never move \
+                  through kaya either way.",
         },
         Record {
             kind: 26,
             name: "read_clipboard",
             fields: &[
                 f("request", FieldTy::U64),
-                f("accepting", FieldTy::U32),
-                f("reserved", FieldTy::U32),
+                f("accepting", FieldTy::Value),
             ],
             payload: None,
             doc: "Read the clipboard and answer this request with at \
                   most one representation, through \
                   kaya_emit_clipboard_result (rust-native backends send \
-                  ClipboardResult on their own sink). `accepting` is a \
-                  mask; the backend takes the FIRST match in descending \
-                  richness, which is the same order copy writes. \
+                  ClipboardResult on their own sink). `accepting` is the \
+                  accept list; the backend takes the FIRST match in \
+                  descending richness, which is the same order copy \
+                  writes, and custom ids lead. \
                   ANSWERING EMPTY IS ALWAYS CORRECT and is what a \
                   backend does when the platform declines — an iOS \
                   prompt the user refused, an unfocused Android or \

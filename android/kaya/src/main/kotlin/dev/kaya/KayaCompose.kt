@@ -122,10 +122,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var a11yLabel by mutableStateOf("")
     var a11yHint by mutableStateOf("")
 
-    /** Which clip representations this widget accepts, a mask over the
-     * clip enum. Recorded here because the paste hook and the standard
-     * commands' enablement both read it off the focused node. */
-    var accepts by mutableStateOf(0)
+    /** The widget's accept list, verbatim. Recorded here because the
+     * paste hook and the standard commands' enablement both read it off
+     * the focused node. Empty means the widget takes nothing. */
+    var accepts by mutableStateOf("")
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -394,7 +394,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x2ed696ff6043310cuL
+    private const val SPEC_HASH: ULong = 0x408bcf69e0ad2bfduL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -504,9 +504,9 @@ object KayaCompose {
     private const val PROP_A11Y_LABEL = 13
     private const val PROP_A11Y_HINT = 14
 
-    /** Which clip representations this widget accepts, a mask over the
-     * clip enum. Read but not yet acted on: the paste hook and the
-     * standard-command enablement it feeds are still to come. */
+    /** Which clip representations this widget accepts: the ACCEPT
+     * LIST, a space-separated string of the closed kind names and any
+     * custom format ids. Not a mask — half the set is open-ended. */
     private const val PROP_ACCEPTS = 15
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
@@ -719,9 +719,10 @@ object KayaCompose {
                         PROP_A11Y_HINT ->
                             KayaSceneModel.nodes[id]!!.a11yHint = readString(b)
                         PROP_ACCEPTS ->
-                            // A MASK in the numeric slot, not an enum
-                            // ordinal: a widget accepts a set.
-                            KayaSceneModel.nodes[id]!!.accepts = readF64(b).toInt()
+                            // The ACCEPT LIST verbatim: kind names and
+                            // custom ids, space separated. Not a mask —
+                            // half the set is open-ended.
+                            KayaSceneModel.nodes[id]!!.accepts = readString(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into

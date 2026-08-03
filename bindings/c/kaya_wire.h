@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x2ed696ff6043310cULL
+#define KAYA_SPEC_HASH 0x408bcf69e0ad2bfdULL
 
 
 /* Create a signal holding `initial`. */
@@ -446,12 +446,11 @@ static inline void kaya_tx_copy(KayaTx *tx, uint32_t present, uint32_t file_coun
     kaya_wire_end(tx, start);
 }
 
-/* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
-static inline void kaya_tx_read_clipboard(KayaTx *tx, uint64_t request, uint32_t accepting) {
+/* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
+static inline void kaya_tx_read_clipboard(KayaTx *tx, uint64_t request, KayaVal accepting) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_READ_CLIPBOARD);
     kaya_wire_u64(tx, request);
-    kaya_wire_u32(tx, accepting);
-    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, accepting);
     kaya_wire_end(tx, start);
 }
 
@@ -904,12 +903,12 @@ static inline void kaya_tx_bind_a11y_hint_element(KayaTx *tx, uint64_t widget_id
 }
 
 /* set_property with a constant accepts value. */
-static inline void kaya_tx_set_accepts(KayaTx *tx, uint64_t widget_id, double accepts) {
+static inline void kaya_tx_set_accepts(KayaTx *tx, uint64_t widget_id, const char *accepts) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACCEPTS);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
-    kaya_wire_value(tx, kaya_f64(accepts));
+    kaya_wire_value(tx, kaya_str(accepts));
     kaya_wire_end(tx, start);
 }
 

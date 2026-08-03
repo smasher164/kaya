@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x2ed696ff6043310c
+let kayaSpecHash: UInt64 = 0x408bcf69e0ad2bfd
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -116,9 +116,9 @@ private let propColumns: UInt32 = 11
 private let propA11yId: UInt32 = 12
 private let propA11yLabel: UInt32 = 13
 private let propA11yHint: UInt32 = 14
-/// Which clip representations this widget accepts, a mask over the
-/// clip enum. Read but not yet acted on: the paste hook and the
-/// standard-command enablement it feeds are still to come.
+/// Which clip representations this widget accepts: the ACCEPT LIST,
+/// a space-separated string of the closed kind names and any custom
+/// format ids. Not a mask — half the set is open-ended.
 private let propAccepts: UInt32 = 15
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
@@ -160,10 +160,10 @@ final class KayaNode: Identifiable {
     var a11yId = ""
     var a11yLabel = ""
     var a11yHint = ""
-    /// Which clip representations this widget accepts, a mask over the
-    /// clip enum. Recorded here because the paste hook and the standard
-    /// commands' enablement both read it off the focused node.
-    var accepts: UInt32 = 0
+    /// The widget's accept list, verbatim. Recorded here because the
+    /// paste hook and the standard commands' enablement both read it
+    /// off the focused node. Empty means the widget takes nothing.
+    var accepts = ""
     var checked = false
     var value = 0.0
     var minValue = 0.0
@@ -540,6 +540,198 @@ func kayaDepthStub(_ scene: String, on platform: String) -> Never {
     fatalError(
         "kaya: the \(scene) scene is not yet materialized on \(platform) — "
             + "it is a depth slice; see CLAUDE.md's sequencing")
+}
+
+// ---- The clipboard ------------------------------------------------
+//
+// One clip, offered in several representations at once; the consumer
+// takes the richest it understands. The values arrive in kaya's
+// canonical order — descending clip value, which IS descending richness
+// — and on this platform that is exactly the preference order a
+// pasteboard consumer walks, so this writes them in the order it reads
+// them and adds no table of its own.
+//
+// MEASURED, not assumed (tools/mac/clipprobe): this host does NOT
+// prompt for a programmatic read of another app's content, bundled or
+// not; PNG bytes set under `.png` come back byte-identical and the
+// system synthesizes `.tiff` for consumers that want one, while
+// writeObjects(NSImage) declares tiff ALONE and would lose the guest's
+// bytes; several files means several ITEMS, with everything
+// single-valued on item 0.
+
+/// One representation as the Swift side holds it, before it crosses as
+/// a `KayaRepresentation`. Swift owns the storage; the C struct only
+/// ever borrows it for the length of one call.
+struct KayaClipValue {
+    var clip: UInt32
+    var text: String?
+    var id: String?
+    var bytes: Data?
+    var locators: [String] = []
+    var names: [String] = []
+}
+
+/// Lend a `KayaClipValue` to the C struct for the length of one call.
+/// strdup because the C side reads the strings during the call and
+/// nothing may outlive it; freed on the way out, exactly as the picker
+/// result does it.
+func kayaWithRepresentation<T>(
+    _ value: KayaClipValue?, _ body: (UnsafePointer<KayaRepresentation>?) -> T
+) -> T {
+    guard let value else { return body(nil) }
+    let textBuf = value.text.map { strdup($0) } ?? nil
+    let idBuf = value.id.map { strdup($0) } ?? nil
+    let locatorBufs: [UnsafeMutablePointer<CChar>?] = value.locators.map { strdup($0) }
+    let nameBufs: [UnsafeMutablePointer<CChar>?] = value.names.map { strdup($0) }
+    defer {
+        free(textBuf)
+        free(idBuf)
+        for b in locatorBufs { free(b) }
+        for b in nameBufs { free(b) }
+    }
+    var locators: [UnsafePointer<CChar>?] = locatorBufs.map { $0.map { UnsafePointer($0) } }
+    var names: [UnsafePointer<CChar>?] = nameBufs.map { $0.map { UnsafePointer($0) } }
+    let bytes = value.bytes ?? Data()
+    return bytes.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        locators.withUnsafeMutableBufferPointer { l in
+            names.withUnsafeMutableBufferPointer { n in
+                var rep = KayaRepresentation(
+                    clip: value.clip,
+                    text: textBuf.map { UnsafePointer($0) },
+                    id: idBuf.map { UnsafePointer($0) },
+                    bytes: value.bytes == nil ? nil : raw.bindMemory(to: UInt8.self).baseAddress,
+                    len: UInt(bytes.count),
+                    locators: l.baseAddress,
+                    names: n.baseAddress,
+                    count: UInt(value.locators.count))
+                return withUnsafePointer(to: &rep) { body($0) }
+            }
+        }
+    }
+}
+
+/// The four closed kinds by the names an accept list spells them —
+/// the same vocabulary the core parses, mirrored here because the
+/// string is the contract (see wire.rs, parse_accept_list).
+private let kayaClipText: UInt32 = 1
+private let kayaClipHtml: UInt32 = 2
+private let kayaClipImage: UInt32 = 4
+private let kayaClipFiles: UInt32 = 8
+private let kayaClipCustom: UInt32 = 16
+
+/// Split an accept list into the closed kinds it names and the custom
+/// ids it names, in the order the list gave them.
+func kayaParseAcceptList(_ list: String) -> (kinds: UInt32, custom: [String]) {
+    var kinds: UInt32 = 0
+    var custom: [String] = []
+    for token in list.split(separator: " ", omittingEmptySubsequences: true).map(String.init) {
+        switch token {
+        case "text": kinds |= kayaClipText
+        case "html": kinds |= kayaClipHtml
+        case "image": kinds |= kayaClipImage
+        case "files": kinds |= kayaClipFiles
+        default: custom.append(token)
+        }
+    }
+    return (kinds, custom)
+}
+
+/// Put one clip on the system clipboard.
+///
+/// SEVERAL FILES MEANS SEVERAL ITEMS on this platform, so item 0
+/// carries every single-valued representation plus the first file and
+/// each later item carries one more file. A consumer that wants text
+/// still finds it; Finder still sees every file.
+///
+/// The text rendition of a file list is DERIVED HERE and only when the
+/// clip offers no text of its own — the plan's one exception, where
+/// there is exactly one right answer and the platforms expect it.
+func kayaCopyToPasteboard(
+    text: String?, html: String?, image: Data?, files: [String],
+    custom: [(String, Data)]
+) {
+    #if os(macOS)
+        let urls = files.compactMap { URL(string: $0) }
+        let board = NSPasteboard.general
+        board.clearContents()
+        var items: [NSPasteboardItem] = []
+        let first = NSPasteboardItem()
+        for (id, bytes) in custom {
+            first.setData(bytes, forType: NSPasteboard.PasteboardType(id))
+        }
+        if let url = urls.first {
+            first.setString(url.absoluteString, forType: .fileURL)
+        }
+        if let image {
+            first.setData(image, forType: .png)
+        }
+        if let html {
+            first.setString(html, forType: .html)
+        }
+        if let text {
+            first.setString(text, forType: .string)
+        } else if !urls.isEmpty {
+            first.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+        }
+        items.append(first)
+        for url in urls.dropFirst() {
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            items.append(item)
+        }
+        board.writeObjects(items)
+    #else
+        _ = (text, html, image, files, custom)
+        kayaDepthStub("clipboard", on: "ios")
+    #endif
+}
+
+/// Answer a privileged read with the FIRST accepted representation in
+/// descending richness — custom ids first, in the order the accept list
+/// named them, then files, image, html, text. Answering EMPTY is always
+/// correct and is what this does when the clipboard holds nothing the
+/// request accepted.
+func kayaReadClipboard(request: UInt64, accepting: String) {
+    #if os(macOS)
+        let (kinds, custom) = kayaParseAcceptList(accepting)
+        let board = NSPasteboard.general
+        var answer: KayaClipValue?
+
+        for id in custom {
+            if let bytes = board.data(forType: NSPasteboard.PasteboardType(id)) {
+                answer = KayaClipValue(clip: kayaClipCustom, id: id, bytes: bytes)
+                break
+            }
+        }
+        if answer == nil, kinds & kayaClipFiles != 0 {
+            let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] ?? []
+            let files = urls.filter(\.isFileURL)
+            if !files.isEmpty {
+                answer = KayaClipValue(
+                    clip: kayaClipFiles,
+                    locators: files.map(\.path),
+                    names: files.map(\.lastPathComponent))
+            }
+        }
+        if answer == nil, kinds & kayaClipImage != 0 {
+            // PNG first because that is what a guest hands over; the
+            // system synthesizes it from a tiff-only clip, so a plain
+            // screenshot still answers.
+            if let bytes = board.data(forType: .png) ?? board.data(forType: .tiff) {
+                answer = KayaClipValue(clip: kayaClipImage, bytes: bytes)
+            }
+        }
+        if answer == nil, kinds & kayaClipHtml != 0, let html = board.string(forType: .html) {
+            answer = KayaClipValue(clip: kayaClipHtml, text: html)
+        }
+        if answer == nil, kinds & kayaClipText != 0, let text = board.string(forType: .string) {
+            answer = KayaClipValue(clip: kayaClipText, text: text)
+        }
+        KayaHost.emitClipboardResult(request, answer)
+    #else
+        _ = (request, accepting)
+        kayaDepthStub("clipboard", on: "ios")
+    #endif
 }
 
 func kayaExpandPath(_ path: String) -> String {
@@ -1278,6 +1470,24 @@ enum KayaHost {
         }
     }
 
+    /// The privileged read's one answer; nil is the universal no.
+    static func emitClipboardResult(_ request: UInt64, _ value: KayaClipValue?) {
+        kayaWithRepresentation(value) { rep in
+            api.emit_clipboard_result(request, rep)
+        }
+    }
+
+    /// Content arriving at a widget because the USER pasted. The tag is
+    /// the widget's own identity bytes, verbatim — one path for a live
+    /// widget and a stamped copy alike.
+    static func emitPasted(_ tag: [UInt8], _ value: KayaClipValue) {
+        kayaWithRepresentation(value) { rep in
+            tag.withUnsafeBufferPointer { t in
+                api.emit_pasted(t.baseAddress, UInt(t.count), rep)
+            }
+        }
+    }
+
     static func nextCommands(_ buffer: UnsafeMutablePointer<UInt8>, _ cap: Int) -> Int {
         Int(api.next_commands(buffer, UInt(cap)))
     }
@@ -1333,6 +1543,25 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
                 if valueType == valueBlob {
                     let handle = raw.loadUnaligned(fromByteOffset: at + 32, as: UInt64.self)
                     blobs[handle] = KayaHost.blobData(handle)
+                }
+            }
+            // COPY carries blobs too — an image, and every custom
+            // format's bytes — and they die with the batch exactly as a
+            // prop's do. Walking its Values block generically rather
+            // than by kind: the header says how many, and a value that
+            // is not a blob is skipped by the same arithmetic.
+            if kind == applyCopy {
+                let slots = Int(raw.loadUnaligned(fromByteOffset: at + 8 + 16, as: UInt32.self))
+                var vat = at + 8 + 24
+                for _ in 0..<slots {
+                    let valueType = raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self)
+                    let len = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
+                    if valueType == valueBlob {
+                        let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
+                        blobs[handle] = KayaHost.blobData(handle)
+                    }
+                    vat += 8 + len
+                    if vat % 8 != 0 { vat += 8 - vat % 8 }
                 }
             }
             at += size
@@ -1454,13 +1683,49 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaWindowDelegates.removeValue(forKey: wid)
                 #endif
                 kayaScene.windows.removeValue(forKey: wid)
-            case applyCopy, applyReadClipboard:
-                // The clipboard's depth slice starts here, but the arms
-                // are the next piece of work. Refusing in this
-                // backend's own words rather than falling through: an
-                // unhandled apply op is silently dropped, and a scene
-                // that copied nothing would read as a kaya bug.
-                kayaDepthStub("clipboard", on: "SwiftUI")
+            case applyCopy:
+                // { u32 present; u32 file_count; u32 custom_count; u32
+                // reserved } then a Values block in the canonical order:
+                // custom pairs, files, image, html, text. Read in that
+                // order and the preference order is right for free.
+                let present = raw.loadUnaligned(fromByteOffset: body, as: UInt32.self)
+                let fileCount = Int(raw.loadUnaligned(fromByteOffset: body + 4, as: UInt32.self))
+                let customCount = Int(
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self))
+                var cat = body + 24
+                func nextClipValue() -> (UInt32, Range<Int>) {
+                    let type = raw.loadUnaligned(fromByteOffset: cat, as: UInt32.self)
+                    let len = Int(raw.loadUnaligned(fromByteOffset: cat + 4, as: UInt32.self))
+                    let payload = (cat + 8)..<(cat + 8 + len)
+                    cat += 8 + len
+                    if cat % 8 != 0 { cat += 8 - cat % 8 }
+                    return (type, payload)
+                }
+                func nextClipString() -> String {
+                    String(decoding: raw[nextClipValue().1], as: UTF8.self)
+                }
+                func nextClipBytes() -> Data {
+                    // A blob rides as a batch-local handle; the pump
+                    // prefetched the bytes before the table turned over.
+                    let handle = raw.loadUnaligned(
+                        fromByteOffset: nextClipValue().1.lowerBound, as: UInt64.self)
+                    return blobs[handle] ?? Data()
+                }
+                var custom: [(String, Data)] = []
+                for _ in 0..<customCount { custom.append((nextClipString(), nextClipBytes())) }
+                var files: [String] = []
+                for _ in 0..<fileCount { files.append(nextClipString()) }
+                let image = present & kayaClipImage != 0 ? nextClipBytes() : nil
+                let html = present & kayaClipHtml != 0 ? nextClipString() : nil
+                let text = present & kayaClipText != 0 ? nextClipString() : nil
+                kayaCopyToPasteboard(
+                    text: text, html: html, image: image, files: files, custom: custom)
+            case applyReadClipboard:
+                let request = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let acceptLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
+                let accepting = String(
+                    decoding: raw[(body + 16)..<(body + 16 + acceptLen)], as: UTF8.self)
+                kayaReadClipboard(request: request, accepting: accepting)
             case applyPresentFileDialog:
                 // The platform's REAL picker (NSOpenPanel), answered
                 // exactly once through kaya_emit_file_dialog_result —
@@ -1619,11 +1884,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propA11yHint, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.a11yHint = String(decoding: bytes, as: UTF8.self)
-                case (propAccepts, valueF64):
-                    // A MASK in the numeric slot, not an enum ordinal:
-                    // a widget accepts a set.
-                    kayaScene.nodes[id]!.accepts = UInt32(
-                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
+                case (propAccepts, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.accepts = String(decoding: bytes, as: UTF8.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.

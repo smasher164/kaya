@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x2ed696ff6043310c
+SPEC_HASH = 0x408bcf69e0ad2bfd
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -368,8 +368,8 @@ def tx_copy(present, file_count, custom_count, reps):
     return record(TX_COPY, struct.pack("<I", present) + struct.pack("<I", file_count) + struct.pack("<I", custom_count) + struct.pack("<I", 0) + _enc.values(reps))
 
 def tx_read_clipboard(request, accepting):
-    """Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is a mask over the `clip` enum; the answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike."""
-    return record(TX_READ_CLIPBOARD, struct.pack("<Q", request) + struct.pack("<I", accepting) + struct.pack("<I", 0))
+    """Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike."""
+    return record(TX_READ_CLIPBOARD, struct.pack("<Q", request) + _enc.value(accepting))
 
 
 def tx_set_text(widget_id, text):
@@ -583,7 +583,7 @@ def tx_bind_a11y_hint_element(widget_id, level=0, field=0):
 
 
 def tx_set_accepts(widget_id, accepts):
-    """set_property with a constant accepts value (float)."""
+    """set_property with a constant accepts value (str)."""
     return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ACCEPTS, SOURCE_CONST) + _enc.value(accepts))
 
 

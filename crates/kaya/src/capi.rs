@@ -1261,6 +1261,25 @@ pub(crate) fn picked_register(
     crate::protocol::PickedId(handle)
 }
 
+/// What the PLATFORM calls a picked file, for a backend that has to
+/// put it somewhere the platform understands — a pasteboard file URL,
+/// a `text/uri-list` line, a `DROPFILES` entry.
+///
+/// A DEAD HANDLE FAILS LOUDLY rather than copying an empty reference:
+/// entries are process-lifetime, so the only way to miss is to name a
+/// handle that was never minted, which is a broken guest.
+pub(crate) fn picked_locator(handle: crate::protocol::PickedId) -> String {
+    let table = picked().lock().unwrap();
+    match table.live.get(&handle.0) {
+        Some(source) => crate::protocol::PickedSource::locator(&**source).to_owned(),
+        None => panic!(
+            "kaya: copy names picked file {} , which was never minted — a \
+             file handle comes from a picker result",
+            handle.0
+        ),
+    }
+}
+
 /// Redeem a handle for an open descriptor. THE ONE ENTRY HERE THAT IS
 /// SAFE FROM ANY THREAD, alongside kaya_wake.
 ///

@@ -606,6 +606,14 @@ impl AppCtx {
         crate::protocol::FileDialogId(id)
     }
 
+    /// Clipboard reads share the same counter, for the same reason:
+    /// a request id that retires with its one answer.
+    fn alloc_clip_read(&self) -> u64 {
+        let id = self.next_alert.get();
+        self.next_alert.set(id + 1);
+        id
+    }
+
     fn alloc_widget(&self) -> WidgetId {
         let id = self.next_widget.get();
         self.next_widget.set(id + 1);
@@ -1200,6 +1208,33 @@ impl<'a> Tx<'a> {
                 filters: Vec::new(),
             },
         }
+    }
+
+    /// Put one clip on the system clipboard, offered in as many
+    /// representations as the app fills in.
+    ///
+    /// kaya DERIVES NOTHING between them: whether list bullets survive
+    /// html-to-text and where the line breaks go are rendering
+    /// decisions this app owns, and a bad auto-derivation degrades
+    /// every paste into a plain field silently. Offer both if both are
+    /// wanted. The one exception is a file list, which also gets the
+    /// platform's own text rendition of the paths — universal
+    /// convention, and no judgment in it.
+    pub fn copy(&mut self) -> CopyRef<'_, 'a> {
+        CopyRef { tx: self, clip: crate::protocol::Clip::default() }
+    }
+
+    /// Read the clipboard OUTSIDE any paste gesture — the privileged
+    /// one. A user's paste arrives at the widget's hook and costs
+    /// nothing; this asks without a gesture, which the platforms have
+    /// deliberately made expensive: iOS prompts for another app's
+    /// content, Android answers nothing without focus, Wayland delivers
+    /// no offer to an unfocused client. Reach for it when there IS no
+    /// paste — detect a URL, import from the clipboard — and not to
+    /// implement Paste.
+    pub fn read_clipboard(&mut self) -> ClipReadRef<'_, 'a> {
+        let request = self.ctx.alloc_clip_read();
+        ClipReadRef { tx: self, request, accepting: Vec::new() }
     }
 
     /// The single-file spelling. The floor always returns a LIST; this
@@ -2618,6 +2653,115 @@ impl FileDialogRef<'_, '_> {
         let id = self.spec.dialog;
         self.tx.ops.push(TxOp::ShowFileDialog(self.spec));
         id
+    }
+}
+
+/// The copy chain: a clip record under construction. Each method fills
+/// one representation, and the terminal puts it on the clipboard.
+///
+/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
+/// structural here, since a second `text` call simply replaces the
+/// field rather than needing a duplicate check the root has to run.
+#[must_use = "a copy chain puts nothing on the clipboard until .send()"]
+pub struct CopyRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    clip: crate::protocol::Clip,
+}
+
+impl CopyRef<'_, '_> {
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.clip.text = Some(text.into());
+        self
+    }
+
+    pub fn html(mut self, html: impl Into<String>) -> Self {
+        self.clip.html = Some(html.into());
+        self
+    }
+
+    /// Encoded image bytes — the same currency the image property
+    /// takes. What comes BACK from a paste may be a re-encode: the
+    /// hosts convert freely between image types, so compare what the
+    /// image IS, not the bytes it arrived in.
+    pub fn image(mut self, bytes: impl Into<std::sync::Arc<[u8]>>) -> Self {
+        self.clip.image = Some(crate::protocol::Blob(bytes.into()));
+        self
+    }
+
+    /// Offer a picked file — the picker's own capability, put straight
+    /// on the clipboard. The bytes never move through kaya.
+    pub fn file(mut self, handle: crate::protocol::PickedId) -> Self {
+        self.clip.files.push(handle);
+        self
+    }
+
+    /// An app-defined format, round-tripped verbatim. The id reaches
+    /// every platform's own registry unchanged — a UTI on Apple,
+    /// RegisterClipboardFormat on Windows, a target atom on X11 and
+    /// Wayland, a MIME type on Android — so it carries no spaces, and
+    /// kaya does nothing clever with the bytes.
+    pub fn custom(
+        mut self,
+        id: impl Into<String>,
+        bytes: impl Into<std::sync::Arc<[u8]>>,
+    ) -> Self {
+        self.clip
+            .custom
+            .push((id.into(), crate::protocol::Blob(bytes.into())));
+        self
+    }
+
+    pub fn send(self) {
+        self.tx.ops.push(TxOp::Copy(self.clip));
+    }
+}
+
+/// The read chain: which representations this read can use, and the
+/// request id its one answer arrives under.
+#[must_use = "a clipboard read asks nothing until .send()"]
+pub struct ClipReadRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    request: u64,
+    accepting: Vec<String>,
+}
+
+impl ClipReadRef<'_, '_> {
+    pub fn text(mut self) -> Self {
+        self.accepting.push("text".to_owned());
+        self
+    }
+
+    pub fn html(mut self) -> Self {
+        self.accepting.push("html".to_owned());
+        self
+    }
+
+    pub fn image(mut self) -> Self {
+        self.accepting.push("image".to_owned());
+        self
+    }
+
+    pub fn files(mut self) -> Self {
+        self.accepting.push("files".to_owned());
+        self
+    }
+
+    /// Accept an app-defined format by id. Custom formats are tried
+    /// FIRST, in the order named: an app's own format round-trips its
+    /// data losslessly, which is the only reason to have one.
+    pub fn custom(mut self, id: impl Into<String>) -> Self {
+        self.accepting.push(id.into());
+        self
+    }
+
+    /// Send the request, returning its id — the handle
+    /// [`Messages::on_clipboard`] binds the one-shot handler to.
+    pub fn send(self) -> u64 {
+        self.tx.ops.push(TxOp::ReadClipboard {
+            request: self.request,
+            accepting: self.accepting.join(" "),
+        });
+        self.request
     }
 }
 
