@@ -164,12 +164,12 @@ let () =
       let read_custom () =
         ignore (read_clipboard ~on_result:answered [ note_id ])
       in
-      let read_text () = ignore (read_clipboard ~on_result:answered [ "text" ]) in
+      let read_text () = ignore (read_clipboard ~on_result:answered [ accept_text ]) in
       let read_image () =
-        ignore (read_clipboard ~on_result:answered [ "image" ])
+        ignore (read_clipboard ~on_result:answered [ accept_image ])
       in
       let read_files () =
-        ignore (read_clipboard ~on_result:answered [ "files" ])
+        ignore (read_clipboard ~on_result:answered [ accept_files ])
       in
 
       let root =
@@ -191,7 +191,7 @@ let () =
               (* DECLARES WHAT IT TAKES, so a paste lands in the hook and
                  this app decides what to do with it. *)
               let w = entry ~a11y_id:"rich" () in
-              set_accepts w [ "text" ];
+              set_accepts w [ accept_text ];
               on_paste app w (fun clip ->
                   (* THE SAME SHAPE THE READ ANSWERS WITH, and free where
                      the read is not: a gesture is its own authorisation,

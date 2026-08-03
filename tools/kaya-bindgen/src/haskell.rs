@@ -354,14 +354,62 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                    return (VStr (map (chr . fromIntegral) bytes))");
     c.line("  return (v, next)");
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app. The redeemer is THREADED AS AN
+    // ARGUMENT rather than installed in a global, because KayaRuntime
+    // imports this module and never the reverse — Haskell's answer to
+    // an effect a module cannot reach on its own.
+    c.line("-- | One representation as the decoder hands it over: the clip");
+    c.line("-- kind, and its values with blobs already redeemed to bytes. The");
+    c.line("-- sum itself is the hand-written tier\'s — this is the taste-free");
+    c.line("-- shape the wire carries.");
+    c.line("--");
+    c.line("-- The kind is a SINGLE member of the clip enum and never a mask");
+    c.line("-- (you offer many and you receive one); 0 with no values is the");
+    c.line("-- universal empty answer.");
+    c.line("data ClipValues = ClipValues");
+    c.line("  { clipKind :: !Word32,");
+    c.line("    clipValues :: ![ClipPart]");
+    c.line("  }");
+    c.line("");
+    c.line("-- | One value of a representation. Its own type rather than a");
+    c.line("-- constructor on Value, because bytes reach a guest ONLY here —");
+    c.line("-- nothing else on the occurrence channel has ever carried them.");
+    c.line("data ClipPart = CStr String | CI64 Int64 | CBytes BS.ByteString");
+    c.line("");
+    c.line("-- Decode a representation at `at`: the clip kind, then its Values");
+    c.line("-- block. Blobs are redeemed and RELEASED by `redeem` here.");
+    c.line("parseClip ::");
+    c.line("  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)");
+    c.line("parseClip redeem rec at = do");
+    c.line("  kind <- peekByteOff rec at :: IO Word32");
+    c.line("  count <- peekByteOff rec (at + 8) :: IO Word32");
+    c.line("  let go a 0 acc = return (reverse acc, a)");
+    c.line("      go a n acc = do");
+    c.line("        (v, next) <- parseValue rec a");
+    c.line("        part <- case v of");
+    c.line("          VBlob h -> CBytes <$> redeem h");
+    c.line("          VI64 i -> return (CI64 i)");
+    c.line("          VStr t -> return (CStr t)");
+    c.line("          other -> return (CStr (show other))");
+    c.line("        go next (n - 1 :: Word32) (part : acc)");
+    c.line("  (parts, at') <- go (at + 16) count []");
+    c.line("  return (ClipValues kind parts, at')");
+    c.line("");
     c.line("-- Decode one occurrence record at `rec` (header included). Just");
     c.line("-- (kind, id, keys, payload) — keys is [] when id is a widget id,");
     c.line("-- else id is a template node id and keys is the copy's key path;");
     c.line("-- payload is Just for text_changed (VStr), toggled (VBool), and");
     c.line("-- value_changed (VF64),");
     c.line("-- Nothing for clicks. Nothing for pad or unknown kinds.");
-    c.line("parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))");
-    c.line("parseOccurrence rec = do");
+    c.line("parseOccurrence ::");
+    c.line("  (Word64 -> IO BS.ByteString) ->");
+    c.line("  Ptr Word8 ->");
+    c.line("  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))");
+    c.line("parseOccurrence redeem rec = do");
     c.line("  kind <- peekByteOff rec 4 :: IO Word16");
     let accepted = crate::occurrence_names(spec)
         .iter()
@@ -376,7 +424,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        then do");
     c.line("          -- The alert's one answer: id + u32 choice (alertChoice*).");
     c.line("          choice <- peekByteOff rec 16 :: IO Word32");
-    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))");
+    c.line("          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing))");
     // The picker's answer is a LIST OF RECORDS, and no single Value
     // can carry one — so the three values per file ride the VALUES
     // slot, flattened, and KayaApp regroups them in threes. The
@@ -393,7 +441,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                (v, next) <- parseValue rec at");
     c.line("                readValues (n - 1 :: Int) next (v : acc)");
     c.line("          vals <- readValues (fromIntegral count * 3) 32 []");
-    c.line("          return (Just (kind, ident, vals, Nothing))");
+    c.line("          return (Just (kind, ident, vals, Nothing, Nothing))");
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "      else if kind == occKind{}",
+            pascal(name)
+        ));
+        c.line("        then do");
+        c.line("          (clip, _) <- parseClip redeem rec 16");
+        c.line("          return (Just (kind, ident, [], Nothing, Just clip))");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))
@@ -402,7 +459,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        -- Surface lifecycle records carry the surface id alone");
     c.line("        -- (derived from the record shapes).");
     c.line(&format!("        else if {id_only}"));
-    c.line("          then return (Just (kind, ident, [], Nothing))");
+    c.line("          then return (Just (kind, ident, [], Nothing, Nothing))");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occKind{}", pascal(n)))
@@ -414,7 +471,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("        else if {id_pair}"));
         c.line("          then do");
         c.line("            second <- peekByteOff rec 16 :: IO Word64");
-        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident))))");
+        c.line("            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing))");
     }
     c.line("          else do");
     c.line("          pathLen <- peekByteOff rec 16 :: IO Word32");
@@ -434,7 +491,28 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                (v, _) <- parseValue rec at'");
     c.line("                return (Just v)");
     c.line("              else return Nothing");
-    c.line("          return (Just (kind, ident, keys, payload))");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    {
+        let pasted = crate::pasted_occurrence_names(spec)
+            .iter()
+            .map(|n| format!("kind == occKind{}", pascal(n)))
+            .collect::<Vec<_>>()
+            .join(" || ");
+        if pasted.is_empty() {
+            c.line("          let clip = Nothing");
+        } else {
+            c.line(&format!("          clip <-"));
+            c.line(&format!("            if {pasted}"));
+            c.line("              then do");
+            c.line("                (c, _) <- parseClip redeem rec at'");
+            c.line("                return (Just c)");
+            c.line("              else return Nothing");
+        }
+    }
+    c.line("          return (Just (kind, ident, keys, payload, clip))");
     c.out
 }
 

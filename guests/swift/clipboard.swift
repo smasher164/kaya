@@ -193,7 +193,7 @@ app.build { tx in
         // DECLARES WHAT IT TAKES, so a paste lands in the hook and this
         // app decides what to do with it.
         rich = tx.entry()  // entry#0
-        tx.setAccepts(rich, ["text"])
+        tx.setAccepts(rich, [KayaAppTx.acceptText])
         tx.setA11yId(rich, "rich")
         tx.onPaste(rich) { inner, clip in
             // THE SAME SHAPE THE READ ANSWERS WITH, and free where the

@@ -158,7 +158,7 @@ final class Clipboard {
 
                 // DECLARES WHAT IT TAKES, so a paste lands in the hook
                 // and this app decides what to do with it.
-                fields[0] = tx.entry().accepts("text").a11yId("rich"); // entry#0
+                fields[0] = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
                 app.onPaste(fields[0], (t, clip) -> {
                     // THE SAME SHAPE THE READ ANSWERS WITH, and free
                     // where the read is not: a gesture is its own

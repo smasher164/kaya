@@ -169,7 +169,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of

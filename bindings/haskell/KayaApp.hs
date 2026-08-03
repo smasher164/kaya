@@ -176,7 +176,22 @@ module KayaApp
     setMenuPrimary,
     setMenuShortcut,
     setMenuRole,
+    copy,
+    emptyClip,
+    Clip (..),
+    Representation (..),
+    readClipboard,
+    setAccepts,
+    onPaste,
+    onPasteNode,
+    acceptText,
+    acceptHtml,
+    acceptImage,
+    acceptFiles,
     roleSettings,
+    roleCut,
+    roleCopy,
+    rolePaste,
     menuAppend,
     menuOptions,
   )
@@ -236,6 +251,61 @@ assertRoot _ = error "kaya: forEach binds the collection itself, not an instance
 -- name, and a re-openable name — EMPTY unless re-opening it actually
 -- works, which measurement puts at the three desktops and neither
 -- phone (DESIGN.md, File dialogs).
+-- | One representation, arriving — the sum a copy is the record of.
+--
+-- YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
+-- record here would invite a guest to check five fields where four are
+-- structurally always empty. Constructors carry the type's initial,
+-- the convention 'AlignCenter' and 'AMessage' already follow.
+--
+-- 'RImage' may be a RE-ENCODE of what was copied — the hosts convert
+-- freely between image types — so compare what the image IS, never the
+-- bytes it arrived in. 'RFiles' is plural INSIDE one representation,
+-- the same nesting text/uri-list and CF_HDROP already have.
+data Representation
+  = RText String
+  | RHtml String
+  | RImage BS.ByteString
+  | RFiles [PickedFile]
+  | RCustom String BS.ByteString
+
+-- | One clip, offered in as many representations as the app fills in.
+--
+-- A RECORD AND NOT AN ATTRIBUTE LIST, and this is the one place the
+-- binding departs from the @showAlert [attrs]@ shape beside it. The
+-- departure is the DESIGN's, not taste: at most one per kind has to be
+-- structural, and a list of attributes cannot say that — @[CText "a",
+-- CText "b"]@ would typecheck. A record with optional fields makes the
+-- second one impossible to write.
+--
+-- kaya DERIVES NOTHING between representations: whether list bullets
+-- survive html-to-text is the app's decision, so an app that wants
+-- plain text beside html fills in both.
+data Clip = Clip
+  { clipText :: Maybe String,
+    clipHtml :: Maybe String,
+    clipImage :: Maybe BS.ByteString,
+    -- | Picked-file handles: copying a file and picking one are the
+    -- same currency, so a picked file goes straight on and the bytes
+    -- never move through kaya.
+    clipFiles :: [PickedFile],
+    -- | The one plural field with names, since several app-defined
+    -- formats are legitimate. Each id reaches every platform's own
+    -- registry verbatim, so it carries no spaces.
+    clipCustom :: [(String, BS.ByteString)]
+  }
+
+-- | The empty clip, to fill in: @copy emptyClip { clipText = Just "hi" }@.
+emptyClip :: Clip
+emptyClip =
+  Clip
+    { clipText = Nothing,
+      clipHtml = Nothing,
+      clipImage = Nothing,
+      clipFiles = [],
+      clipCustom = []
+    }
+
 data PickedFile = PickedFile
   { pickedHandle :: !Word64,
     pickedName :: !String,
@@ -258,6 +328,7 @@ data Counters = Counters
     cNode :: !Word64,
     cAlert :: !Word64,
     cFileDialog :: !Word64,
+    cClipboardRead :: !Word64,
     cMenuItem :: !Word64
   }
 
@@ -313,6 +384,7 @@ data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (Word32 -> IO ())
   | PFileDialog !Word64 ([PickedFile] -> IO ())
+  | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
   | PSectionSelected !Word64 (IO ())
   | PBackRequested !Word64 (IO ())
@@ -813,8 +885,44 @@ newtype Catalog = Catalog [Word64]
 -- | The closed standard-command vocabulary (DESIGN.md, Menus): macOS
 -- places this one in the application menu, and every other host leaves
 -- the item where the app declared it.
+-- | A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
+-- are. The accept list is open-ended — a custom format id is any
+-- app-chosen string — so the four closed kinds cannot be a mask; but
+-- they can be spelled once here instead of quoted at every call site.
+-- A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
+-- clipboard will ever offer, so Paste stays dead and the paste hook
+-- never fires, with nothing to see anywhere. A custom id has no
+-- constant by nature — the app that defines it names it.
+acceptText :: String
+acceptText = "text"
+acceptHtml :: String
+acceptHtml = "html"
+acceptImage :: String
+acceptImage = "image"
+acceptFiles :: String
+acceptFiles = "files"
+
 roleSettings :: String
 roleSettings = "settings"
+
+-- | The three clipboard commands. They lower to the platform's own, act
+-- on the FOCUSED widget, and work out their own enablement from what
+-- the clipboard offers and what that widget accepts.
+--
+-- GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
+-- widget knows what is selected, so an app cannot assemble the payload
+-- for "copy the selected text" out of the data layer. Copy of a
+-- selection is therefore necessarily a command, and Paste is its
+-- mirror. 'copy' and 'readClipboard' are for overriding that default
+-- and for targets with no native behaviour.
+roleCut :: String
+roleCut = "cut"
+
+roleCopy :: String
+roleCopy = "copy"
+
+rolePaste :: String
+rolePaste = "paste"
 
 -- | Menu item construction attributes — the config-list spelling over
 -- a closed GADT indexed by anchor scope. Label and enablement are
@@ -1089,6 +1197,104 @@ showAlert attrs handler = do
 -- IS THE EMPTY LIST, faithfully: no platform can confirm an empty
 -- selection. One dialog may be live per process; show the next from
 -- the handler.
+-- | Check one accept-list entry and return it.
+--
+-- Ids reach every platform's own registry verbatim, so they carry no
+-- spaces — which is what makes the space-separated join unambiguous,
+-- and what this refuses to let you break.
+acceptToken :: String -> String
+acceptToken kind
+  | null kind || ' ' `elem` kind =
+      error
+        ( "kaya: "
+            ++ show kind
+            ++ " is not an accept-list entry — the closed kinds are "
+            ++ "acceptText, acceptHtml, acceptImage and acceptFiles, and a "
+            ++ "custom format id reaches the platform's own registry "
+            ++ "verbatim, so it carries no spaces"
+        )
+  | otherwise = kind
+
+-- | Join an accept list: the closed kinds by name plus any custom ids,
+-- space separated.
+--
+-- A LIST AND NOT A MASK, because half the set is open-ended. A custom
+-- format that could be written and never accepted would be an escape
+-- hatch that only opens outward, and round-tripping an app's own data
+-- is the whole reason to have one.
+acceptList :: [String] -> String
+acceptList = unwords . map acceptToken
+
+-- | Put ONE clip on the system clipboard:
+-- @copy emptyClip { clipText = Just "kaya clip" }@.
+--
+-- The blob registrations ride the deferred record action, which is why
+-- this is one 'emitBIO' rather than a sequence: 'Build' is pure, and
+-- the bytes reach the core when the transaction submits.
+--
+-- The wire order is kaya's, not this record's — descending richness,
+-- which is preference order on every host that has one, so a backend
+-- writes what it is handed in the order it is handed. (@W.clipText@
+-- below is the wire MASK; @clipText@ is this record's field.)
+copy :: Clip -> Build ()
+copy clip = emitBIO $ do
+  customValues <-
+    concat
+      <$> mapM
+        ( \(ident, bytes) -> do
+            h <- registerBlob bytes
+            return [W.VStr (acceptToken ident), W.VBlob h]
+        )
+        (clipCustom clip)
+  imageValue <- case clipImage clip of
+    Nothing -> return []
+    Just bytes -> (: []) . W.VBlob <$> registerBlob bytes
+  let present =
+        maybe 0 (const W.clipText) (clipText clip)
+          + maybe 0 (const W.clipHtml) (clipHtml clip)
+          + maybe 0 (const W.clipImage) (clipImage clip)
+      files = map (W.VI64 . fromIntegral . pickedHandle) (clipFiles clip)
+      values =
+        customValues
+          ++ files
+          ++ imageValue
+          ++ maybe [] (\h -> [W.VStr h]) (clipHtml clip)
+          ++ maybe [] (\t -> [W.VStr t]) (clipText clip)
+  return
+    ( W.txCopy
+        present
+        (fromIntegral (length (clipFiles clip)))
+        (fromIntegral (length (clipCustom clip)))
+        values
+    )
+
+-- | Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE,
+-- named for what it is rather than for pasting.
+--
+-- A user's paste arrives at the widget's hook and costs nothing; this
+-- asks without a gesture, which the platforms have deliberately made
+-- expensive: iOS 16 PROMPTS when the content came from another app and
+-- blocks until the user answers, Android returns nothing unless the app
+-- has focus, and Wayland delivers no offer to an unfocused client.
+-- Reach for this to detect a URL or import from the clipboard, never to
+-- implement Paste — that is the Paste command, and it is free.
+--
+-- The handler fires exactly once, with @Just rep@ or @Nothing@, and the
+-- registration retires with it — the alert's grammar.
+readClipboard :: [String] -> (Maybe Representation -> IO ()) -> Build ()
+readClipboard accepting handler = do
+  n <- Build $ \st ->
+    let c = bCounters st
+        next = cClipboardRead c + 1
+     in (next, st {bCounters = c {cClipboardRead = next}})
+  pendB (PClipboardRead n handler)
+  emitB (W.txReadClipboard n (W.VStr (acceptList accepting)))
+
+-- | Declare what a widget takes from a paste — the dynamic path; the
+-- declarative spelling is the 'Accepts' attribute at construction.
+setAccepts :: Widget -> [String] -> Build ()
+setAccepts (Widget w) kinds = emitB (W.txSetAccepts w (acceptList kinds))
+
 pickFiles :: [(String, String)] -> ([PickedFile] -> IO ()) -> Build ()
 pickFiles = pick True
 
@@ -1224,6 +1430,23 @@ data Attr (c :: WClass) where
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
   A11yHint :: String -> Attr 'LeafW
+  -- | What this widget takes from a paste — the closed kinds by name
+  -- ('acceptText' and friends) plus any custom format ids. Any widget
+  -- class, like 'Grow'.
+  --
+  -- ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
+  -- live while this widget is focused, it filters what can reach the
+  -- paste hook, and on Android it IS the native registration
+  -- (setOnReceiveContentListener takes the mime types on the view).
+  -- Per-widget because whether Paste should be enabled is the
+  -- INTERSECTION of what the clipboard offers and what the FOCUSED
+  -- target takes.
+  --
+  -- DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
+  -- declares nothing gets the platform's own insertion and reports it
+  -- through the ordinary change path, which is why a plain text editor
+  -- writes none of this and has working cut, copy and paste.
+  Accepts :: [String] -> Attr c
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
@@ -1232,6 +1455,7 @@ applyAttr (Align a) w = setAlign w a
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l
 applyAttr (A11yHint h) w = setA11yHint w h
+applyAttr (Accepts kinds) w = setAccepts w kinds
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do
@@ -1974,6 +2198,12 @@ data App = App
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64,
     appFileDialogHandlers :: IORef (Map.Map Word64 ([PickedFile] -> IO ())),
+    -- Clipboard reads share the alert's request/result grammar and so
+    -- its table shape: one-shot, keyed by request id.
+    appClipboardReads :: IORef (Map.Map Word64 (Maybe Representation -> IO ())),
+    appNextClipboardRead :: IORef Word64,
+    appWidgetPastes :: IORef (Map.Map Word64 (Representation -> IO ())),
+    appNodePastes :: IORef (Map.Map Word64 ([W.Value] -> Representation -> IO ())),
     -- Menu dispatch tables, keyed by MENU ITEM id — their own id
     -- space, separate from every widget/node table ("two tables,
     -- always" — now N tables, still always). The node flavors receive
@@ -2066,6 +2296,8 @@ register app pending = case pending of
   PAlert n handler -> modifyIORef' (appAlertHandlers app) (Map.insert n handler)
   PFileDialog n handler ->
     modifyIORef' (appFileDialogHandlers app) (Map.insert n handler)
+  PClipboardRead n handler ->
+    modifyIORef' (appClipboardReads app) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (appEntryPopped app) (Map.insert n handler)
   PSectionSelected n handler -> modifyIORef' (appSectionSelected app) (Map.insert n handler)
   PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
@@ -2101,6 +2333,24 @@ onChange :: App -> Widget -> (String -> IO ()) -> IO ()
 onChange app (Widget n) handler =
   modifyIORef' (appWidgetChanges app) (Map.insert n handler)
 
+-- | Take pasted content at a live widget.
+--
+-- COSTS NOTHING ON ANY PLATFORM, unlike 'readClipboard': a paste is a
+-- user gesture, so it is its own authorisation — iOS raises no prompt
+-- and the focus rules are satisfied by construction. Only fires for a
+-- widget that declared what it 'Accepts'.
+onPaste :: App -> Widget -> (Representation -> IO ()) -> IO ()
+onPaste app (Widget n) handler =
+  modifyIORef' (appWidgetPastes app) (Map.insert n handler)
+
+-- | A paste onto a stamped copy: the handler also receives the copy's
+-- key path, outermost first. One record kind, the path deciding —
+-- exactly as a click on a stamped row is one record with a click on a
+-- live widget.
+onPasteNode :: App -> Node -> ([W.Value] -> Representation -> IO ()) -> IO ()
+onPasteNode app (Node n) handler =
+  modifyIORef' (appNodePastes app) (Map.insert n handler)
+
 -- | Register a change handler for a template entry; it also receives
 -- the stamped copy's keys, outermost first.
 onChangeNode :: App -> Node -> ([W.Value] -> String -> IO ()) -> IO ()
@@ -2127,6 +2377,32 @@ onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
 onToggleNode app (Node n) handler =
   modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
+-- | Turn the decoder's kind-and-parts into the sum, or Nothing.
+--
+-- EMPTY IS THE UNIVERSAL NO: Nothing covers a denied prompt on iOS, an
+-- unfocused reader on Android or Wayland, an empty clipboard, and
+-- content in no representation this read accepted. The guest is not
+-- told which, because the platforms deliberately do not say.
+representationOf :: Maybe W.ClipValues -> Maybe Representation
+representationOf Nothing = Nothing
+representationOf (Just cv)
+  | kind == W.clipText = Just (RText (str 0))
+  | kind == W.clipHtml = Just (RHtml (str 0))
+  | kind == W.clipImage = Just (RImage (bytes 0))
+  | kind == W.clipCustom = Just (RCustom (str 0) (bytes 1))
+  -- The picker's own three-per-file grouping, so a guest that decodes a
+  -- dialog result decodes this with the same loop.
+  | kind == W.clipFiles = Just (RFiles (regroup (W.clipValues cv)))
+  | otherwise = Nothing
+  where
+    kind = W.clipKind cv
+    part i = case drop i (W.clipValues cv) of p : _ -> Just p; [] -> Nothing
+    str i = case part i of Just (W.CStr t) -> t; _ -> ""
+    bytes i = case part i of Just (W.CBytes b) -> b; _ -> BS.empty
+    regroup (W.CI64 h : W.CStr n : W.CStr p : rest) =
+      PickedFile (fromIntegral h) n p : regroup rest
+    regroup _ = []
+
 -- | A fresh app: zeroed id counters, an empty model, empty dispatch
 -- tables. kayaMain starts from one; headless checks use it directly,
 -- without ever entering the core.
@@ -2134,7 +2410,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar []
-    <*> newIORef (Counters 0 0 0 0 0 0 0)
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -2151,6 +2427,10 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef 0
+    <*> newIORef Map.empty
+    <*> newIORef Map.empty
+    <*> newIORef 0
+    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -2231,7 +2511,7 @@ dispatchLoop app = do
     Nothing -> do
       more <- waitOccurrences
       if more then dispatchLoop app else return () -- shutdown
-    Just (kind, ident, keys, payload)
+    Just (kind, ident, keys, payload, clip)
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""
           case keys of
@@ -2292,6 +2572,29 @@ dispatchLoop app = do
           handlers <- readIORef (appSectionSelected app)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
+      | kind == W.occKindClipboardResult -> do
+          -- One-shot like the alert, and the request retires with it.
+          -- EMPTY IS THE UNIVERSAL NO and arrives as Nothing — denied,
+          -- unfocused, absent and nothing-we-accept alike, because no
+          -- platform says which.
+          handlers <- readIORef (appClipboardReads app)
+          writeIORef (appClipboardReads app) (Map.delete ident handlers)
+          dispatch (mapM_ ($ representationOf clip) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindPasted -> do
+          -- A paste rides a click tag verbatim, so it arrives on the
+          -- ordinary widget/node split — one record kind, the key path
+          -- deciding. Never empty: a paste that delivered nothing is not
+          -- an occurrence.
+          case (representationOf clip, keys) of
+            (Nothing, _) -> return ()
+            (Just rep, []) -> do
+              handlers <- readIORef (appWidgetPastes app)
+              dispatch (mapM_ ($ rep) (Map.lookup ident handlers))
+            (Just rep, ks) -> do
+              handlers <- readIORef (appNodePastes app)
+              dispatch (mapM_ (\h -> h ks rep) (Map.lookup ident handlers))
+          dispatchLoop app
       | kind == W.occKindFileDialogResult -> do
           -- One-shot like the alert, and the id retires with it. The
           -- parser flattens three values per file into the values slot
@@ -2349,11 +2652,11 @@ dispatchLoop app = do
               handlers <- readIORef (appMenuSelectedNode app)
               dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
           dispatchLoop app
-    Just (_, ident, [], _) -> do
+    Just (_, ident, [], _, _) -> do
       handlers <- readIORef (appWidgetHandlers app)
       dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
-    Just (_, ident, keys, _) -> do
+    Just (_, ident, keys, _, _) -> do
       handlers <- readIORef (appNodeHandlers app)
       dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
       dispatchLoop app

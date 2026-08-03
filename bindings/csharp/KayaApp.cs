@@ -1849,6 +1849,19 @@ sealed class Tx
     /// The closed standard-command vocabulary (DESIGN.md, Menus):
     /// macOS places this one in the application menu, and every other
     /// host leaves the item where the app declared it.
+    // A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
+    // are. The accept list is open-ended — a custom format id is any
+    // app-chosen string — so the four closed kinds cannot be a mask; but
+    // they can be spelled once here instead of quoted at every call site.
+    // A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
+    // clipboard will ever offer, so Paste stays dead and the paste hook
+    // never fires, with nothing to see anywhere. A custom id has no
+    // constant by nature — the app that defines it names it.
+    public const string AcceptText = "text";
+    public const string AcceptHtml = "html";
+    public const string AcceptImage = "image";
+    public const string AcceptFiles = "files";
+
     public const string RoleSettings = "settings";
 
     /// The three clipboard commands. They lower to the platform's own,

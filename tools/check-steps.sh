@@ -409,6 +409,17 @@ LANGS = [
     ("ocaml", "guests/ocaml/{s}.ml"),
     ("haskell", "guests/haskell/{s}.hs"),
 ]
+# The JVM and CLR guests are NOT one file per scene: they are one
+# package plus a selector, with irregular class names (FileDialog,
+# GridScene, Milestone2), so a path pattern cannot see them. Check the
+# thing that actually decides whether a scene is reachable — that the
+# selector dispatches it. A guest class that exists but was never wired
+# into the switch is exactly as broken as a missing file, and looks
+# fine to every other gate.
+SELECTORS = [
+    ("java", "guests/java-desktop/dev/kaya/milestone2kt/Main.java"),
+    ("csharp", "guests/csharp/Program.cs"),
+]
 bad = []
 for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh", "tools/deploy-win.sh"):
     text = pathlib.Path(runner).read_text()
@@ -423,6 +434,24 @@ for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh", "tools/depl
                     f"{runner}: scene \"{scene}\" is in SCENES but has no {lang} guest "
                     f"({pat.format(s=scene, S=scene.capitalize())}) — a rust-only scene "
                     "belongs in DEPTH_SCENES")
+scenes = set()
+for runner in ("tools/validate-mac.sh", "tools/linux/run-suites.sh", "tools/deploy-win.sh"):
+    text = pathlib.Path(runner).read_text()
+    m = re.search(r'^SCENES="([^"]+)"', text, re.M)
+    if m:
+        scenes.update(m.group(1).split())
+for lang, selector in SELECTORS:
+    text = pathlib.Path(selector).read_text()
+    for scene in sorted(scenes):
+        # milestone2 is the DEFAULT arm in both selectors, reachable
+        # without a case of its own — verified, not assumed: both files
+        # end in `default:` dispatching Milestone2.
+        if scene == "milestone2":
+            continue
+        if f'case "{scene}"' not in text:
+            bad.append(
+                f'{selector}: scene "{scene}" is in SCENES but the {lang} '
+                "selector never dispatches it — the guest is unreachable")
 for b in bad:
     print(f"check-steps: {b}", file=sys.stderr)
 sys.exit(1 if bad else 0)

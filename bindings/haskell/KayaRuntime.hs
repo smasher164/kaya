@@ -23,13 +23,13 @@ import Data.Int (Int32, Int64)
 import Data.Word (Word16, Word32, Word64, Word8)
 import Foreign.C.Types (CBool (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, mallocBytes)
-import Foreign.Ptr (Ptr, castPtr, plusPtr)
-import Foreign.Storable (peek, peekByteOff)
+import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
+import Foreign.Storable (peek, peekByteOff, poke)
 import GHC.IO.Handle.FD (fdToHandle)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
 
-import KayaWire (Value, parseOccurrence, specHash)
+import KayaWire (ClipValues, Value, parseOccurrence, specHash)
 
 foreign import ccall safe "kaya_run"
   c_kaya_run :: IO Int32
@@ -60,6 +60,36 @@ foreign import ccall unsafe "kaya_submit"
 
 foreign import ccall unsafe "kaya_blob_register"
   c_kaya_blob_register :: Ptr Word8 -> CSize -> IO Word64
+
+foreign import ccall unsafe "kaya_occurrence_blob"
+  c_kaya_occurrence_blob :: Word64 -> Ptr CSize -> IO (Ptr Word8)
+
+foreign import ccall unsafe "kaya_occurrence_blob_release"
+  c_kaya_occurrence_blob_release :: Word64 -> IO ()
+
+-- Redeem an occurrence blob for its bytes, and release it. Handed to
+-- the generated decoder, never named by a guest.
+--
+-- COPY THEN RELEASE, in that order: the pointer borrows core memory
+-- that the release frees. A blob arriving in an OCCURRENCE is a handle
+-- into a table with no boundary that retires one — unlike the apply
+-- channel's batch-local index, which the next batch supersedes — so the
+-- decoder is what has to let go of it, while decoding, before any
+-- handle can reach an app. Release is idempotent, so a dead handle
+-- costs nothing rather than being an error the decoder must reason
+-- about.
+occurrenceBlob :: Word64 -> IO BS.ByteString
+occurrenceBlob handle =
+  alloca $ \lenPtr -> do
+    poke lenPtr 0
+    dat <- c_kaya_occurrence_blob handle lenPtr
+    len <- peek lenPtr
+    out <-
+      if dat == nullPtr || len == 0
+        then return BS.empty
+        else BS.packCStringLen (castPtr dat, fromIntegral len)
+    c_kaya_occurrence_blob_release handle
+    return out
 
 -- The ordered cursor accesses; see kaya_hs_stubs.c.
 foreign import ccall unsafe "kaya_hs_load_acquire_u32"
@@ -156,7 +186,8 @@ waitOccurrences = do
 -- nextOccurrence, because the app thread has a SECOND source of work:
 -- actions posted from other threads. A single blocking read would park
 -- inside C with no way back out to run them.
-pollOccurrence :: IO (Maybe (Word16, Word64, [Value], Maybe Value))
+pollOccurrence ::
+  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
 pollOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1
@@ -167,7 +198,7 @@ pollOccurrence = do
           else do
             let at = fromIntegral (hh .&. mask)
             size <- peekByteOff dat at :: IO Word32
-            parsed <- parseOccurrence (dat `plusPtr` at)
+            parsed <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
             -- Word32 wraps on its own; hand the space back with release.
             let hh' = hh + size
             storeReleaseU32 headPtr hh'

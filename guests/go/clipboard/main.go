@@ -200,7 +200,7 @@ func main() {
 
 			// DECLARES WHAT IT TAKES, so a paste lands in the hook and
 			// this app decides what to do with it.
-			rich = tx.Entry(nil).Accepts("text").A11yID("rich") // entry#0
+			rich = tx.Entry(nil).Accepts(kaya.AcceptText).A11yID("rich") // entry#0
 			app.OnPaste(rich, func(tx *kaya.Tx, clip kaya.Representation) {
 				if text, ok := clip.(kaya.TextClip); ok {
 					tx.Write(status, "pasted "+text.Text)

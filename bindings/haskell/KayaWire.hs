@@ -1077,14 +1077,54 @@ parseValue rec at = do
                     return (VStr (map (chr . fromIntegral) bytes))
   return (v, next)
 
+-- | One representation as the decoder hands it over: the clip
+-- kind, and its values with blobs already redeemed to bytes. The
+-- sum itself is the hand-written tier's — this is the taste-free
+-- shape the wire carries.
+--
+-- The kind is a SINGLE member of the clip enum and never a mask
+-- (you offer many and you receive one); 0 with no values is the
+-- universal empty answer.
+data ClipValues = ClipValues
+  { clipKind :: !Word32,
+    clipValues :: ![ClipPart]
+  }
+
+-- | One value of a representation. Its own type rather than a
+-- constructor on Value, because bytes reach a guest ONLY here —
+-- nothing else on the occurrence channel has ever carried them.
+data ClipPart = CStr String | CI64 Int64 | CBytes BS.ByteString
+
+-- Decode a representation at `at`: the clip kind, then its Values
+-- block. Blobs are redeemed and RELEASED by `redeem` here.
+parseClip ::
+  (Word64 -> IO BS.ByteString) -> Ptr Word8 -> Int -> IO (ClipValues, Int)
+parseClip redeem rec at = do
+  kind <- peekByteOff rec at :: IO Word32
+  count <- peekByteOff rec (at + 8) :: IO Word32
+  let go a 0 acc = return (reverse acc, a)
+      go a n acc = do
+        (v, next) <- parseValue rec a
+        part <- case v of
+          VBlob h -> CBytes <$> redeem h
+          VI64 i -> return (CI64 i)
+          VStr t -> return (CStr t)
+          other -> return (CStr (show other))
+        go next (n - 1 :: Word32) (part : acc)
+  (parts, at') <- go (at + 16) count []
+  return (ClipValues kind parts, at')
+
 -- Decode one occurrence record at `rec` (header included). Just
 -- (kind, id, keys, payload) — keys is [] when id is a widget id,
 -- else id is a template node id and keys is the copy's key path;
 -- payload is Just for text_changed (VStr), toggled (VBool), and
 -- value_changed (VF64),
 -- Nothing for clicks. Nothing for pad or unknown kinds.
-parseOccurrence :: Ptr Word8 -> IO (Maybe (Word16, Word64, [Value], Maybe Value))
-parseOccurrence rec = do
+parseOccurrence ::
+  (Word64 -> IO BS.ByteString) ->
+  Ptr Word8 ->
+  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
+parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
   if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted
     then return Nothing
@@ -1094,7 +1134,7 @@ parseOccurrence rec = do
         then do
           -- The alert's one answer: id + u32 choice (alertChoice*).
           choice <- peekByteOff rec 16 :: IO Word32
-          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice))))
+          return (Just (kind, ident, [], Just (VI64 (fromIntegral choice)), Nothing))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,
@@ -1106,17 +1146,21 @@ parseOccurrence rec = do
                 (v, next) <- parseValue rec at
                 readValues (n - 1 :: Int) next (v : acc)
           vals <- readValues (fromIntegral count * 3) 32 []
-          return (Just (kind, ident, vals, Nothing))
+          return (Just (kind, ident, vals, Nothing, Nothing))
+      else if kind == occKindClipboardResult
+        then do
+          (clip, _) <- parseClip redeem rec 16
+          return (Just (kind, ident, [], Nothing, Just clip))
         -- Surface lifecycle records carry the surface id alone
         -- (derived from the record shapes).
         else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested
-          then return (Just (kind, ident, [], Nothing))
+          then return (Just (kind, ident, [], Nothing, Nothing))
         -- Surface-pair records (window, section): the SECOND id
         -- keys the handler; the first rides as the payload.
         else if kind == occKindSectionSelected
           then do
             second <- peekByteOff rec 16 :: IO Word64
-            return (Just (kind, second, [], Just (VI64 (fromIntegral ident))))
+            return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing))
           else do
           pathLen <- peekByteOff rec 16 :: IO Word32
           let go at 0 acc = return (reverse acc, at)
@@ -1130,4 +1174,10 @@ parseOccurrence rec = do
                 (v, _) <- parseValue rec at'
                 return (Just v)
               else return Nothing
-          return (Just (kind, ident, keys, payload))
+          clip <-
+            if kind == occKindPasted
+              then do
+                (c, _) <- parseClip redeem rec at'
+                return (Just c)
+              else return Nothing
+          return (Just (kind, ident, keys, payload, clip))

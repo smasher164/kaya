@@ -48,11 +48,11 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
-DEPTH_SCENES="clipboard"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -818,13 +818,24 @@ run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/
 KAYA_SELFTEST_SCRIPT="$(scene_script clipboard)"
 export KAYA_SELFTEST_SCRIPT
 run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
+drain
 run clipboard-python-swiftui env KAYA_SELFTEST=clipboard python3 guests/python/clipboard.py
+drain
 run clipboard-go-swiftui env KAYA_SELFTEST=clipboard target/go-guests/clipboard
+drain
 run clipboard-swift-swiftui env KAYA_SELFTEST=clipboard target/swift-guests/clipboard
+drain
 run clipboard-csharp-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
+drain
+run clipboard-ocaml-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/clipboard.exe
+drain
+run clipboard-haskell-swiftui env KAYA_SELFTEST=clipboard "$(hs_bin clipboard)"
+drain
 run clipboard-java-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

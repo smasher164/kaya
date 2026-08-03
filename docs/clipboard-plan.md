@@ -746,10 +746,68 @@ as `kaya_blob_data` already asks — so there is no buffer to be too
 small. Measurement, the guard, and the WOKEN half of the lesson are in
 docs/traps.md.
 
-## §5 onwards — to be written
+## §5 — the seven other bindings (landed)
 
-The fan-out: seven more bindings, three more backends, and the Android
-helper APK, then the matrix.
+All eight now copy, read, declare what they accept, and take a paste.
+Each was run against the real SwiftUI interpreter on the clipboard
+scene — eighteen observations apiece, not a compile check.
+
+### The spellings, and the one rule that produced them
+
+| binding | copy | the sum |
+| --- | --- | --- |
+| Rust | chain | enum |
+| Go | chain | sealed interface + one struct per case |
+| Swift | chain | enum with associated values |
+| C# | chain | abstract record + nested records |
+| Java | chain | sealed interface + nested records |
+| Python | keyword arguments | nested classes under `Representation` |
+| OCaml | optional labelled arguments | variant |
+| Haskell | a RECORD LITERAL | data, constructors prefixed `R` |
+
+The rule is the binding convention, not taste: AT MOST ONE PER KIND IS
+STRUCTURAL IN ALL EIGHT. A chain gets it because a second `.text()`
+replaces the field; keyword arguments get it because the call cannot
+name `text` twice; a record gets it the same way. Haskell is the only
+one that takes a record literal, and it is the only place the binding
+departs from the `showAlert [attrs]` shape beside it — deliberately,
+because an attribute list would let `[CText "a", CText "b"]`
+typecheck, and the design says that must be impossible rather than
+checked.
+
+### THE ACCEPT VOCABULARY IS NAMED, because a bare string fails silently
+
+`accepts` and `read_clipboard` take the closed kinds by name. Spelled
+as bare strings, a typo is INVISIBLE: `"txet"` is a well-formed custom
+format id, so it joins the accept list, no clipboard ever offers it,
+Paste stays dead and the paste hook never fires — with nothing to see
+in any log.
+
+So the four closed kinds are named constants in every binding, spelled
+exactly the way that binding already spells the MENU ROLES: a typed
+enum in Rust (`Accepts::Text`, beside `MenuRole::Cut`) and a named
+string constant everywhere else (`ACCEPT_TEXT`, `AcceptText`,
+`acceptText`, `accept_text`). That is a ratified pattern for a closed
+vocabulary riding the wire as a string, and it was followed rather
+than reinvented — a typed sum in six languages was considered and
+dropped for breaking it. A custom id has no constant by nature: the
+app that defines it names it.
+
+### The occurrence blob table, three ways
+
+A blob in an occurrence is a table handle, redeemed and released while
+decoding so no handle reaches an app. Where the generated decoder can
+reach the library it calls it directly (Swift, C#, Go, Java through a
+new `KayaRing.occurrenceBlob` native on both twins). Where it cannot —
+the generated module is imported BY the runtime, never the reverse —
+Python and OCaml install a redeemer into a module-level slot, and
+Haskell threads it as a function argument, which is that language's
+answer to the same problem and needs no global.
+
+## §6 onwards — to be written
+
+The fan-out continues: three more backends, the Android helper APK,
+then the matrix.
 
 Next: the SwiftUI arms on mac (NSPasteboard), the `accepts` lowering
 and the paste hook, Cut/Copy/Paste as standard commands (the gesture

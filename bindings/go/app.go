@@ -2096,6 +2096,21 @@ func (m MenuItem) Primary(on bool) MenuItem {
 
 // RoleSettings names the app's settings command — the closed
 // standard-command vocabulary (DESIGN.md, Menus).
+// A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
+// are. The accept list is open-ended — a custom format id is any
+// app-chosen string — so the four closed kinds cannot be a mask; but
+// they can be spelled once here instead of quoted at every call site.
+// A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
+// clipboard will ever offer, so Paste stays dead and the paste hook
+// never fires, with nothing to see anywhere. A custom id has no
+// constant by nature — the app that defines it names it.
+const (
+	AcceptText = "text"
+	AcceptHtml = "html"
+	AcceptImage = "image"
+	AcceptFiles = "files"
+)
+
 const RoleSettings = "settings"
 
 // The three clipboard commands. They lower to the platform's own, act

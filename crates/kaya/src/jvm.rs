@@ -173,7 +173,7 @@ extern "system" fn ring_occurrence_blob<'a>(
     let out = env
         .byte_array_from_slice(bytes)
         .expect("kaya: handing over the occurrence blob failed");
-    unsafe { crate::capi::kaya_occurrence_blob_release(handle as u64) };
+    crate::capi::kaya_occurrence_blob_release(handle as u64);
     out
 }
 

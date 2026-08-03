@@ -2730,3 +2730,47 @@ THE GUARD is `capi::tests::the_function_floor_hands_out_a_record_of_any_size`:
 it pushes an 8 KiB pasted text and asserts the whole record arrives,
 header and all. Watched failing — reinstating the 256-byte cap aborts
 the test process with SIGABRT, which is the production failure exactly.
+
+
+## Heavy concurrent GUI churn degrades the macOS accessibility subsystem, LANE-WIDE
+
+Symptom: `expect_ax` fails with `<not in the accessibility tree>` across
+scenes that have nothing to do with each other and were not touched —
+background, split, listdetail, filedialog, clipboard, all at once. The
+model assertions in those same legs pass; only the real-tree reads
+fail. Reads take about 5s each rather than milliseconds, which is the
+2.0s messaging timeout being hit two or three times per read, not a
+missing tree.
+
+IT IS THE MACHINE, NOT THE CODE, and it self-heals. Measured 2026-08-02,
+twice in one session:
+
+1. Eight clipboard legs run concurrently by hand (an experiment that
+   left six failing). The lane started immediately afterwards lost 31
+   legs to `<not in the accessibility tree>`. Minutes later the same
+   a11y leg passed in 0.6s.
+2. Earlier the same day, a single OCaml leg failed its AX read and the
+   untouched a11y OCaml scene then failed 12/12 AX reads in 64 seconds.
+   Both passed on a re-run with nothing changed.
+
+WHY IT MATTERS FOR DIAGNOSIS. Episode 2 cost a wrong conclusion: the
+a11y scene was used as a CONTROL to prove a defect was OCaml-specific,
+but the control was measured inside the degraded window, so it
+"confirmed" a language difference that does not exist. A control taken
+during the same degraded window is not a control.
+
+WHAT TO DO. Before believing any `<not in the accessibility tree>`
+result, re-run ONE known-good AX leg (`a11y-rust` is cheapest) on a
+settled machine. If it passes, the earlier failures were the
+environment. Only if it still fails is there something to debug — and
+then `KAYA_AX_TRACE=1` distinguishes "tree missing" from "read timed
+out" in one run, because it dumps what the platform actually publishes.
+
+The underlying mechanism is not proven, and the honest statement is
+that it correlates with a burst of GUI processes starting and dying in
+quick succession — especially a batch that left legs wedged. The
+related and PROVEN cost is documented at KayaSwiftUI.swift's
+kayaAxReadOnMain: announcing AXEnhancedUserInterface makes AppKit
+rebuild its whole accessibility hierarchy and drive a full layout pass,
+which on 2026-07-25 put legs past a 120s timeout under the 8-wide pool
+while the same binary passed standalone.

@@ -135,15 +135,15 @@ def read_custom():
 
 
 def read_text():
-    kaya.read_clipboard(["text"], on_result=answered)
+    kaya.read_clipboard([kaya.ACCEPT_TEXT], on_result=answered)
 
 
 def read_image():
-    kaya.read_clipboard(["image"], on_result=answered)
+    kaya.read_clipboard([kaya.ACCEPT_IMAGE], on_result=answered)
 
 
 def read_files():
-    kaya.read_clipboard(["files"], on_result=answered)
+    kaya.read_clipboard([kaya.ACCEPT_FILES], on_result=answered)
 
 
 def pasted(clip):
@@ -187,7 +187,7 @@ with app.window(title="clipboard"):
 
         # DECLARES WHAT IT TAKES, so a paste lands in the hook and this
         # app decides what to do with it.
-        rich = kaya.entry().accepts("text").on_paste(pasted)
+        rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).on_paste(pasted)
         rich.a11y_id("rich")                               # entry#0
         # DECLARES NOTHING, so the platform's own insertion happens and
         # the field's ordinary change path reports it — which is what a

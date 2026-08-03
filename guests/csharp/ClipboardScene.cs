@@ -202,7 +202,7 @@ static class ClipboardScene
                 // DECLARES WHAT IT TAKES, so a paste lands in the hook
                 // and this app decides what to do with it.
                 rich = tx.Entry(); // entry#0
-                tx.SetAccepts(rich, "text");
+                tx.SetAccepts(rich, Tx.AcceptText);
                 tx.SetA11yId(rich, "rich");
                 tx.OnPaste(rich, (inner, clip) =>
                 {
