@@ -33,6 +33,68 @@ public readonly record struct PickedFile(ulong Handle, string Name, string Local
         => Kaya.OpenPicked(Handle, mode);
 }
 
+/// One representation, arriving — the sum a copy is the record of.
+/// C# has records and pattern matching, so this is an abstract record
+/// with one derived record per constructor and a `switch` expression is
+/// the elimination.
+///
+/// YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
+/// record of five optional fields would invite a guest to check five
+/// where four are structurally always empty.
+abstract record Representation
+{
+    public sealed record Text(string Value) : Representation;
+
+    public sealed record Html(string Value) : Representation;
+
+    /// Encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE — the
+    /// hosts convert freely between image types — so compare what the
+    /// image IS, never the bytes it arrived in.
+    public sealed record Image(byte[] Bytes) : Representation;
+
+    /// Files, plural INSIDE one representation — the same nesting
+    /// text/uri-list and CF_HDROP already have. A pasted file is the
+    /// picker's own capability arriving through a second door, so it
+    /// opens with the call that already exists.
+    public sealed record Files(List<PickedFile> Value) : Representation;
+
+    /// An app-defined format, round-tripped verbatim.
+    public sealed record Custom(string Id, byte[] Bytes) : Representation;
+
+    /// Turn the decoder's kind-and-values into the sum, or null.
+    ///
+    /// EMPTY IS THE UNIVERSAL NO: null covers a denied prompt on iOS, an
+    /// unfocused reader on Android or Wayland, an empty clipboard, and
+    /// content in no representation this read accepted. The guest is not
+    /// told which, because the platforms deliberately do not say.
+    internal static Representation? From(KayaWire.ClipValues? clip)
+    {
+        if (clip == null) return null;
+        string Str(int i) => i < clip.Values.Count && clip.Values[i] is string s ? s : "";
+        byte[] Blob(int i) =>
+            i < clip.Values.Count && clip.Values[i] is byte[] b ? b : Array.Empty<byte>();
+        switch (clip.Kind)
+        {
+            case KayaWire.ClipText: return new Text(Str(0));
+            case KayaWire.ClipHtml: return new Html(Str(0));
+            case KayaWire.ClipImage: return new Image(Blob(0));
+            case KayaWire.ClipCustom: return new Custom(Str(0), Blob(1));
+            case KayaWire.ClipFiles:
+                // The picker's own three-per-file grouping, so a guest
+                // that decodes a dialog result decodes this with the
+                // same loop.
+                var files = new List<PickedFile>();
+                for (int i = 0; i + 2 < clip.Values.Count; i += 3)
+                {
+                    long handle = clip.Values[i] is long h ? h : 0;
+                    files.Add(new PickedFile((ulong)handle, Str(i + 1), Str(i + 2)));
+                }
+                return new Files(files);
+            default: return null;
+        }
+    }
+}
+
 static class Kaya
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -73,6 +135,35 @@ static class Kaya
 
     [DllImport("kaya")]
     static extern ulong kaya_blob_register(byte[] bytes, nuint len);
+
+    [DllImport("kaya")]
+    static extern IntPtr kaya_occurrence_blob(ulong handle, out nuint len);
+
+    [DllImport("kaya")]
+    static extern void kaya_occurrence_blob_release(ulong handle);
+
+    /// Redeem an occurrence blob for its bytes, and release it. Called
+    /// by the generated decoder, never by a guest.
+    ///
+    /// COPY THEN RELEASE, in that order: the pointer borrows core memory
+    /// that the release frees. A blob arriving in an OCCURRENCE is a
+    /// handle into a table with no boundary that retires one — unlike
+    /// the apply channel's batch-local index, which the next batch
+    /// supersedes — so the decoder is what has to let go of it, while
+    /// decoding, before any handle can reach an app. Release is
+    /// idempotent, so a dead handle costs nothing.
+    public static byte[] OccurrenceBlob(ulong handle)
+    {
+        IntPtr data = kaya_occurrence_blob(handle, out nuint len);
+        byte[] bytes = System.Array.Empty<byte>();
+        if (data != IntPtr.Zero && len > 0)
+        {
+            bytes = new byte[(int)len];
+            Marshal.Copy(data, bytes, 0, (int)len);
+        }
+        kaya_occurrence_blob_release(handle);
+        return bytes;
+    }
 
     [DllImport("kaya")]
     static extern int kaya_open_picked(

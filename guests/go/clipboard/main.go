@@ -1,0 +1,220 @@
+// The clipboard conformance scene, Go port — one clip in several
+// representations, and the privileged read that takes one back
+// (DESIGN.md, Clipboard; docs/clipboard-plan.md).
+//
+// EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole design
+// of this scene. kaya's representation set is closed because the
+// LOWERINGS are the hard part — CF_HTML's mandatory offset header,
+// Android's content:// URI for an image, CF_HDROP's double-NUL struct —
+// and a check where kaya reads what kaya wrote parses its own malformed
+// header perfectly happily. That is not merely less coverage: it is a
+// check that cannot fail for the reason the design exists.
+//
+// THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool
+// on any platform writes an app-defined type, so the guest copies one
+// and reads it back, with the foreign reader confirming from outside
+// that the bytes really are there under that id.
+//
+// THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every host
+// re-encodes freely between image types, so a byte count would be a
+// different number on every lane for one picture.
+//
+// Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
+// contract in tools/scenes/clipboard.steps.
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+
+	kaya "dev.kaya/bindings/go"
+)
+
+func init() {
+	runtime.LockOSThread()
+}
+
+// A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
+// through a foreign decoder, so the picture has to be a real encoded
+// image whose size is knowable from the script. Written to disk for the
+// seeding tool AND handed to Copy as bytes — the same picture both ways.
+var pixelPNG = []byte{
+	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+	0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+	0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, // 4 x 4
+	0x08, 0x02, 0x00, 0x00, 0x00, 0x26, 0x93, 0x09, // 8-bit rgb + crc
+	0x29, 0x00, 0x00, 0x00, 0x1C, 0x49, 0x44, 0x41, // IDAT length + type
+	0x54, 0x18, 0x57, 0x63, 0xFC, 0xCF, 0xC0, 0xF0,
+	0x9F, 0x81, 0xE1, 0x3F, 0x03, 0xC3, 0x7F, 0x06,
+	0x86, 0xFF, 0x0C, 0x0C, 0xFF, 0x19, 0x18, 0xFE,
+	0x33, 0x30, 0x00, 0x00, 0x3D, 0x94, 0x07, 0xF9,
+	0x8A, 0x2C, 0xEA, 0x84, 0x00, 0x00, 0x00, 0x00, // IEND length
+	0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
+}
+
+// The app-defined format's id: reverse-DNS and space-free, because it
+// reaches every platform's own registry VERBATIM — a UTI on Apple,
+// RegisterClipboardFormat on Windows, a target atom on X11 and Wayland,
+// a MIME type on Android.
+const noteID = "dev.kaya.note"
+
+// NO QUOTES IN THE PAYLOAD, and the reason is the script rather than
+// the clipboard: the step grammar's escapes are \n, \r and \\ in all
+// three interpreters, with no \" — so a quoted byte could not be
+// spelled in the expectation.
+var noteBytes = []byte("note=1")
+
+func main() {
+	app := kaya.NewApp()
+
+	// Both halves compute this identically, the filedialog rule: guest
+	// and interpreter are the same process, so they agree on a path with
+	// no runner involvement, and the pid keeps parallel legs from
+	// colliding. os.TempDir is Go's OWN answer to "where is temp", which
+	// is what makes the two halves agree without either consulting the
+	// other.
+	dir := filepath.Join(os.TempDir(), "kaya-clip-"+strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		panic("failed to make the scene's directory: " + err.Error())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pixel.png"), pixelPNG, 0o644); err != nil {
+		panic("failed to write the picture: " + err.Error())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pasted.txt"), []byte("pasted bytes"), 0o644); err != nil {
+		panic("failed to write the file: " + err.Error())
+	}
+
+	var status kaya.Signal[string]
+	app.Build(func(tx *kaya.Tx) {
+		win := tx.Window(0).Title("clipboard")
+
+		// THE GESTURE LAYER'S DECLARATION, and an app writes nothing
+		// else for it: the Paste command lowers to the platform's own,
+		// acts on whatever is focused, and works out its own enablement.
+		// kaya has no selection API, which is exactly why copy of a
+		// selection has to be a command rather than something an app
+		// assembles out of the data layer.
+		edit := win.Menu("Edit")
+		edit.Item("Cut").Role(kaya.RoleCut)
+		edit.Item("Copy").Role(kaya.RoleCopy)
+		edit.Item("Paste").Role(kaya.RolePaste)
+
+		status = tx.Signal("ready")
+
+		// THE SAME SHAPE THE READ ANSWERS WITH, and free where the read
+		// is not: a gesture is its own authorisation, so no platform
+		// charges a prompt for this one.
+		answered := func(tx *kaya.Tx, clip kaya.Representation) {
+			switch clip := clip.(type) {
+			// EMPTY IS THE UNIVERSAL NO, and the guest does not try to
+			// tell its four causes apart — denied, unfocused, absent, or
+			// nothing this read accepted. The platforms deliberately
+			// decline to say.
+			case nil:
+				tx.Write(status, "empty")
+			case kaya.TextClip:
+				tx.Write(status, "text "+clip.Text)
+			case kaya.HTMLClip:
+				tx.Write(status, "html "+clip.HTML)
+			case kaya.CustomClip:
+				tx.Write(status, fmt.Sprintf("custom %s %s", clip.ID, clip.Bytes))
+			case kaya.ImageClip:
+				// STRAIGHT BACK OUT, because the assertion that matters
+				// is a foreign DECODER's: the byte count differs per
+				// host for one picture, and the decoded size does not.
+				tx.Copy().Image(clip.Bytes).Send()
+				tx.Write(status, "image")
+			case kaya.FilesClip:
+				if len(clip.Files) == 0 {
+					tx.Write(status, "files none")
+					return
+				}
+				file := clip.Files[0]
+				go func() {
+					// OFF THE APP GOROUTINE, which is what Open
+					// documents: it blocks, and a pasted file is no
+					// different from a picked one — it IS a picked one,
+					// the same capability arriving through a second door.
+					text := ""
+					f, _, err := file.Open(kaya.FileModeRead)
+					if err != nil {
+						text = "open failed: " + err.Error()
+					} else {
+						b, rerr := io.ReadAll(f)
+						if rerr != nil {
+							text = "read failed: " + rerr.Error()
+						} else {
+							text = string(b)
+						}
+						f.Close()
+					}
+					app.Post(func(tx *kaya.Tx) {
+						tx.Write(status, fmt.Sprintf("files %s %s", file.Name, text))
+					})
+				}()
+				tx.Write(status, "reading")
+			}
+		}
+
+		tx.Mount(tx.Column(func() {
+			tx.Label(status).A11yID("status") // label#0
+			tx.Button("copy", func(tx *kaya.Tx) { // button#0
+				// ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of
+				// them from any other: whether list bullets survive
+				// html-to-text is this app's decision, so it spells out
+				// both. The order they go on the wire is kaya's, not
+				// this chain's — descending richness, which is
+				// preference order on every host that has one.
+				tx.Copy().
+					Text("kaya clip").
+					HTML("<b>kaya</b> clip").
+					Image(pixelPNG).
+					Custom(noteID, noteBytes).
+					Send()
+				tx.Write(status, "copied")
+			})
+			tx.Button("read custom", func(tx *kaya.Tx) { // button#1
+				tx.ReadClipboard().Custom(noteID).OnResult(answered).Send()
+			})
+			tx.Button("read text", func(tx *kaya.Tx) { // button#2
+				tx.ReadClipboard().Text().OnResult(answered).Send()
+			})
+			tx.Button("read image", func(tx *kaya.Tx) { // button#3
+				tx.ReadClipboard().Image().OnResult(answered).Send()
+			})
+			tx.Button("read files", func(tx *kaya.Tx) { // button#4
+				tx.ReadClipboard().Files().OnResult(answered).Send()
+			})
+
+			var rich, plain kaya.Widget
+			tx.Button("focus rich", func(tx *kaya.Tx) { // button#5
+				tx.Focus(rich)
+			})
+			tx.Button("focus plain", func(tx *kaya.Tx) { // button#6
+				tx.Focus(plain)
+			})
+
+			// DECLARES WHAT IT TAKES, so a paste lands in the hook and
+			// this app decides what to do with it.
+			rich = tx.Entry(nil).Accepts("text").A11yID("rich") // entry#0
+			app.OnPaste(rich, func(tx *kaya.Tx, clip kaya.Representation) {
+				if text, ok := clip.(kaya.TextClip); ok {
+					tx.Write(status, "pasted "+text.Text)
+					return
+				}
+				tx.Write(status, fmt.Sprintf("pasted %v", clip))
+			})
+
+			// DECLARES NOTHING, so the platform's own insertion happens
+			// and the field's ordinary change path reports it — which is
+			// what a plain text editor gets for free.
+			plain = tx.Entry(nil).A11yID("plain") // entry#1
+		}))
+	})
+
+	os.Exit(app.Run())
+}

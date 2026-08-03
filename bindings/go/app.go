@@ -21,6 +21,7 @@ package kaya
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -81,6 +82,9 @@ func assertRoot(c Collection) {
 
 type counters struct {
 	signal, widget, collection, node, alert, menuItem, fileDialog uint64
+	// Clipboard reads share the alert's request/result grammar, so
+	// they share its id shape: one counter, one-shot registrations.
+	clipboard uint64
 }
 
 // Entry is one key/value pair of a collection instance, in insertion
@@ -116,6 +120,9 @@ type App struct {
 	sectionSelected map[uint64]func(*Tx)
 	alerts         map[uint64]func(*Tx, uint32)
 	fileDialogs    map[uint64]func(*Tx, []PickedFile)
+	clipboardReads map[uint64]func(*Tx, Representation)
+	widgetPastes   map[uint64]func(*Tx, Representation)
+	nodePastes     map[uint64]func(*Tx, []any, Representation)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
 	// Menu dispatch tables, keyed by MENU ITEM id — their own id
 	// space, separate from every widget/node table ("two tables,
@@ -167,6 +174,9 @@ func NewApp() *App {
 		widgetHandlers: make(map[uint64]func(*Tx)),
 		alerts:         make(map[uint64]func(*Tx, uint32)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
+		clipboardReads: make(map[uint64]func(*Tx, Representation)),
+		widgetPastes:   make(map[uint64]func(*Tx, Representation)),
+		nodePastes:     make(map[uint64]func(*Tx, []any, Representation)),
 		entryPopped:    make(map[uint64]func(*Tx)),
 		backRequested:  make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
@@ -1445,6 +1455,320 @@ func (r FileDialogRef) Show() uint64 {
 	return r.id
 }
 
+// --- The clipboard (DESIGN.md, Clipboard) --------------------------
+//
+// A clip is not a string: every host models it as ONE item available in
+// several types, with the consumer taking the richest it understands.
+// So COPY TAKES A RECORD — spelled as a chain here, where a second
+// Text simply replaces the field rather than needing a duplicate check
+// — and the two answers are a SUM, because you offer many and receive
+// one.
+//
+// kaya DERIVES NOTHING between representations. Whether list bullets
+// survive html-to-text is the app's decision, and a bad
+// auto-derivation degrades every paste into a plain field silently.
+
+// Representation is one representation, arriving — the sum a copy is
+// the record of. Go has no sum type, so it is a sealed interface with
+// one struct per constructor: a type switch is the elimination, which
+// is how Go spells a match.
+//
+//	switch clip := clip.(type) {
+//	case nil:                 // the universal empty answer
+//	case kaya.TextClip:       _ = clip.Text
+//	case kaya.FilesClip:      _ = clip.Files
+//	}
+type Representation interface{ isRepresentation() }
+
+// TextClip is plain text.
+type TextClip struct{ Text string }
+
+// HTMLClip is an html fragment.
+type HTMLClip struct{ HTML string }
+
+// ClipImage is encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE
+// — the hosts convert freely between image types — so compare what the
+// image IS, never the bytes it arrived in.
+type ImageClip struct{ Bytes []byte }
+
+// ClipFiles is files, plural INSIDE one representation — the same
+// nesting text/uri-list and CF_HDROP already have. A pasted file is the
+// picker's own capability arriving through a second door, so it opens
+// with the call that already exists.
+type FilesClip struct{ Files []PickedFile }
+
+// ClipCustom is an app-defined format, round-tripped verbatim.
+type CustomClip struct {
+	ID    string
+	Bytes []byte
+}
+
+func (TextClip) isRepresentation()   {}
+func (HTMLClip) isRepresentation()   {}
+func (ImageClip) isRepresentation()  {}
+func (FilesClip) isRepresentation()  {}
+func (CustomClip) isRepresentation() {}
+
+// representation turns the decoder's kind-and-values into the sum, or
+// nil.
+//
+// EMPTY IS THE UNIVERSAL NO: nil covers a denied prompt on iOS, an
+// unfocused reader on Android or Wayland, an empty clipboard, and
+// content in no representation this read accepted. The guest is not
+// told which, because the platforms deliberately do not say.
+func representation(clip ClipValues) Representation {
+	str := func(i int) string {
+		if i < len(clip.Values) {
+			s, _ := clip.Values[i].(string)
+			return s
+		}
+		return ""
+	}
+	blob := func(i int) []byte {
+		if i < len(clip.Values) {
+			b, _ := clip.Values[i].([]byte)
+			return b
+		}
+		return nil
+	}
+	switch clip.Kind {
+	case ClipText:
+		return TextClip{Text: str(0)}
+	case ClipHtml:
+		return HTMLClip{HTML: str(0)}
+	case ClipImage:
+		return ImageClip{Bytes: blob(0)}
+	case ClipCustom:
+		return CustomClip{ID: str(0), Bytes: blob(1)}
+	case ClipFiles:
+		// The picker's own three-per-file grouping, so a guest that
+		// decodes a dialog result decodes this with the same loop.
+		files := make([]PickedFile, 0, len(clip.Values)/3)
+		for i := 0; i+2 < len(clip.Values); i += 3 {
+			handle, _ := clip.Values[i].(int64)
+			files = append(files, PickedFile{
+				Handle: uint64(handle), Name: str(i + 1), LocalPath: str(i + 2)})
+		}
+		return FilesClip{Files: files}
+	}
+	return nil
+}
+
+// acceptList joins an accept list: the closed kinds by name plus any
+// custom ids, space separated.
+//
+// A LIST AND NOT A MASK, because half the set is open-ended. A custom
+// format that could be written and never accepted would be an escape
+// hatch that only opens outward, and round-tripping an app's own data
+// is the whole reason to have one. Ids reach every platform's registry
+// verbatim, so they carry no spaces — which is what makes the join
+// unambiguous, and what this refuses to let you break.
+func acceptList(kinds []string) string {
+	for _, kind := range kinds {
+		if kind == "" || strings.Contains(kind, " ") {
+			panic(fmt.Sprintf(
+				"kaya: %q is not an accept-list entry — the closed kinds are "+
+					"\"text\", \"html\", \"image\" and \"files\", and a custom "+
+					"format id reaches the platform's own registry verbatim, "+
+					"so it carries no spaces", kind))
+		}
+	}
+	return strings.Join(kinds, " ")
+}
+
+// Copy begins a clip: fill in as many representations as the app wants
+// to offer, and Send puts it on the system clipboard.
+//
+// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
+// structural, since a second Text replaces the field rather than
+// needing a duplicate check the root has to run.
+func (tx *Tx) Copy() CopyRef {
+	return CopyRef{tx: tx}
+}
+
+// CopyRef accumulates the one atomic COPY record; nothing reaches the
+// clipboard until Send.
+type CopyRef struct {
+	tx     *Tx
+	text   *string
+	html   *string
+	image  []byte
+	files  []uint64
+	custom [][2]any // id, bytes
+}
+
+func (r CopyRef) Text(text string) CopyRef {
+	r.text = &text
+	return r
+}
+
+func (r CopyRef) HTML(html string) CopyRef {
+	r.html = &html
+	return r
+}
+
+// Image offers encoded image bytes — the same currency the image
+// property takes.
+func (r CopyRef) Image(bytes []byte) CopyRef {
+	r.image = bytes
+	return r
+}
+
+// File offers a picked file, the picker's own capability put straight
+// on the clipboard. The bytes never move through kaya.
+func (r CopyRef) File(f PickedFile) CopyRef {
+	r.files = append(r.files, f.Handle)
+	return r
+}
+
+// Custom offers an app-defined format, round-tripped verbatim. The id
+// reaches every platform's own registry unchanged — a UTI on Apple,
+// RegisterClipboardFormat on Windows, a target atom on X11 and
+// Wayland, a MIME type on Android — so it carries no spaces, and kaya
+// does nothing clever with the bytes.
+func (r CopyRef) Custom(id string, bytes []byte) CopyRef {
+	acceptList([]string{id})
+	r.custom = append(r.custom, [2]any{id, bytes})
+	return r
+}
+
+// Send puts the clip on the system clipboard. The wire order is kaya's,
+// not this chain's — descending richness, which is preference order on
+// every host that has one, so a backend writes what it is handed in the
+// order it is handed.
+func (r CopyRef) Send() {
+	var present uint32
+	values := make([]any, 0, 8)
+	for _, pair := range r.custom {
+		values = append(values, pair[0])
+		values = append(values, BlobHandle(RegisterBlob(pair[1].([]byte))))
+	}
+	for _, handle := range r.files {
+		values = append(values, int64(handle))
+	}
+	if r.image != nil {
+		present |= ClipImage
+		values = append(values, BlobHandle(RegisterBlob(r.image)))
+	}
+	if r.html != nil {
+		present |= ClipHtml
+		values = append(values, *r.html)
+	}
+	if r.text != nil {
+		present |= ClipText
+		values = append(values, *r.text)
+	}
+	r.tx.emit(TxCopy(present, uint32(len(r.files)), uint32(len(r.custom)), values))
+}
+
+// ReadClipboard begins the privileged read — THE ONE NAMED FOR WHAT IT
+// IS rather than for pasting.
+//
+// A user's paste arrives at the widget's hook and costs nothing; this
+// asks without a gesture, which the platforms have deliberately made
+// expensive: iOS 16 PROMPTS when the content came from another app and
+// blocks until the user answers, Android returns nothing unless the app
+// has focus, and Wayland delivers no offer to an unfocused client.
+// Reach for this to detect a URL or import from the clipboard, never to
+// implement Paste — that is the Paste command, and it is free.
+func (tx *Tx) ReadClipboard() ClipReadRef {
+	tx.app.c.clipboard++
+	return ClipReadRef{tx: tx, id: tx.app.c.clipboard}
+}
+
+// ClipReadRef accumulates which representations the read can use, and
+// the request id its one answer arrives under.
+type ClipReadRef struct {
+	tx        *Tx
+	id        uint64
+	accepting []string
+	onResult  func(*Tx, Representation)
+}
+
+func (r ClipReadRef) Text() ClipReadRef  { return r.accept("text") }
+func (r ClipReadRef) HTML() ClipReadRef  { return r.accept("html") }
+func (r ClipReadRef) Image() ClipReadRef { return r.accept("image") }
+func (r ClipReadRef) Files() ClipReadRef { return r.accept("files") }
+
+// Custom accepts an app-defined format by id. Custom formats are tried
+// FIRST, in the order named: an app's own format round-trips its data
+// losslessly, which is the only reason to have one.
+func (r ClipReadRef) Custom(id string) ClipReadRef { return r.accept(id) }
+
+func (r ClipReadRef) accept(kind string) ClipReadRef {
+	r.accepting = append(append([]string{}, r.accepting...), kind)
+	return r
+}
+
+// OnResult binds the one-shot handler to THIS request. The registration
+// retires with the answer, which is nil when the clipboard had nothing
+// this read accepted — and nil equally when the read was denied or the
+// app was unfocused, because no platform says which.
+func (r ClipReadRef) OnResult(fn func(*Tx, Representation)) ClipReadRef {
+	r.onResult = fn
+	return r
+}
+
+// Send asks, returning the request id; the one answer arrives at the
+// OnResult handler.
+func (r ClipReadRef) Send() uint64 {
+	if r.onResult != nil {
+		r.tx.app.clipboardReads[r.id] = r.onResult
+	}
+	r.tx.emit(TxReadClipboard(r.id, acceptList(r.accepting)))
+	return r.id
+}
+
+// SetAccepts declares what a widget takes from a paste — the closed
+// kinds by name ("text", "html", "image", "files") plus any custom
+// format ids. The dynamic path; the declarative spelling is the Accepts
+// chain at construction.
+func (tx *Tx) SetAccepts(w Widget, kinds ...string) {
+	tx.emit(TxSetAccepts(w.id, acceptList(kinds)))
+}
+
+// Accepts declares what this widget takes from a paste, at
+// construction: tx.Entry(nil).Accepts("text").
+//
+// ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
+// live while this widget is focused, it filters what can reach the
+// paste hook, and on Android it IS the native registration
+// (setOnReceiveContentListener takes the mime types on the view).
+// Per-widget because whether Paste should be enabled is the
+// INTERSECTION of what the clipboard offers and what the FOCUSED target
+// takes — a search field wants plain text, a rich editor also wants
+// images.
+//
+// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that declares
+// nothing gets the platform's own insertion and reports it through the
+// ordinary change path, which is why a plain text editor writes none of
+// this and has working cut, copy and paste.
+func (w Widget) Accepts(kinds ...string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Accepts on a widget outside its build transaction — use Tx.SetAccepts inside a live transaction")
+	}
+	w.tx.SetAccepts(w, kinds...)
+	return w
+}
+
+// OnPaste registers where pasted content lands for a live widget.
+//
+// COSTS NOTHING ON ANY PLATFORM, unlike ReadClipboard: a paste is a
+// user gesture, so it is its own authorisation — iOS raises no prompt
+// and the focus rules are satisfied by construction. Only fires for a
+// widget that declared what it Accepts.
+func (a *App) OnPaste(w Widget, fn func(*Tx, Representation)) {
+	a.widgetPastes[w.id] = fn
+}
+
+// OnPasteNode registers a paste handler for a template node; the
+// handler also receives the stamped copy's keys, outermost first. A
+// paste onto a stamped row is the same event as a paste onto a live
+// one, exactly as a click is.
+func (a *App) OnPasteNode(n Node, fn func(*Tx, []any, Representation)) {
+	a.nodePastes[n.id] = fn
+}
+
 // WindowRef chains window props, the construction-sugar tier.
 type WindowRef struct {
 	tx *Tx
@@ -1773,6 +2097,22 @@ func (m MenuItem) Primary(on bool) MenuItem {
 // RoleSettings names the app's settings command — the closed
 // standard-command vocabulary (DESIGN.md, Menus).
 const RoleSettings = "settings"
+
+// The three clipboard commands. They lower to the platform's own, act
+// on the FOCUSED widget, and work out their own enablement from what
+// the clipboard offers and what that widget accepts.
+//
+// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
+// widget knows what is selected, so an app cannot assemble the payload
+// for "copy the selected text" out of the data layer. Copy of a
+// selection is therefore necessarily a command, and Paste is its
+// mirror. Tx.Copy and Tx.ReadClipboard are for overriding that default
+// and for targets with no native behaviour.
+const (
+	RoleCut   = "cut"
+	RoleCopy  = "copy"
+	RolePaste = "paste"
+)
 
 // Role declares this action a standard command (actions only —
 // root-checked). The declaration is uniform; PLACEMENT is each host's
@@ -2109,6 +2449,7 @@ func (a *App) Run() int {
 			value, _ := payload.(float64)
 			choice, _ := payload.(uint32)
 			files, _ := payload.([]PickedFile)
+			clipValues, isClip := payload.(ClipValues)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -2175,6 +2516,30 @@ func (a *App) Run() int {
 				if fn := a.alerts[id]; fn != nil {
 					delete(a.alerts, id)
 					a.dispatch(func(tx *Tx) { fn(tx, choice) })
+				}
+			case kind == occClipboardResult:
+				// One-shot like the alert, and the request retires with
+				// it. EMPTY IS THE UNIVERSAL NO and arrives as a nil
+				// Representation — denied, unfocused, absent and
+				// nothing-we-accept alike, because no platform says which.
+				if fn := a.clipboardReads[id]; fn != nil {
+					delete(a.clipboardReads, id)
+					clip := representation(clipValues)
+					a.dispatch(func(tx *Tx) { fn(tx, clip) })
+				}
+			// A paste rides a click tag verbatim, so it arrives on the
+			// ordinary widget/node split — one record kind, the key path
+			// deciding. Never empty: a paste that delivered nothing is
+			// not an occurrence.
+			case kind == occPasted && len(keys) == 0:
+				if fn := a.widgetPastes[id]; fn != nil && isClip {
+					clip := representation(clipValues)
+					a.dispatch(func(tx *Tx) { fn(tx, clip) })
+				}
+			case kind == occPasted:
+				if fn := a.nodePastes[id]; fn != nil && isClip {
+					clip := representation(clipValues)
+					a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
 				}
 			case kind == occFileDialogResult:
 				// One-shot like the alert, and the id retires with it.

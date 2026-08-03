@@ -439,6 +439,48 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
     }
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app.
+    c.line("    /// One representation as the decoder hands it over: the clip");
+    c.line("    /// kind, and its values with blobs already redeemed to byte[].");
+    c.line("    /// The sum itself is the hand-written tier\'s — this is the");
+    c.line("    /// taste-free shape the wire carries.");
+    c.line("    ///");
+    c.line("    /// Kind is a SINGLE member of the clip enum and never a mask (you");
+    c.line("    /// offer many and you receive one); 0 with no values is the");
+    c.line("    /// universal empty answer.");
+    c.line("    public sealed class ClipValues");
+    c.line("    {");
+    c.line("        public uint Kind;");
+    c.line("        public List<object> Values = new List<object>();");
+    c.line("    }");
+    c.line("");
+    c.line("    /// Decode a representation at `at`: the clip kind, then its");
+    c.line("    /// Values block. Blobs are redeemed and RELEASED here.");
+    c.line("    public static ClipValues ParseClip(byte[] rec, int at, out int next)");
+    c.line("    {");
+    c.line("        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };");
+    c.line("        int count = (int)BitConverter.ToUInt32(rec, at + 8);");
+    c.line("        at += 16;");
+    c.line("        for (int i = 0; i < count; i++)");
+    c.line("        {");
+    c.line("            uint vtype = BitConverter.ToUInt32(rec, at);");
+    c.line("            int vlen = (int)BitConverter.ToUInt32(rec, at + 4);");
+    c.line("            switch (vtype)");
+    c.line("            {");
+    c.line("                case ValueI64: clip.Values.Add(BitConverter.ToInt64(rec, at + 8)); break;");
+    c.line("                case ValueBlob: clip.Values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;");
+    c.line("                default: clip.Values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;");
+    c.line("            }");
+    c.line("            at += 8 + ((vlen + 7) & ~7);");
+    c.line("        }");
+    c.line("        next = at;");
+    c.line("        return clip;");
+    c.line("    }");
+    c.line("");
     c.line("    /// Decode one occurrence record (header included). Returns false");
     c.line("    /// for non-click records. keys is empty for a click on a");
     c.line("    /// guest-created widget (id is a widget id); otherwise id is a");
@@ -494,6 +536,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            payload = files;");
     c.line("            return true;");
     c.line("        }");
+    // The privileged read's one answer. Its own arm for the
+    // file_dialog_result reason and then some: the generic tail would
+    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!("        if (kind == OccKind{})", pascal(name)));
+        c.line("        {");
+        c.line("            payload = ParseClip(rec, 16, out int _clipEnd);");
+        c.line("            return true;");
+        c.line("        }");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == OccKind{}", pascal(n)))
@@ -552,6 +605,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                default: payload = Encoding.UTF8.GetString(rec, at + 8, plen); break;");
     c.line("            }");
     c.line("        }");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    let pasted = crate::pasted_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OccKind{}", pascal(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !pasted.is_empty() {
+        c.line(&format!("        if ({pasted})"));
+        c.line("        {");
+        c.line("            payload = ParseClip(rec, at, out int _pasteEnd);");
+        c.line("        }");
+    }
     c.line("        return true;");
     c.line("    }");
     c.line("}");

@@ -414,6 +414,68 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key");
     c.line("}");
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app.
+    c.line("/// One value of a representation. Its own type rather than a case");
+    c.line("/// on KayaValue, because bytes reach a guest ONLY here — nothing");
+    c.line("/// else on the occurrence channel has ever carried them.");
+    c.line("enum KayaClipPart {");
+    c.line("    case str(String)");
+    c.line("    case i64(Int64)");
+    c.line("    case bytes([UInt8])");
+    c.line("}");
+    c.line("");
+    c.line("/// One representation as the decoder hands it over: the clip kind,");
+    c.line("/// and its parts with blobs already redeemed. The sum itself is the");
+    c.line("/// hand-written tier\'s — this is the taste-free shape the wire");
+    c.line("/// carries.");
+    c.line("///");
+    c.line("/// `kind` is a SINGLE member of the clip enum and never a mask (you");
+    c.line("/// offer many and you receive one); 0 with no parts is the universal");
+    c.line("/// empty answer.");
+    c.line("struct KayaClipValues {");
+    c.line("    let kind: UInt32");
+    c.line("    let parts: [KayaClipPart]");
+    c.line("}");
+    c.line("");
+    c.line("/// Decode a representation at `at`: the clip kind, then its Values");
+    c.line("/// block. Blobs are redeemed and RELEASED here.");
+    c.line("func kayaParseClip(_ raw: UnsafeRawBufferPointer, _ at: Int)");
+    c.line("    -> (clip: KayaClipValues, next: Int)");
+    c.line("{");
+    c.line("    let kind = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+    c.line("    let count = Int(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt32.self))");
+    c.line("    var at = at + 16");
+    c.line("    var parts: [KayaClipPart] = []");
+    c.line("    for _ in 0..<count {");
+    c.line("        let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)");
+    c.line("        let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))");
+    c.line("        switch vtype {");
+    c.line("        case UInt32(KAYA_VALUE_I64):");
+    c.line("            parts.append(.i64(raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))");
+    c.line("        case UInt32(KAYA_VALUE_BLOB):");
+    c.line("            let handle = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)");
+    c.line("            var length = 0");
+    c.line("            // COPY THEN RELEASE, in that order: the pointer borrows");
+    c.line("            // core memory that the release frees.");
+    c.line("            if let data = kaya_occurrence_blob(handle, &length) {");
+    c.line("                parts.append(.bytes([UInt8](UnsafeBufferPointer(start: data, count: length))))");
+    c.line("            } else {");
+    c.line("                parts.append(.bytes([]))");
+    c.line("            }");
+    c.line("            kaya_occurrence_blob_release(handle)");
+    c.line("        default:");
+    c.line("            parts.append(.str(String(");
+    c.line("                decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)))");
+    c.line("        }");
+    c.line("        at += 8 + ((vlen + 7) & ~7)");
+    c.line("    }");
+    c.line("    return (KayaClipValues(kind: kind, parts: parts), at)");
+    c.line("}");
+    c.line("");
     c.line("/// Decode one occurrence record (header included); nil for pad or");
     c.line("/// unknown kinds. keys is [] when id is a widget id; otherwise id is");
     c.line("/// a template node id and keys is the copy's key path, outermost");
@@ -421,7 +483,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// checkbox's new state for TOGGLED, the slider's new value for");
     c.line("/// VALUE_CHANGED, nil for clicks.");
     c.line("func kayaParseOccurrence(_ rec: [UInt8])");
-    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile])?");
+    c.line("    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?)?");
     c.line("{");
     c.line("    rec.withUnsafeBytes { raw in");
     c.line("        let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)");
@@ -438,7 +500,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {");
     c.line("            // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).");
     c.line("            let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
-    c.line("            return (kind, id, [], .i64(Int64(choice)), [])");
+    c.line("            return (kind, id, [], .i64(Int64(choice)), [], nil)");
     c.line("        }");
     // The picker's answer: the one occurrence whose payload is a LIST
     // OF RECORDS, which no single KayaValue can carry — hence the
@@ -470,8 +532,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                files.append(KayaPickedFile(");
     c.line("                    handle: UInt64(handle), name: name, localPath: localPath))");
     c.line("            }");
-    c.line("            return (kind, id, [], nil, files)");
+    c.line("            return (kind, id, [], nil, files, nil)");
     c.line("        }");
+    // The privileged read's one answer. Its own arm for the
+    // file_dialog_result reason and then some: the generic tail would
+    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!(
+            "        if kind == UInt16(KAYA_OCCURRENCE_{}) {{",
+            name.to_uppercase()
+        ));
+        c.line("            let (clip, _) = kayaParseClip(raw, 16)");
+        c.line("            return (kind, id, [], nil, [], clip)");
+        c.line("        }");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
@@ -483,7 +558,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("            || {cond}"));
     }
     c.line("        {");
-    c.line("            return (kind, id, [], nil, [])");
+    c.line("            return (kind, id, [], nil, [], nil)");
     c.line("        }");
     let id_pair = crate::id_pair_occurrence_names(spec)
         .iter()
@@ -498,7 +573,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
         c.line("        {");
         c.line("            let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)");
-        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [])");
+        c.line("            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil)");
         c.line("        }");
     }
     c.line("        let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)");
@@ -549,7 +624,25 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("                payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))");
     c.line("            }");
     c.line("        }");
-    c.line("        return (kind, id, keys, payload, [])");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    c.line("        var clip: KayaClipValues? = nil");
+    let pasted = crate::pasted_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == UInt16(KAYA_OCCURRENCE_{})", n.to_uppercase()))
+        .collect::<Vec<_>>();
+    if !pasted.is_empty() {
+        c.line(&format!("        if {}", pasted[0]));
+        for cond in &pasted[1..] {
+            c.line(&format!("            || {cond}"));
+        }
+        c.line("        {");
+        c.line("            clip = kayaParseClip(raw, at).clip");
+        c.line("        }");
+    }
+    c.line("        return (kind, id, keys, payload, [], clip)");
     c.line("    }");
     c.line("}");
     c.out

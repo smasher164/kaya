@@ -259,6 +259,220 @@ extension KayaSignal: KayaMenuIndex {}
 /// name, and `localPath` — a RE-OPENABLE NAME, empty unless re-opening
 /// it actually works, which measurement puts at the three desktops and
 /// neither phone (DESIGN.md, File dialogs).
+/// One representation, arriving — the sum a copy is the record of.
+/// Swift has a real sum, so this is an enum with associated values and
+/// a `switch` is the elimination.
+///
+/// YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
+/// record here would invite a guest to check five fields where four
+/// are structurally always empty.
+enum KayaRepresentation {
+    case text(String)
+    case html(String)
+    /// Encoded image bytes. WHAT COMES BACK MAY BE A RE-ENCODE — the
+    /// hosts convert freely between image types — so compare what the
+    /// image IS, never the bytes it arrived in.
+    case image([UInt8])
+    /// Files, plural INSIDE one representation — the same nesting
+    /// text/uri-list and CF_HDROP already have. A pasted file is the
+    /// picker's own capability arriving through a second door, so it
+    /// opens with the call that already exists.
+    case files([KayaPickedFile])
+    /// An app-defined format, round-tripped verbatim.
+    case custom(id: String, bytes: [UInt8])
+}
+
+/// Turn the decoder's kind-and-parts into the sum, or nil.
+///
+/// EMPTY IS THE UNIVERSAL NO: nil covers a denied prompt on iOS, an
+/// unfocused reader on Android or Wayland, an empty clipboard, and
+/// content in no representation this read accepted. The guest is not
+/// told which, because the platforms deliberately do not say.
+func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
+    guard let clip else { return nil }
+    func str(_ i: Int) -> String {
+        guard i < clip.parts.count, case .str(let s) = clip.parts[i] else { return "" }
+        return s
+    }
+    func bytes(_ i: Int) -> [UInt8] {
+        guard i < clip.parts.count, case .bytes(let b) = clip.parts[i] else { return [] }
+        return b
+    }
+    switch clip.kind {
+    case UInt32(CLIP_TEXT): return .text(str(0))
+    case UInt32(CLIP_HTML): return .html(str(0))
+    case UInt32(CLIP_IMAGE): return .image(bytes(0))
+    case UInt32(CLIP_CUSTOM): return .custom(id: str(0), bytes: bytes(1))
+    case UInt32(CLIP_FILES):
+        // The picker's own three-per-file grouping, so a guest that
+        // decodes a dialog result decodes this with the same loop.
+        var out: [KayaPickedFile] = []
+        var i = 0
+        while i + 2 < clip.parts.count {
+            guard case .i64(let handle) = clip.parts[i] else { break }
+            out.append(KayaPickedFile(
+                handle: UInt64(handle), name: str(i + 1), localPath: str(i + 2)))
+            i += 3
+        }
+        return .files(out)
+    default: return nil
+    }
+}
+
+/// Join an accept list: the closed kinds by name plus any custom ids,
+/// space separated.
+///
+/// A LIST AND NOT A MASK, because half the set is open-ended. A custom
+/// format that could be written and never accepted would be an escape
+/// hatch that only opens outward, and round-tripping an app's own data
+/// is the whole reason to have one. Ids reach every platform's registry
+/// verbatim, so they carry no spaces — which is what makes the join
+/// unambiguous, and what this refuses to let you break.
+func kayaAcceptList(_ kinds: [String]) -> String {
+    for kind in kinds where kind.isEmpty || kind.contains(" ") {
+        fatalError("""
+            kaya: "\(kind)" is not an accept-list entry — the closed kinds \
+            are "text", "html", "image" and "files", and a custom format id \
+            reaches the platform's own registry verbatim, so it carries no spaces
+            """)
+    }
+    return kinds.joined(separator: " ")
+}
+
+/// The copy chain: a clip record under construction. Each method fills
+/// one representation, and send() puts it on the clipboard.
+///
+/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
+/// structural, since a second text() replaces the field rather than
+/// needing a duplicate check the root has to run.
+struct KayaCopyRef {
+    let tx: KayaAppTx
+    private var text: String?
+    private var html: String?
+    private var image: [UInt8]?
+    private var files: [UInt64] = []
+    private var custom: [(String, [UInt8])] = []
+
+    init(tx: KayaAppTx) { self.tx = tx }
+
+    func text(_ text: String) -> KayaCopyRef {
+        var next = self
+        next.text = text
+        return next
+    }
+
+    func html(_ html: String) -> KayaCopyRef {
+        var next = self
+        next.html = html
+        return next
+    }
+
+    /// Encoded image bytes — the same currency the image property takes.
+    func image(_ bytes: [UInt8]) -> KayaCopyRef {
+        var next = self
+        next.image = bytes
+        return next
+    }
+
+    /// Offer a picked file, the picker's own capability put straight on
+    /// the clipboard. The bytes never move through kaya.
+    func file(_ f: KayaPickedFile) -> KayaCopyRef {
+        var next = self
+        next.files.append(f.handle)
+        return next
+    }
+
+    /// An app-defined format, round-tripped verbatim. The id reaches
+    /// every platform's own registry unchanged — a UTI on Apple,
+    /// RegisterClipboardFormat on Windows, a target atom on X11 and
+    /// Wayland, a MIME type on Android — so it carries no spaces, and
+    /// kaya does nothing clever with the bytes.
+    func custom(_ id: String, _ bytes: [UInt8]) -> KayaCopyRef {
+        _ = kayaAcceptList([id])
+        var next = self
+        next.custom.append((id, bytes))
+        return next
+    }
+
+    /// Put the clip on the system clipboard. The wire order is kaya's,
+    /// not this chain's — descending richness, which is preference
+    /// order on every host that has one.
+    func send() {
+        var present: UInt32 = 0
+        var values: [KayaValue] = []
+        for (id, bytes) in custom {
+            values.append(.str(id))
+            values.append(.blob(kayaRegisterBlob(Data(bytes))))
+        }
+        for handle in files {
+            values.append(.i64(Int64(bitPattern: handle)))
+        }
+        if let image {
+            present |= UInt32(CLIP_IMAGE)
+            values.append(.blob(kayaRegisterBlob(Data(image))))
+        }
+        if let html {
+            present |= UInt32(CLIP_HTML)
+            values.append(.str(html))
+        }
+        if let text {
+            present |= UInt32(CLIP_TEXT)
+            values.append(.str(text))
+        }
+        tx.tx.copy(present, UInt32(files.count), UInt32(custom.count), values)
+    }
+}
+
+/// The read chain: which representations this read can use, and the
+/// request id its one answer arrives under.
+struct KayaClipReadRef {
+    let tx: KayaAppTx
+    let id: UInt64
+    private var accepting: [String] = []
+    private var onResult: ((KayaAppTx, KayaRepresentation?) throws -> Void)?
+
+    init(tx: KayaAppTx, id: UInt64) {
+        self.tx = tx
+        self.id = id
+    }
+
+    func text() -> KayaClipReadRef { accept("text") }
+    func html() -> KayaClipReadRef { accept("html") }
+    func image() -> KayaClipReadRef { accept("image") }
+    func files() -> KayaClipReadRef { accept("files") }
+
+    /// Accept an app-defined format by id. Custom formats are tried
+    /// FIRST, in the order named: an app's own format round-trips its
+    /// data losslessly, which is the only reason to have one.
+    func custom(_ id: String) -> KayaClipReadRef { accept(id) }
+
+    private func accept(_ kind: String) -> KayaClipReadRef {
+        var next = self
+        next.accepting.append(kind)
+        return next
+    }
+
+    /// Bind the one-shot handler to THIS request. The answer is nil
+    /// when the clipboard had nothing this read accepted — and nil
+    /// equally when the read was denied or the app was unfocused,
+    /// because no platform says which.
+    func onResult(
+        _ handler: @escaping (KayaAppTx, KayaRepresentation?) throws -> Void
+    ) -> KayaClipReadRef {
+        var next = self
+        next.onResult = handler
+        return next
+    }
+
+    /// Send the request, returning its id.
+    @discardableResult
+    func send() -> UInt64 {
+        if let onResult { tx.app.onClipboard(id, onResult) }
+        tx.tx.readClipboard(id, .str(kayaAcceptList(accepting)))
+        return id
+    }
+}
+
 struct KayaPickedFile {
     let handle: UInt64
     let name: String
@@ -318,6 +532,12 @@ final class KayaApp {
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var alerts: [UInt64: (KayaAppTx, UInt32) throws -> Void] = [:]
     private var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
+    // Clipboard reads share the alert's request/result grammar and so
+    // its table shape: one-shot, keyed by request id.
+    private var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
+    private var widgetPastes: [UInt64: (KayaAppTx, KayaRepresentation) throws -> Void] = [:]
+    private var nodePastes: [UInt64: (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void] = [:]
+    private var nextClipboardRead: UInt64 = 0
     private var nextAlert: UInt64 = 0
     private var nextFileDialog: UInt64 = 0
     private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
@@ -668,6 +888,33 @@ final class KayaApp {
         return nextAlert
     }
 
+    /// Bind a clipboard read's one-shot result handler (internal: the
+    /// Tx sugar registers at send time, on the alert's grammar).
+    func onClipboard(
+        _ request: UInt64, _ handler: @escaping (KayaAppTx, KayaRepresentation?) throws -> Void
+    ) {
+        clipboardReads[request] = handler
+    }
+
+    func allocClipboardRead() -> UInt64 {
+        nextClipboardRead += 1
+        return nextClipboardRead
+    }
+
+    func onPaste(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaRepresentation) throws -> Void
+    ) {
+        widgetPastes[w.id] = handler
+    }
+
+    func onPaste(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void
+    ) {
+        nodePastes[n.id] = handler
+    }
+
     /// Bind the picker's one-shot result handler (internal: the Tx
     /// sugar registers at show time and the registration retires with
     /// the result).
@@ -724,7 +971,7 @@ final class KayaApp {
             // routinely kilobytes.
             guard let start = record else { continue }
             let buf = [UInt8](UnsafeBufferPointer(start: start, count: Int(size)))
-            guard let (kind, id, keys, payload, files) = kayaParseOccurrence(buf)
+            guard let (kind, id, keys, payload, files, clip) = kayaParseOccurrence(buf)
             else { continue }
             var text: String?
             var checked = false
@@ -800,6 +1047,27 @@ final class KayaApp {
                 // One-shot: the registration retires with the result.
                 if let handler = alerts.removeValue(forKey: id) {
                     dispatch { try build { tx in try handler(tx, choice) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
+                // One-shot like the alert, and the request retires with
+                // it. EMPTY IS THE UNIVERSAL NO and arrives as nil —
+                // denied, unfocused, absent and nothing-we-accept
+                // alike, because no platform says which.
+                if let handler = clipboardReads.removeValue(forKey: id) {
+                    let answer = kayaRepresentation(clip)
+                    dispatch { try build { tx in try handler(tx, answer) } }
+                }
+            // A paste rides a click tag verbatim, so it arrives on the
+            // ordinary widget/node split — one record kind, the key
+            // path deciding. Never empty: a paste that delivered
+            // nothing is not an occurrence.
+            case (UInt16(KAYA_OCCURRENCE_PASTED), true):
+                if let handler = widgetPastes[id], let answer = kayaRepresentation(clip) {
+                    dispatch { try build { tx in try handler(tx, answer) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_PASTED), false):
+                if let handler = nodePastes[id], let answer = kayaRepresentation(clip) {
+                    dispatch { try build { tx in try handler(tx, keys, answer) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT), _):
                 // One-shot like the alert, and the id retires with it.
@@ -1712,6 +1980,82 @@ final class KayaAppTx {
         return id
     }
 
+    // --- The clipboard (DESIGN.md, Clipboard) ----------------------
+    //
+    // A clip is not a string: every host models it as ONE item
+    // available in several types, with the consumer taking the richest
+    // it understands. So COPY TAKES A RECORD — spelled as a chain here,
+    // where a second text() simply replaces the field rather than
+    // needing a duplicate check — and the two answers are a SUM.
+    //
+    // kaya DERIVES NOTHING between representations. Whether list
+    // bullets survive html-to-text is the app's decision.
+
+    /// Begin a clip: fill in as many representations as the app wants
+    /// to offer, and send() puts it on the system clipboard.
+    func copy() -> KayaCopyRef {
+        KayaCopyRef(tx: self)
+    }
+
+    /// Begin the privileged read — THE ONE NAMED FOR WHAT IT IS rather
+    /// than for pasting.
+    ///
+    /// A user's paste arrives at the widget's hook and costs nothing;
+    /// this asks without a gesture, which the platforms have
+    /// deliberately made expensive: iOS 16 PROMPTS when the content
+    /// came from another app and blocks until the user answers, Android
+    /// returns nothing unless the app has focus, and Wayland delivers
+    /// no offer to an unfocused client. Reach for this to detect a URL
+    /// or import from the clipboard, never to implement Paste — that is
+    /// the Paste command, and it is free.
+    func readClipboard() -> KayaClipReadRef {
+        KayaClipReadRef(tx: self, id: app.allocClipboardRead())
+    }
+
+    /// Declare what a widget takes from a paste — the closed kinds by
+    /// name ("text", "html", "image", "files") plus any custom format
+    /// ids.
+    ///
+    /// ONE DECLARATION, THREE JOBS: it drives whether the Paste command
+    /// is live while this widget is focused, it filters what can reach
+    /// the paste hook, and on Android it IS the native registration
+    /// (setOnReceiveContentListener takes the mime types on the view).
+    /// Per-widget because whether Paste should be enabled is the
+    /// INTERSECTION of what the clipboard offers and what the FOCUSED
+    /// target takes.
+    ///
+    /// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
+    /// declares nothing gets the platform's own insertion and reports
+    /// it through the ordinary change path, which is why a plain text
+    /// editor writes none of this and has working cut, copy and paste.
+    func setAccepts(_ w: KayaWidget, _ kinds: [String]) {
+        tx.setAccepts(w.id, kayaAcceptList(kinds))
+    }
+
+    /// Take pasted content at a live widget.
+    ///
+    /// COSTS NOTHING ON ANY PLATFORM, unlike readClipboard: a paste is
+    /// a user gesture, so it is its own authorisation — iOS raises no
+    /// prompt and the focus rules are satisfied by construction. Only
+    /// fires for a widget that declared what it accepts.
+    func onPaste(
+        _ w: KayaWidget,
+        _ handler: @escaping (KayaAppTx, KayaRepresentation) throws -> Void
+    ) {
+        app.onPaste(w, handler)
+    }
+
+    /// A paste onto a stamped copy: the handler also receives the
+    /// copy's key path, outermost first. One record kind, the path
+    /// deciding — exactly as a click on a stamped row is one record
+    /// with a click on a live widget.
+    func onPaste(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void
+    ) {
+        app.onPaste(n, handler)
+    }
+
     /// Create an auxiliary window (capability-gated: phone hosts
     /// reject at the root); materializes hidden, mountIn presents.
     /// Named arguments are the Swift spelling.
@@ -1834,6 +2178,20 @@ final class KayaAppTx {
     /// macOS places this one in the application menu, and every other
     /// host leaves the item where the app declared it.
     static let roleSettings = "settings"
+
+    /// The three clipboard commands. They lower to the platform's own,
+    /// act on the FOCUSED widget, and work out their own enablement
+    /// from what the clipboard offers and what that widget accepts.
+    ///
+    /// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
+    /// the widget knows what is selected, so an app cannot assemble the
+    /// payload for "copy the selected text" out of the data layer. Copy
+    /// of a selection is therefore necessarily a command, and Paste is
+    /// its mirror. copy() and readClipboard() are for overriding that
+    /// default and for targets with no native behaviour.
+    static let roleCut = "cut"
+    static let roleCopy = "copy"
+    static let rolePaste = "paste"
 
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one

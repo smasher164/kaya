@@ -1266,6 +1266,63 @@ func kayaCanonicalizeShortcut(_ spelling: String) -> String {
     return (primary ? "primary+" : "") + (shift ? "shift+" : "") + (alt ? "alt+" : "") + key
 }
 
+/// One value of a representation. Its own type rather than a case
+/// on KayaValue, because bytes reach a guest ONLY here — nothing
+/// else on the occurrence channel has ever carried them.
+enum KayaClipPart {
+    case str(String)
+    case i64(Int64)
+    case bytes([UInt8])
+}
+
+/// One representation as the decoder hands it over: the clip kind,
+/// and its parts with blobs already redeemed. The sum itself is the
+/// hand-written tier's — this is the taste-free shape the wire
+/// carries.
+///
+/// `kind` is a SINGLE member of the clip enum and never a mask (you
+/// offer many and you receive one); 0 with no parts is the universal
+/// empty answer.
+struct KayaClipValues {
+    let kind: UInt32
+    let parts: [KayaClipPart]
+}
+
+/// Decode a representation at `at`: the clip kind, then its Values
+/// block. Blobs are redeemed and RELEASED here.
+func kayaParseClip(_ raw: UnsafeRawBufferPointer, _ at: Int)
+    -> (clip: KayaClipValues, next: Int)
+{
+    let kind = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+    let count = Int(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt32.self))
+    var at = at + 16
+    var parts: [KayaClipPart] = []
+    for _ in 0..<count {
+        let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+        let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+        switch vtype {
+        case UInt32(KAYA_VALUE_I64):
+            parts.append(.i64(raw.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))
+        case UInt32(KAYA_VALUE_BLOB):
+            let handle = raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)
+            var length = 0
+            // COPY THEN RELEASE, in that order: the pointer borrows
+            // core memory that the release frees.
+            if let data = kaya_occurrence_blob(handle, &length) {
+                parts.append(.bytes([UInt8](UnsafeBufferPointer(start: data, count: length))))
+            } else {
+                parts.append(.bytes([]))
+            }
+            kaya_occurrence_blob_release(handle)
+        default:
+            parts.append(.str(String(
+                decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)))
+        }
+        at += 8 + ((vlen + 7) & ~7)
+    }
+    return (KayaClipValues(kind: kind, parts: parts), at)
+}
+
 /// Decode one occurrence record (header included); nil for pad or
 /// unknown kinds. keys is [] when id is a widget id; otherwise id is
 /// a template node id and keys is the copy's key path, outermost
@@ -1273,7 +1330,7 @@ func kayaCanonicalizeShortcut(_ spelling: String) -> String {
 /// checkbox's new state for TOGGLED, the slider's new value for
 /// VALUE_CHANGED, nil for clicks.
 func kayaParseOccurrence(_ rec: [UInt8])
-    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile])?
+    -> (kind: UInt16, id: UInt64, keys: [KayaValue], payload: KayaValue?, files: [KayaPickedFile], clip: KayaClipValues?)?
 {
     rec.withUnsafeBytes { raw in
         let kind = raw.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
@@ -1298,7 +1355,7 @@ func kayaParseOccurrence(_ rec: [UInt8])
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
             // The alert's one answer: id + u32 choice (ALERT_CHOICE_*).
             let choice = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
-            return (kind, id, [], .i64(Int64(choice)), [])
+            return (kind, id, [], .i64(Int64(choice)), [], nil)
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
@@ -1325,7 +1382,11 @@ func kayaParseOccurrence(_ rec: [UInt8])
                 files.append(KayaPickedFile(
                     handle: UInt64(handle), name: name, localPath: localPath))
             }
-            return (kind, id, [], nil, files)
+            return (kind, id, [], nil, files, nil)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT) {
+            let (clip, _) = kayaParseClip(raw, 16)
+            return (kind, id, [], nil, [], clip)
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
@@ -1334,14 +1395,14 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_ENTRY_POPPED)
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
         {
-            return (kind, id, [], nil, [])
+            return (kind, id, [], nil, [], nil)
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
         if kind == UInt16(KAYA_OCCURRENCE_SECTION_SELECTED)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
-            return (kind, section, [], .i64(Int64(bitPattern: id)), [])
+            return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil)
         }
         let pathLen = raw.loadUnaligned(fromByteOffset: 16, as: UInt32.self)
         var keys: [KayaValue] = []
@@ -1386,6 +1447,11 @@ func kayaParseOccurrence(_ rec: [UInt8])
                 payload = .str(String(decoding: raw[(at + 8)..<(at + 8 + plen)], as: UTF8.self))
             }
         }
-        return (kind, id, keys, payload, [])
+        var clip: KayaClipValues? = nil
+        if kind == UInt16(KAYA_OCCURRENCE_PASTED)
+        {
+            clip = kayaParseClip(raw, at).clip
+        }
+        return (kind, id, keys, payload, [], clip)
     }
 }

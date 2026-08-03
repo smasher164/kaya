@@ -804,6 +804,40 @@ own the state (see the undo note in this file).
   (2) signal-bound entry titles have wire + scene + fan-out but no
   binding sugar.
 
+### Swift reads its constants straight out of the C header, and the header is not namespaced
+
+Swift is the ONE binding with no generated constants: every other
+language's kaya-bindgen emitter walks `spec.enums` and writes them out,
+while Swift imports kaya.h with `-import-objc-header` and names the C
+symbols directly (`KAYA_PROP_ALIGN`, `KAYA_ALIGN_START`). That was
+deliberate — Swift's C interop is free, so re-declaring would be pure
+duplication.
+
+The clipboard found the crack in it. Constants declared in
+`crates/kaya/src/capi.rs` carry the `KAYA_` prefix in their Rust names
+and reach the header prefixed; constants declared in
+`crates/kaya/src/wire.rs` do not, and cbindgen exports them verbatim.
+So the header defines `CLIP_TEXT`, not `KAYA_CLIP_TEXT` — and the
+`KayaRepresentation` doc comment, written from the other side, promises
+`KAYA_CLIP_*`. The Swift clipboard surface uses `CLIP_TEXT`, which is
+what is actually there.
+
+THE WIDER PROBLEM is not the clipboard's. kaya.h currently exports
+about sixty unprefixed defines — every `REC_*`, every `TX_*`, every
+`APPLY_*`, the `VALUE_*` types, the `PROP_*` and `WPROP_*` keys, the
+`CLIP_*` masks, and `HEADER_SIZE`, which is a name no public header
+should take. Any C or Swift consumer that includes kaya.h inherits all
+of them.
+
+WHY IT IS A SLICE AND NOT A RENAME. Fixing it means deciding how the
+Swift binding should name what the header exposes at all — generated
+constants like the other seven, a Swift enum wrapping them, or a
+prefixed header it keeps reading — and each answer rewrites call sites
+across the Swift binding, the SwiftUI interpreter, every Swift guest
+and every C guest. Doing it inside a feature milestone would mix a
+mechanical sweep into changes that need to be readable. Take it on its
+own, with the C guests compiled and the whole matrix run after.
+
 ## Testing / infrastructure
 
 - ~~**Python's lifecycle handlers ran outside a transaction**~~ — FIXED

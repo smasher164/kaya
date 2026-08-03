@@ -1436,6 +1436,42 @@ func TxSetMenuRole(item uint64, role string) []byte {
 	return endRecord(b)
 }
 
+// ClipValues is one representation as the decoder hands it over:
+// the clip kind, and its values with blobs already redeemed to
+// bytes. The sum itself is the hand-written tier's — this is the
+// taste-free shape the wire carries.
+//
+// Kind is a SINGLE member of the clip enum and never a mask (you
+// offer many and you receive one); 0 with no values is the
+// universal empty answer.
+type ClipValues struct {
+	Kind   uint32
+	Values []any
+}
+
+// parseClip decodes a representation at `at`: the clip kind, then
+// its Values block. Blobs are redeemed and RELEASED here.
+func parseClip(rec []byte, at int) (ClipValues, int) {
+	clip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}
+	count := int(binary.LittleEndian.Uint32(rec[at+8:]))
+	at += 16
+	for i := 0; i < count; i++ {
+		vtype := binary.LittleEndian.Uint32(rec[at:])
+		vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
+		body := rec[at+8 : at+8+vlen]
+		switch vtype {
+		case ValueI64:
+			clip.Values = append(clip.Values, int64(binary.LittleEndian.Uint64(body)))
+		case ValueBlob:
+			clip.Values = append(clip.Values, occurrenceBlob(binary.LittleEndian.Uint64(body)))
+		default:
+			clip.Values = append(clip.Values, string(body))
+		}
+		at += 8 + (vlen+7)&^7
+	}
+	return clip, at
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
@@ -1480,6 +1516,10 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		}
 		return kind, id, nil, files, true
 	}
+	if kind == occClipboardResult {
+		clip, _ := parseClip(rec, 16)
+		return kind, id, nil, clip, true
+	}
 	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested {
 		// Surface lifecycle records carry the surface id alone —
 		// no key path, no payload (derived from the record shapes).
@@ -1521,6 +1561,10 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		default:
 			payload = string(rec[at+8 : at+8+vlen])
 		}
+	}
+	if kind == occPasted {
+		clip, _ := parseClip(rec, at)
+		payload = clip
 	}
 	return kind, id, keys, payload, true
 }

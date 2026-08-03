@@ -447,6 +447,47 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
     }
     c.line("");
+    // The occurrence blob table, the third direction. A blob in an
+    // OCCURRENCE is a table handle, not the apply channel's batch-local
+    // index: this channel has no boundary that retires one, so it is
+    // released explicitly. Redeeming inside the decoder is what keeps a
+    // handle from ever reaching an app.
+    c.line("// ClipValues is one representation as the decoder hands it over:");
+    c.line("// the clip kind, and its values with blobs already redeemed to");
+    c.line("// bytes. The sum itself is the hand-written tier's — this is the");
+    c.line("// taste-free shape the wire carries.");
+    c.line("//");
+    c.line("// Kind is a SINGLE member of the clip enum and never a mask (you");
+    c.line("// offer many and you receive one); 0 with no values is the");
+    c.line("// universal empty answer.");
+    c.line("type ClipValues struct {");
+    c.line("\tKind   uint32");
+    c.line("\tValues []any");
+    c.line("}");
+    c.line("");
+    c.line("// parseClip decodes a representation at `at`: the clip kind, then");
+    c.line("// its Values block. Blobs are redeemed and RELEASED here.");
+    c.line("func parseClip(rec []byte, at int) (ClipValues, int) {");
+    c.line("\tclip := ClipValues{Kind: binary.LittleEndian.Uint32(rec[at:])}");
+    c.line("\tcount := int(binary.LittleEndian.Uint32(rec[at+8:]))");
+    c.line("\tat += 16");
+    c.line("\tfor i := 0; i < count; i++ {");
+    c.line("\t\tvtype := binary.LittleEndian.Uint32(rec[at:])");
+    c.line("\t\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
+    c.line("\t\tbody := rec[at+8 : at+8+vlen]");
+    c.line("\t\tswitch vtype {");
+    c.line("\t\tcase ValueI64:");
+    c.line("\t\t\tclip.Values = append(clip.Values, int64(binary.LittleEndian.Uint64(body)))");
+    c.line("\t\tcase ValueBlob:");
+    c.line("\t\t\tclip.Values = append(clip.Values, occurrenceBlob(binary.LittleEndian.Uint64(body)))");
+    c.line("\t\tdefault:");
+    c.line("\t\t\tclip.Values = append(clip.Values, string(body))");
+    c.line("\t\t}");
+    c.line("\t\tat += 8 + (vlen+7)&^7");
+    c.line("\t}");
+    c.line("\treturn clip, at");
+    c.line("}");
+    c.line("");
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
     c.line("// node id and keys is the copy's key path, outermost first. payload");
@@ -499,6 +540,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\treturn kind, id, nil, files, true");
     c.line("\t}");
+    // The privileged read's one answer. Its own arm for the
+    // file_dialog_result reason and then some: the generic tail would
+    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // would read the values header as a key.
+    for name in crate::clip_answer_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tclip, _ := parseClip(rec, 16)");
+        c.line("\t\treturn kind, id, nil, clip, true");
+        c.line("\t}");
+    }
     let id_only = crate::id_only_occurrence_names(spec)
         .iter()
         .map(|n| format!("kind == occ{}", camel(n)))
@@ -560,6 +611,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t\tpayload = string(rec[at+8 : at+8+vlen])");
     c.line("\t\t}");
     c.line("\t}");
+    // A paste rides a click tag VERBATIM, so the key path above is
+    // already read and the clip sits after it — the way text_changed's
+    // payload does. One record kind, path_len deciding, exactly as a
+    // click on a stamped row is one record with a click on a live one.
+    for name in crate::pasted_occurrence_names(spec) {
+        c.line(&format!("\tif kind == occ{} {{", camel(name)));
+        c.line("\t\tclip, _ := parseClip(rec, at)");
+        c.line("\t\tpayload = clip");
+        c.line("\t}");
+    }
     c.line("\treturn kind, id, keys, payload, true");
     c.line("}");
     c.out

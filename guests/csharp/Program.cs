@@ -40,6 +40,7 @@ static class Program
             case "commands": CommandsScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
             case "filedialog": FileDialogScene.Run(); break;
+            case "clipboard": ClipboardScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;

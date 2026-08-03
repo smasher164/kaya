@@ -819,6 +819,10 @@ KAYA_SELFTEST_SCRIPT="$(scene_script clipboard)"
 export KAYA_SELFTEST_SCRIPT
 run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
 run clipboard-python-swiftui env KAYA_SELFTEST=clipboard python3 guests/python/clipboard.py
+run clipboard-go-swiftui env KAYA_SELFTEST=clipboard target/go-guests/clipboard
+run clipboard-swift-swiftui env KAYA_SELFTEST=clipboard target/swift-guests/clipboard
+run clipboard-csharp-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT

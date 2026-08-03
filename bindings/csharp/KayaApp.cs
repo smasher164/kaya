@@ -306,8 +306,14 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
     internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
+    // Clipboard reads share the alert's request/result grammar and so
+    // its table shape: one-shot, keyed by request id.
+    internal readonly Dictionary<ulong, Action<Tx, Representation?>> clipboardReads = new();
+    internal readonly Dictionary<ulong, Action<Tx, Representation>> widgetPastes = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<object>, Representation>> nodePastes = new();
     internal ulong nextAlert;
     internal ulong nextFileDialog;
+    internal ulong nextClipboardRead;
 
     // The collection is the model — the only copy: every mutation op
     // edits it and queues the wire delta in the same call, so reads
@@ -613,6 +619,34 @@ sealed class KayaApp
                     var files = payload as List<PickedFile> ?? new List<PickedFile>();
                     Dispatch(tx => fn(tx, files));
                 }
+            }
+            else if (kind == KayaWire.OccKindClipboardResult)
+            {
+                // One-shot like the alert, and the request retires with
+                // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
+                // denied, unfocused, absent and nothing-we-accept
+                // alike, because no platform says which.
+                if (clipboardReads.Remove(id, out var fn))
+                {
+                    var clip = Representation.From(payload as KayaWire.ClipValues);
+                    Dispatch(tx => fn(tx, clip));
+                }
+            }
+            // A paste rides a click tag verbatim, so it arrives on the
+            // ordinary widget/node split — one record kind, the key
+            // path deciding. Never empty: a paste that delivered
+            // nothing is not an occurrence.
+            else if (kind == KayaWire.OccKindPasted && keys.Count == 0)
+            {
+                if (widgetPastes.TryGetValue(id, out var fn)
+                    && Representation.From(payload as KayaWire.ClipValues) is { } clip)
+                    Dispatch(tx => fn(tx, clip));
+            }
+            else if (kind == KayaWire.OccKindPasted)
+            {
+                if (nodePastes.TryGetValue(id, out var fn)
+                    && Representation.From(payload as KayaWire.ClipValues) is { } clip)
+                    Dispatch(tx => fn(tx, keys, clip));
             }
             // Menu occurrences key the menu-item tables — their own
             // id space, so neither widget nor node ids can collide
@@ -1601,6 +1635,91 @@ sealed class Tx
         return id;
     }
 
+    // --- The clipboard (DESIGN.md, Clipboard) ----------------------
+    //
+    // A clip is not a string: every host models it as ONE item
+    // available in several types, with the consumer taking the richest
+    // it understands. So COPY TAKES A RECORD — spelled as a chain here,
+    // where a second Text() replaces the field rather than needing a
+    // duplicate check — and the two answers are a SUM.
+    //
+    // kaya DERIVES NOTHING between representations. Whether list
+    // bullets survive html-to-text is the app's decision.
+
+    /// Begin a clip: fill in as many representations as the app wants
+    /// to offer, and Send puts it on the system clipboard.
+    public CopyRef Copy() => new CopyRef(this);
+
+    /// Begin the privileged read — THE ONE NAMED FOR WHAT IT IS rather
+    /// than for pasting.
+    ///
+    /// A user's paste arrives at the widget's hook and costs nothing;
+    /// this asks without a gesture, which the platforms have
+    /// deliberately made expensive: iOS 16 PROMPTS when the content
+    /// came from another app and blocks until the user answers, Android
+    /// returns nothing unless the app has focus, and Wayland delivers
+    /// no offer to an unfocused client. Reach for this to detect a URL
+    /// or import from the clipboard, never to implement Paste — that is
+    /// the Paste command, and it is free.
+    public ClipReadRef ReadClipboard() => new ClipReadRef(this, ++App.nextClipboardRead);
+
+    /// Declare what a widget takes from a paste — the closed kinds by
+    /// name ("text", "html", "image", "files") plus any custom format
+    /// ids.
+    ///
+    /// ONE DECLARATION, THREE JOBS: it drives whether the Paste command
+    /// is live while this widget is focused, it filters what can reach
+    /// the paste hook, and on Android it IS the native registration
+    /// (setOnReceiveContentListener takes the mime types on the view).
+    /// Per-widget because whether Paste should be enabled is the
+    /// INTERSECTION of what the clipboard offers and what the FOCUSED
+    /// target takes.
+    ///
+    /// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
+    /// declares nothing gets the platform's own insertion and reports
+    /// it through the ordinary change path, which is why a plain text
+    /// editor writes none of this and has working cut, copy and paste.
+    public void SetAccepts(Widget w, params string[] kinds) =>
+        Records.Add(KayaWire.TxSetAccepts(w.Id, AcceptList(kinds)));
+
+    /// Take pasted content at a live widget.
+    ///
+    /// COSTS NOTHING ON ANY PLATFORM, unlike ReadClipboard: a paste is a
+    /// user gesture, so it is its own authorisation — iOS raises no
+    /// prompt and the focus rules are satisfied by construction. Only
+    /// fires for a widget that declared what it accepts.
+    public void OnPaste(Widget w, Action<Tx, Representation> handler) =>
+        App.widgetPastes[w.Id] = handler;
+
+    /// A paste onto a stamped copy: the handler also receives the
+    /// copy's key path, outermost first. One record kind, the path
+    /// deciding — exactly as a click on a stamped row is one record
+    /// with a click on a live widget.
+    public void OnPaste(Node n, Action<Tx, List<object>, Representation> handler) =>
+        App.nodePastes[n.Id] = handler;
+
+    /// Join an accept list: the closed kinds by name plus any custom
+    /// ids, space separated.
+    ///
+    /// A LIST AND NOT A MASK, because half the set is open-ended. A
+    /// custom format that could be written and never accepted would be
+    /// an escape hatch that only opens outward, and round-tripping an
+    /// app's own data is the whole reason to have one. Ids reach every
+    /// platform's registry verbatim, so they carry no spaces — which is
+    /// what makes the join unambiguous, and what this refuses to let
+    /// you break.
+    internal static string AcceptList(IEnumerable<string> kinds)
+    {
+        foreach (var kind in kinds)
+            if (string.IsNullOrEmpty(kind) || kind.Contains(' '))
+                throw new ArgumentException(
+                    $"kaya: \"{kind}\" is not an accept-list entry — the closed "
+                    + "kinds are \"text\", \"html\", \"image\" and \"files\", and a "
+                    + "custom format id reaches the platform's own registry "
+                    + "verbatim, so it carries no spaces");
+        return string.Join(" ", kinds);
+    }
+
     /// Close and forget an auxiliary window — also the veto grammar's
     /// confirmation and the reconciliation after a chrome close.
     public void DestroyWindow(ulong id) => Records.Add(KayaWire.TxDestroyWindow(id));
@@ -1731,6 +1850,20 @@ sealed class Tx
     /// macOS places this one in the application menu, and every other
     /// host leaves the item where the app declared it.
     public const string RoleSettings = "settings";
+
+    /// The three clipboard commands. They lower to the platform's own,
+    /// act on the FOCUSED widget, and work out their own enablement
+    /// from what the clipboard offers and what that widget accepts.
+    ///
+    /// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
+    /// the widget knows what is selected, so an app cannot assemble the
+    /// payload for "copy the selected text" out of the data layer. Copy
+    /// of a selection is therefore necessarily a command, and Paste is
+    /// its mirror. Copy() and ReadClipboard() are for overriding that
+    /// default and for targets with no native behaviour.
+    public const string RoleCut = "cut";
+    public const string RoleCopy = "copy";
+    public const string RolePaste = "paste";
 
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one
@@ -2071,5 +2204,131 @@ sealed class Tpl
         if (parent != 0)
             tx.Records.Add(KayaWire.TxAddChild(parent, n.Id));
         return n;
+    }
+}
+
+
+/// The copy chain: a clip record under construction. Each method fills
+/// one representation, and Send puts it on the clipboard.
+///
+/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
+/// structural, since a second Text() replaces the field rather than
+/// needing a duplicate check the root has to run.
+sealed class CopyRef
+{
+    readonly Tx tx;
+    string? text;
+    string? html;
+    byte[]? image;
+    readonly List<ulong> files = new();
+    readonly List<(string Id, byte[] Bytes)> custom = new();
+
+    internal CopyRef(Tx tx) => this.tx = tx;
+
+    public CopyRef Text(string value) { text = value; return this; }
+
+    public CopyRef Html(string value) { html = value; return this; }
+
+    /// Encoded image bytes — the same currency the image property takes.
+    public CopyRef Image(byte[] bytes) { image = bytes; return this; }
+
+    /// Offer a picked file, the picker's own capability put straight on
+    /// the clipboard. The bytes never move through kaya.
+    public CopyRef File(PickedFile f) { files.Add(f.Handle); return this; }
+
+    /// An app-defined format, round-tripped verbatim. The id reaches
+    /// every platform's own registry unchanged — a UTI on Apple,
+    /// RegisterClipboardFormat on Windows, a target atom on X11 and
+    /// Wayland, a MIME type on Android — so it carries no spaces, and
+    /// kaya does nothing clever with the bytes.
+    public CopyRef Custom(string id, byte[] bytes)
+    {
+        Tx.AcceptList(new[] { id });
+        custom.Add((id, bytes));
+        return this;
+    }
+
+    /// Put the clip on the system clipboard. The wire order is kaya's,
+    /// not this chain's — descending richness, which is preference
+    /// order on every host that has one.
+    public void Send()
+    {
+        uint present = 0;
+        var values = new List<object>();
+        foreach (var (id, bytes) in custom)
+        {
+            values.Add(id);
+            values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes)));
+        }
+        foreach (var handle in files)
+            values.Add((long)handle);
+        if (image != null)
+        {
+            present |= KayaWire.ClipImage;
+            values.Add(new KayaWire.BlobHandle(Kaya.RegisterBlob(image)));
+        }
+        if (html != null)
+        {
+            present |= KayaWire.ClipHtml;
+            values.Add(html);
+        }
+        if (text != null)
+        {
+            present |= KayaWire.ClipText;
+            values.Add(text);
+        }
+        tx.Records.Add(KayaWire.TxCopy(
+            present, (uint)files.Count, (uint)custom.Count, values.ToArray()));
+    }
+}
+
+/// The read chain: which representations this read can use, and the
+/// request id its one answer arrives under.
+sealed class ClipReadRef
+{
+    readonly Tx tx;
+    readonly ulong id;
+    readonly List<string> accepting = new();
+    Action<Tx, Representation?>? onResult;
+
+    internal ClipReadRef(Tx tx, ulong id)
+    {
+        this.tx = tx;
+        this.id = id;
+    }
+
+    public ClipReadRef Text() => Accept("text");
+    public ClipReadRef Html() => Accept("html");
+    public ClipReadRef Image() => Accept("image");
+    public ClipReadRef Files() => Accept("files");
+
+    /// Accept an app-defined format by id. Custom formats are tried
+    /// FIRST, in the order named: an app's own format round-trips its
+    /// data losslessly, which is the only reason to have one.
+    public ClipReadRef Custom(string formatId) => Accept(formatId);
+
+    ClipReadRef Accept(string kind)
+    {
+        accepting.Add(kind);
+        return this;
+    }
+
+    /// Bind the one-shot handler to THIS request. The answer is null
+    /// when the clipboard had nothing this read accepted — and null
+    /// equally when the read was denied or the app was unfocused,
+    /// because no platform says which.
+    public ClipReadRef OnResult(Action<Tx, Representation?> handler)
+    {
+        onResult = handler;
+        return this;
+    }
+
+    /// Send the request, returning its id.
+    public ulong Send()
+    {
+        if (onResult != null)
+            tx.App.clipboardReads[id] = onResult;
+        tx.Records.Add(KayaWire.TxReadClipboard(id, Tx.AcceptList(accepting)));
+        return id;
     }
 }

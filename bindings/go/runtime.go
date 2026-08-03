@@ -76,6 +76,28 @@ func RegisterBlob(data []byte) uint64 {
 	return uint64(C.kaya_blob_register((*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data))))
 }
 
+// occurrenceBlob redeems an occurrence blob for its bytes, and
+// releases it. Called by the generated decoder, never by a guest.
+//
+// COPY THEN RELEASE, in that order: the pointer borrows core memory
+// that the release frees. A blob arriving in an OCCURRENCE is a handle
+// into a table with no boundary that retires one — unlike the apply
+// channel's batch-local index, which the next batch supersedes — so
+// the decoder is what has to let go of it, while decoding, before any
+// handle can reach an app. Release is idempotent, so a dead handle
+// costs nothing rather than being an error the decoder must reason
+// about.
+func occurrenceBlob(handle uint64) []byte {
+	var length C.size_t
+	data := C.kaya_occurrence_blob(C.uint64_t(handle), &length)
+	var out []byte
+	if data != nil && length > 0 {
+		out = C.GoBytes(unsafe.Pointer(data), C.int(length))
+	}
+	C.kaya_occurrence_blob_release(C.uint64_t(handle))
+	return out
+}
+
 // PollOccurrence reads the next occurrence if one is ready and NEVER
 // blocks; ready is false when the ring is empty right now. keys is nil
 // when id is a widget id, else id is a template node id and keys is the

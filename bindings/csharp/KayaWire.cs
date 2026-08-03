@@ -1292,6 +1292,43 @@ static class KayaWire
         return Finish(stream, w, TxKindSetMenuProp);
     }
 
+    /// One representation as the decoder hands it over: the clip
+    /// kind, and its values with blobs already redeemed to byte[].
+    /// The sum itself is the hand-written tier's — this is the
+    /// taste-free shape the wire carries.
+    ///
+    /// Kind is a SINGLE member of the clip enum and never a mask (you
+    /// offer many and you receive one); 0 with no values is the
+    /// universal empty answer.
+    public sealed class ClipValues
+    {
+        public uint Kind;
+        public List<object> Values = new List<object>();
+    }
+
+    /// Decode a representation at `at`: the clip kind, then its
+    /// Values block. Blobs are redeemed and RELEASED here.
+    public static ClipValues ParseClip(byte[] rec, int at, out int next)
+    {
+        var clip = new ClipValues { Kind = BitConverter.ToUInt32(rec, at) };
+        int count = (int)BitConverter.ToUInt32(rec, at + 8);
+        at += 16;
+        for (int i = 0; i < count; i++)
+        {
+            uint vtype = BitConverter.ToUInt32(rec, at);
+            int vlen = (int)BitConverter.ToUInt32(rec, at + 4);
+            switch (vtype)
+            {
+                case ValueI64: clip.Values.Add(BitConverter.ToInt64(rec, at + 8)); break;
+                case ValueBlob: clip.Values.Add(Kaya.OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8))); break;
+                default: clip.Values.Add(Encoding.UTF8.GetString(rec, at + 8, vlen)); break;
+            }
+            at += 8 + ((vlen + 7) & ~7);
+        }
+        next = at;
+        return clip;
+    }
+
     /// Decode one occurrence record (header included). Returns false
     /// for non-click records. keys is empty for a click on a
     /// guest-created widget (id is a widget id); otherwise id is a
@@ -1339,6 +1376,11 @@ static class KayaWire
             payload = files;
             return true;
         }
+        if (kind == OccKindClipboardResult)
+        {
+            payload = ParseClip(rec, 16, out int _clipEnd);
+            return true;
+        }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
         if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested)
@@ -1377,6 +1419,10 @@ static class KayaWire
                 case ValueF64: payload = BitConverter.ToDouble(rec, at + 8); break;
                 default: payload = Encoding.UTF8.GetString(rec, at + 8, plen); break;
             }
+        }
+        if (kind == OccKindPasted)
+        {
+            payload = ParseClip(rec, at, out int _pasteEnd);
         }
         return true;
     }
