@@ -1988,7 +1988,7 @@ fn close_sampler() {
 }
 
 /// Show the Shell's common item dialog and return (name, path) per
-/// file. Runs on its own STA thread; see the apply arm.
+/// file. Runs on the dialog apartment's thread; see `dialog_apartment`.
 ///
 /// The empty vector IS cancel: Show() answers ERROR_CANCELLED, which is
 /// not an error condition to report but the platform's way of saying the
@@ -1999,10 +1999,7 @@ fn file_dialog_show(
     filters: &[(String, String)],
     folder: Option<&str>,
 ) -> Vec<(String, String)> {
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
-    };
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
     use windows::Win32::UI::Shell::{
         FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
@@ -2011,10 +2008,9 @@ fn file_dialog_show(
 
     let mut out = Vec::new();
     unsafe {
-        // STA, because the shell dialog demands it. The result is not
-        // checked for S_FALSE: already-initialized is fine, and the
-        // matching uninit still runs.
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // THE APARTMENT IS THE THREAD'S, NOT THIS CALL'S — the caller
+        // entered it and never leaves it. See `dialog_apartment`.
+        //
         // WHICH CALL FAILED, not merely that one did: a bare
         // "The parameter is incorrect" from a chain of six COM calls
         // names nothing, and the first run cost a deploy cycle to learn
@@ -2123,9 +2119,225 @@ fn file_dialog_show(
                 );
             }
         }
-        CoUninitialize();
     }
     out
+}
+
+/// Win32's EXCEPTION_POINTERS/EXCEPTION_RECORD, truncated to the one
+/// field the probe reads. The handler never touches the rest.
+#[repr(C)]
+struct ExceptionPointers {
+    record: *mut ExceptionRecord,
+    context: *mut c_void,
+}
+#[repr(C)]
+struct ExceptionRecord {
+    code: u32,
+    flags: u32,
+}
+
+unsafe extern "system" {
+    fn AddVectoredExceptionHandler(
+        first: u32,
+        handler: unsafe extern "system" fn(*mut ExceptionPointers) -> i32,
+    ) -> *mut c_void;
+}
+
+/// How many times the Shell has been caught calling into an apartment
+/// this process had already closed. THE HARNESS FAILS THE SCENE ON A
+/// NON-ZERO COUNT (see `Stage::finish`).
+///
+/// It is a count and not a print because the failure it names is
+/// SILENT IN FOUR LANGUAGES OUT OF FIVE. Measured 2026-08-03 on the
+/// windows lane, per-dialog apartments, 5 runs each with this handler
+/// armed: rust raised 0x80010108 on 2 of 5 runs and PASSED all five;
+/// java raised it on 3 of 5 and died on exactly those three. Only the
+/// JVM notices, because its top-level filter reports any exception
+/// code as a fatal VM error even on a thread it does not own — so
+/// leaving the detection to a runtime's temperament leaves it to luck.
+static COM_DISCONNECTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// KAYA_WINUI_SEH_PROBE: also name every COM/RPC first-chance code and
+/// the thread it landed on, for the next investigation.
+static PROBE_VERBOSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A VECTORED handler is the only place in this process that can see
+/// these: they run ahead of every frame-based `__except`, and the one
+/// that matters here is swallowed by combase before any other code
+/// gets a look. It decides nothing — always EXCEPTION_CONTINUE_SEARCH
+/// — it only counts.
+unsafe extern "system" fn seh_probe(info: *mut ExceptionPointers) -> i32 {
+    use std::sync::atomic::Ordering::Relaxed;
+    const CONTINUE_SEARCH: i32 = 0;
+    const RPC_E_DISCONNECTED: u32 = 0x8001_0108;
+    let code = unsafe { (*(*info).record).code };
+    if code == RPC_E_DISCONNECTED {
+        COM_DISCONNECTS.fetch_add(1, Relaxed);
+    }
+    // FACILITY_RPC's HRESULT range. C++ throws (0xE06D7363) and the
+    // loader's own breakpoints are noise for this question. Printing
+    // is opt-in: a handler that takes stderr's lock runs on threads
+    // this process does not own.
+    if PROBE_VERBOSE.load(Relaxed) && code & 0xFFFF_0000 == 0x8001_0000 {
+        eprintln!(
+            "kaya: first-chance COM exception {code:#010x} on thread {}",
+            unsafe { GetCurrentThreadId() }
+        );
+    }
+    CONTINUE_SEARCH
+}
+
+/// Armed for every harness build, because that is the build being
+/// TESTED and the guard is worthless if someone has to remember it. A
+/// shipped app carries no handler unless it asks for the probe.
+fn install_seh_probe() {
+    let verbose = std::env::var_os("KAYA_WINUI_SEH_PROBE").is_some();
+    if !verbose && !cfg!(feature = "harness") {
+        return;
+    }
+    PROBE_VERBOSE.store(verbose, std::sync::atomic::Ordering::Relaxed);
+    // 1 = ahead of any handler already registered.
+    unsafe { AddVectoredExceptionHandler(1, seh_probe) };
+}
+
+/// One request to put a picker up, handed to the apartment thread.
+struct DialogRequest {
+    hwnd: isize,
+    multiple: bool,
+    filters: Vec<(String, String)>,
+    folder: Option<String>,
+    dialog: u64,
+    sink: OccSink,
+}
+
+/// Requests waiting for the apartment thread.
+static DIALOG_QUEUE: std::sync::Mutex<Vec<DialogRequest>> = std::sync::Mutex::new(Vec::new());
+/// The apartment thread, started at the first pick and never joined.
+static DIALOG_APARTMENT: OnceLock<()> = OnceLock::new();
+/// The doorbell the apply arm rings after queueing.
+///
+/// AN EVENT AND NOT A POSTED MESSAGE, for two reasons. Posting needs
+/// the thread's id, so the caller would have to WAIT for the thread to
+/// come up — on the UI thread, inside apply, which is the one place
+/// this backend must never block (the app-thread stall detector exists
+/// for exactly that). And a thread message is discarded by any modal
+/// loop that dispatches it, which is what a picker runs. An auto-reset
+/// event needs nobody to exist yet and cannot be swallowed: signalled
+/// before the wait, it satisfies the wait immediately.
+static DIALOG_DOORBELL: OnceLock<isize> = OnceLock::new();
+
+fn dialog_doorbell() -> isize {
+    *DIALOG_DOORBELL
+        .get_or_init(|| unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) })
+}
+
+/// The ONE STA the pickers live in, for the life of the process.
+///
+/// WHY IT IS SHARED AND NEVER TORN DOWN, measured 2026-08-03 on the
+/// windows lane. A thread per dialog called CoUninitialize the moment
+/// Show() returned, and CoUninitialize "forces all RPC connections on
+/// the thread to close" — its own documentation, which also says it
+/// belongs "on application shutdown, as the last call made to the COM
+/// library". The Shell's own workers are still calling back into this
+/// apartment at that moment (comdlg32 -> combase -> RPCRT4 ->
+/// RaiseException), so RPCRT4 raised RPC_E_DISCONNECTED (0x80010108)
+/// on a thread nobody in this process owns. Every runtime absorbed it
+/// but the JVM, whose top-level filter reports ANY exception code as a
+/// fatal VM error even on a thread it does not own: filedialog_java
+/// passed 2 of 10 while filedialog_rust passed 10 of 10 ON THE SAME
+/// BUILD, which is why this read as flake for the four milestones it
+/// shipped in.
+///
+/// THE GRACE PERIOD WAS MEASURED AND REJECTED. Keeping the per-dialog
+/// thread pumping before the uninit, java, 15 runs each: 5ms -> 13/15
+/// (both failures carried exactly one 0x80010108), 50ms -> 15/15,
+/// 250ms -> 15/15. So the safe margin is somewhere under 50ms on an
+/// idle 6-core VM and unknown anywhere else — a race won by margin,
+/// not a fix. This shape has no race to win: with no CoUninitialize
+/// there is no forced disconnect, and the same 15 runs raised zero
+/// COM first-chance exceptions of any kind.
+///
+/// Nor is it a kaya invention. A real app's picker runs on a thread
+/// whose apartment outlives it by the whole session; Chromium gives
+/// its shell dialogs a dedicated COM STA task runner rather than a
+/// thread per dialog.
+///
+/// It PUMPS while idle rather than blocking on the queue, because
+/// those same Shell workers reach into this apartment by posting to
+/// it; a thread that owns an STA and does not dispatch is a thread
+/// other people's calls hang on.
+fn dialog_apartment() {
+    DIALOG_APARTMENT.get_or_init(|| {
+        let doorbell = dialog_doorbell();
+        std::thread::Builder::new()
+            .name("kaya-file-dialog".into())
+            .spawn(move || {
+                const COINIT_APARTMENTTHREADED: u32 = 0x2;
+                const INFINITE: u32 = 0xFFFF_FFFF;
+                const QS_ALLINPUT: u32 = 0x04FF;
+                const MWMO_INPUTAVAILABLE: u32 = 0x0004;
+                const PM_REMOVE: u32 = 0x0001;
+                unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED) };
+                // NO CoUninitialize ANYWHERE BELOW, deliberately, and
+                // no way out of this loop: the apartment ends with the
+                // process. That is the whole fix.
+                loop {
+                    // One at a time, and never under the lock: a picker
+                    // runs a nested modal loop for as long as the user
+                    // stares at it.
+                    while let Some(request) = DIALOG_QUEUE.lock().unwrap().pop() {
+                        run_dialog_request(request);
+                    }
+                    let mut msg = Msg::default();
+                    while unsafe { PeekMessageW(&mut msg, 0, 0, 0, PM_REMOVE) } != 0 {
+                        unsafe { DispatchMessageW(&msg) };
+                    }
+                    unsafe {
+                        MsgWaitForMultipleObjectsEx(
+                            1,
+                            &doorbell,
+                            INFINITE,
+                            QS_ALLINPUT,
+                            MWMO_INPUTAVAILABLE,
+                        )
+                    };
+                }
+            })
+            .expect("failed to spawn the file dialog thread");
+    });
+}
+
+/// Put one picker up and answer it. Runs ON the apartment thread.
+fn run_dialog_request(request: DialogRequest) {
+    let files = file_dialog_show(
+        request.hwnd,
+        request.multiple,
+        &request.filters,
+        request.folder.as_deref(),
+    );
+    let picked = files
+        .into_iter()
+        .map(|(name, path)| {
+            let handle = crate::capi::picked_register(std::sync::Arc::new(
+                crate::protocol::PathSource {
+                    name: name.clone(),
+                    path: path.clone(),
+                },
+            ));
+            crate::protocol::PickedFile {
+                handle,
+                name,
+                local_path: path,
+            }
+        })
+        .collect::<Vec<_>>();
+    // Cancel is the EMPTY LIST, faithfully: Show() returns
+    // ERROR_CANCELLED and no platform can confirm an empty selection,
+    // so there is no sentinel to invent (DESIGN.md, File dialogs).
+    crate::capi::file_dialog_retire(request.dialog);
+    request.sink.send(Occurrence::FileDialogResult {
+        dialog: crate::protocol::FileDialogId(request.dialog),
+        files: picked,
+    });
 }
 
 fn window_client_width(core: &CoreState, window: u64) -> Option<f64> {
@@ -4156,54 +4368,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // "honorable on four platforms and not the fifth" — and it
             // decides the API rather than being worked around.
             //
-            // ON ITS OWN STA THREAD, because Show() is modal and runs a
-            // nested message loop. Blocking the UI thread inside apply
-            // would stall the dispatcher for as long as the picker is
-            // up, and this scene exists to prove the app stays alive
-            // while a pick is outstanding. The owner HWND still makes it
-            // modal to the user; only kaya's thread is spared.
+            // ON THE DIALOG APARTMENT'S THREAD, because Show() is modal
+            // and runs a nested message loop. Blocking the UI thread
+            // inside apply would stall the dispatcher for as long as the
+            // picker is up, and this scene exists to prove the app stays
+            // alive while a pick is outstanding. The owner HWND still
+            // makes it modal to the user; only kaya's thread is spared.
+            // ONE apartment serves every dialog and outlives them all —
+            // see `dialog_apartment` for the failure that shape fixes.
             let target = winui_window(core, spec.window.0);
             let hwnd = target
                 .ok()
                 .and_then(|t| windows_core::Interface::cast::<IWindowNative>(&t).ok())
                 .and_then(|n| n.window_handle().ok())
                 .unwrap_or(0);
-            let dir = core.pending_dialog_dir.borrow_mut().take();
-            let multiple = spec.multiple;
-            let filters = spec.filters.clone();
-            let dialog_id = spec.dialog.0;
-            let sink = core.occurrences.clone();
-            std::thread::Builder::new()
-                .name("kaya-file-dialog".into())
-                .spawn(move || {
-                    let files = file_dialog_show(hwnd, multiple, &filters, dir.as_deref());
-                    let picked = files
-                        .into_iter()
-                        .map(|(name, path)| {
-                            let handle = crate::capi::picked_register(std::sync::Arc::new(
-                                crate::protocol::PathSource {
-                                    name: name.clone(),
-                                    path: path.clone(),
-                                },
-                            ));
-                            crate::protocol::PickedFile {
-                                handle,
-                                name,
-                                local_path: path,
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    // Cancel is the EMPTY LIST, faithfully: Show()
-                    // returns ERROR_CANCELLED and no platform can
-                    // confirm an empty selection, so there is no
-                    // sentinel to invent (DESIGN.md, File dialogs).
-                    crate::capi::file_dialog_retire(dialog_id);
-                    sink.send(Occurrence::FileDialogResult {
-                        dialog: crate::protocol::FileDialogId(dialog_id),
-                        files: picked,
-                    });
-                })
-                .expect("failed to spawn the file dialog thread");
+            let request = DialogRequest {
+                hwnd,
+                multiple: spec.multiple,
+                filters: spec.filters.clone(),
+                folder: core.pending_dialog_dir.borrow_mut().take(),
+                dialog: spec.dialog.0,
+                sink: core.occurrences.clone(),
+            };
+            // QUEUE, THEN RING: whichever order the apartment thread
+            // starts in, the request is already there to be found.
+            DIALOG_QUEUE.lock().unwrap().push(request);
+            dialog_apartment();
+            unsafe { SetEvent(dialog_doorbell()) };
         }
         ApplyOp::PresentAlert(spec) => {
             // The platform's REAL modal dialog: ContentDialog's three
@@ -4771,6 +4962,14 @@ const MDD_ON_NO_MATCH_SHOW_UI: i32 = 0x8;
 unsafe extern "system" {
     fn LoadLibraryW(name: *const u16) -> *mut c_void;
     fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
+    /// The dialog apartment's doorbell: auto-reset, unnamed.
+    fn CreateEventW(
+        attributes: *const c_void,
+        manual_reset: i32,
+        initial: i32,
+        name: *const u16,
+    ) -> isize;
+    fn SetEvent(event: isize) -> i32;
     /// This module's own base, for the sampler window's class.
     #[cfg(feature = "harness")]
     fn GetModuleHandleW(name: *const u16) -> isize;
@@ -4779,6 +4978,10 @@ unsafe extern "system" {
 #[link(name = "ole32")]
 unsafe extern "system" {
     fn CoInitializeEx(reserved: *const c_void, coinit: u32) -> i32;
+    // NO CoUninitialize IS DECLARED HERE, and that is the fix rather
+    // than an omission: the one apartment this process opens for
+    // pickers is meant to end with the process. `dialog_apartment`
+    // carries the measurement.
 }
 
 type MddBootstrapInitialize2 =
@@ -4829,6 +5032,7 @@ fn bootstrap_windows_app_runtime() {
 /// the exit code; the host process decides how to exit (a library must
 /// not tear down someone else's process).
 pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
+    install_seh_probe();
     bootstrap_windows_app_runtime();
 
     const COINIT_APARTMENTTHREADED: u32 = 0x2;
@@ -5140,6 +5344,19 @@ unsafe extern "system" {
     ) -> isize;
     fn DefWindowProcW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
 
+    /// The dialog apartment's loop (`dialog_apartment`): a thread that
+    /// owns an STA has to dispatch, and it sleeps on its doorbell and
+    /// its message queue at the same time.
+    fn PeekMessageW(msg: *mut Msg, hwnd: isize, min: u32, max: u32, remove: u32) -> i32;
+    fn DispatchMessageW(msg: *const Msg) -> isize;
+    fn MsgWaitForMultipleObjectsEx(
+        count: u32,
+        handles: *const isize,
+        timeout: u32,
+        wake_mask: u32,
+        flags: u32,
+    ) -> u32;
+
     /// The harness's own calls: the sampler window that lets it ask an
     /// STA object a question from another thread, and the posts that
     /// drive the dialog. EVERY ONE IS GATED, because WndClassW is, and
@@ -5175,6 +5392,20 @@ unsafe extern "system" {
     fn DestroyWindow(hwnd: isize) -> i32;
     #[cfg(feature = "harness")]
     fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
+}
+
+/// Win32's MSG, for the dialog apartment's loop. Laid out to match
+/// winuser.h exactly (POINT inline, no trailing member on Windows).
+#[repr(C)]
+#[derive(Default)]
+struct Msg {
+    hwnd: isize,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    pt_x: i32,
+    pt_y: i32,
 }
 
 /// Win32's RECT, for the client/outer chrome math below.
@@ -7147,6 +7378,25 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn finish(&self, code: i32, verdict: &str) {
+        // THE APARTMENT GUARD, on the path every scene in every
+        // language leaves by. A first-chance RPC_E_DISCONNECTED means
+        // some apartment in this process closed while the Shell still
+        // held proxies into it — the defect `dialog_apartment`
+        // describes — and four of the five guest runtimes swallow it
+        // without a mark, so the scene has to be the one that looks.
+        // A green scene that raised one is not a green scene.
+        let disconnects = COM_DISCONNECTS.load(std::sync::atomic::Ordering::Relaxed);
+        let synthesized;
+        let (code, verdict) = if code == 0 && disconnects > 0 {
+            synthesized = format!(
+                "KAYA_SELFTEST: FAILED ({disconnects} first-chance RPC_E_DISCONNECTED \
+                 (0x80010108) — a COM apartment closed while the Shell still held \
+                 proxies into it; see dialog_apartment in crates/kaya/src/winui/mod.rs)"
+            );
+            (1, synthesized.as_str())
+        } else {
+            (code, verdict)
+        };
         if code == 0 {
             println!("{verdict}");
         } else {
