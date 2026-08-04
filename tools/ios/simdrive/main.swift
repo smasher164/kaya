@@ -458,7 +458,7 @@ final class Tapper {
 
 let arguments = CommandLine.arguments
 guard arguments.count >= 4 else {
-    fail("usage: simdrive <udid> <app-pid> state|choose <name>|cancel|describe")
+    fail("usage: simdrive <udid> <app-pid> state|choose <name>|cancel|describe|press <label>")
 }
 let udid = arguments[1]
 guard let appPid = Int32(arguments[2]) else { fail("app pid must be a number") }
@@ -625,6 +625,90 @@ case "cancel":
         fail("no Cancel reachable from the picker; it offers \(strip)")
     }
     if !waitForPickerGone() { fail("the picker was still up after cancelling") }
+
+case "press":
+    // Tap a control by its accessibility description, wherever it
+    // lives. The paste-permission alert is the customer: unlike the
+    // picker it is not a remote view controller with rows, so `choose`
+    // (which parses "<name>, <kind>, <time>, <size>" rows) cannot reach
+    // it. The overlay tree (a pid other than the app's) is searched
+    // first; when no overlay is up the app's OWN tree is searched, so
+    // the verb serves both homes a system alert can have — measured to
+    // matter, since which process presents the paste alert is exactly
+    // what the probe asks.
+    guard arguments.count >= 5 else { fail("press needs a label") }
+    let label = arguments[4...].joined(separator: " ")
+    var pressed = false
+    for _ in 0..<20 {
+        // BOTH TREES, EVERY TIME, because each one goes blind in a
+        // different state. The hit-test overlay finds an alert while
+        // the foreground app's accessibility answers — but a paste
+        // alert raised by the APP'S OWN blocked read takes the
+        // hit-test down with it (measured: `describe` answered "no
+        // picker" for six straight seconds with the alert filling the
+        // screen). The explicit tree walk of the pid this was invoked
+        // with — SpringBoard, for the paste alert it hosts — answers
+        // in exactly that state, and needs no hit-test at all.
+        var nodes: [Node] = []
+        var home = "overlay"
+        if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
+            flatten(root, 0, into: &nodes)
+        }
+        if !nodes.contains(where: { $0.description.contains(label) }),
+            let appObject = sim.applicationObject(forPid: appPid),
+            let root = sim.element(for: appObject)
+        {
+            home = "app"
+            nodes = []
+            flatten(root, 0, into: &nodes)
+        }
+        let exact = nodes.first { $0.description == label && !$0.frame.isEmpty }
+        // Shortest match, not first match: on the paste alert BOTH
+        // buttons contain "Allow Paste", and tree order puts the
+        // denial first. The shortest containing description is the
+        // one closest to what was asked for.
+        let loose = nodes.filter { $0.description.contains(label) && !$0.frame.isEmpty }
+            .min { $0.description.count < $1.description.count }
+        if let hit = exact ?? loose {
+            // NEVER TAP A MOVING TARGET. The paste alert reports its
+            // buttons' FINAL frames while it is still animating in, so
+            // a tap at the reported centre lands wherever the alert
+            // currently is — measured to hit the button ABOVE the one
+            // asked for, and on this alert the button above "Allow
+            // Paste" is the denial. Two identical reads 300ms apart
+            // are the proof the animation is over; until then, loop.
+            usleep(300_000)
+            var settledNodes: [Node] = []
+            if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
+                flatten(root, 0, into: &settledNodes)
+            }
+            if !settledNodes.contains(where: { $0.description.contains(label) }),
+                let appObject = sim.applicationObject(forPid: appPid),
+                let root = sim.element(for: appObject)
+            {
+                settledNodes = []
+                flatten(root, 0, into: &settledNodes)
+            }
+            let settled = settledNodes.first {
+                $0.description == hit.description && $0.frame == hit.frame
+            }
+            guard settled != nil else { continue }
+            let centre = CGPoint(x: hit.frame.midX, y: hit.frame.midY)
+            Tapper(device: sim.device).tap(at: centre, screen: screen)
+            print("pressed \(hit.role)\t\(hit.description)\t\(NSStringFromRect(hit.frame))\tin \(home)")
+            pressed = true
+            break
+        }
+        usleep(300_000)
+    }
+    if !pressed {
+        var nodes: [Node] = []
+        if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
+            flatten(root, 0, into: &nodes)
+        }
+        let listed = nodes.map { $0.description }.filter { !$0.isEmpty }
+        fail("nothing labeled \(label) to press; the overlay offers \(listed)")
+    }
 
 default:
     fail("unknown verb \(verb)")

@@ -830,6 +830,222 @@ out="$(clipboard_device tools/android/run-emulator.sh)" || {
     status=1
 }
 
+# THE iOS LANE IS THE ANDROID SHAPE, FOR THE ANDROID REASON, and it was
+# measured rather than argued: two simulators held two different clips at
+# the same time while the host's stayed untouched
+# (docs/clipboard-plan.md §8 finding 5). A session here is a DEVICE, the
+# slot queue_leg claims for a leg's whole duration IS this lane's
+# clipboard exclusion, and a drain bracket on top would exclude nothing.
+#
+# So this checks what CAN go wrong. A clipboard leg must ride queue_leg
+# AND run_swiftui_on: the first claims the simulator, the second starts
+# the host-side watcher that answers clipboard_seed and expect_clipboard
+# — on this platform the guest cannot spawn a child process, so a leg
+# without that watcher has neither the exclusion nor a foreign side at
+# all. It must not ride kaya-sim-pad, which is ONE lockless device (the
+# same live temptation the android tablet is). And queue_leg must still
+# claim a device, or the first clause is a rule about a word.
+#
+# The swift flavor never spells its own leg name — it is queued in a loop
+# over IOS_SWIFT_SCENES — so that list is read as a leg too, and the
+# block that turns it into legs has to dispatch through queue_leg.
+clipboard_ios() { # path
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+
+# A leg call usually wraps, so continuations are joined first, each
+# keeping the line it started on.
+joined = []
+first = None
+buf = ""
+for n, raw in enumerate(text.splitlines(), 1):
+    s = raw.strip()
+    if first is None:
+        first = n
+    if s.endswith("\\"):
+        buf = (buf + " " + s[:-1]).strip()
+        continue
+    joined.append((first, (buf + " " + s).strip()))
+    first, buf = None, ""
+
+seen = 0
+for n, line in joined:
+    words = line.split()
+    if not words or words[0] not in ("queue_leg", "queue_pad_leg", "run_swiftui_on"):
+        continue
+    if not any(w == "clipboard" or w.startswith("clipboard-") for w in words[1:]):
+        continue
+    seen += 1
+    verb = words[0]
+    fn = words[1] if len(words) > 1 else ""
+    if verb == "queue_pad_leg":
+        bad.append(f"{path}:{n}: a clipboard leg on the iPad — kaya-sim-pad is a single "
+                   f"LOCKLESS device (queue_pad_leg claims no slot), so legs on it would "
+                   f"share one pasteboard; the phone pool slot lock IS this lane clipboard "
+                   f"exclusion (docs/clipboard-plan.md §8 finding 5)")
+    elif verb != "queue_leg":
+        bad.append(f"{path}:{n}: a clipboard leg runs outside queue_leg, the only thing "
+                   f"that claims a simulator for a whole leg")
+    elif fn != "run_swiftui_on":
+        bad.append(f"{path}:{n}: the clipboard leg rides {fn or verb}, not run_swiftui_on "
+                   f"— the host-side seed/read bridge is started there and nowhere else, "
+                   f"and iOS cannot answer either verb in the guest process")
+
+# The swift guests are legs too, spelled as a list rather than as calls.
+scenes = re.search("IOS_SWIFT_SCENES=\"([^\"]*)\"", text)
+if scenes is None:
+    bad.append(f"{path}: IOS_SWIFT_SCENES is not where this gate looks — the runner shape "
+               f"moved and the swift half of the check went vacuous")
+elif any(entry.split(":")[0] == "clipboard" for entry in scenes.group(1).split()):
+    seen += 1
+    block = text[scenes.end():]
+    stop = block.find("\n    drain\n")
+    if stop >= 0:
+        block = block[:stop]
+    if "queue_pad_leg" in block:
+        bad.append(f"{path}: clipboard is in IOS_SWIFT_SCENES and that block queues with "
+                   f"queue_pad_leg — the pad is one lockless device")
+    if "queue_leg " not in block:
+        bad.append(f"{path}: clipboard is in IOS_SWIFT_SCENES but that block no longer "
+                   f"queues through queue_leg, so the swift leg claims no device")
+
+if seen == 0:
+    bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
+
+start = text.find("queue_leg() {")
+end = text.find("queue_pad_leg() {")
+if start < 0 or end < start:
+    bad.append(f"{path}: queue_leg()/queue_pad_leg() are not where this gate looks — the "
+               f"runner shape moved and the check went vacuous")
+else:
+    body = text[start:end]
+    for claim in ("mkdir \"$LEGS_DIR/.dev-", "rmdir \"$LEGS_DIR/.dev-"):
+        if claim in body:
+            continue
+        bad.append(f"{path}: queue_leg no longer does `{claim}...`, so a leg no longer "
+                   f"holds its simulator alone — on this lane that lock IS the clipboard "
+                   f"exclusion (docs/clipboard-plan.md §8 finding 5)")
+
+# NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH. The seed once
+# transited the macOS pasteboard (pbcopy + pbsync host-><device>), which
+# delivers asynchronously — the guest read raced the window and answered
+# empty — and which validate-all would race against the mac lane and its
+# clipboard legs. The ratified shape is a spawned on-device write
+# (tools/ios/clipctl), so the pasteboard tools may appear here only in
+# comments explaining exactly this (docs/clipboard-plan.md §8 finding 6).
+for n, raw in enumerate(text.splitlines(), 1):
+    s = raw.strip()
+    if s.startswith("#"):
+        continue
+    if re.search(r"\bpbcopy\b|\bpbpaste\b|\bpbsync\b|set the clipboard", s):
+        bad.append(f"{path}:{n}: a live line touches a pasteboard tool (`{s[:60]}`) — "
+                   f"the clipboard seed/read is a spawned on-device process precisely so "
+                   f"this lane cannot race the mac lane legs or its own delivery window "
+                   f"(docs/clipboard-plan.md §8 finding 6)")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# THE GUARD GUARDS ITSELF, on the REAL runner rather than on a fixture: a
+# fixture only ever proves the pattern matches the fixture, which is how
+# the wayland seat guard passed VACUOUSLY TWICE (docs/traps.md). Each
+# perturbation prints its substitution count and the copy is refused if
+# it did not apply — an unchanged file is a FAILED self-test, not a
+# passed one — and each refusal is checked for its REASON, since an exit
+# code alone is satisfied by any unrelated finding.
+IOS_T="$(mktemp -d)"
+
+# <source> <regex> <replacement> <destination> -> substitution count
+ios_perturb() {
+    python3 -c '
+import re
+import sys
+
+text = open(sys.argv[1]).read()
+out, n = re.subn(sys.argv[2], sys.argv[3], text)
+open(sys.argv[4], "w").write(out)
+print(n)
+' "$@"
+}
+
+ios_applied() { # count label
+    if [ "$1" = 1 ]; then
+        return 0
+    fi
+    echo "check-steps: SELF-TEST FAIL ($2 applied $1 times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+    rm -rf "$IOS_T"
+    exit 1
+}
+
+ios_selftest() { # copy want-fragment label
+    local out
+    out="$(clipboard_ios "$1")" && {
+        echo "check-steps: SELF-TEST FAIL ($3 passed)" >&2
+        rm -rf "$IOS_T"
+        exit 1
+    }
+    case "$out" in
+        *"$2"*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($3 failed for another reason: $out)" >&2
+            rm -rf "$IOS_T"
+            exit 1
+            ;;
+    esac
+}
+
+# A clipboard leg moved onto the lockless pad must fail...
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'queue_leg (run_swiftui_on clipboard-swiftui)' 'queue_pad_leg \1' "$IOS_T/pad.sh")"
+ios_applied "$hits" "the pad perturbation"
+ios_selftest "$IOS_T/pad.sh" "on the iPad" "a clipboard leg on the pad"
+
+# ...a clipboard leg that claims no device slot at all must fail...
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'queue_leg (run_swiftui_on clipboard-swiftui)' '\1' "$IOS_T/bare.sh")"
+ios_applied "$hits" "the unqueued-leg perturbation"
+ios_selftest "$IOS_T/bare.sh" "outside queue_leg" "a clipboard leg outside queue_leg"
+
+# ...a queue_leg that stopped claiming a device must fail...
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'mkdir "\$LEGS_DIR/\.dev-\$i"' 'mkdir "$LEGS_DIR/live-$i"' "$IOS_T/unlocked.sh")"
+ios_applied "$hits" "the slot-lock perturbation"
+ios_selftest "$IOS_T/unlocked.sh" "holds its simulator alone" "an unlocked queue_leg"
+
+# ...and an unwired scene must fail, which takes BOTH legs away: the
+# rust example names itself, the swift one is a word in IOS_SWIFT_SCENES.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    'queue_leg run_swiftui_on clipboard-swiftui[\s\S]*?clipboard clipboard\n' '' \
+    "$IOS_T/half.sh")"
+ios_applied "$hits" "the rust-leg removal"
+hits="$(ios_perturb "$IOS_T/half.sh" ' clipboard"' '"' "$IOS_T/unwired.sh")"
+ios_applied "$hits" "the swift-leg removal"
+ios_selftest "$IOS_T/unwired.sh" "no clipboard leg found" "a runner with no clipboard leg"
+
+# ...and a live host-pasteboard line must fail: the seed once rode
+# pbcopy+pbsync and raced both its own delivery window and (under
+# validate-all) the mac lane's legs.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    echo ok$' '    printf seed | pbcopy\n    echo ok' "$IOS_T/hostboard.sh")"
+ios_applied "$hits" "the host-pasteboard perturbation"
+ios_selftest "$IOS_T/hostboard.sh" "touches a pasteboard tool" "a live pbcopy in the runner"
+
+rm -rf "$IOS_T"
+
+# The accept direction is the real check itself, immediately below: a
+# rule that refused everything would fail here rather than pass quietly.
+out="$(clipboard_ios tools/ios/run-sim.sh)" || {
+    echo "check-steps: an iOS clipboard leg must own its simulator for the whole leg (docs/clipboard-plan.md §8 finding 5 — one pasteboard per device, and the slot lock is this lane's drain):" >&2
+    echo "$out" >&2
+    status=1
+}
+
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
 # every scene there, so the leg selects one by name through
 # `--es KAYA_SELFTEST <scene>` and the guest matches it. A name the

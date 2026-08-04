@@ -76,10 +76,16 @@ tools/gen-header.sh --check
 tools/gen-bindings.sh --check
 
 # The host-side picker driver, built ONCE per run and before any leg.
-# Only the filedialog leg uses it, but building it here means a break in
-# it fails the run at the top rather than inside one leg's watcher,
-# where the symptom would be a scene timing out with no reason given.
+# Only the filedialog and clipboard legs use it, but building it here
+# means a break in it fails the run at the top rather than inside one
+# leg's watcher, where the symptom would be a scene timing out with no
+# reason given.
 SIMDRIVE=$(tools/ios/simdrive/build.sh)
+# The lane's foreign clipboard reader, built once for the same reason.
+# It is a separate binary rather than a verb of simdrive because it runs
+# INSIDE the simulator, under `simctl spawn`, against the same UIKit the
+# guest sees (tools/ios/clipctl/main.swift).
+CLIPCTL=$(tools/ios/clipctl/build.sh)
 
 make_bundle() {
     local name="$1" bundle_id="$2" executable_path="$3"
@@ -498,6 +504,261 @@ rec_finish() {
     printf '%s\n' "$1" >"$REC_DIR/leg.log"
 }
 
+# THE CLIPBOARD SCENE'S FOREIGN SIDE, ON THE HOST. iOS has no child
+# processes — Process is macOS-only, so the interpreter cannot run the
+# foreign tools the mac arm runs — and an app reading its own writes is
+# a check that cannot fail for the reason the scene exists. So the seed
+# and the foreign read are answered here, over the same two files the
+# picker verbs use, with payloads base64'd because the request line is
+# word-split below and a seed's content has spaces.
+#
+# Every rule below was measured (docs/clipboard-plan.md §8):
+#   - BOTH DIRECTIONS ARE A SPAWNED PROCESS, not a tool
+#     (tools/ios/clipctl). Reading: `simctl pbpaste` reads a union clip
+#     as empty and `pbsync <device> host` drops app-defined types.
+#     Seeding: `simctl pbcopy` is text-only, and `pbsync host <device>`
+#     exits rc=0 while delivery is still in flight — the window that
+#     intermittently handed the guest an empty board (§8 finding 6) —
+#     besides transiting the ONE macOS pasteboard this lane must never
+#     touch (validate-all runs it beside the mac lane's clipboard
+#     legs). A spawned principal is gated by the system as another app,
+#     which is the only sense of "foreign" that matters here.
+#   - `simctl` writes its "unhandled Platform key" warnings to STDERR,
+#     so every capture here drops it rather than gluing 18 lines in
+#     front of the content.
+
+# base64 in and out, in python3 — the repo's rule for text processing,
+# and the spelling that cannot line-wrap a long payload into several
+# tokens.
+clip_decode() { # b64 -> bytes on stdout
+    python3 -c 'import base64, sys
+sys.stdout.buffer.write(base64.b64decode(sys.argv[1]))' "$1"
+}
+
+clip_encode() { # bytes on stdin -> one base64 token on stdout
+    python3 -c 'import base64, sys
+sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())'
+}
+
+# The process that HOSTS the paste alert. Resolved per call and cached
+# per device: the alert is SpringBoard's, and SpringBoard's own tree is
+# the one place it is ALWAYS readable — the hit-test route goes blind
+# exactly when the alert was raised by the foreground app's own blocked
+# read (measured 2026-08-03: `describe` answered "no picker" for six
+# straight seconds with the alert filling the screen, while a tree walk
+# of SpringBoard's pid found the button first try).
+clip_sb_pid() { # udid -> pid (0 when unresolved, which press tolerates)
+    local udid="$1" pid
+    local cache="$LEGS_DIR/sb-pid-$udid"
+    if [ -f "$cache" ]; then
+        cat "$cache"
+        return 0
+    fi
+    pid=$(xcrun simctl spawn "$udid" launchctl list 2>/dev/null \
+        | grep -F "com.apple.SpringBoard" | head -1 | cut -f1)
+    echo "${pid:-0}" | tee "$cache"
+}
+
+# Answer the per-clip paste prompt, or report that there was none — an
+# own-content read never raises one, so "none" is an answer rather than
+# a failure.
+#
+# The press verb is the one that looks: it searches the hit-test
+# overlay AND SpringBoard's own tree each try, refuses to tap a button
+# whose frame is still animating, and FAILS when nothing carries the
+# label — which is this function's "no alert" signal. Pressed again
+# until that failure, because the alert leaving the screen is the only
+# proof a tap landed.
+clip_press() { # udid -> pressed | none
+    local udid="$1" sb i did=0
+    sb=$(clip_sb_pid "$udid")
+    for i in 1 2 3 4 5 6; do
+        if ! timeout 60 "$SIMDRIVE" "$udid" "$sb" press Allow Paste >/dev/null 2>&1; then
+            if [ "$did" = 1 ]; then
+                echo pressed
+            else
+                echo none
+            fi
+            return 0
+        fi
+        did=1
+    done
+    echo "the paste alert is still up after 6 presses" >&2
+    return 1
+}
+
+# Put content on the device clipboard FROM OUTSIDE the guest: a
+# spawned writer on the DEVICE, one item, replacing the board. `kind`
+# is a bare token; the payload rides base64 and is the literal content
+# for text/html, or an ALREADY-EXPANDED absolute path for image/files.
+#
+# THE HOST PASTEBOARD IS NOT IN THIS PATH, deliberately, and it was
+# once: the first shape seeded the HOST board and pushed it with
+# `pbsync host <device>`, which exits rc=0 while DELIVERY IS STILL IN
+# FLIGHT — the guest's read then snapshots the board mid-replacement
+# and answers empty, which run after run failed a DIFFERENT two of the
+# four foreign reads (docs/clipboard-plan.md §8 finding 6). The
+# spawned write is synchronous and visible to other processes before
+# the spawn exits (measured, 246ms), and it keeps the ONE macOS
+# pasteboard out of a lane that runs beside validate-mac's clipboard
+# legs under validate-all — through the host board this lane would
+# race the mac lane's, and check-steps' iOS clause now pins the
+# absence.
+#
+# Custom formats are not seedable, here as everywhere: no stock tool
+# writes an app-defined type, and a helper kaya wrote would be foreign
+# in name only.
+clip_seed() { # udid kind b64 -> ok
+    local udid="$1" kind="$2" payload path
+    case "$kind" in
+        text | html)
+            payload="$3"
+            ;;
+        image)
+            # The watcher reads the container file (a real host path)
+            # and hands clipctl the BYTES: the write must not depend on
+            # the spawned process's own sandbox seeing the path.
+            path=$(clip_decode "$3")
+            if [ ! -f "$path" ]; then
+                echo "the image seed's file is missing: $path" >&2
+                return 1
+            fi
+            payload=$(clip_encode <"$path")
+            ;;
+        files)
+            # The PATH itself is the payload: the container path is the
+            # same string on the host and inside the simulator, and the
+            # file-url item must carry the url, not the bytes.
+            path=$(clip_decode "$3")
+            if [ ! -f "$path" ]; then
+                echo "the files seed's file is missing: $path" >&2
+                return 1
+            fi
+            payload="$3"
+            ;;
+        *)
+            echo "clipboard_seed cannot write $kind from outside the app" >&2
+            return 1
+            ;;
+    esac
+    # THE WRITER IS HELD ALIVE, not exit-and-hope: the pasteboard
+    # daemon serves item DATA by fetching it from the setter, and a
+    # writer that exits at once intermittently leaves a reader empty
+    # (measured 1-in-5 solo for the png; §8 finding 6). Each seed
+    # kills the previous holder — the board is replaced wholesale — and
+    # the leg teardown kills the last one.
+    local holder_file="$LEGS_DIR/seed-holder-$udid"
+    local seed_log="$LEGS_DIR/seed-$udid.out"
+    if [ -f "$holder_file" ]; then
+        kill "$(cat "$holder_file")" 2>/dev/null || true
+        rm -f "$holder_file"
+    fi
+    : >"$seed_log"
+    timeout 600 xcrun simctl spawn "$udid" "$CLIPCTL" write "$kind" "$payload" hold \
+        >"$seed_log" 2>/dev/null &
+    echo "$!" >"$holder_file"
+    # The W line is the writer saying the board is written; the hold
+    # begins after it. No line inside the bound is a failed write.
+    local waited=0
+    while ! grep -q "^W types=" "$seed_log"; do
+        waited=$((waited + 1))
+        if [ "$waited" -gt 100 ]; then
+            echo "the spawned $kind seed never reported its write on $udid" >&2
+            return 1
+        fi
+        sleep 0.1
+    done
+    echo ok
+}
+
+# Read the device clipboard back FROM OUTSIDE the guest, in one
+# representation, and answer what expect_clipboard compares: the content
+# for text/html/custom, WxH for an image, newline-joined basenames for
+# files, empty when the board does not carry the kind.
+clip_read() { # udid b64-kind -> b64 answer
+    local udid="$1" kind log png b64 tries=0
+    kind=$(clip_decode "$2")
+    if [ -z "$kind" ]; then
+        echo "clip_read needs a kind" >&2
+        return 1
+    fi
+    # Named for the DEVICE: a leg holds its simulator for its whole
+    # duration, so this cannot collide with another leg's read.
+    log="$LEGS_DIR/clipread-$udid.out"
+    # THE READ RUNS IN THE BACKGROUND because it does not return until
+    # the prompt is answered, and the thing that answers it is the press
+    # below — a foreground read would deadlock against its own remedy.
+    timeout 25 xcrun simctl spawn "$udid" "$CLIPCTL" read "$kind" >"$log" 2>/dev/null &
+    local reader=$!
+    while kill -0 "$reader" 2>/dev/null && [ "$tries" -lt 8 ]; do
+        clip_press "$udid" >/dev/null || true
+        tries=$((tries + 1))
+        sleep 1
+    done
+    wait "$reader" 2>/dev/null || true
+    if ! grep -q "^S " "$log"; then
+        echo "the spawned reader answered nothing at all: $(head -3 "$log")" >&2
+        return 1
+    fi
+    # THE MISSING LINE IS THE DIAGNOSIS. A kind the board does not carry
+    # still prints an EMPTY `S b64=`; no line at all means the read never
+    # returned, which is an unanswered prompt and not an empty clipboard.
+    # Saying so here is the difference between one message and a scene
+    # that reports the backend wrote nothing.
+    if ! grep -q "^S b64=" "$log"; then
+        echo "the $kind read never returned after $tries presses — the paste prompt" \
+            "went unanswered; the board offered $(grep "^S types=" "$log")" >&2
+        return 1
+    fi
+    b64=$(grep -m1 "^S b64=" "$log" | cut -d= -f2-)
+    case "$kind" in
+        image)
+            # TWO OF APPLE'S TOOLS, the mac arm's own answer: the bytes
+            # are written out and `sips` reports the DECODED SIZE. WxH
+            # rather than a byte count, because every host re-encodes
+            # freely and one picture would count differently per lane.
+            if [ -z "$b64" ]; then
+                return 0
+            fi
+            png="$LEGS_DIR/clipread-$udid.png"
+            clip_decode "$b64" >"$png"
+            sips -g pixelWidth -g pixelHeight "$png" 2>/dev/null | python3 -c 'import re, sys
+size = dict(re.findall(r"^\s+(pixelWidth|pixelHeight):\s*(\d+)", sys.stdin.read(), re.M))
+sys.stdout.write(size["pixelWidth"] + "x" + size["pixelHeight"] if len(size) == 2 else "")' \
+                | clip_encode
+            ;;
+        files)
+            # BASENAMES, never paths: the expected string is compared
+            # byte for byte across lanes whose containers are at
+            # different paths.
+            clip_decode "$b64" | python3 -c 'import os, sys, urllib.parse
+names = [os.path.basename(urllib.parse.unquote(urllib.parse.urlparse(line).path.rstrip("/")))
+         for line in sys.stdin.read().splitlines() if line]
+sys.stdout.write("\n".join(names))' | clip_encode
+            ;;
+        *)
+            # text, html and any custom id ARE their own answer, so the
+            # reader's base64 rides through untouched — one fewer decode
+            # to be byte-exact about.
+            printf '%s' "$b64"
+            ;;
+    esac
+}
+
+# The clipboard verbs, dispatched off the request line's first token.
+clip_verb() { # udid verb args...
+    local udid="$1" verb="$2"
+    case "$verb" in
+        clip_seed) clip_seed "$udid" "${3:-}" "${4:-}" ;;
+        clip_read) clip_read "$udid" "${3:-}" ;;
+        clip_press) clip_press "$udid" ;;
+        *)
+            echo "unknown clipboard verb $verb" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Answer the guest's simdrive requests for the life of one leg.
 #
 # The protocol is deliberately two files and nothing else: the guest
@@ -509,7 +770,9 @@ rec_finish() {
 #
 # The app's pid is resolved per request rather than once: simdrive needs
 # it to tell the picker's process from the app's, and the app is
-# launched after this starts.
+# launched after this starts. The clipboard verbs need no pid — the
+# principal they drive is the spawned reader, not the app — so they
+# skip that round trip.
 simdrive_watch() { # udid bundle_id documents_dir
     local udid="$1" bundle_id="$2" dir="$3"
     local request="$dir/kaya-simdrive-request" response="$dir/kaya-simdrive-response"
@@ -520,12 +783,24 @@ simdrive_watch() { # udid bundle_id documents_dir
             local verb
             verb=$(cat "$request" 2>/dev/null)
             rm -f "$request"
-            local pid body rc
-            pid=$(xcrun simctl spawn "$udid" launchctl list 2>/dev/null \
-                | grep -F "$bundle_id" | head -1 | cut -f1)
-            # shellcheck disable=SC2086
-            body=$("$SIMDRIVE" "$udid" "${pid:-0}" $verb 2>&1)
-            rc=$?
+            # CAPTURED WITH `|| rc=$?`, NOT `rc=$?` ON THE NEXT LINE: this
+            # runs under `set -e`, where a failing command substitution
+            # kills the watcher before the next line runs. The err branch
+            # below was unreachable that way, and the failure it exists
+            # to report arrived as a leg timing out with nothing said.
+            local pid body rc=0
+            case "$verb" in
+                clip_*)
+                    # shellcheck disable=SC2086
+                    body=$(clip_verb "$udid" $verb 2>&1) || rc=$?
+                    ;;
+                *)
+                    pid=$(xcrun simctl spawn "$udid" launchctl list 2>/dev/null \
+                        | grep -F "$bundle_id" | head -1 | cut -f1)
+                    # shellcheck disable=SC2086
+                    body=$("$SIMDRIVE" "$udid" "${pid:-0}" $verb 2>&1) || rc=$?
+                    ;;
+            esac
             # Written aside and RENAMED: rename is atomic, so the
             # guest either sees no response or a whole one. Polling a
             # file being written is exactly how a harness reads half an
@@ -560,16 +835,19 @@ run_swiftui_on() {
     script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
     [ -n "$extra" ] && script="$script
 $extra"
-    # THE HARNESS'S EYES OUTSIDE THIS APP, for the one scene that needs
-    # them. iOS's document picker is a remote view controller whose UI
-    # belongs to another process and which publishes nothing in-process,
-    # so its verbs are answered on the HOST by tools/ios/simdrive; the
-    # two sides meet through files in the app's own data container
-    # (docs/traps.md). Started per leg and killed with it — a watcher
-    # outliving its leg would answer the NEXT one's requests against a
-    # dead app.
+    # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for the two scenes
+    # that need them, for two different reasons. iOS's document picker is
+    # a remote view controller whose UI belongs to another process and
+    # which publishes nothing in-process, so its verbs are answered on
+    # the HOST by tools/ios/simdrive. The clipboard's foreign seed and
+    # foreign read cannot run in-process at all — iOS has no child
+    # processes — so they are answered on the host too, by the clip_*
+    # verbs above. Both meet the guest through files in the app's own
+    # data container (docs/traps.md). Started per leg and killed with it
+    # — a watcher outliving its leg would answer the NEXT one's requests
+    # against a dead app.
     local watcher_pid=""
-    if [ "$scene" = filedialog ]; then
+    if [ "$scene" = filedialog ] || [ "$scene" = clipboard ]; then
         local data_container
         data_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
@@ -583,6 +861,12 @@ $extra"
     if [ -n "$watcher_pid" ]; then
         kill "$watcher_pid" 2>/dev/null || true
         wait "$watcher_pid" 2>/dev/null || true
+    fi
+    # The last seed's held writer dies with the leg (clip_seed's
+    # holder discipline; the next leg's own copy replaces the board).
+    if [ -f "$LEGS_DIR/seed-holder-$udid" ]; then
+        kill "$(cat "$LEGS_DIR/seed-holder-$udid")" 2>/dev/null || true
+        rm -f "$LEGS_DIR/seed-holder-$udid"
     fi
     printf '%s\n' "$out"
     rec_finish "$out"
@@ -780,7 +1064,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y clipboard"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -930,6 +1214,24 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on filedialog-swiftui "$APP" dev.kaya.filedialogswiftui \
         filedialog-swiftui filedialog filedialog
+
+    # The clipboard scene. THE SECOND LEG WITH HELP FROM THE HOST, for a
+    # different reason than the picker's: iOS cannot spawn a child
+    # process, so the foreign seed and the foreign read — the crossings
+    # that make this scene a check rather than kaya parsing its own
+    # writes — are answered by run_swiftui_on's watcher over the same
+    # container bridge (the clip_* verbs above, docs/clipboard-plan.md
+    # §8). NO DRAIN BRACKET, unlike every desktop lane: the simulator
+    # pasteboard is strictly PER-DEVICE (measured — two sims held two
+    # different clips at once, the host's untouched), so the slot
+    # queue_leg already holds IS this lane's clipboard exclusion, and a
+    # bracket on top would be a barrier that cannot fail for the reason
+    # it exists.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example clipboard
+    APP=$(make_bundle clipboardrs-swiftui dev.kaya.clipboardswiftui "$TARGET_DIR/examples/clipboard")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on clipboard-swiftui "$APP" dev.kaya.clipboardswiftui \
+        clipboard-swiftui clipboard clipboard
 
     # The a11y scene: every widget kind's role and name read back out of
     # UIKit's OWN accessibility tree. iOS is the one platform where that

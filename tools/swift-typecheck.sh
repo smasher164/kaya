@@ -111,6 +111,15 @@ if ios_xcrun -sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
         echo "swift-typecheck: FAIL (the SwiftUI interpreter, iOS)"
         exit 1
     fi
+    # The lane's foreign clipboard reader, for the same reason simdrive
+    # earned its pass: nothing else compiles it until run-sim.sh does,
+    # and the emulator must never be the first compiler to see it.
+    if ! ios_xcrun -sdk iphonesimulator swiftc -typecheck \
+        -target arm64-apple-ios17.0-simulator \
+        tools/ios/clipctl/main.swift; then
+        echo "swift-typecheck: FAIL (tools/ios/clipctl, the iOS lane's foreign clipboard process)"
+        exit 1
+    fi
 else
     echo "swift-typecheck: note — no iphonesimulator SDK; the iOS half went unchecked" >&2
 fi

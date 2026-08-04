@@ -26,12 +26,25 @@ import Foundation
 
 let app = KayaApp()
 
-// TMPDIR FIRST. NSTemporaryDirectory() answers with the per-user Darwin
-// temp directory (/var/folders/...) and does NOT honour TMPDIR, so a
-// guest that trusted it wrote its files somewhere the interpreter never
-// looked — the interpreter computes $TMP the way Rust does, which is
-// TMPDIR when set. Measured by the filedialog scene, the hard way.
-let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+// NOT THE TEMP DIRECTORY ON iOS. $TMP there is the app's own Documents
+// (kayaTempDir in swift/KayaSwiftUI.swift), because the outside process
+// that seeds and reads these files can see that collection and cannot
+// see an app's private storage. A guest that computed the temp dir
+// instead writes where nothing looks — the §7.6 android trap replayed,
+// where the shared Java guest lacked the rust guest's platform branch
+// and the seed died on the disagreed path.
+//
+// TMPDIR FIRST EVERYWHERE ELSE. NSTemporaryDirectory() answers with the
+// per-user Darwin temp directory (/var/folders/...) and does NOT honour
+// TMPDIR, so a guest that trusted it wrote its files somewhere the
+// interpreter never looked — the interpreter computes $TMP the way Rust
+// does, which is TMPDIR when set. Measured by the filedialog scene, the
+// hard way.
+#if os(iOS)
+    let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
+#else
+    let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+#endif
 let sceneDir = (kayaTmp as NSString)
     .appendingPathComponent("kaya-clip-\(ProcessInfo.processInfo.processIdentifier)")
 try? FileManager.default.createDirectory(

@@ -1341,8 +1341,149 @@ nothing had walked before.
   are generated from the spec and pinned by gen-bindings/gen-header
   — so the gate covers the one mechanism that can drift this way.
 
-## §8 onwards — to be written
+## §8 — what iOS actually charges (measured 2026-08-03; ClipProbe II)
 
-The iOS arm (measure UIPasteboard's charge for a slashed custom type
-FIRST — §5b finding 4's two macOS write paths are the warning), then
-the full matrix.
+The second campaign: tools/ios/clipprobe/{main2.swift,run2.sh,
+spawnread.swift}, on the kaya-sim pool's iOS 26.5 image. The first
+campaign (§0e finding 2) measured the prompt's existence; this one
+measured everything the arm touches. Five findings, every one load-
+bearing for the arm's shape.
+
+### 1. ONE WRITE PATH, AND THE SLASHED ID SURVIVES IT
+
+`UIPasteboard.items = [[type: value]]` with all five representations
+in one item (files as a second item) preserves `dev.kaya/note`
+VERBATIM in `types` — the macOS two-path dance (§5b finding 4:
+NSPasteboardItem drops a slashed type, the board-level write serves
+it) does NOT recur on iOS. Every representation reads back byte-exact
+as own content, prompt-free. The clip SURVIVES PROCESS EXIT: the app
+was terminated and the host still read every kind that crosses the
+bridge. The setData fallback cell was written and never needed.
+
+### 2. THE PROMPT IS PER-CLIP, NOT PER-PAIR, AND IT IS DRIVABLE
+
+- The alert is an OUT-OF-PROCESS overlay (a pid other than the
+  app's), which is exactly what simdrive's hit-testing finds. Its
+  tree, recorded: AXStaticText `"<reader>" would like to paste from
+  "<writer>"`, AXStaticText `Do you want to allow this?`, AXButton
+  `Don't Allow Paste` (the DEFAULT), AXButton `Allow Paste`.
+- simdrive gained a `press <label>` verb and it lands: the blocked
+  read returned 2218ms after launch, i.e. the moment the button was
+  pressed. THE ALERT IS SPRINGBOARD'S, AND ONLY SPRINGBOARD'S TREE IS
+  ALWAYS READABLE (the first lane run's lesson, 2026-08-03): the
+  hit-test route that finds a picker — and that found this same alert
+  over the idle probe app — goes BLIND when the alert was raised by
+  the foreground app's OWN blocked read (`describe` answered "no
+  picker" for six straight seconds with the alert filling the
+  screen), which is precisely the state every real paste leg is in.
+  A tree walk of SpringBoard's pid answers in exactly that state, so
+  `press` searches the hit-test overlay AND the invoked pid's own
+  tree every attempt, the watcher drives it with SpringBoard's pid,
+  and a tap is refused until the button's frame is identical across
+  two reads 300ms apart (the buttons sit LOWER while the title wraps
+  longer app names — the y that was 462 for a two-line title is 473
+  for three, so coordinates cannot be assumed, only read).
+- Allow is NOT a durable grant: a re-read of the SAME clip is free
+  (3ms, no alert), but every NEW foreign clip — same source, same
+  reader — prompts AGAIN (measured: the re-seeded read raised a
+  second alert). The scene seeds foreign content four times, so the
+  leg drives the prompt four times. Mechanical, not exceptional.
+- The read blocks ONLY the calling thread: with the read on a
+  background queue the main thread heartbeated through the whole
+  alert (46 beats). The arm's reads go off-thread, always.
+- Prompt-free queries stay free at every stage: numberOfItems,
+  types (per item too), has*, changeCount — measured against foreign
+  content repeatedly. The unsatisfiable read (accepts files,
+  clipboard holds text) can answer "empty" from types alone, no
+  alert, no data touch.
+
+### 3. THE SYNC BRIDGE IS ASYMMETRIC, AND ONE DIRECTION HANGS
+
+- `simctl pbcopy` seeds TEXT only (stdin, no type argument).
+- `simctl pbsync host <device>` carries the rich kinds: html, png
+  and — measured this campaign — `public.file-url` all arrive under
+  their proper types. Every clipboard_seed kind works as: seed the
+  HOST pasteboard with the mac arm's own spellings (pbcopy /
+  osascript «data HTML»/«class PNGf»/POSIX file), then pbsync
+  host->device.
+- `simctl pbsync <device> host` DROPS app-defined types and
+  file-urls (text/html/png cross, plus a synthesized image family) —
+  so no stock host tool can confirm the custom representation. It
+  also MAY NOT EXIT when a promised secondary type is on the board
+  (rc=124 long after the content landed): bound it with `timeout`
+  and poll the host pasteboard for arrival.
+- `simctl pbpaste <device>` read our union clip as EMPTY. Not a
+  reader for anything kaya writes.
+
+### 4. THE FOREIGN READER IS A SPAWNED PROCESS
+
+The android helper's iOS spelling, one size smaller: a plain CLI run
+with `simctl spawn` (no app, no UI, no bundle) CAN talk to the
+pasteboard service. Its type list answers prompt-free — including
+`dev.kaya/note` verbatim, confirmed from a genuinely different
+process — and its DATA reads are gated by the SAME per-clip prompt,
+which renders on the simulator screen with correct attribution both
+ways (`"spawnread" would like to paste from "ClipProbe2"`). One
+press later the read returns `note=1`, 6 bytes, byte-exact. So the
+lane's expect_clipboard reader for EVERY kind is a spawned reader
+plus a bounded press: one mechanism, covers the kind no other tool
+can, and it is foreign in the only sense that matters — the system
+itself gates it as another principal.
+
+### 5. WHAT THE RUNNER ALREADY SETTLED (measured during recon)
+
+The simulator pasteboard is strictly PER-DEVICE (two sims held two
+different clips at once; the host board untouched), so iOS is the
+android shape: the pool's per-leg device slot lock IS the clipboard
+exclusion, and a drain bracket would be a barrier that cannot fail
+for the reason it exists. `simctl`'s 18 "unhandled Platform key"
+warning lines go to stderr and its pbpaste output has no trailing
+newline — capture with `2>/dev/null`, compare byte-exact.
+
+### 6. THE SEED CANNOT TRANSIT THE HOST BOARD (from the first lane runs)
+
+The arm's first seed shape wrote the HOST pasteboard with the mac
+spellings and pushed it with `pbsync host <device>` — and the lane
+failed a DIFFERENT two of the four foreign reads on every run, each
+answering "empty". Two defects stacked:
+
+- `pbsync host <device>` exits rc=0 while DELIVERY IS STILL IN
+  FLIGHT. The guest's read snapshots `types` mid-replacement and
+  finds nothing; whether a given read lands before, inside, or after
+  the window is a per-run coin flip, files (the slowest family)
+  losing most often.
+- The interpreter's settle-wait was VACUOUS: it polled `types` for
+  the seeded kind, but the scene's own copy leaves a union clip
+  carrying EVERY kind's type, so the poll was satisfied by the stale
+  board before the seed landed. The wall the mac arm's settle
+  provides was not standing here — a poll that cannot fail is not a
+  wait. The settle now demands the CHANGECOUNT move first, then the
+  type (both prompt-free).
+
+The durable fix removes the transit entirely: `clipboard_seed` is a
+spawned WRITER on the device (tools/ios/clipctl `write`), which is
+synchronous and visible to other processes before the spawn exits
+(measured, 246ms), keeps every leg on its own board — and keeps the
+ONE macOS pasteboard out of a lane that runs beside validate-mac's
+clipboard legs under validate-all, a collision the pbsync shape had
+built in. check-steps' iOS clause pins the absence: a live
+pbcopy/pbpaste/pbsync/`set the clipboard` line in run-sim.sh is a
+failure, self-tested with the perturbation proven applied.
+
+### The arm's decisions, from the findings
+
+Copy: `items=` union, one path. Read/paste: background queue plus a
+press request over the host bridge, tolerant of no alert appearing
+(own-content reads never prompt). Seeds: the spawned writer, on the
+device (finding 6). expect_clipboard: the spawned reader + press. The
+role-enablement intersection reads `types` live (prompt-free), so
+harness activations — which resolve through the model on iOS — see
+fresh enablement with no rebuild machinery. Legs: rust and swift
+(the two languages with iOS guests; the other six have no iOS tier
+at all — that is the sweep verdict, do×2/can't×6), phones only (the
+pad is a lockless single device and the form-factor gate needs no
+clipboard), one leg per device slot, no drain.
+
+## §9 onwards — to be written
+
+The full matrix (validate-all) once the iOS arm is green.

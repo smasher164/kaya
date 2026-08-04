@@ -169,10 +169,34 @@ Each needs: the copy arm, the read arm answering exactly once, the
   on its tier's attach path, both directions, statically, four
   negative self-tests. THE LANE IS GREEN: 50 legs, both clipboard
   legs PASS, 2026-08-03.
-- **iOS.** `UIPasteboard`, and the read PROMPTS for another app's
-  content (§0e finding 2). The leg has to drive the prompt, the way
-  the picker leg drives the panel (tools/ios/simdrive). Seeding is
-  `simctl pbcopy`, which counts as another app.
+- **iOS — ARM WRITTEN 2026-08-03, measured first (docs/
+  clipboard-plan.md §8), LANE GREEN: 46 legs, clipboard-swiftui and
+  clipboard-swift both PASS.** ClipProbe II measured every cell
+  before the arm: `items=` preserves the slashed custom id VERBATIM
+  (no macOS two-path dance); the paste prompt is PER-CLIP, an
+  out-of-process overlay driven by simdrive's new `press` verb;
+  reads go on a background queue (the read parks only its own
+  thread); the unsatisfiable read decides from `types`, prompt-free.
+  BOTH foreign directions are one spawned process, tools/ios/clipctl
+  (`read` gated by the system's own prompt with correct attribution;
+  `write` synchronous and cross-process visible before the spawn
+  exits) — no stock tool crosses: pbpaste reads union clips empty,
+  pbsync device->host drops custom+file-url, and pbsync host->device
+  DELIVERS AFTER EXITING rc=0, the race that failed a different two
+  foreign reads per run until the seed became a spawned write (§8
+  finding 6; the settle-wait also went changeCount-first, having
+  been vacuously satisfied by the union clip's own types). The
+  press lesson: the alert is SPRINGBOARD'S, and the AX hit-test
+  goes BLIND exactly when the foreground app's own read raised the
+  alert — `press` searches the hit-test overlay AND the invoked
+  pid's tree, taps only a frame stable across two reads, and the
+  watcher drives it with SpringBoard's pid. Legs: rust + swift
+  (the two languages with an iOS tier; the other six have none —
+  the sweep verdict), phones only, one leg per device slot, NO
+  drain (per-device pasteboards, §8 finding 5), and check-steps'
+  iOS clause pins the shape both ways with five self-tests —
+  including that no live run-sim.sh line touches a pasteboard tool
+  (the validate-all cross-lane hazard, closed structurally).
 
 ### 3. The Android helper APK
 

@@ -903,6 +903,73 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
+- **DEFECT — filedialog_java is a coin flip on windows, and it is as
+  old as the feature.** Measured 2026-08-03 (two agents, A/B against
+  the pre-clipboard backend: 8/11 fail on BOTH; VM hs_err logs date to
+  2026-07-31, the day 116b8c9 landed the dialog): the per-dialog STA
+  thread runs `CoUninitialize()` the moment `Show()` returns
+  (winui/mod.rs ~:2126) while the Shell's own workers (comdlg32,
+  SHCore) still hold proxies into that apartment, so RPCRT4 raises
+  RPC_E_DISCONNECTED first-chance on their thread. Every runtime
+  absorbs it EXCEPT the JVM, which reports a fatal VM error:
+  `Internal Error (0x80010108)`, frame `KERNELBASE.dll+0x1233c4`,
+  "Current thread is native thread", immediately after
+  `FileChoose(...)`. RECOGNIZE IT BY THAT SIGNATURE — it has stayed
+  green in lanes only because each run samples the leg once, and when
+  it reddens it looks like a fresh regression from whatever slice is
+  in flight (two agents walked into exactly that trap today).
+  Unverified remedies, in the order to measure: keep the dialog STA
+  thread pumping for a grace period after Show() before
+  CoUninitialize; or one long-lived reused dialog STA thread. Any
+  future guest runtime with a process-wide first-chance handler will
+  join Java in crashing until this is fixed.
+
+- **Follow-ups from the WinUI chord-drop fix (2026-08-03).** The race:
+  chords were dispatched over TWO routes split by leaf kind (79dcd1d),
+  and the XAML-accelerator route PERMANENTLY DROPS a chord arriving
+  within ~45ms of the previous chord's activation — measured 42% per
+  commands leg, language-independent, fixed by dispatching every
+  catalog chord from the thread key hook against core.menu_shortcuts
+  (the same table that gates the harness verb), 0/46 after. Left open,
+  in priority order:
+  - A text gate pinning the one-route rule: key_hook's dispatch names
+    all three of MenuItemKind::{Action,Toggle,RadioOption} and no
+    consume path is conditional on kind. Cheap check-verbs-style
+    clause; the compile-time exhaustive match guards NEW kinds but not
+    a deliberate re-split.
+  - The echo premise (a programmatic IsChecked set must not raise
+    Click) is now load-bearing for radios too and is checked only by
+    menu_probe behind KAYA_WINUI_MENU_PROBE. Promote canary 1 out of
+    the flag gate, the way assert_chord_premise is unflagged.
+  - No scene presses a chord on a DISABLED item; the fixed route makes
+    that fully inert (consumed, no stamp, no emit) — believed right,
+    unverified live.
+  - The same two-route shape exists on GTK (GtkShortcutController),
+    SwiftUI (.keyboardShortcut) and Compose. Those lanes are green but
+    nobody has measured whether their pass sits on the same
+    tens-of-milliseconds gap. One timing probe each (press a chord
+    ~20ms after the previous chord's occurrence) before assuming WinUI
+    was special.
+  - Unexplained: the lane was recorded 145/145 at the WinUI clipboard
+    slice, which a stable 42% per-leg rate makes essentially
+    impossible. Either that run was an outlier or the VM's timing
+    distribution shifted around the ~45ms boundary. The experiment if
+    anyone wants it closed: rebuild the exact 48cfbad tree and loop
+    commands_rust there.
+
+- **GAP — an `#if os(iOS)` branch in a SWIFT GUEST is invisible to
+  every fast gate.** Found 2026-08-03 while wiring the iOS clipboard
+  legs: tools/swift-typecheck.sh's guest loop compiles the guests for
+  macOS only, so the iOS scene_root branch guests/swift/clipboard.swift
+  needed (the §7.6 android trap's cousin — the guest and the
+  interpreter must agree on $TMP) typechecks nowhere until
+  run-sim.sh's own build loop compiles it on a booted pool. The
+  interpreter's iOS half earned its typecheck pass for exactly this
+  class; the guests deserve the same — an iphonesimulator -typecheck
+  loop over guests/swift/*.swift in swift-typecheck.sh, gated the
+  same way (skip with the loud note when no simulator SDK exists).
+  Cheap; nobody has been burned yet; write it before someone is.
+
 - ~~**Python's lifecycle handlers ran outside a transaction**~~ — FIXED
   2026-07-27, and GUARDED. The dispatch loop wrapped widget and menu
   handlers but called the six lifecycle handlers bare
