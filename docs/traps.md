@@ -1183,11 +1183,67 @@ timeout, deploy-win now probes ssh FIRST — before the wedge
 fingerprint, which cannot work when the host is gone — and aborts the
 lane immediately with the diagnosis rather than stalling.
 
-The GUARD is not the FIX. The fix is resourcing: give the VM more
-cores, or stop running the windows lane fully concurrent with the other
-four. Until then a red windows lane under validate-all that is green
-standalone is a contention artifact, not a regression — check
-standalone before believing it.
+The GUARD is not the FIX, and for a long time we had the fix wrong too:
+we called it resourcing (more cores, or stop running windows fully
+concurrent). Concurrency is the TRIGGER, but the failure is a guest
+driver bug — see "The wedge is a BSOD in viogpudo.sys" below. Read that
+before treating a red windows lane as a contention artifact.
+
+## The wedge is a BSOD in viogpudo.sys (VirtIO GPU), not a hang
+
+2026-08-04, from the five minidumps in `C:\Windows\Minidump`. Every
+"wedged VM" we have logged since 2026-07-22 is the SAME crash, and the
+guest is not hanging — it is bugchecking, writing a dump, and rebooting.
+ssh dies and utmctl still says `started` because the VM really is
+running; it is on the blue screen and then in early boot.
+
+Bugcheck 0x1000007E (SYSTEM_THREAD_EXCEPTION_NOT_HANDLED),
+param1 0xC0000005, faulting at `viogpudo.sys+0xB52C` in ALL five dumps —
+the only thing that varies is the driver's ASLR base, which is why the
+address always ends in `b52c`. viogpudo.sys is Red Hat's VirtIO GPU
+display-only (WDDM DOD) driver, 22.7.38.43, PE timestamp 2025-03-14.
+
+The defect is a NULL-pointer WRITE (exception Info[0]=1,
+Info[1]=0x30) in `CtrlQueue::TransferToHost2D`:
+
+    bl   AllocCmd(&vbuf, 0x38)   ; returns NULL when the ring is full
+    ldr  x1, [sp, #0x10]         ; x1 = vbuf, NOT CHECKED
+    str  x8, [x1, #0x30]         ; <-- bugcheck
+
+`GetBuf` hands out pre-allocated command buffers by popping a free list
+with `ExInterlockedRemoveHeadList`; when the guest has more commands
+outstanding than the ring has buffers it returns NULL, `AllocCmd`
+propagates it correctly, and only `TransferToHost2D` fails to check.
+`TRANSFER_TO_HOST_2D` runs on every screen update, so the crashing
+process is always `dwm.exe` and the stack is always
+`dxgkrnl.sys -> viogpudo.sys`.
+
+This is upstream kvm-guest-drivers-windows PR #1330, merged 2025-03-31;
+our binary predates it. The fix makes GetBuf allocate when the free list
+is empty. Do not trust version numbers here — verify the code:
+`GetBuf` must reference an allocator, and in ours it references only
+`ExInterlockedRemoveHeadList` and returns NULL. Upstream's own
+reproduction note is the tell for why concurrency matters: it "may
+depend on whether the host can keep catching up with frames".
+
+Timeline, which is the whole argument for the trigger: `parallel sweep
+by default` (d4ddc03) landed 2026-07-22 13:42; the first of these
+bugchecks is 2026-07-22 16:07. Twelve since, none before. The one crash
+we can place against a lane log (2026-08-03) was in `select_java`, not
+a clipboard suite — the mechanism is per-frame, so no suite owns it.
+
+AND DO NOT FORCE-KILL A VM THAT IS MID-CRASH. deploy-win's boot block
+runs `utmctl stop --kill` whenever ssh fails while utmctl says
+`started` — which is exactly the state a bugchecking guest is in. On
+2026-08-03 the guest booted at 17:10:51 and was killed at 17:10:56,
+five seconds into its boot. That is how you corrupt a Windows boot (it
+has cost a manual console recovery once), and it is the likeliest
+reason 7 of the 12 crashes left no minidump behind: the pagefile dump
+is converted to a `.dmp` on the NEXT boot, and killing that boot throws
+the evidence away. Wait out a possible bugcheck reboot before deciding
+a guest is wedged, and after any recovery check
+`C:\Windows\Minidump` — a new file there means the lane did not lose to
+contention, it lost to this bug.
 
 ## The wedged-VM class: "started" is not "reachable"
 
@@ -2211,9 +2267,11 @@ What made this expensive is that it is INVISIBLE FROM THE LANE. `query
 session` says the console is Active and unlocked; `Get-Process` over ssh
 lists no window titles, because the toast has none. The only thing that
 answered was a screenshot of the console session, taken through the same
-`schtasks /it` route the legs themselves run under. When a Windows leg
-fails in a way that implicates the DESKTOP rather than the app, take the
-picture first — it is two minutes and it ends the search.
+`schtasks /it` route the legs themselves run under (tools/guest/shot.cmd
+— take it through the wrapper, not by hand; the hand-written version is
+a trap of its own, two entries down). When a Windows leg fails in a way
+that implicates the DESKTOP rather than the app, take the picture first
+— it is two minutes and it ends the search.
 
 deploy-win now turns toasts off and verifies it, beside the HideFileExt
 write and for the same reason: an OS default that fails a leg looking
@@ -2335,6 +2393,75 @@ DID have Cancel. It came from a hit test landing on the app's own
 carries that label while the picker's chrome does not. Hit tests answer
 with whatever owns the point, across processes — so an element found
 that way is only evidence about the picker if its pid says so.
+
+## The first picker a device shows after a boot ignores where you aimed it
+
+The iOS lane's `filedialog-swiftui` leg failed five times running and
+passed on the sixth, and the two states it was A/B'd against —
+Simulator.app running or quit — turned out to be the wrong axis
+entirely.
+
+**What actually fails.** `UIDocumentPickerViewController.directoryURL`
+is honoured by com.apple.DocumentManager.Service as a REVEAL that races
+the service's own "which location does this picker open at" strategy.
+Both are in its log, and the loser is whichever lands first:
+
+    Will reveal location <kaya-picked-26596> (from root, animated: NO)
+    Attempt to reset locations, while a reset is already in progress
+    2.2.2 Will use getSaveLocation's suggested location <filedialogrs-swiftui>
+
+Measured on this machine, 2026-08-03, ten leg runs across three devices
+— five on a device whose first picker this was, all five at the root;
+five after one, all five where they were aimed:
+
+| device state | getSaveLocation | reveal arrives | picker opens at |
+| --- | --- | --- | --- |
+| first picker after boot | 708ms | 381ms | the container ROOT |
+| every picker after that | 160ms | 297ms | the asked-for directory |
+
+The reveal lands ~300-450ms after the service starts resolving, so a
+resolution slower than that overwrites it. The first resolution on a
+boot is slow because the LocalStorage file provider populates its tree
+lazily; Apple's forums carry the symptom ("since iOS 18 directoryURL
+opens the root instead", no official explanation) and one relevant
+remark, that some providers populate lazily and the folder is not
+guaranteed to be there the first time you ask.
+
+**What it looks like from the lane**, which is why it cost a session:
+the picker IS up, IS accessible, and lists real rows — the app's
+Documents directory. `expect_file_dialog` fails on the directory,
+`file_choose picked.txt` then refuses a row that is genuinely not in
+that list, the guest's result handler never runs, and the scene's SECOND
+`pick_file` trips the one-per-process dialog guard
+(crates/kaya/src/capi.rs) whose abort took the harness's failure list
+with it. The visible remains were a panic and a timeout. The fix for
+that half is one line in the interpreter's step wrapper: a step's final
+failure text is printed as `KAYA_HARNESS: step-failed ...` the moment it
+becomes final, so it survives an abort — plus `KAYA_PICKER_TRACE` lines
+for present/didPick/cancelled/emitted, the picker being the one piece of
+UI in that backend nobody in the process can see.
+
+**Simulator.app is not the axis.** It looked decisive because quitting
+it SHUTS DOWN every device it shows, so each "headless" trial was a cold
+boot while each "with the app" trial ran on a device that had already
+shown a picker. Measured directly: a cold-booted device fails the same
+way with Simulator.app running, and a warm one passes with it quit. The
+lane needs no renderer — HID taps land, the picker is readable, and
+`simctl io screenshot` (which forces composition) changes nothing.
+
+**No app-side fix exists.** Setting `directoryURL` again after
+presentation is inert — four re-assertions at 0.8/1.6/2.4/3.2s produced
+no second reveal and the picker never moved. The property is read when
+the remote view controller is configured and never again.
+
+**So the runner owns it**: `picker_warm` in tools/ios/run-sim.sh
+launches the system's own Files app on each pool device before any leg
+(same DocumentManager, same file provider), waits for
+`com.apple.FileProvider` to carry a pid — it carries none until
+something on that boot has used the document stack, which is exactly the
+cold/warm edge — settles, and terminates it. 5.2s on a cold device,
+0.23s on a warm one. tools/check-steps.sh keeps the call in front of the
+legs, with both refusals watched failing.
 
 ## A freshness check by mtime, against a build system that hashes
 
@@ -2532,17 +2659,102 @@ incident but not of this one, so a screenshot showing an idle desktop
 read as ruling nothing out.
 
 THE FIX IS A SETTING THE DEPLOY OWNS. tools/deploy-win.sh writes
-ForegroundLockTimeout=0, applies it to the live session with
-SystemParametersInfo (a registry write alone waits for the next logon),
-and VERIFIES it — the third setting in that file to exist because the
-desktop can quietly refuse a window the foreground, after HideFileExt
-and toasts. Any settings visit, or any reboot, can put it back.
+ForegroundLockTimeout=0 and VERIFIES it — the third setting in that file
+to exist because the desktop can quietly refuse a window the foreground,
+after HideFileExt and toasts. Any settings visit, or any reboot, can put
+it back. (The half of that fix which applied the value to the LIVE
+session used to be a `SystemParametersInfo` call made over ssh, and
+could never have worked; it moved into the desktop warm-up on
+2026-08-04, for the reason the next entry gives.)
 
 THE LESSON FOR NEXT TIME, since two of the night's dead ends were the
 same shape: when a lane goes red after an environment event and the
 same commit was green before it, bisect against the ENVIRONMENT first
 (stash the changes and re-run the old commit) rather than reading the
 diff. Both answers came in one command.
+
+## Whether the desktop will hand over the foreground is invisible from ssh
+
+2026-08-04, the same failure one boot later. After the VM was restarted,
+every chord-injecting leg — `menus_*` and `commands_*`, ten of them —
+died 6-8s in with kaya's own guard text, while the other 135 legs passed,
+the clipboard suites among them: nothing else on this lane needs the
+foreground. A reboot cleared it and the lane ran 145/145. Both halves of
+that, the diagnosis and the remedy, lived in a human's head.
+
+WHAT ACTUALLY REFUSES, measured that day on the VM through
+`schtasks /it` — a bare `SetForegroundWindow` poll beside a real
+`menus_rust` run, one leg per row:
+
+| desktop state | bare SetForegroundWindow | menus_rust |
+| --- | --- | --- |
+| idle (Progman or the taskbar in front) | won on the first try | PASS |
+| Start menu open (SearchHost's CoreWindow) | LOST, 150 tries, 5.5s | PASS |
+| another process holds the foreground lock | LOST, 150 tries | PASS |
+| an ordinary window in front (Notepad) | won in 5ms | — |
+| **input desktop is not the legs' desktop** | **LOST, 150 tries** | **FAIL** |
+
+The two middle rows are the ones the guard's message names, and it
+BEATS BOTH on its own: the ESC it taps at 200ms dismisses the menu (the
+next `SetForegroundWindow` then wins in 49ms), and the bare ALT at 1s
+releases a held foreground lock, which is the documented way out of
+`LockSetForegroundWindow` — the mechanism the Start menu and toasts use.
+So "a Start menu left open on the VM", which the assert calls the usual
+cause, is measurably a cause the backend already survives.
+
+THE ROW THAT KILLS LEGS is the last one, and it kills them because no
+key can reach it. When the console session is locked the input goes to
+`WinSta0\Winlogon`; when a UAC prompt is up it goes to the secure
+desktop. The legs' windows stay on `WinSta0\Default`, so ESC and ALT are
+injected into a desktop nobody is looking at, `SetForegroundWindow` can
+never be satisfied, and every chord leg dies at 3s. Everything that does
+not need the foreground keeps passing, which is exactly the shape the
+lane reported.
+
+NONE OF IT IS VISIBLE FROM SSH, and that is the trap. An ssh session
+gets its OWN window station — `query session` marks it `>services`,
+session 0 — so it can see neither the input desktop nor a toast, which
+has no title to list. Two consequences, both of which cost real time:
+the lane could not tell a sick desktop from a WinUI bug, and the
+`SystemParametersInfo` call the deploy made over ssh to clear the
+foreground lock in the "live session" cleared it in session 0 and
+nowhere else. Measured: the console session still read
+`ForegroundLockTimeout = 2147483647` after every deploy that day, while
+the registry check beside it passed on the 0 it had just written.
+
+THE GUARD IS NOW THE LEGS' OWN QUESTION, ASKED ONCE. tools/deploy-win.sh
+runs a desktop warm-up before the suites (`desk_warm`, with
+tools/guest/desk-warm.ps1 doing the work inside an interactive scheduled
+task): it names the input desktop, applies the foreground-lock setting
+where it actually lands, and then PROVES the handover by creating a
+window and taking the foreground with the guard's own sequence — 3s,
+ESC at 200ms, ALT at 1s. Winning clears the desktop as a side effect and
+prints what it had to get past; losing stops the lane in ~3s with the
+holder's window class, title and process, and the remedy for that
+holder. A Start menu costs it 8 tries and 641ms and the lane goes on.
+
+Two things worth keeping from how it was built. The proof is bounded by
+the CLOCK, not by a try count: PowerShell's loop costs ~120ms a turn
+against the guard's 20ms, so counting to 150 would have waited 18s and
+passed a desktop that hands over far too slowly for any leg. And the
+negative test was watched twice — the fixture (a temporary desktop with
+`SwitchDesktop`, which stands in for Winlogon because it can be switched
+back without credentials) made `menus_rust` FAIL with the real guard
+text, and the warm-up then refused the same lane invocation before any
+leg ran. A Ctrl+Esc fixture toggled a Start menu SHUT once instead of
+open, which would have been a vacuous pass; the fixture check now reads
+the foreground window back and aborts if it does not name the intruder.
+
+AND THE PHOTOGRAPH ROUTE ITSELF WAS BROKEN, which is worth its own
+sentence because the entry above prescribes it. `schtasks /tr "powershell
+-File C:\kaya\shot.ps1"` exits 1 without ever running the script —
+PowerShell needs `-ExecutionPolicy Bypass` for a shipped .ps1 — and
+since shot.ps1 only writes its output on success, what you find
+afterwards is the PREVIOUS run's shot.png, with an old timestamp nobody
+checks. tools/guest/shot.cmd is now the route: right policy, hidden
+console (a visible one would take the foreground it is photographing),
+and it deletes the old picture first so a failure cannot look like a
+fresh one.
 
 ## Headless Weston has no seat, so it has no clipboard
 
@@ -2774,3 +2986,285 @@ kayaAxReadOnMain: announcing AXEnhancedUserInterface makes AppKit
 rebuild its whole accessibility hierarchy and drive a full layout pass,
 which on 2026-07-25 put legs past a 120s timeout under the 8-wide pool
 while the same binary passed standalone.
+
+## A windows race can stop reproducing, and a green run then proves nothing
+
+MEASURED 2026-08-03 while fixing the filedialog_java coin flip
+(deferred.md). Same VM, same boot, same binary:
+
+| time  | build                          | filedialog_java |
+|-------|--------------------------------|-----------------|
+| 20:00 | HEAD (defective)               | 2/10 pass       |
+| 20:19 | last observed failure anywhere | —               |
+| 20:37 | HEAD (defective, redeployed)   | 10/10 pass      |
+
+Nothing was updated: comdlg32/combase/shcore/rpcrt4 all still carried
+their July timestamps, no servicing event ran, the machine had not
+rebooted. Between those two rows sit about a hundred dialog opens, and
+somewhere in them the machine got fast enough that the Shell's workers
+finished before the apartment closed. The race was still there; the
+window had shut.
+
+THE COST IF YOU DO NOT KNOW THIS. Every verification after 20:19 is
+vacuous. A fix measured 22/22 green against a defect that had stopped
+reproducing says nothing about the fix, and a NEGATIVE TEST that puts
+the defect back and sees green reads as "the guard is broken" when the
+guard is fine — that exact sequence cost an hour here.
+
+WHAT TO DO. Reproduce under load, not on an idle machine, and prove
+the reproduction is live in the same session as the verification. The
+load that worked, on the 6-core VM: four hidden
+`powershell -Command "while($true){ Get-ChildItem C:\Windows\System32
+-Recurse | Out-Null }"` plus four hidden
+`cmd /c "for /l %i in (1,0,2) do rem"`, started with
+`Start-Process -PassThru`, their PIDs written to a file so every one
+of them can be stopped afterwards. Under it the defective build went
+back to 4/10 failing within one batch, and the A/B became meaningful
+— 25/25 for the fix under the same load. CPU SPINNERS ALONE DID
+NOTHING (10/10 pass); the recursive metadata walks are what makes a
+Shell worker late.
+
+The general rule this is an instance of: when a race stops
+reproducing, the first thing to establish is that your reproducer
+still reproduces — on the unfixed code, in this session. A guard you
+have never watched fail is worse than none, and so is a race you have
+never watched happen.
+
+## `set the clipboard to` reports success and writes NOTHING
+
+MEASURED 2026-08-04, chasing a mac clipboard leg that died only under
+the five-lane matrix — a different guest each run, always
+`clipboard_seed files never appeared on the clipboard`, always after
+consuming the settle's whole deadline (widening it 5s -> 15s changed
+nothing at all).
+
+AppleScript's clipboard write is REFUSED, silently, when another
+process touches the pasteboard inside its clear-then-put window. The
+seed's exact command, run against a competitor doing plain `pbcopy`
+every 10ms, with a 1ms poll watching for the type afterwards:
+
+| competitor        | writes | landed | osascript said |
+|-------------------|--------|--------|----------------|
+| none, heavy load  | 200    | 200    | rc=0, silent   |
+| `pbcopy` @ 10ms   | 12     | 0      | rc=0, silent   |
+
+Not "landed and was replaced": the type never appeared once, at 1ms
+resolution, in any round. That is the Carbon Pasteboard Manager's
+`badPasteboardSyncErr` shape with AppleScript swallowing the error.
+The same command with a path that does not exist (`POSIX file
+"/tmp/gone"`) is the other silent no-write: rc=0, nothing printed,
+board untouched — while a path that DOES exist writes fine.
+
+So the failure needs a second principal on the one macOS pasteboard,
+which is what the matrix adds and a solo lane does not. CPU load alone
+does not do it (200/200 above ran under twelve spinners and a looping
+`cargo build -j 18`).
+
+THE COST IF YOU DO NOT KNOW THIS. Every symptom points at the wait:
+you widen the deadline, you poll harder, you suspect the pasteboard
+server — and the write never happened. Worse, the interpreter used to
+DISCARD the tool's exit status and stderr, so a tool that refused and
+a tool that worked were the same empty string, and the only evidence
+either way was a settle timing out fifteen seconds later.
+
+WHAT TO DO, all of it now in `swift/KayaSwiftUI.swift`:
+
+- Carry what the child process DID (`KayaToolRun`: status, stderr,
+  stdout), fail the seed with the tool's own words, and trace a read
+  whose tool refused (`KAYA_CLIP_TRACE: osascript exited 1: ...`).
+- RE-ISSUE a write that did not land, up to the deadline. The seed is
+  idempotent by construction — same file, same content, same command —
+  and a write that is gone cannot be waited into existence.
+- Prove the file exists before handing its path to a tool that will
+  say nothing about it.
+- Demand the changeCount MOVE, not merely that the type be offered:
+  the scene's own copy leaves a union clip carrying nearly every type,
+  so a type-only poll passes on the stale board (three of this scene's
+  four seeds waited on nothing until this was fixed — the same vacuity
+  §8 finding 6 found on iOS).
+- And keep the evidence: the settle's fatal now lists every distinct
+  clip it saw, `+Nms cc=NNN [types]`, which separates "nobody ever
+  wrote" from "somebody else is writing this board too".
+
+Guard: `kayaRunTool` is no longer `@discardableResult`, and the
+interpreter compiles with `-warnings-as-errors` in BOTH
+tools/swiftui/build-dylib.sh and tools/swift-typecheck.sh — so
+dropping a tool's result is a BUILD ERROR, not a warning nobody reads.
+Watched failing with the perturbation proven applied; the first
+version of this guard was watched NOT failing, because a bare
+`kayaRunTool(...)` is only a warning and `swift-typecheck: OK` still
+passed.
+
+WHO THE SECOND PRINCIPAL IS was not proven. Ruled out by measurement:
+the mac lane (its clipboard legs are drain-bracketed), the android
+pool (§7 finding 4, bridge severed, `-no-window`), the iOS lane
+(Simulator.app not running, and run-sim.sh refuses a live relay per §8
+finding 7). Left standing: this machine's Windows VM is configured
+`/Sharing/ClipboardSharing = True` with the SPICE vdagent channel on
+its running qemu command line, and the windows lane runs five
+clipboard legs of 10-12s each, concurrent with the mac lane's
+clipboard block. Something on this machine also reads every clip
+within 15ms of it being written (measured with a promised-type probe).
+If it happens again, the settle's clip list now names the intruder.
+
+
+## A watchdog that reports a stall on a HEALTHY app, in five of eight languages
+
+Symptom: a matrix leg fails and the log carries
+
+    kaya: THE APP THREAD IS STALLED — 13 occurrences have been waiting
+    1027ms and nothing has taken them. ... The cause is a handler that
+    has not returned: something blocking ran on the app thread instead
+    of on a thread of its own.
+
+and the next session spends its first hours sampling a main thread that
+was never blocked.
+
+THE LINE WAS ALWAYS THERE — it just needs a leg that lives long enough
+to cross the threshold. Measured 2026-08-04 on a PASSING haskell
+clipboard leg (`KAYA_SELFTEST: OK` in the same run), varying only
+`KAYA_STALL_MS`: 1ms -> "1 occurrences ... 106ms", 50ms -> "5", 100ms ->
+"7", 400ms -> "9 occurrences ... 422ms". The pending count is simply the
+running total of occurrences enqueued so far. One leg each, all passing,
+at `KAYA_STALL_MS=100`: go 1, csharp 1, ocaml 1, haskell 1, java 1;
+rust 0, python 0, swift 0.
+
+THE MECHANISM. `crates/kaya/src/stall.rs` compared two counters,
+ENQUEUED and TAKEN, and its own comment claimed they "say the same thing
+about either transport". They do not. TAKEN was bumped only where the
+CORE hands a record over — `OccRing::wait_pop` (the C function floor)
+and `AppCtx::next` (the Rust mpsc path). The five languages that map the
+ring and advance `head` themselves (go, csharp, ocaml, haskell, java)
+never pass through either, so TAKEN sat at 0 for the life of the process
+while ENQUEUED climbed: pending was permanently positive, the consumer
+that WAS moving was never read, and the watchdog reported as soon as the
+threshold elapsed.
+
+WHY NO GATE SAW IT. `tools/scenes/stall.steps` asserted only
+`expect_stall` — that a stall IS reported. Nothing anywhere asserted the
+negative, and a watchdog that reports unconditionally passes that scene
+in every language. A diagnostic that fires when it should not is worse
+than none, because the line is read as evidence.
+
+THE FIX: each transport is asked in the terms it actually has — the ring
+through its `head`/`tail` cursors (which is what DESIGN promised: "the
+core reads the app's consumer cursor directly"), the mpsc channel
+through its counters. A cursor is also the better half of the pair: no
+binding can forget to advance it, because a consumer that does not
+wedges itself.
+
+THE GUARD: `expect_no_stall`, asserted in stall.steps right after the
+recovery the scene already proves, so every lane and every language runs
+it. Watched failing with the watchdog put back in its blind form
+(2 substitutions, both printed): haskell, go and java FAIL with "the
+stall watchdog reports 7431ms of unclaimed occurrences about an app that
+is answering this scene", rust passes. Restored: 8/8 green with two real
+stall reports each.
+
+
+## A standard clipboard command that is DISABLED does nothing, and said so
+## to nobody
+
+Symptom, from the 2026-08-04 matrix run: `menu_activate "Edit>Paste"`
+reports success, no occurrence is emitted, and five seconds later the
+scene fails on a label that still reads what it read before —
+`label#0 reads "files pasted.txt pasted bytes", wanted "pasted pasted by
+hand"`. Then the second paste, into a different widget, does the same.
+
+THAT IS THE DESIGNED BEHAVIOR, and the diagnostic gap around it is the
+bug. A role item computes its own enablement — what the clipboard OFFERS
+intersected with what the FOCUSED widget accepts — and a disabled item
+is inert, exactly as native chrome leaves a greyed one. For a person
+that needs no words: they can see the grey. For a scene it is silent.
+
+WHAT MAKES IT DISABLED MID-SCENE: a second principal writing the one
+macOS pasteboard between the seed's settle and the activation (the trap
+above names the candidates). An image-only clip is enough — the widget
+accepts `text`, the board offers `public.png`, the intersection is
+empty. Reproduce it deterministically with a second seed, no
+concurrency needed:
+
+    clipboard_seed text "pasted by hand"
+    click button#5
+    expect_focused entry#0
+    clipboard_seed image "$TMP/kaya-clip-$PID/pixel.png"
+    menu_activate "Edit>Paste"
+    expect label#0 "pasted pasted by hand"
+
+HOW TO TELL IT APART FROM A READ THAT ANSWERED EMPTY: the read's own
+note. `kayaReadClipboardValue` traces every nil answer
+(`KAYA_CLIP_TRACE: read of [text] answered empty; the clipboard offered
+[...]`), so if the paste were reaching the read and coming back empty
+that line would be in the log. In the failing run it was NOT, which is
+what proved the command never dispatched.
+
+WHAT TO DO, now in `swift/KayaSwiftUI.swift` (mac and iOS, one body):
+`kayaRoleInertNote` prints one line when a harness `menu_activate` lands
+on a role item whose command is disabled, naming the intersection that
+came up empty, and `kayaClipOwned`/`kayaClipOwnerClause` remember the
+changeCount kaya itself last put on the board — the app's own copy and
+any seed that settled — so the note can say whether the board has been
+REPLACED since:
+
+    KAYA_CLIP_TRACE: menu_activate "Edit>Paste" did nothing — the paste
+    command is disabled and a disabled item is inert. the focused widget
+    (node 1) accepts [text]; the clipboard offers ["public.png", ...] at
+    cc 48312 — AND THE BOARD HAS MOVED SINCE KAYA WROTE IT (cc 48308 ->
+    48312): another process is writing this clipboard
+
+The dispatch itself is untouched: inert stays inert, on every platform.
+A pasteboard has no "who wrote it", and the changeCount kaya owns is the
+only evidence that separates "kaya read the wrong thing" from "somebody
+else replaced the board".
+
+
+## A paste can land on the widget that WAS focused: kaya's focus is synchronous,
+## the platform's first responder is not
+
+Symptom, twice in one mac lane run (2026-08-04) and not reproducible on demand:
+
+    KAYA_HARNESS: +690ms click button#6
+    KAYA_HARNESS: +690ms expect_focused entry#1
+    KAYA_HARNESS: +715ms menu_activate "Edit>Paste"
+    KAYA_HARNESS: step-failed entry#1 reads "", wanted "pasted by hand"
+    KAYA_HARNESS: step-failed ax field/, wanted field/pasted by hand
+
+with no `KAYA_CLIP_TRACE` of any kind — so the Paste command was ENABLED (the
+trap above is a different failure), it dispatched, and the platform's own
+insertion did not reach entry#1. The AX read agrees the field is really empty, so
+the text went somewhere else or nowhere.
+
+THE MECHANISM, hypothesis not yet proven: `tx.focus(entry#1)` sets
+`kayaScene.focusedId` immediately and `expect_focused` reads exactly that, so the
+scene proceeds at once — but the AppKit first responder only moves when SwiftUI
+applies the @FocusState change on its next update pass. `kayaSendToFocusedResponder`
+sends `NSText.paste(_:)` to `window.firstResponder`, which in that window is
+still entry#0's field editor — another editable field, which takes the paste
+happily. Under load the pass takes longer than the 25ms the scene leaves.
+
+WHAT MAKES IT HARD: every assertion in the scene reads the same either way. The
+symptom is a field that stayed empty, which is also what "nobody took it" and
+"the widget ignored it" look like.
+
+WHAT IS IN PLACE NOW (do not re-derive this from scratch):
+
+- `kayaSendToFocusedResponder` reports a command NOBODY took — the callsite's
+  comment claimed it did and it did not. One line naming the selector, kaya's
+  focused node, and each window's first responder.
+- `tools/scenes/clipboard.steps` asserts `expect entry#0 ""` after the second
+  paste. entry#0 declares an accept list, so kaya delivers to its paste hook and
+  the platform never inserts there; it must stay empty for the whole scene on
+  every backend. A paste that landed on the wrong widget fails THAT line and
+  names itself.
+
+WHAT WOULD SETTLE IT, next time it fires: read the two new lines. `entry#0 reads
+"pasted by hand"` proves the wrong-widget path (fix: make the platform paste wait
+for the responder to match kaya's focus, or make `expect_focused` a real-tree
+observation on macOS rather than a model read). `reached no responder that would
+take it` proves the no-responder path (fix: the focus never reached AppKit at
+all). Nothing in the mac lane's 260+ green clipboard legs distinguishes them
+today.
+
+NOT A PRODUCT RACE, as far as anything shows: a person focuses a field and pastes
+hundreds of milliseconds later. It needs focus and paste inside the same ~20ms,
+which only a harness does.

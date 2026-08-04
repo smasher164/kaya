@@ -917,6 +917,36 @@ elif any(entry.split(":")[0] == "clipboard" for entry in scenes.group(1).split()
 if seen == 0:
     bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
 
+# AND THE BOARD MUST BELONG TO THE DEVICE BEFORE ANY LEG RUNS.
+# Simulator.app relays the macOS pasteboard into and out of every booted
+# simulator while its Edit > Automatically Sync Pasteboard is on, which
+# is the default, so the slot lock above excludes other LEGS and
+# excludes nothing else (docs/clipboard-plan.md section 8, finding 7).
+# That cost three matrix runs of a different clipboard step reading
+# empty each time while the lane passed solo, so the runner MEASURES the
+# isolation and refuses. The call is matched with an argument after it:
+# a bare name would match the definition too, which is how three clauses
+# of check-tx-liveness once passed with the guard deleted.
+relay_call = None
+first_leg = None
+for n, raw in enumerate(text.splitlines(), 1):
+    s = raw.strip()
+    if s.startswith("#"):
+        continue
+    if relay_call is None and re.match(r"clip_relay_check\s+\S", s):
+        relay_call = n
+    if first_leg is None and re.match(r"queue_(pad_)?leg\s+\S", s):
+        first_leg = n
+if relay_call is None:
+    bad.append(f"{path}: nothing measures the clipboard isolation — the pasteboard of a "
+               f"booted simulator belongs to Simulator.app too whenever it is running, and "
+               f"the legs then share one board with the mac lane (docs/clipboard-plan.md "
+               f"§8 finding 7). Call clip_relay_check before the legs")
+elif first_leg is not None and relay_call > first_leg:
+    bad.append(f"{path}:{relay_call}: the clipboard isolation is measured AFTER the first "
+               f"leg is queued (line {first_leg}) — a lane that dies at leg 40 teaches "
+               f"nothing a lane that dies in five seconds does not")
+
 start = text.find("queue_leg() {")
 end = text.find("queue_pad_leg() {")
 if start < 0 or end < start:
@@ -947,6 +977,55 @@ for n, raw in enumerate(text.splitlines(), 1):
                    f"the clipboard seed/read is a spawned on-device process precisely so "
                    f"this lane cannot race the mac lane legs or its own delivery window "
                    f"(docs/clipboard-plan.md §8 finding 6)")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# AND THE PICKER MUST BE AIMABLE BEFORE ANY LEG RUNS, which on this
+# platform is not a property of the code under test.
+#
+# The FIRST document picker a simulator shows after a boot opens at the
+# app's container root instead of the directory it was aimed at: the
+# app's reveal and DocumentManager's own default-location strategy race,
+# and on a cold boot the strategy's file-provider resolution takes 708ms
+# against a reveal that arrives at ~380ms (measured six ways,
+# docs/traps.md). The scene then fails three steps deep, at file_choose,
+# on a row that genuinely is not in the list — a failure that reads like
+# a harness or guest defect and is neither.
+#
+# So run-sim.sh warms the document stack per device before the legs, and
+# this keeps it there. Matched with an argument after the name so the
+# definition line cannot satisfy the clause on its own — a bare name
+# matching its own definition is how three clauses of check-tx-liveness
+# once passed with the guard deleted.
+picker_ios() { # path
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+
+warm_call = None
+first_leg = None
+for n, raw in enumerate(text.splitlines(), 1):
+    s = raw.strip()
+    if s.startswith("#"):
+        continue
+    if warm_call is None and re.match(r"picker_warm\s+\S", s):
+        warm_call = n
+    if first_leg is None and re.match(r"queue_(pad_)?leg\s+\S", s):
+        first_leg = n
+if warm_call is None:
+    bad.append(f"{path}: nothing warms the document picker — the first picker a simulator "
+               f"shows after a boot opens at the container root rather than where it was "
+               f"aimed, and the filedialog scene then fails at file_choose on a row that is "
+               f"really not there (docs/traps.md). Call picker_warm before the legs")
+elif first_leg is not None and warm_call > first_leg:
+    bad.append(f"{path}:{warm_call}: the picker is warmed AFTER the first leg is queued "
+               f"(line {first_leg}) — the leg that needs it may already have run")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 ' "$1"
@@ -1036,12 +1115,75 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
 ios_applied "$hits" "the host-pasteboard perturbation"
 ios_selftest "$IOS_T/hostboard.sh" "touches a pasteboard tool" "a live pbcopy in the runner"
 
+# ...and a runner that never asks whether the board is the device's own
+# must fail: with Simulator.app running, it is Simulator.app's too.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^clip_relay_check .*\n' '' "$IOS_T/norelay.sh")"
+ios_applied "$hits" "the relay-check removal"
+ios_selftest "$IOS_T/norelay.sh" "nothing measures the clipboard isolation" \
+    "a runner that never measures the isolation"
+
+# ...and one that measures it only after the legs are queued must fail.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^clip_relay_check (.*)\n' '' "$IOS_T/late.sh")"
+ios_applied "$hits" "the late-check removal half"
+hits="$(ios_perturb "$IOS_T/late.sh" \
+    '(?m)^    drain\n    timing swiftui-build\+legs' \
+    'clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1\n    drain\n    timing swiftui-build+legs' \
+    "$IOS_T/late.sh")"
+ios_applied "$hits" "the late-check insertion half"
+ios_selftest "$IOS_T/late.sh" "measured AFTER the first leg" \
+    "a runner that measures the isolation too late"
+
+# ...and the picker half, with its own refusals: a runner that never
+# warms the document stack must fail...
+picker_selftest() { # copy want-fragment label
+    local out
+    out="$(picker_ios "$1")" && {
+        echo "check-steps: SELF-TEST FAIL ($3 passed)" >&2
+        rm -rf "$IOS_T"
+        exit 1
+    }
+    case "$out" in
+        *"$2"*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL ($3 failed for another reason: $out)" >&2
+            rm -rf "$IOS_T"
+            exit 1
+            ;;
+    esac
+}
+
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    picker_warm .*\n' '' "$IOS_T/nowarm.sh")"
+ios_applied "$hits" "the picker-warm removal"
+picker_selftest "$IOS_T/nowarm.sh" "nothing warms the document picker" \
+    "a runner that never warms the picker"
+
+# ...and one that warms it only after the legs are queued must fail.
+hits="$(ios_perturb tools/ios/run-sim.sh \
+    '(?m)^    picker_warm (.*)\n' '' "$IOS_T/latewarm.sh")"
+ios_applied "$hits" "the late-warm removal half"
+hits="$(ios_perturb "$IOS_T/latewarm.sh" \
+    '(?m)^    drain\n    timing swiftui-build\+legs' \
+    'picker_warm "${UDIDS[0]}" || exit 1\n    drain\n    timing swiftui-build+legs' \
+    "$IOS_T/latewarm.sh")"
+ios_applied "$hits" "the late-warm insertion half"
+picker_selftest "$IOS_T/latewarm.sh" "warmed AFTER the first leg" \
+    "a runner that warms the picker too late"
+
 rm -rf "$IOS_T"
 
 # The accept direction is the real check itself, immediately below: a
 # rule that refused everything would fail here rather than pass quietly.
 out="$(clipboard_ios tools/ios/run-sim.sh)" || {
     echo "check-steps: an iOS clipboard leg must own its simulator for the whole leg (docs/clipboard-plan.md §8 finding 5 — one pasteboard per device, and the slot lock is this lane's drain):" >&2
+    echo "$out" >&2
+    status=1
+}
+
+out="$(picker_ios tools/ios/run-sim.sh)" || {
+    echo "check-steps: the iOS lane must warm each device's document stack before its legs (docs/traps.md — the first picker after a boot opens at the container root, not where it was aimed):" >&2
     echo "$out" >&2
     status=1
 }

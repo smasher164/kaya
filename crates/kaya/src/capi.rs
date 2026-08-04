@@ -714,6 +714,10 @@ fn state() -> &'static CState {
     static STATE: OnceLock<CState> = OnceLock::new();
     STATE.get_or_init(|| {
         let ring = Arc::new(OccRing::new(64 * 1024));
+        // The watchdog reads this ring's consumer cursor (crate::stall).
+        // HERE, where the one process-wide ring is born, because every
+        // other candidate is an entry point somebody has to remember.
+        crate::stall::watch_ring(Arc::clone(&ring));
         let (tx_tx, tx_rx) = mpsc::channel();
         CState {
             ring: ring.clone(),

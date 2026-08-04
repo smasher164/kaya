@@ -63,8 +63,19 @@ OUT=target/swiftui/libkaya_swiftui.dylib
 # grep, a tail, a human skimming) misses it entirely. Callers should
 # still check the exit status; this makes the artifact honest even when
 # they do not.
+# -warnings-as-errors, and it is a GUARD rather than tidiness. The one
+# thing the compiler says about a dropped return value is a warning
+# (`result of call to ... is unused`), and a warning in a build nobody
+# reads is how this file shipped a clipboard seed that threw away
+# osascript's exit status and stderr for the whole life of the scene:
+# a tool that refused looked exactly like one that worked, and the only
+# symptom either way was a settle timing out fifteen seconds later
+# (2026-08-04). The interpreter compiles warning-free, so the flag costs
+# nothing and puts the wall in the BUILD — the thing every mac and iOS
+# run does first — instead of in a gate somebody has to remember.
 rm -f "$OUT"
 if ! kaya_swiftc \
+    -warnings-as-errors \
     -emit-library \
     -import-objc-header crates/kaya/include/kaya.h \
     swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift "$MARKER_SWIFT" \

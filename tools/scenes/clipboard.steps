@@ -109,6 +109,15 @@ expect_focused entry#1
 menu_activate "Edit>Paste"
 expect entry#1 "pasted by hand"
 
+# AND IT WENT WHERE IT WAS AIMED. entry#0 was focused a moment ago and
+# is an editable field like this one, so a paste that dispatches while
+# the platform's focus is still catching up with kaya's lands THERE — and
+# every other assertion in this scene reads the same either way: entry#1
+# stays empty (the symptom) with nothing saying where the content went.
+# Measured 2026-08-04, twice in one mac lane run. This line is what tells
+# "the paste reached nobody" from "the paste reached the wrong widget".
+expect entry#0 ""
+
 # One REAL-TREE read at the end: every assertion above reads kaya's own
 # model or the clipboard, and would pass for an arm that ran and drew
 # nothing.

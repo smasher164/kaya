@@ -165,8 +165,12 @@ impl OccRing {
     /// length (record bodies always are). Panics when full; the design
     /// says never block and never drop, and growth is not built yet.
     pub fn push_record(&self, kind: u16, body: &[u8]) {
-        // One occurrence bound for the app thread (crate::stall).
-        crate::stall::enqueued();
+        // One occurrence bound for the app thread (crate::stall). No
+        // counter on this transport: the cursors below already say what
+        // is pending and whether the consumer is moving, and unlike a
+        // counter they cannot be forgotten by a binding — a consumer
+        // that does not advance `head` wedges itself.
+        crate::stall::ring_pushed();
         if !self.try_push_record(kind, body) {
             panic!("kaya occurrence ring full: segment growth is not implemented yet");
         }
@@ -247,7 +251,6 @@ impl OccRing {
                 self.head
                     .0
                     .store(head.wrapping_add(header.size), Ordering::Release);
-                crate::stall::taken();
                 return Waited::Record(header.kind, body);
             }
             if self.shutdown.load(Ordering::Acquire) {
@@ -346,6 +349,47 @@ impl OccRing {
     #[cfg(test)]
     pub fn parked(&self) -> usize {
         self.parked.load(Ordering::Acquire)
+    }
+
+    /// The two cursors, for the stall watchdog: `(head, tail)`. Equal is
+    /// an empty ring; unequal with `head` standing still is the stall
+    /// (crate::stall). This is DESIGN's "the core reads the app's
+    /// consumer cursor directly" — and it works for the direct tier as
+    /// well as the function floor, because both advance `head` and only
+    /// one of them ever enters this file.
+    pub(crate) fn cursors(&self) -> (u32, u32) {
+        let head = self.head.0.load(Ordering::Acquire);
+        let tail = self.tail.0.load(Ordering::Acquire);
+        (head, tail)
+    }
+
+    /// How many records are waiting, for the watchdog's message — the
+    /// count a person recognizes ("I clicked three times"), where the
+    /// byte distance between the cursors is not.
+    ///
+    /// Walks the published region, which is safe to READ from another
+    /// thread: those bytes were written before `tail` was released, and
+    /// nothing reuses them until the consumer advances `head` past them.
+    /// It is a DIAGNOSTIC count and says so: a consumer draining
+    /// concurrently can leave this walk following a header the producer
+    /// has since overwritten, so the walk is bounded by the ring itself
+    /// and stops at anything that cannot be a record.
+    pub(crate) fn pending_records(&self) -> u64 {
+        let (mut at, tail) = self.cursors();
+        let mut records = 0;
+        let mut budget = u64::from(self.capacity() / HEADER_SIZE);
+        while at != tail && budget > 0 {
+            budget -= 1;
+            let header = self.read_header(at);
+            if header.size < HEADER_SIZE || header.size > self.capacity() {
+                break;
+            }
+            if header.kind != REC_PAD {
+                records += 1;
+            }
+            at = at.wrapping_add(header.size);
+        }
+        records
     }
 
     /// Raw layout for direct consumers, io_uring-offsets style. The

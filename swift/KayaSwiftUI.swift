@@ -727,6 +727,10 @@ func kayaCopyToPasteboard(
         // The assignment IS the clear — `items` replaces the board.
         UIPasteboard.general.items = items
     #endif
+    // THE BOARD KAYA NOW OWNS. Anything that moves it after this line
+    // was somebody else, and the diagnostics say so by name
+    // (kayaClipOwnerClause).
+    kayaClipOwned(kayaClipBoardNow().change)
 }
 
 /// Answer a privileged read with the FIRST accepted representation in
@@ -798,6 +802,68 @@ func kayaReadClipboard(request: UInt64, accepting: String) {
     }
 #endif
 
+/// ONE LINE WHEN A READ ANSWERS NOTHING, naming what was asked for and
+/// what the clipboard was actually holding.
+///
+/// Empty is a legitimate answer with four indistinguishable causes
+/// (denied, unfocused, absent, or nothing this read accepted), so the
+/// GUEST cannot report which — but the backend knows what the board
+/// offered at that instant, and a step that reads "label#0 reads empty"
+/// does not. That gap cost this project two debugging rounds on iOS,
+/// where the answer was that the board had been REPLACED by another
+/// process's clip (docs/clipboard-plan.md §8 finding 7): the offer list
+/// in this line says so at a glance, and it costs nothing on the path
+/// that answers.
+func kayaClipNote(
+    _ answer: KayaClipValue?, accepting: String, offered: [String]
+) -> KayaClipValue? {
+    if answer == nil {
+        let note =
+            "KAYA_CLIP_TRACE: read of [\(accepting)] answered empty; "
+            + "the clipboard offered \(offered)\(kayaClipOwnerClause())\n"
+        FileHandle.standardError.write(Data(note.utf8))
+    }
+    return answer
+}
+
+/// THE CHANGE COUNT KAYA ITSELF LAST PUT ON THE BOARD — the app's own
+/// copy, or a seed that settled. Written from the app thread (the copy)
+/// and the harness thread (the seed), so it takes a lock rather than
+/// pretending an Int is atomic.
+private let kayaClipOwnerLock = NSLock()
+private var kayaClipOwnerChange = -1
+
+/// Remember the board kaya just produced. Every clipboard write kaya
+/// asks for ends here — there is no second place to add one.
+func kayaClipOwned(_ change: Int) {
+    kayaClipOwnerLock.lock()
+    kayaClipOwnerChange = change
+    kayaClipOwnerLock.unlock()
+}
+
+/// A clause naming a board that has changed since kaya last wrote it,
+/// or "" when the board is still the one kaya left.
+///
+/// WHY THIS SENTENCE EXISTS. A pasteboard has no "who wrote it", so
+/// every failure whose real cause is a second principal — a VM's
+/// clipboard relay, a clipboard manager, a sibling lane — arrives as
+/// kaya's own step reading the wrong thing, and the session that gets it
+/// starts by suspecting kaya. The changeCount is the one piece of
+/// evidence that separates the two, and kaya knows which value is its
+/// own: 2026-08-04's matrix failure was a paste that silently did
+/// nothing because an image clip had replaced the seeded text 25ms
+/// earlier, and nothing in the log said the board had moved at all.
+func kayaClipOwnerClause() -> String {
+    kayaClipOwnerLock.lock()
+    let owned = kayaClipOwnerChange
+    kayaClipOwnerLock.unlock()
+    let now = kayaClipBoardNow().change
+    if owned < 0 || owned == now { return "" }
+    return
+        " — AND THE BOARD HAS MOVED SINCE KAYA WROTE IT (cc \(owned) -> \(now)): "
+        + "another process is writing this clipboard"
+}
+
 /// The walk itself, shared by the privileged read and by a paste
 /// landing on a widget that declared what it accepts — ONE
 /// implementation, because the two differ in their trigger and never in
@@ -838,7 +904,9 @@ func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
         if answer == nil, kinds & kayaClipText != 0, let text = board.string(forType: .string) {
             answer = KayaClipValue(clip: kayaClipText, text: text)
         }
-        return answer
+        return kayaClipNote(
+            answer, accepting: accepting,
+            offered: board.types?.map(\.rawValue) ?? [])
     #else
         let (kinds, custom) = kayaParseAcceptList(accepting)
         let board = UIPasteboard.general
@@ -898,37 +966,101 @@ func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
         {
             answer = KayaClipValue(clip: kayaClipText, text: text)
         }
-        return answer
+        return kayaClipNote(answer, accepting: accepting, offered: Array(offered))
     #endif
 }
 
+/// What a child tool DID, not merely what it printed.
+///
+/// A TOOL THAT FAILED AND A TOOL THAT SUCCEEDED SILENTLY ARE THE SAME
+/// EMPTY STRING, and this arm could not tell them apart for the whole
+/// life of the clipboard scene: the run discarded the exit status and
+/// piped stderr into a pipe nobody read, so an `osascript` that refused
+/// looked exactly like one that worked. Either way the only symptom was
+/// a settle that timed out — a sentence about the pasteboard, said
+/// about a process that may never have written it. The status and the
+/// stderr ride along here so a failure can quote the tool.
+struct KayaToolRun {
+    let args: [String]
+    let out: String
+    let status: Int32
+    /// Whatever the tool wrote to stderr, or — when it never started —
+    /// this side's account of why.
+    let said: String
+    let signalled: Bool
+
+    var ok: Bool { status == 0 && !signalled }
+
+    /// The tool's own account of itself, in one line, for an error that
+    /// has to explain a failure to a session with no context.
+    var note: String {
+        let name = args.first ?? "?"
+        let words = said.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: "; ")
+        let verdict =
+            signalled
+            ? "\(name) was killed by signal \(status)"
+            : "\(name) exited \(status)"
+        return words.isEmpty ? "\(verdict) and said nothing" : "\(verdict): \(words)"
+    }
+}
+
 /// Run one of the platform's own clipboard tools as a CHILD PROCESS
-/// and hand back its stdout. The tools are Apple's — `pbcopy`,
+/// and hand back what it did. The tools are Apple's — `pbcopy`,
 /// `pbpaste`, `osascript`, `sips` — never anything kaya wrote, because
 /// the whole value of the foreign side is that it does not share our
 /// assumptions about the lowering.
-@discardableResult
-func kayaRunTool(_ args: [String], stdin: Data? = nil) -> String {
+///
+/// NOT `@discardableResult`, and that one missing attribute is the
+/// guard: dropping this value on the floor is exactly the defect that
+/// cost a matrix debugging round, and now the COMPILER refuses it at
+/// the callsite rather than a gate refusing it later. A caller that
+/// genuinely has nothing to do with the answer says so by name —
+/// `kayaToolNote(kayaRunTool(…))`, which reports a tool that failed.
+func kayaRunTool(_ args: [String], stdin: Data? = nil) -> KayaToolRun {
     #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
         let out = Pipe()
+        let err = Pipe()
         process.standardOutput = out
-        process.standardError = Pipe()
+        process.standardError = err
         let input = Pipe()
         if stdin != nil { process.standardInput = input }
-        do { try process.run() } catch { return "" }
+        do { try process.run() } catch {
+            return KayaToolRun(
+                args: args, out: "", status: -1,
+                said: "never started: \(error)", signalled: false)
+        }
         if let stdin {
             input.fileHandleForWriting.write(stdin)
             input.fileHandleForWriting.closeFile()
         }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
+        // BOTH PIPES DRAIN AT ONCE. A child that fills the stderr buffer
+        // while this thread is still reading stdout to EOF stops writing
+        // and never exits — a deadlock built into the very path that
+        // exists to report a tool having gone wrong. Reading stderr
+        // beside stdout costs one queue hop and removes the class.
+        let drained = DispatchGroup()
+        var errBytes = Data()
+        DispatchQueue.global(qos: .userInitiated).async(group: drained) {
+            errBytes = err.fileHandleForReading.readDataToEndOfFile()
+        }
+        let outBytes = out.fileHandleForReading.readDataToEndOfFile()
+        drained.wait()
         process.waitUntilExit()
-        return String(data: data, encoding: .utf8) ?? ""
+        return KayaToolRun(
+            args: args,
+            out: String(decoding: outBytes, as: UTF8.self),
+            status: process.terminationStatus,
+            said: String(decoding: errBytes, as: UTF8.self),
+            signalled: process.terminationReason == .uncaughtSignal)
     #else
-        _ = (args, stdin)
-        return ""
+        _ = stdin
+        return KayaToolRun(
+            args: args, out: "", status: -1,
+            said: "this platform runs no child processes", signalled: false)
     #endif
 }
 
@@ -944,6 +1076,62 @@ private func kayaClipUTI(_ kind: String) -> String {
     }
 }
 
+/// The clipboard as a settle sees it: the changeCount and the type
+/// list. THE ONE PLACE THE TWO BOARDS DIFFER, so everything built on it
+/// is written once and cannot drift between the platforms this file
+/// serves — which is what the settle below relies on.
+func kayaClipBoardNow() -> (change: Int, types: [String]) {
+    #if os(macOS)
+        let board = NSPasteboard.general
+        return (board.changeCount, board.types?.map(\.rawValue) ?? [])
+    #else
+        return (UIPasteboard.general.changeCount, UIPasteboard.general.types)
+    #endif
+}
+
+/// Put the content on the clipboard ONCE, by the platform's own means.
+/// Answers nil when the attempt went through, or the sentence to fail
+/// with when the MECHANISM refused — which is never worth retrying: a
+/// tool that will not run and a host bridge that will not answer do not
+/// improve on the second ask.
+private func kayaClipSeedOnce(kind: String, arg: String) -> String? {
+    #if os(macOS)
+        let ran: KayaToolRun
+        switch kind {
+        case "text":
+            ran = kayaRunTool(["pbcopy"], stdin: Data(arg.utf8))
+        case "html":
+            // An AppleScript data literal: «data» plus the four-character
+            // class code, then hex. The only way to put a TYPED payload
+            // on the pasteboard with a stock tool.
+            let hex = arg.utf8.map { String(format: "%02X", $0) }.joined()
+            ran = kayaRunTool(["osascript", "-e", "set the clipboard to «data HTML\(hex)»"])
+        case "image":
+            ran = kayaRunTool([
+                "osascript", "-e",
+                "set the clipboard to (read (POSIX file \"\(arg)\") as «class PNGf»)",
+            ])
+        default:
+            ran = kayaRunTool(["osascript", "-e", "set the clipboard to POSIX file \"\(arg)\""])
+        }
+        return ran.ok ? nil : ran.note
+    #else
+        // THE SEED IS A SPAWNED WRITER ON THIS DEVICE, asked for over
+        // the host bridge, because this process has no way to be
+        // another app and no stock tool to run (Process is macOS-only;
+        // kayaRunTool runs nothing here). The host spawns
+        // tools/ios/clipctl, whose write is synchronous and visible to
+        // other processes before the spawn exits (measured, §8 finding
+        // 6) — the pbsync route it replaced exited rc=0 with delivery
+        // still in flight, and this read raced that window. The payload
+        // rides base64 because the watcher word-splits the request line,
+        // and a seeded string has spaces in it far more often than not.
+        let payload = Data(arg.utf8).base64EncodedString()
+        let (ok, lines) = KayaSimdrive.ask("clip_seed \(kind) \(payload)")
+        return ok ? nil : (lines.first ?? "the host refused without saying why")
+    #endif
+}
+
 /// Put content on the clipboard FROM OUTSIDE this app, so a read leg is
 /// answering something this process did not write.
 ///
@@ -953,101 +1141,125 @@ private func kayaClipUTI(_ kind: String) -> String {
 /// it round-trips within the app, so the scene copies and reads one
 /// back — with `pbpaste` confirming from outside that the bytes really
 /// are on the pasteboard under that id.
+///
+/// ONE BODY FOR BOTH PLATFORMS, and that is not tidiness: the seed's
+/// settle is the rule that "the verb returns only when the content is
+/// really there", and the two arms drifted apart once already — mac
+/// polled the TYPE alone, which three of this scene's four seeds
+/// already offered before the seed ran, so those three waited on
+/// nothing and only `files` could ever report trouble (§8 finding 6 is
+/// the same vacuity, found on the other platform). What differs between
+/// the platforms is the WRITE and the board object; the rule does not.
 func kayaClipboardSeed(kind: String, argument: String) {
-    #if os(macOS)
-        let arg = kayaExpandPath(argument)
-        switch kind {
-        case "text":
-            kayaRunTool(["pbcopy"], stdin: Data(arg.utf8))
-        case "html":
-            // An AppleScript data literal: «data» plus the four-character
-            // class code, then hex. The only way to put a TYPED payload
-            // on the pasteboard with a stock tool.
-            let hex = arg.utf8.map { String(format: "%02X", $0) }.joined()
-            kayaRunTool(["osascript", "-e", "set the clipboard to «data HTML\(hex)»"])
-        case "image":
-            kayaRunTool([
-                "osascript", "-e",
-                "set the clipboard to (read (POSIX file \"\(arg)\") as «class PNGf»)",
-            ])
-        case "files":
-            kayaRunTool(["osascript", "-e", "set the clipboard to POSIX file \"\(arg)\""])
-        default:
-            fatalError(
-                "kaya: clipboard_seed cannot write \(kind) from outside the app — no stock "
-                    + "tool writes an app-defined format, and a helper kaya wrote would be "
-                    + "foreign in name only")
-        }
-        // AND WAIT UNTIL IT IS REALLY THERE. `osascript` writes the
-        // clipboard through AppleEvents, in another process, and its
-        // EXIT does not mean the pasteboard server has settled — a
-        // guest that read immediately after got an empty answer about
-        // one run in three, with no retry to save it (the seed is a
-        // silent action, so the failure landed on whatever the guest
-        // asserted next). A verb that returns before its own work
-        // is visible makes every step after it race.
-        let want = kayaClipUTI(kind)
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
-            if NSPasteboard.general.types?.contains(where: { $0.rawValue == want }) == true {
-                return
-            }
-            usleep(10_000)
-        }
-        fatalError("kaya: clipboard_seed \(kind) never appeared on the clipboard")
-    #else
-        // THE SEED IS A SPAWNED WRITER ON THIS DEVICE, asked for over
-        // the host bridge, because this process has no way to be
-        // another app and no stock tool to run (Process is macOS-only;
-        // kayaRunTool returns nothing here). The host spawns
-        // tools/ios/clipctl, whose write is synchronous and visible to
-        // other processes before the spawn exits (measured, §8 finding
-        // 6) — the pbsync route it replaced exited rc=0 with delivery
-        // still in flight, and this read raced that window. The payload
-        // rides base64 because the watcher word-splits the request line,
-        // and a seeded string has spaces in it far more often than not.
-        let before = UIPasteboard.general.changeCount
-        let arg = kayaExpandPath(argument)
-        switch kind {
-        case "text", "html", "image", "files":
-            let payload = Data(arg.utf8).base64EncodedString()
-            let (ok, lines) = KayaSimdrive.ask("clip_seed \(kind) \(payload)")
-            if !ok {
-                fatalError(
-                    "kaya: clipboard_seed \(kind) — "
-                        + (lines.first ?? "the host refused without saying why"))
-            }
-        default:
-            fatalError(
-                "kaya: clipboard_seed cannot write \(kind) from outside the app — no stock "
-                    + "tool writes an app-defined format, and a helper kaya wrote would be "
-                    + "foreign in name only")
-        }
-        // AND WAIT UNTIL IT IS REALLY *NEW*, not merely until the kind
-        // is offered. The scene's own copy leaves a union clip carrying
-        // EVERY kind's type, so a poll for the type alone is satisfied
-        // by the stale board before the seed lands — the vacuity that
-        // let the pbsync window through (§8 finding 6). The changeCount
-        // moving is what proves the board this poll reads is the seed's
-        // board; then the type confirms it is the right one. Both polls
-        // are prompt-free — a type list and a changeCount cost nothing
-        // at any stage — so waiting here cannot raise the very alert
-        // the read after it is meant to raise.
-        let want = kayaClipUTI(kind)
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
-            if UIPasteboard.general.changeCount != before,
-                UIPasteboard.general.types.contains(want)
-            {
-                return
-            }
-            usleep(10_000)
-        }
+    guard ["text", "html", "image", "files"].contains(kind) else {
         fatalError(
-            UIPasteboard.general.changeCount == before
-                ? "kaya: clipboard_seed \(kind) never moved the clipboard's changeCount"
-                : "kaya: clipboard_seed \(kind) never appeared on the clipboard")
-    #endif
+            "kaya: clipboard_seed cannot write \(kind) from outside the app — no stock "
+                + "tool writes an app-defined format, and a helper kaya wrote would be "
+                + "foreign in name only")
+    }
+    let arg = kayaExpandPath(argument)
+    // A FILE THAT IS NOT THERE IS NOT A CLIPBOARD PROBLEM, and nothing
+    // downstream will say so: `set the clipboard to POSIX file
+    // "<missing>"` exits 0, prints nothing and leaves the board
+    // untouched (measured 2026-08-04), so a path that is wrong or a file
+    // the guest has not written yet arrives as a settle that waits out
+    // its whole deadline and then talks about the pasteboard. Both
+    // path-taking kinds check here, on both platforms, where the answer
+    // is one line.
+    if kind == "image" || kind == "files", !FileManager.default.fileExists(atPath: arg) {
+        fatalError("kaya: clipboard_seed \(kind) — there is no file at \(arg)")
+    }
+
+    // AND WAIT UNTIL IT IS REALLY *NEW*, not merely until the kind is
+    // offered: the scene's own copy leaves a union clip carrying nearly
+    // every kind's type, so a poll for the type alone is satisfied by
+    // the STALE board before the seed lands. The changeCount moving is
+    // what proves the board this poll reads is the seed's board; then
+    // the type confirms it is the right one. Both polls are prompt-free
+    // — a type list and a changeCount cost nothing at any stage — so
+    // waiting here cannot raise the very alert the read after it is
+    // meant to raise.
+    //
+    // AND RE-ISSUE A WRITE THAT DID NOT LAND, because waiting longer
+    // cannot help one that never happened. `set the clipboard to`
+    // REPORTS SUCCESS AND WRITES NOTHING when another process touches
+    // the board inside its clear-then-put window: measured 2026-08-04,
+    // 12 of 12 writes vanished against a competitor writing every 10ms,
+    // osascript exiting 0 and silent each time, with a 1ms poll that
+    // never once saw the type (200 of 200 land with no competitor, so
+    // this is contention and not load). That is the matrix-only failure
+    // this settle used to report as "never appeared on the clipboard"
+    // after fifteen fruitless seconds — and why widening the deadline
+    // from 5s to 15s changed nothing. The seed is idempotent by
+    // construction — the same file, the same content, the same command —
+    // so a write that is not on the board within a second is simply made
+    // again.
+    let want = kayaClipUTI(kind)
+    let before = kayaClipBoardNow().change
+    let started = Date()
+    // EVERY BOARD THIS WAIT SEES, one entry per distinct clip. A settle
+    // that runs out has two very different stories and the bare timeout
+    // tells neither: nothing was ever written (the count never moves),
+    // or something else is writing this board too (the count moves to
+    // types that are not ours, again and again, through every re-issue).
+    // This list is that evidence, and it costs one comparison per poll.
+    var clips: [String] = []
+    var last = before
+    var seen = 0
+    var attempts = 0
+    while true {
+        attempts += 1
+        if let refused = kayaClipSeedOnce(kind: kind, arg: arg) {
+            fatalError("kaya: clipboard_seed \(kind) — \(refused)")
+        }
+        let window = Date().addingTimeInterval(1)
+        while true {
+            let board = kayaClipBoardNow()
+            if board.change != last || clips.isEmpty {
+                last = board.change
+                seen += 1
+                if clips.count < 12 {
+                    clips.append(
+                        "+\(Int(Date().timeIntervalSince(started) * 1000))ms "
+                            + "cc=\(board.change) \(board.types)")
+                }
+            }
+            if board.change != before, board.types.contains(want) {
+                // The seed is kaya's write too, however foreign the
+                // process that made it: what the verb settled on is the
+                // board kaya owns from here.
+                kayaClipOwned(board.change)
+                return
+            }
+            if Date() >= window { break }
+            usleep(10_000)
+        }
+        if Date().timeIntervalSince(started) >= 15 { break }
+    }
+    fatalError(
+        "kaya: clipboard_seed \(kind) never "
+            + (last == before
+                ? "moved the clipboard's changeCount"
+                : "appeared on the clipboard")
+            + " — \(attempts) writes over 15s from cc=\(before), \(seen) clips seen: "
+            + clips.joined(separator: " | "))
+}
+
+/// ONE LINE WHEN A CLIPBOARD TOOL DID NOT SUCCEED, quoting it.
+///
+/// A foreign read answers a STRING the scene compares byte for byte, so
+/// a tool that failed and a clipboard holding nothing of that kind
+/// arrive as the same "" — and the step then reports the guest's state
+/// where the harness's belongs. This is kayaClipNote's sibling for the
+/// side kaya spawns. Not a failure by itself: `osascript` refusing to
+/// write out a png the board does not hold IS the empty answer, and the
+/// line says so in the tool's own words.
+@discardableResult
+func kayaToolNote(_ ran: KayaToolRun) -> KayaToolRun {
+    if !ran.ok {
+        FileHandle.standardError.write(Data("KAYA_CLIP_TRACE: \(ran.note)\n".utf8))
+    }
+    return ran
 }
 
 /// Read the clipboard back FROM OUTSIDE this app, in one
@@ -1060,7 +1272,7 @@ func kayaClipboardRead(_ kind: String) -> String {
             // scene that wants this verified copies one file. Basenames,
             // never paths: the expected string is compared byte for byte
             // across lanes whose temp directories differ.
-            let raw = kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])
+            let raw = kayaToolNote(kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])).out
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty, let url = URL(string: raw) else { return "" }
             return url.lastPathComponent
@@ -1072,15 +1284,19 @@ func kayaClipboardRead(_ kind: String) -> String {
             // would read differently on every platform for one picture.
             let scratch = kayaTempDir() + "/kaya-clipread-\(getpid()).png"
             try? FileManager.default.removeItem(atPath: scratch)
-            kayaRunTool([
-                "osascript",
-                "-e", "set f to open for access POSIX file \"\(scratch)\" with write permission",
-                "-e", "set eof f to 0",
-                "-e", "write (the clipboard as «class PNGf») to f",
-                "-e", "close access f",
-            ])
+            kayaToolNote(
+                kayaRunTool([
+                    "osascript",
+                    "-e",
+                    "set f to open for access POSIX file \"\(scratch)\" with write permission",
+                    "-e", "set eof f to 0",
+                    "-e", "write (the clipboard as «class PNGf») to f",
+                    "-e", "close access f",
+                ]))
             guard FileManager.default.fileExists(atPath: scratch) else { return "" }
-            let sized = kayaRunTool(["sips", "-g", "pixelWidth", "-g", "pixelHeight", scratch])
+            let sized = kayaToolNote(
+                kayaRunTool(["sips", "-g", "pixelWidth", "-g", "pixelHeight", scratch])
+            ).out
             try? FileManager.default.removeItem(atPath: scratch)
             let numbers = sized.split(separator: "\n").compactMap { line -> String? in
                 guard let colon = line.lastIndex(of: ":") else { return nil }
@@ -1090,7 +1306,7 @@ func kayaClipboardRead(_ kind: String) -> String {
             guard numbers.count == 2 else { return "" }
             return "\(numbers[0])x\(numbers[1])"
         default:
-            return kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])
+            return kayaToolNote(kayaRunTool(["pbpaste", "-Prefer", kayaClipUTI(kind)])).out
         }
     #else
         // ONE MECHANISM FOR EVERY KIND, and it is the host's: a CLI
@@ -1377,7 +1593,16 @@ func kayaPresentFileDialog(
         kayaLiveDocumentPicker = panel
         let scenes = UIApplication.shared.connectedScenes
         let ws = scenes.compactMap { $0 as? UIWindowScene }.first
-        ws?.windows.first?.rootViewController?.present(panel, animated: false)
+        let host = ws?.windows.first?.rootViewController
+        kayaPickerNote(
+            "present dialog=\(dialog) at \(kayaPendingPanelDirectory ?? "<none>") "
+                + "multiple=\(allowsMultiple) host=\(host.map { String(describing: type(of: $0)) } ?? "<none>")")
+        host?.present(panel, animated: false) {
+            // The completion is the presentation ACTUALLY finishing.
+            // Everything the harness does next assumes an interactive
+            // picker, and "present returned" says nothing about that.
+            kayaPickerNote("presented dialog=\(dialog)")
+        }
     #endif
 }
 
@@ -1469,6 +1694,20 @@ func kayaPresentFileDialog(
         return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
     }
 
+    /// ONE LINE PER PICKER LIFECYCLE EVENT, on stderr, because this
+    /// picker is the one piece of UI in this backend that NOBODY IN THIS
+    /// PROCESS CAN SEE. It is a remote view controller: the harness reads
+    /// it from the host (tools/ios/simdrive) and the app learns nothing
+    /// about it except through the delegate. So the four moments that
+    /// exist here are said out loud — presented, picked, cancelled,
+    /// emitted — and the difference between "the tap never landed" and
+    /// "the tap landed and the delegate never fired" stops being a
+    /// guess. Same voice and same destination as kayaClipNote, for the
+    /// same reason: the guest cannot report what only the backend knows.
+    func kayaPickerNote(_ what: String) {
+        FileHandle.standardError.write(Data("KAYA_PICKER_TRACE: \(what)\n".utf8))
+    }
+
     /// The live picker and the delegate that answers it. Held because a
     /// UIDocumentPickerViewController's delegate is UNOWNED — dropped on
     /// the floor it is deallocated before the user picks anything, and
@@ -1499,12 +1738,15 @@ func kayaPresentFileDialog(
         func documentPicker(
             _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
         ) {
+            kayaPickerNote(
+                "didPick dialog=\(dialog) \(urls.map { $0.lastPathComponent })")
             answer(urls)
         }
 
         /// Cancel is the EMPTY LIST, faithfully — no platform can
         /// confirm an empty selection, so there is no sentinel.
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            kayaPickerNote("cancelled dialog=\(dialog)")
             answer([])
         }
 
@@ -1537,6 +1779,7 @@ func kayaPresentFileDialog(
                         dialog, l.baseAddress, n.baseAddress, UInt(urls.count))
                 }
             }
+            kayaPickerNote("emitted dialog=\(dialog) \(urls.count) file(s)")
         }
     }
 
@@ -3500,6 +3743,25 @@ private func kayaRunScript(_ script: String) {
                         "the app thread is keeping up — no pending occurrences have gone "
                             + "unclaimed, so the stall watchdog has nothing to report")
                 }
+            case "expect_no_stall":
+                // THE OTHER HALF OF THE SAME CLAIM, and the half nothing
+                // asserted for four milestones: a watchdog that reports a
+                // stall about a HEALTHY app is worse than none, because
+                // the line is read as evidence. It shipped that way — the
+                // five languages that read the occurrence ring directly
+                // reported a stall on every green leg — and this arm is
+                // what refuses it. Polled like its sibling: the reading
+                // clears on the watchdog's own 100ms poll.
+                let idleMs = KayaHost.api.stalled_ms()
+                if idleMs == 0 {
+                    observed.append("the app thread is keeping up")
+                } else {
+                    failures.append(
+                        "the stall watchdog reports \(idleMs)ms of unclaimed occurrences "
+                            + "about an app that is answering this scene — either the app "
+                            + "thread really is gone, or the watchdog cannot see this "
+                            + "guest's transport (crates/kaya/src/stall.rs)")
+                }
             case "expect_focused":
                 // The model's focusedId is the observation the focus
                 // command lands as (the entry view's FocusState mirrors
@@ -4513,8 +4775,18 @@ private func kayaRunScript(_ script: String) {
                         }
                         let noun = kayaScene.contextNouns[wid] ?? []
                         kayaOpenContextWidget = nil
+                        kayaRoleInertNote(item, verb: "menu_activate \"\(path)\"")
                         kayaMenuUserActivate(item, noun: noun)
                         return nil
+                    }
+                    // BEFORE THE DISPATCH, AND ON BOTH PLATFORMS, because
+                    // an inert standard command is the one activation
+                    // that succeeds and does nothing (kayaRoleInertNote).
+                    // Resolved against the model, which is what the mac
+                    // route resolves against too before it walks to the
+                    // real NSMenuItem.
+                    if let item = kayaResolveMenuPath(path, roots: kayaPresentedCatalog()) {
+                        kayaRoleInertNote(item, verb: "menu_activate \"\(path)\"")
                     }
                     #if os(macOS)
                         return kayaMacMenuActivate(path)
@@ -4569,6 +4841,13 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 let unowned: Bool = DispatchQueue.main.sync {
+                    // A CHORD REACHES THE SAME COMMANDS, so it reaches
+                    // the same silence: no scene pastes by chord today,
+                    // and the session that first writes one must not have
+                    // to find this out again.
+                    if let id = kayaShortcutItems[spelling], let item = kayaScene.menuItems[id] {
+                        kayaRoleInertNote(item, verb: "shortcut \"\(spelling)\"")
+                    }
                     #if os(macOS)
                         return kayaMacShortcut(spelling)
                     #else
@@ -4594,6 +4873,28 @@ private func kayaRunScript(_ script: String) {
                     failures.removeLast(failures.count - failuresBefore)
                     Thread.sleep(forTimeInterval: 0.02)
                     retryStep = true
+                } else if failures.count > failuresBefore {
+                    // THE EVIDENCE MUST OUTLIVE THE PROCESS. The verdict
+                    // line at the bottom is authoritative and stays so,
+                    // but it is printed LAST — and a scene whose failure
+                    // is "the dialog did not resolve" walks straight into
+                    // the one-per-process dialog guard three steps later,
+                    // which ABORTS. The failure list dies with the
+                    // process and the log shows a panic with no reason,
+                    // which is exactly the round this cost on iOS: the
+                    // host driver had written a self-diagnosing sentence
+                    // naming the tap point and what the picker listed,
+                    // and nobody ever saw it.
+                    //
+                    // So a failure is printed the moment it becomes
+                    // FINAL — an expect whose deadline has run out, or
+                    // any action, which never retries. One line each, on
+                    // the same line-buffered stdout as the step trace, so
+                    // it lands in order beside the step it belongs to and
+                    // survives a kill as well as an abort.
+                    for text in failures[failuresBefore...] {
+                        print("KAYA_HARNESS: step-failed \(text)")
+                    }
                 }
             }
         }
@@ -5509,6 +5810,45 @@ func kayaRoleEnabled(_ role: String) -> Bool {
     #endif
 }
 
+/// ONE LINE WHEN A STANDARD COMMAND DOES NOTHING, naming the
+/// intersection that came up empty.
+///
+/// A role item works out its own enablement — what the clipboard offers
+/// INTERSECTED with what the focused widget accepts — and a disabled
+/// item is INERT, exactly as native chrome leaves a greyed one. For a
+/// person that is right and needs no words: they can see the grey. For a
+/// scene it is SILENT — `menu_activate "Edit>Paste"` reports success,
+/// nothing is emitted, and the failure surfaces up to five seconds later
+/// as a label that still reads what it read before, in a step that
+/// mentions neither the clipboard nor the command.
+///
+/// That is exactly the 2026-08-04 matrix failure: a foreign image clip
+/// replaced the seeded text 25ms after the seed settled, so both pastes
+/// went inert, and the only other line in the log was a stall report
+/// about an app thread that was fine. The read's own note
+/// (kayaClipNote) could not help, because the disabled command never
+/// reached the read. This is that note for the door before it.
+func kayaRoleInertNote(_ item: KayaMenuItemModel, verb: String) {
+    guard !item.role.isEmpty, !kayaMenuEffectiveEnabled(item) else { return }
+    let board = kayaClipBoardNow()
+    let target: String
+    if let id = kayaScene.focusedId, let node = kayaScene.nodes[id] {
+        target =
+            node.accepts.isEmpty
+            ? "the focused widget (node \(id)) declares no accept list, so it takes the "
+                + "platform's own insertion"
+            : "the focused widget (node \(id)) accepts [\(node.accepts)]"
+    } else {
+        target = "nothing is focused"
+    }
+    let note =
+        "KAYA_CLIP_TRACE: \(verb) did nothing — the \(item.role) command "
+        + "is disabled and a disabled item is inert. \(target); the clipboard offers "
+        + "\(board.types) at cc \(board.change)\(kayaClipOwnerClause())\n"
+    FileHandle.standardError.write(Data(note.utf8))
+}
+
+
 /// Send a standard editing command down the responder chain, starting
 /// at the FOCUSED window's first responder rather than at the
 /// application.
@@ -5530,14 +5870,37 @@ func kayaSendToFocusedResponder(_ selector: Selector) -> Bool {
                 return true
             }
         }
-        return NSApp.sendAction(selector, to: nil, from: nil)
+        if NSApp.sendAction(selector, to: nil, from: nil) { return true }
+        let offered = kayaNSWindows.values.map { window in
+            "win=\(window.windowNumber) "
+                + (window.firstResponder.map { String(describing: type(of: $0)) } ?? "no responder")
+        }
     #else
         // UIKit's dispatch starts at the FIRST RESPONDER and walks up,
         // which is the shape the macOS arm had to build by hand: there
         // is no key-window step to lose a background leg's paste at.
         // Main thread, because it moves the responder chain.
-        return UIApplication.shared.sendAction(selector, to: nil, from: nil, for: nil)
+        if UIApplication.shared.sendAction(selector, to: nil, from: nil, for: nil) { return true }
+        // No public API names this platform's first responder, so the
+        // sentence below says what it can. The TRIGGER and the meaning
+        // are the same on both platforms, which is the part that has to
+        // be uniform.
+        let offered = ["the app's responder chain"]
     #endif
+    // NOBODY TOOK IT, and this was swallowed even though the callsite's
+    // own comment claimed otherwise ("a refusal is reported rather than
+    // swallowed"): a command that reached no responder looks exactly
+    // like a widget that ignored the content, and the scene reports a
+    // field that simply stayed empty. A paste sent while the platform's
+    // focus is still catching up with kaya's is precisely this, and it
+    // is intermittent — the failure you get once a month and cannot
+    // reproduce is the one that has to explain itself the first time.
+    let note =
+        "KAYA_CLIP_TRACE: \(selector) reached no responder that would take it — kaya's "
+        + "focus is node \(kayaScene.focusedId.map(String.init) ?? "nowhere"), and the "
+        + "platform offers [\(offered.joined(separator: ", "))]\n"
+    FileHandle.standardError.write(Data(note.utf8))
+    return false
 }
 
 /// Perform a clipboard role on the focused widget. Answers whether it

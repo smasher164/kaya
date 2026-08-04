@@ -1440,6 +1440,12 @@ for the reason it exists. `simctl`'s 18 "unhandled Platform key"
 warning lines go to stderr and its pbpaste output has no trailing
 newline — capture with `2>/dev/null`, compare byte-exact.
 
+**PER-DEVICE ONLY WHILE Simulator.app IS NOT RUNNING** — this
+paragraph was measured in exactly that state and finding 7 below is
+the correction. The exclusion argument survives it (the slot lock is
+still the only exclusion this lane needs); what does not survive is
+the assumption that the board is the device's to begin with.
+
 ### 6. THE SEED CANNOT TRANSIT THE HOST BOARD (from the first lane runs)
 
 The arm's first seed shape wrote the HOST pasteboard with the mac
@@ -1470,6 +1476,105 @@ built in. check-steps' iOS clause pins the absence: a live
 pbcopy/pbpaste/pbsync/`set the clipboard` line in run-sim.sh is a
 failure, self-tested with the perturbation proven applied.
 
+### 7. THE DEVICE BOARD IS SIMULATOR.APP'S TOO (measured 2026-08-03, the matrix-only empty read)
+
+The two iOS clipboard legs were green SOLO, run after run, and failed
+ONE step per five-lane matrix run — a different step each time, always
+"reads empty". The unmeasured cell was what `types` said at that
+instant. It says the board was REPLACED:
+
+    read accepting=[image] enter cc=1021 types=["public.png"]
+    data(public.png) -> nil in 53ms
+    empty-answer        t+0   cc=1022 types=["public.utf8-plain-text"]
+
+Fifty-four milliseconds, and the clip is somebody else's. Not an empty
+snapshot, not a pasteboardd hiccup, not a prompt that went unanswered:
+another principal's clip, whole, with the changeCount moved.
+
+**Simulator.app relays the macOS pasteboard into and out of EVERY
+booted simulator** when Edit > Automatically Sync Pasteboard is on,
+which is the default (`PasteboardAutomaticSync` in
+com.apple.iphonesimulator). Measured, on this machine, with the lane's
+own tools:
+
+- A host `pbcopy` replaced a booted device's html clip in **260ms** —
+  the first poll after the write already read the host's text.
+- Two booted devices ground each other's clips down to ONE board
+  through the host: device A got html, device B got text, and three
+  seconds later both offered the same types and the HOST pasteboard
+  held device B's content.
+- Quit Simulator.app and boot the same devices headless with `simctl
+  boot`: no propagation at all, in either direction, across 36
+  seconds of polling — each board kept what it was given and the host
+  kept its own. That is finding 5's measurement, and it is only true
+  in that state. (Quitting the app SHUTS DOWN every device it is
+  showing, which is worth knowing before doing it mid-session.)
+- A running Simulator.app IGNORES `defaults write ...
+  PasteboardAutomaticSync -bool NO`: the relay went on working with
+  the pref reading 0. The pref is read at launch, so it can only be
+  believed about the NEXT launch — which is why nothing here reads it
+  to decide anything.
+
+That is the whole matrix-only story. Under validate-all the mac lane
+rewrites the macOS pasteboard for eight languages throughout the iOS
+lane's ~90-second clipboard leg (pbcopy, and osascript for html, png
+and file urls), and every one of those writes lands on the simulator
+too. Whether it falls inside the window between the guest's own write
+and the read that follows it is a coin flip, which is exactly why a
+different step failed each run. Reproduced deterministically two ways:
+two clipboard legs on two devices concurrently (5 of the first 6 legs
+failed), and — the matrix's own shape — ONE leg beside a loop that
+wrote the host pasteboard every two seconds (3 legs, 3 failures, with
+the churn's own png and html arriving on the device board under their
+own types).
+
+The lane cannot make itself immune: a shared board with a live writer
+has no read that cannot be clobbered, and the scene's whole design
+needs one clipboard it owns. So `tools/ios/run-sim.sh` MEASURES the
+isolation before any leg (`clip_relay_check`: two devices, two
+different clips, each must keep its own; types only, which is
+prompt-free, and no host pasteboard write — the mac lane is using
+that board) and refuses the run with the remedy named. Five seconds
+per lane run, on the path every leg already walks.
+`tools/probe-env.sh` reports the same thing early, by naming the app
+rather than the pref.
+
+The guard was watched failing before it was believed: with the relay
+live it names both tells (device A lost html, device B gained it) in
+2s; with Simulator.app relaunched after the pref was turned off it
+passes in 5s and a host `pbcopy` no longer reaches the device.
+
+One line of the backend is the other half of this. A read that
+answers nothing now says so on stderr with the offer list beside it —
+`KAYA_CLIP_TRACE: read of [dev.kaya/note] answered empty; the
+clipboard offered ["public.png"]` — which is the sentence that turns
+"label#0 reads empty" into a diagnosis. The guest still cannot tell
+empty's four causes apart (denied, unfocused, absent, unaccepted) and
+still must not; the BACKEND knows what the board held, and saying it
+costs nothing on the path that answers.
+
+WHAT WAS NOT ADDED, and why. A bounded re-poll of the read ("an empty
+snapshot is not an answer") was the expected shape before the
+measurement and is NOT here. With the relay live, one read did show a
+true un-answer — `public.file-url` on the board and `urls` answering
+0, then 1 two hundred milliseconds later, with the changeCount moving
+in between, i.e. the relay re-delivering the clip. With the relay off
+it did not recur: 20 legs under twelve CPU hogs and a host pasteboard
+rewritten every two seconds answered every read first time, and the only
+`KAYA_CLIP_TRACE` line in each was the scene's own legitimate empty
+(a files-accepting read while the board holds text). Retrying a
+foreign read is also not free: each attempt can re-raise the per-clip
+prompt, so a user who denied one paste would be asked again. If a
+future run measures an un-answer with no relay in the picture, that is
+the moment for the re-poll, and the trace line above is what will say
+so.
+
+The android lane makes the same claim honestly, which is worth the
+contrast: §7 finding 4 measured the emulator-host clipboard bridge
+severed in both directions, and that lane BOOTS its emulators
+`-no-window` — the isolation is a flag it owns. This lane cannot own
+whether a developer has Simulator.app open, so it measures instead.
+
 ### The arm's decisions, from the findings
 
 Copy: `items=` union, one path. Read/paste: background queue plus a
@@ -1484,6 +1589,188 @@ at all — that is the sweep verdict, do×2/can't×6), phones only (the
 pad is a lockless single device and the form-factor gate needs no
 clipboard), one leg per device slot, no drain.
 
-## §9 onwards — to be written
+## §9 — what the MATRIX charges the mac seed (measured 2026-08-04)
 
-The full matrix (validate-all) once the iOS arm is green.
+The first five-lane runs with all four clipboard lanes green killed one
+mac clipboard leg per run — a different guest each time (swift, then
+haskell), always the same line: `clipboard_seed files never appeared on
+the clipboard`, always after the settle's whole deadline, and widening
+that deadline from 5s to 15s changed nothing. validate-mac alone was
+232/232, repeatedly.
+
+### 1. THE WRITE NEVER HAPPENED — `set the clipboard to` refuses in silence
+
+The seed's exact command, against a competitor writing the board with
+plain `pbcopy` every 10ms, with a 1ms poll watching for the type after
+it (`seedprobe.swift`, in the session's scratch):
+
+| competitor        | writes | landed | osascript |
+|-------------------|--------|--------|-----------|
+| none, heavy load  | 200    | 200    | rc=0, silent |
+| `pbcopy` @ 10ms   | 12     | 0      | rc=0, silent |
+
+The type never appeared ONCE at 1ms resolution — the write is dropped,
+not overwritten. That is `badPasteboardSyncErr`'s shape (a Pasteboard
+Manager write against a board another process has modified) with
+AppleScript swallowing the error. `POSIX file "<missing path>"` is the
+same silence for a different reason: rc=0, nothing printed, board
+untouched.
+
+So the defect needs a SECOND PRINCIPAL on the one macOS pasteboard,
+which is exactly what the matrix adds. CPU load does not do it: 200/200
+landed under twelve spinners plus a looping `cargo build -j 18`, and 24
+clipboard legs across four languages passed under the same load.
+
+### 2. THE SETTLE WAS VACUOUS FOR THREE OF THE FOUR SEEDS
+
+The mac arm polled the TYPE alone. The scene's own copy leaves a union
+clip carrying nearly every kind's type, so `text` (twice) and — after
+osascript writes a text representation beside a file url — the second
+`text` seed were satisfied by the STALE board before their write landed.
+`files` is not special because file urls are fragile; it is one of the
+only two seeds whose wait could ever fail. That is §8 finding 6's
+vacuity, on the other platform, found from the other end: a dropped
+`text` seed does not fatal, it shows up as a wrong label three steps
+later.
+
+### 3. WHO THE OTHER WRITER IS — not proven, and the fix does not depend on it
+
+Ruled out by measurement or by the record: the mac lane itself (its
+clipboard legs are drain-bracketed), the android pool (§7 finding 4,
+bridge severed both ways, `-no-window`), the iOS lane (Simulator.app not
+running, and run-sim.sh refuses a live relay — §8 finding 7). Left
+standing: this machine's Windows VM carries `/Sharing/ClipboardSharing
+= True` with the SPICE vdagent channel live on its qemu command line
+(UTM 4.7.5 drives `NSPasteboard` from CocoaSpice's `CSSession`), and the
+windows lane runs five clipboard legs of 10-12s each, concurrent with
+the mac lane's clipboard block. Confirming it means making the guest
+copy, which this session was not to touch. A promised-type probe also
+showed SOMETHING reading every clip within 15ms of it being written.
+
+### The arm's decisions, from the findings
+
+One body for both platforms (`kayaClipBoardNow` is the only place the
+two boards differ), because the two arms had already drifted into
+different rules for the same verb. The settle demands the changeCount to
+move AND the type to appear. A write that has not landed within a second
+is MADE AGAIN, up to the 15s deadline — idempotent by construction, and
+the only answer to a write that was refused rather than delayed. A file
+that is not there fails by name. The tool's exit status and stderr are
+carried (`KayaToolRun`) instead of discarded, the seed fails with the
+tool's own words, and a read whose tool refused says so
+(`KAYA_CLIP_TRACE: osascript exited 1: ...`). The fatal lists every
+distinct clip the wait saw, `+Nms cc=NNN [types]`, which is what tells
+"nobody ever wrote" from "somebody else is writing this board too".
+
+Guard: `kayaRunTool` lost `@discardableResult` and the interpreter now
+compiles with `-warnings-as-errors` in both build-dylib.sh and
+swift-typecheck.sh, so dropping a tool's result is a build error rather
+than a warning nobody reads (watched failing, perturbation proven
+applied — and the first version of the guard was watched NOT failing).
+
+Sweep, one verdict per backend: mac and iOS share the fixed body (do,
+do); GTK already asserts its writer's exit status and its lane owns a
+private compositor per container, so the class is unreachable there
+(defer, with the shape to copy if that ever changes); WinUI writes once
+and polls `Contains*` for 5s, the same shape, and its board has the same
+SPICE relay on the other side of it — but that arm was settled the same
+day and is out of scope here (defer, named in deferred.md's ledger if it
+ever fires).
+
+## §10 — what the MATRIX charges the mac PASTE (measured 2026-08-04)
+
+§9 fixed the seed's write. The same matrix run then failed one leg
+further down the same scene, and this is that half: not the seed, the
+GESTURE.
+
+    KAYA_HARNESS: +574ms clipboard_seed text "pasted by hand"   (settled, 12ms)
+    KAYA_HARNESS: +586ms click button#5
+    KAYA_HARNESS: +586ms expect_focused entry#0
+    KAYA_HARNESS: +611ms menu_activate "Edit>Paste"
+    KAYA_HARNESS: +611ms expect label#0 "pasted pasted by hand"
+    kaya: THE APP THREAD IS STALLED — 13 occurrences ... waiting 1027ms
+    KAYA_HARNESS: step-failed label#0 reads "files pasted.txt pasted bytes"
+
+### 1. THE STALL LINE WAS NOISE, AND IT COST THE FIRST HOURS
+
+The watchdog compared two counters and only one of them moved for a
+guest that reads the occurrence ring directly, so go, csharp, ocaml,
+haskell and java reported a stall on EVERY healthy run — visible only
+when a leg lived long enough to cross the 1s threshold, which a failing
+leg does and a passing one does not. Measured on a PASSING haskell
+clipboard leg, varying only `KAYA_STALL_MS`: 1ms/50ms/100ms/400ms all
+report, with the pending count tracking the running total of
+occurrences. Fixed in crates/kaya/src/stall.rs (each transport asked in
+its own terms) and guarded by a new `expect_no_stall` in
+tools/scenes/stall.steps. Full account in docs/traps.md.
+
+### 2. THE PASTE WAS DISABLED, AND A DISABLED COMMAND IS SILENT
+
+The proof is a line that is NOT in the log. Since §9 every nil read
+prints `KAYA_CLIP_TRACE: read of [...] answered empty; the clipboard
+offered [...]`. The failing paste printed none — so the paste never
+reached the read, and the only gate before it is
+`kayaRoleEnabled("paste")`: something focused, something on the board it
+takes. `expect_focused entry#0` had passed 25ms earlier, so the board
+had lost `public.utf8-plain-text` between the seed's settle and the
+activation.
+
+Reproduced deterministically, no concurrency needed — a second seed of
+an IMAGE stands in for the foreign write:
+
+    clipboard_seed text "pasted by hand"
+    click button#5
+    expect_focused entry#0
+    clipboard_seed image "$TMP/kaya-clip-$PID/pixel.png"
+    menu_activate "Edit>Paste"
+    expect label#0 "pasted pasted by hand"
+
+`step-failed label#0 reads "ready"`, in rust and haskell alike (the
+mechanism is the interpreter's, not any guest's), with no other output.
+The second half of the scene reproduces the run's other line: entry#1
+declares no accept list, so its gate is
+`canReadObject(forClasses: [NSString.self])`, equally false for an
+image-only clip, and `entry#1 reads ""`.
+
+### 3. THE SECOND PRINCIPAL, AGAIN — and this time it is dated
+
+§9 left the writer unproven. The timeline of the failing run pins the
+opportunity: `Windows.utm/config.plist` was set to
+`ClipboardSharing = False` at 08:07:29, the run built at 08:09-08:11 and
+wrote its log at 08:15, and the VM process carrying the SPICE vdagent
+channel was not restarted until ~08:20. UTM reads that setting when the
+VM starts, so the relay was live throughout the leg — and the windows
+lane was running its own five clipboard legs at the time, each copying
+text, html, an image and files on the Windows side. vdagent relays text
+AND images; an image clip on the macOS board is exactly this failure.
+
+### The arm's decisions, from the findings
+
+INERT STAYS INERT. A role command that cannot act does nothing, on every
+backend, exactly as native chrome leaves a greyed item. Nothing here
+changes dispatch.
+
+BUT IT SAYS SO. `kayaRoleInertNote` (mac and iOS, one body) prints the
+intersection that came up empty when a harness `menu_activate` lands on
+a disabled role item: what is focused, what it accepts, what the board
+offers, and at what changeCount.
+
+AND KAYA KNOWS WHICH BOARD IS ITS OWN. `kayaClipOwned` records the
+changeCount after every write kaya asked for — the app's own copy, and
+any seed that settled — so `kayaClipOwnerClause` can append "AND THE
+BOARD HAS MOVED SINCE KAYA WROTE IT (cc N -> M): another process is
+writing this clipboard" to the inert note and to the empty-read note. A
+pasteboard has no "who wrote it"; this is the nearest thing there is,
+and it is the sentence that separates a kaya defect from a neighbour.
+
+Sweep, one verdict per backend: mac and iOS share the note (do, do);
+GTK defers (a private compositor per container — no second principal);
+Compose defers (one board per device, bridge severed, §7 finding 4);
+WinUI defers and is the likeliest to want it, its board having the same
+relay on the other side — recorded in docs/deferred.md rather than
+built, since that arm was settled 2026-08-03.
+
+## §11 onwards — to be written
+
+The full matrix (validate-all) once the mac seed's and paste's fixes
+have ridden it.

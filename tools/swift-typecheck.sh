@@ -62,7 +62,16 @@ done
 # "swift-typecheck: OK" and only failed minutes later in the heavy lane
 # — measured: `NSObject.accessibilityIdentifier` typechecked green here
 # while the dylib build rejected it outright.
-if ! kaya_swiftc -typecheck \
+#
+# -warnings-as-errors here as in tools/swiftui/build-dylib.sh, and for
+# the same reason: the compiler's only complaint about a DROPPED return
+# value is a warning, and this file's clipboard seed threw away
+# osascript's exit status and stderr for the whole life of the scene on
+# exactly that footing. The interpreter compiles warning-free, so the
+# flag costs nothing and turns "someone will notice the warning" into a
+# wall. If it fires on something else, fix the warning — do not remove
+# the flag.
+if ! kaya_swiftc -typecheck -warnings-as-errors \
     -import-objc-header crates/kaya/include/kaya.h \
     swift/KayaSwiftUI.swift swift/KayaSwiftUIEntry.swift; then
     echo "swift-typecheck: FAIL (the SwiftUI interpreter, macOS)"

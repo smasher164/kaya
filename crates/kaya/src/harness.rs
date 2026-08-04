@@ -194,6 +194,21 @@ pub enum Step {
     /// survived: a scene that only timed out would prove the app was
     /// broken, not that kaya NOTICED.
     ExpectStall,
+    /// The watchdog has NOTHING to report about a healthy app — the
+    /// other half of the same claim, and the half nothing asserted for
+    /// four milestones.
+    ///
+    /// A diagnostic that fires when it should is only half a
+    /// diagnostic; one that fires when it should not is worse than none,
+    /// because it is read as evidence. Exactly that shipped: the
+    /// watchdog counted occurrences into the transport and counted the
+    /// ones the CORE handed over, so the five languages that read the
+    /// ring directly (go, csharp, ocaml, haskell, java) reported a stall
+    /// on every healthy run, and a matrix failure in one of them sent a
+    /// session hunting a blocked main thread that did not exist. The
+    /// stall scene passed throughout, because it only ever asked for the
+    /// positive.
+    ExpectNoStall,
     Click(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
@@ -434,6 +449,7 @@ impl Step {
             Step::SetText { .. } => false,
             Step::Expect { .. } => true,
             Step::ExpectStall => true,
+            Step::ExpectNoStall => true,
             Step::ExpectOrder { .. } => true,
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
@@ -789,6 +805,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("settle wants milliseconds: {line:?}"))?,
             ),
             "expect_stall" => Step::ExpectStall,
+            "expect_no_stall" => Step::ExpectNoStall,
             "click" => Step::Click(parse_target(rest)?),
             "toggle" => {
                 let (target, state) = rest
@@ -1579,6 +1596,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                         .to_string(),
                 ),
             })),
+            // POLLED TOO, for the mirror-image reason: the watchdog
+            // clears its reading on its own 100ms poll, so a reading
+            // left over from the stall this scene just recovered from
+            // takes a moment to go. What it must NOT tolerate is a
+            // reading that never clears, which is what a watchdog blind
+            // to a transport produces.
+            Step::ExpectNoStall => Some(poll(|| match crate::stall::stalled_for() {
+                None => Ok("the app thread is keeping up".to_string()),
+                Some(waited) => Err(format!(
+                    "the stall watchdog reports {}ms of unclaimed occurrences about an app \
+                     that is answering this scene — either the app thread really is gone, \
+                     or the watchdog cannot see this guest's transport (crate::stall)",
+                    waited.as_millis()
+                )),
+            })),
             Step::Toggle(t, on) => {
                 stage.toggle(*t, *on);
                 None
@@ -1652,8 +1684,26 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // guest's scene files by $TMP/$PID token, and an
                 // unexpanded token is a literal path that exists
                 // nowhere (the trap expand_path's comment names).
-                stage.clipboard_seed(kind, &expand_path(arg));
-                None
+                let resolved = expand_path(arg);
+                if matches!(kind.as_str(), "image" | "files")
+                    && !std::path::Path::new(&resolved).exists()
+                {
+                    // A FILE THAT IS NOT THERE IS NOT A CLIPBOARD
+                    // PROBLEM, and the tools do not say so: macOS's
+                    // `set the clipboard to POSIX file "<missing>"`
+                    // exits 0, prints nothing and leaves the board
+                    // untouched (measured 2026-08-04), so the seed's
+                    // wait runs out and blames the pasteboard. Same
+                    // sentence on every backend, at the one place all
+                    // of them pass through — the file_dialog_goto arm
+                    // above says it for the same reason.
+                    Some(Err(format!(
+                        "clipboard_seed {kind} {arg}: there is no file at {resolved}"
+                    )))
+                } else {
+                    stage.clipboard_seed(kind, &resolved);
+                    None
+                }
             }
             Step::ExpectClipboard(kind, want) => Some(poll(|| {
                 // POLLED like every other observation: the copy went
@@ -2266,7 +2316,12 @@ pub fn shares(extents: &[f64]) -> String {
 /// retryable non-match ("no such target"), never a panic
 /// (try_resolve; the interpreters were already total).
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
-pub const POLL_DEADLINE: Duration = Duration::from_secs(5);
+// 15, NOT 5, and the number is measured: under the five-lane matrix a
+// loaded VM answered a first click in more than five seconds and a leg
+// that was 145/145 solo went red (entry_go, 2026-08-03). A pass
+// returns the moment it matches, so the width costs a green run
+// nothing; only a genuine failure reports slower.
+pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
 
 /// `$TMP` and `$PID` in a scene path.
 ///
@@ -2489,6 +2544,37 @@ mod tests {
         assert_eq!(code, 0, "{verdict}");
         assert!(verdict.contains("entry-text"), "{verdict}");
         assert!(verdict.contains("focused"), "{verdict}");
+    }
+
+    /// A seed whose file is NOT THERE fails by name, rather than
+    /// leaving the backend's wait to run out and blame the pasteboard.
+    /// macOS's own tool is the reason this cannot be left to the
+    /// backend: `set the clipboard to POSIX file "<missing>"` exits 0,
+    /// prints nothing and leaves the board untouched (docs/traps.md),
+    /// so every symptom downstream describes the clipboard and none of
+    /// them describes the path.
+    #[test]
+    fn clipboard_seed_names_a_file_that_is_not_there() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("clipboard_seed files \"/nope/kaya-missing.txt\"\nexpect label#0 \"ok-text\"")
+                .unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("there is no file at /nope/kaya-missing.txt"), "{verdict}");
+        // And the kinds that carry CONTENT rather than a path are
+        // untouched by the check — a text seed of that same string is
+        // a perfectly good seed.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("clipboard_seed text \"/nope/kaya-missing.txt\"\nexpect label#0 \"ok-text\"")
+                .unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
     }
 
     /// A stage that records interactions and reports the verdict back

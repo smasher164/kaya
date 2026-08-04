@@ -745,6 +745,166 @@ sys.stdout.write("\n".join(names))' | clip_encode
     esac
 }
 
+# THE DEVICE PASTEBOARD IS NOT ALWAYS THE DEVICE'S, and this is the
+# wall in front of that. Simulator.app carries an Edit > Automatically
+# Sync Pasteboard, ON BY DEFAULT (`PasteboardAutomaticSync` in
+# com.apple.iphonesimulator), which RELAYS the macOS pasteboard into and
+# out of every booted simulator — measured 2026-08-03: a host `pbcopy`
+# replaced a booted device's clip in 260ms, and two booted devices
+# ground each other's clips down to one shared board through the host.
+# §8 finding 5's "strictly per-device" holds only while that app is not
+# running, which is exactly the state it was measured in.
+#
+# What that costs this lane is not theoretical: under validate-all the
+# mac lane's clipboard legs rewrite the macOS pasteboard for eight
+# languages throughout, so the guest's clip is replaced mid-scene and a
+# DIFFERENT step reads empty every run while the lane passes solo. That
+# is three matrix runs of chasing a race that was never in kaya's code.
+#
+# So MEASURE IT, before any leg, on the two devices this lane already
+# booted. A pref read would not do: a running Simulator.app ignores a
+# `defaults write` (measured), so the pref can say NO while the relay is
+# live. Two devices, two different clips, and each must keep its own —
+# types only, which is prompt-free at every stage (§8 finding 2), so
+# this costs no alert and touches no data. And no host pasteboard: this
+# lane must never write the board the mac lane is using (§8 finding 6,
+# pinned by check-steps).
+clip_relay_check() { # udid_a udid_b -> 0 when the boards are separate
+    local a="$1" b="$2" i seen_a seen_b shared
+    timeout 60 xcrun simctl spawn "$a" "$CLIPCTL" write html \
+        "$(printf '%s' '<b>kaya relay check</b>' | clip_encode)" >/dev/null 2>&1
+    timeout 60 xcrun simctl spawn "$b" "$CLIPCTL" write text \
+        "$(printf '%s' 'kaya relay check' | clip_encode)" >/dev/null 2>&1
+    # The relay is FAST (260ms), so a look a second later is already
+    # decisive; three of them is slack for a loaded machine. Device A
+    # wrote first, so last-writer-wins leaves A carrying B's text — A
+    # LOSING html and B GAINING it are two independent tells, and either
+    # one is a shared board.
+    for i in 1 2 3; do
+        sleep 1
+        seen_a=$(timeout 60 xcrun simctl spawn "$a" "$CLIPCTL" 2>/dev/null | grep -m1 '^S types=')
+        seen_b=$(timeout 60 xcrun simctl spawn "$b" "$CLIPCTL" 2>/dev/null | grep -m1 '^S types=')
+        if [ -z "$seen_a" ] || [ -z "$seen_b" ]; then
+            # A device that did not answer is not a verdict either way.
+            continue
+        fi
+        shared=0
+        case "$seen_a" in
+            *public.html*) ;;
+            *) shared=1 ;;
+        esac
+        case "$seen_b" in
+            *public.html*) shared=1 ;;
+        esac
+        if [ "$shared" = 0 ]; then
+            continue
+        fi
+        echo "the simulator clipboards are NOT separate boards:" >&2
+        echo "  $a offers $seen_a" >&2
+        echo "  $b offers $seen_b" >&2
+        echo "Simulator.app is relaying the macOS pasteboard into every booted" >&2
+        echo "simulator (Edit > Automatically Sync Pasteboard, on by default)." >&2
+        echo "The clipboard legs cannot run against a board the mac lane" >&2
+        echo "rewrites throughout the matrix. Quit Simulator.app — this lane" >&2
+        echo "boots its devices headless with simctl and never needs it — or" >&2
+        echo "turn that menu item off, or run" >&2
+        echo "  defaults write com.apple.iphonesimulator PasteboardAutomaticSync -bool NO" >&2
+        echo "and RELAUNCH it: a running Simulator.app reads that pref only at" >&2
+        echo "launch. Then re-run." >&2
+        return 1
+    done
+    if [ -z "$seen_a" ] || [ -z "$seen_b" ]; then
+        echo "the relay check could not read a clipboard on $a / $b" >&2
+        return 1
+    fi
+    return 0
+}
+
+# THE FIRST PICKER A DEVICE SHOWS AFTER A BOOT OPENS IN THE WRONG
+# DIRECTORY, and this is the warm-up in front of that.
+#
+# `UIDocumentPickerViewController.directoryURL` is not applied at
+# presentation the way NSOpenPanel's is. The app's request crosses to
+# com.apple.DocumentManager.Service as a REVEAL, and that service is
+# concurrently running its own "which location does this picker open
+# at" strategy, which ends in `getSaveLocation` — the app's container
+# root. Whichever of the two lands LAST wins, and the service says so in
+# its own log ("Will reveal location <kaya-picked-N>" vs "2.2.2 Will use
+# getSaveLocation's suggested location <appname>", with an "Attempt to
+# reset locations, while a reset is already in progress" between them).
+#
+# Measured on this machine, 2026-08-03, ten leg runs across three
+# devices — five on a device whose first picker this was, all five at
+# the root; five after one, all five where they were aimed:
+#
+#   device state          getSaveLocation   reveal   outcome
+#   first picker on boot        708ms        381ms   the ROOT, every time
+#   any picker after that       160ms        297ms   the asked-for directory
+#
+# The reveal arrives ~300-450ms after the service starts resolving, so a
+# resolution slower than that overwrites it. The first one on a boot is
+# slow because the LocalStorage file provider populates its tree lazily
+# — Apple's own forums say as much, and the "directoryURL opens the root
+# instead" reports have no other explanation (docs/traps.md).
+#
+# It is not the harness, and it is not the guest: a picker that opens at
+# the root lists the app's Documents directory, `file_choose` then
+# refuses a row that is genuinely not there, and the guest never gets a
+# result. It is also NOT about Simulator.app — that was the first
+# suspect and it is measured false: a cold device fails identically with
+# the app running, and a warm one passes headless.
+#
+# So WARM THE STACK before any leg, with the system's own Files app —
+# the same DocumentManager and the same file provider the picker uses.
+# The device says when it is done: `com.apple.FileProvider` carries no
+# pid until something on that boot has used the document stack, and the
+# daemon is what the tree is enumerated behind. A device that already
+# has one is already warm and costs a single query.
+doc_daemon_pid() { # udid -> the file provider daemon's pid, empty when down
+    xcrun simctl spawn "$1" launchctl list 2>/dev/null | python3 -c '
+import sys
+for line in sys.stdin:
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) >= 3 and parts[2] == "com.apple.FileProvider" and parts[0].isdigit():
+        sys.stdout.write(parts[0])
+        break
+'
+}
+
+picker_warm() { # udid -> 0 when this device can aim a picker
+    local udid="$1" i
+    if [ -n "$(doc_daemon_pid "$udid")" ]; then
+        return 0
+    fi
+    if ! timeout 60 xcrun simctl launch "$udid" com.apple.DocumentsApp >/dev/null 2>&1; then
+        echo "the stock Files app would not launch on $udid — this lane warms the" >&2
+        echo "document stack with it so the filedialog scene's first picker opens" >&2
+        echo "where it was aimed (docs/traps.md). Check the runtime has" >&2
+        echo "com.apple.DocumentsApp: xcrun simctl listapps $udid" >&2
+        return 1
+    fi
+    for i in $(seq 1 80); do
+        if [ -n "$(doc_daemon_pid "$udid")" ]; then
+            break
+        fi
+        sleep 0.25
+    done
+    if [ -z "$(doc_daemon_pid "$udid")" ]; then
+        echo "the file provider daemon never came up on $udid after launching Files" >&2
+        return 1
+    fi
+    # The daemon answering is the edge; the local-storage tree fills in
+    # behind it, and nothing on the host can watch that happen. Measured:
+    # the resolution the picker waits on drops 708ms -> 294ms across this
+    # pause, which is what puts the reveal back in front of it. If it ever
+    # stops being enough the leg says so in one line now
+    # ("KAYA_HARNESS: step-failed file dialog showing ..."), which is the
+    # sentence this whole warm-up was bought with.
+    sleep 3
+    timeout 60 xcrun simctl terminate "$udid" com.apple.DocumentsApp >/dev/null 2>&1 || true
+    return 0
+}
+
 # The clipboard verbs, dispatched off the request line's first token.
 clip_verb() { # udid verb args...
     local udid="$1" verb="$2"
@@ -1006,6 +1166,27 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     export SIMCTL_CHILD_KAYA_RECORD=1
 fi
 boot_pool
+# BEFORE ANY LEG, and on every run: are these devices' clipboards their
+# own? The clipboard legs are the customers, but the check sits here
+# rather than beside them because a lane that dies at leg 40 after eight
+# minutes teaches nothing a lane that dies in five seconds does not.
+clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1
+# AND ON THE SAME PATH, for the same reason: the first picker a device
+# shows after a boot ignores the directory it was aimed at (see
+# picker_warm). Every phone in the pool, because which one claims the
+# filedialog leg is a race; not the pad, which runs no picker scene.
+# Concurrently, since they are separate devices and this is the only
+# thing the run is doing.
+warm_pids=()
+for udid in "${UDIDS[@]}"; do
+    picker_warm "$udid" &
+    warm_pids+=($!)
+done
+warm_failed=0
+for pid in "${warm_pids[@]}"; do
+    wait "$pid" || warm_failed=1
+done
+[ "$warm_failed" = 0 ] || exit 1
 rec_suite_start
 timing boot
 

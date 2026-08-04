@@ -903,26 +903,48 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
-- **DEFECT — filedialog_java is a coin flip on windows, and it is as
-  old as the feature.** Measured 2026-08-03 (two agents, A/B against
-  the pre-clipboard backend: 8/11 fail on BOTH; VM hs_err logs date to
-  2026-07-31, the day 116b8c9 landed the dialog): the per-dialog STA
-  thread runs `CoUninitialize()` the moment `Show()` returns
-  (winui/mod.rs ~:2126) while the Shell's own workers (comdlg32,
-  SHCore) still hold proxies into that apartment, so RPCRT4 raises
-  RPC_E_DISCONNECTED first-chance on their thread. Every runtime
-  absorbs it EXCEPT the JVM, which reports a fatal VM error:
-  `Internal Error (0x80010108)`, frame `KERNELBASE.dll+0x1233c4`,
-  "Current thread is native thread", immediately after
-  `FileChoose(...)`. RECOGNIZE IT BY THAT SIGNATURE — it has stayed
-  green in lanes only because each run samples the leg once, and when
-  it reddens it looks like a fresh regression from whatever slice is
-  in flight (two agents walked into exactly that trap today).
-  Unverified remedies, in the order to measure: keep the dialog STA
-  thread pumping for a grace period after Show() before
-  CoUninitialize; or one long-lived reused dialog STA thread. Any
-  future guest runtime with a process-wide first-chance handler will
-  join Java in crashing until this is fixed.
+- ~~**DEFECT — filedialog_java is a coin flip on windows**~~ — FIXED
+  2026-08-03, and GUARDED. The per-dialog STA thread ran
+  `CoUninitialize()` the moment `Show()` returned, which "forces all
+  RPC connections on the thread to close" while the Shell's own
+  workers still held proxies into that apartment, so RPCRT4 raised
+  RPC_E_DISCONNECTED (0x80010108) on a comdlg32 worker. Only the JVM
+  turned that into a fatal error. There is now ONE dialog apartment
+  per process, started at the first pick, pumping, never uninitialized
+  — `dialog_apartment` in crates/kaya/src/winui/mod.rs carries the
+  numbers. The measured grace period (the other candidate remedy) is
+  recorded there too, and rejected: 5ms still failed 2 of 15.
+  THE GUARD IS THE SCENE ITSELF. A vectored handler counts
+  first-chance RPC_E_DISCONNECTED for every harness build, and the
+  WinUI `Stage::finish` fails the scene on a non-zero count in every
+  language. Watched failing: with the defect put back, the RUST leg —
+  which passed 10/10 on that same defect before the guard existed —
+  went 6/12 red, each naming the mechanism. 145/145 with it armed, so
+  its false-positive rate on this lane is zero.
+  READ THE TRAP BEFORE RE-MEASURING ANYTHING LIKE THIS
+  (docs/traps.md, §"A windows race can stop reproducing"): the defect
+  reproduced 8/10 at 20:00 and 0/10 on the SAME BUILD an hour later.
+  It comes back under load.
+
+- **The step-failed line exists in ONE of the three harnesses
+  (2026-08-03).** A step's final failure text is now printed the moment
+  it becomes final — `KAYA_HARNESS: step-failed <text>`, in
+  swift/KayaSwiftUI.swift's bounded-retry wrapper — so evidence survives
+  an abort that runs before the verdict line. It was bought by the iOS
+  picker session, where a scene-designed panic
+  (crates/kaya/src/capi.rs's one-dialog-per-process guard) destroyed the
+  failure list carrying the host driver's self-diagnosing sentence, and
+  the log showed only a panic and a timeout.
+  The same wrapper shape, and the same exposure, exist in
+  android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt and in
+  crates/kaya/src/harness.rs (which serves GTK and WinUI): any panic
+  before the verdict loses the list the same way. Mirroring is a
+  four-line edit in each; both were left out of that session only
+  because each carries its own gate to re-run (check-compose +
+  check-detekt for Kotlin, the harness unit tests for Rust) and the lane
+  under repair was iOS. Do them together, and keep the spelling
+  byte-identical — the three harnesses are compared by eye far more
+  often than by tool.
 
 - **Follow-ups from the WinUI chord-drop fix (2026-08-03).** The race:
   chords were dispatched over TWO routes split by leaf kind (79dcd1d),
@@ -1326,3 +1348,59 @@ that is exactly the class the a11y milestone was about. Decide on
 evidence: if a real defect ever slips past the Windows a11y legs while
 another platform's client-side read would have caught it, this stops
 being a maybe.
+## MAYBE: the WinUI seed writes once too, on a board with a relay on it
+
+Raised 2026-08-04, alongside the mac seed's fix (docs/traps.md,
+docs/clipboard-plan.md §9). The macOS seed was measured LOSING its
+write, silently, whenever another process touched the pasteboard inside
+`osascript`'s clear-then-put window — 12 of 12 writes gone against a
+competitor writing every 10ms, rc=0 and no stderr each time. Its remedy
+is a bounded re-issue: the seed is idempotent, and a write that was
+refused cannot be waited into existence.
+
+`crates/kaya/src/winui/mod.rs`'s `clipboard_seed` has the same SHAPE —
+`Set-Clipboard`, then poll `Contains*` for 5s, then fail — on a board
+that has the same second principal available to it: the Windows guest's
+clipboard is relayed to and from the host by SPICE's vdagent whenever
+UTM's clipboard sharing is on, which it is on this machine. Nothing has
+been observed failing there; the windows lane's five clipboard legs
+pass. So this is recorded, not scheduled.
+
+WHAT WOULD DECIDE IT. A windows clipboard leg failing with
+`KAYA_SEED_LOST` or `never appeared on the clipboard` is this exact
+class, and the fix is the mac one transliterated: re-issue the write
+inside the poll instead of polling harder. Do not go looking before
+then — the arm was settled 2026-08-03 and a speculative rewrite of a
+green lane's seed buys nothing.
+
+## MAYBE: the other three backends say nothing when a standard command is inert
+
+Raised 2026-08-04 with the mac paste fix (docs/traps.md, "A standard
+clipboard command that is DISABLED does nothing"). A role item works out
+its own enablement — what the clipboard offers intersected with what the
+focused widget accepts — and a disabled item is inert on every backend,
+which is right and matches native chrome. What only the SwiftUI
+interpreter now does is SAY SO: `kayaRoleInertNote` prints the
+intersection that came up empty, plus whether the board has changed
+since kaya wrote it, when a harness `menu_activate` lands on a command
+that cannot act.
+
+The verdicts, one per backend (invariant 2):
+
+- SwiftUI mac and iOS — DONE, one body, the defect's own platform.
+- GTK / linux — DEFER. The failure needs a second principal writing the
+  one clipboard, and each lane run owns a private compositor inside its
+  container; there is nobody else to write it. Copy the shape if a real
+  desktop session ever runs these legs.
+- WinUI / windows — DEFER, and the strongest candidate of the three: its
+  board has the same SPICE relay on the other side as the mac one (see
+  the seed MAYBE above). A windows clipboard leg failing on a stale
+  label after a `menu_activate "Edit>Paste"` is this class. The arm was
+  settled 2026-08-03 and this session was not to touch it.
+- Compose / android — DEFER. One clipboard per device, the emulator's
+  host bridge severed both ways (docs/clipboard-plan.md §7 finding 4),
+  so again no second principal.
+
+Cheap when it comes: the note needs the focused node's accept list, the
+board's type list, and the changeCount the backend last wrote — all
+three already exist in every backend's clipboard arm.

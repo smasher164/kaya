@@ -22,6 +22,19 @@ expect_stall
 # rather than a death, and that nothing was dropped while it was gone.
 expect label#0 "pinged"
 
+# AND THE WATCHDOG TAKES IT BACK. This is the half nothing asserted for
+# four milestones, and its absence shipped a diagnostic that LIED in
+# five of the eight languages: the watchdog counted occurrences into the
+# transport and counted the ones the CORE handed over, so every guest
+# that reads the occurrence ring directly (go, csharp, ocaml, haskell,
+# java) reported a stall on every healthy run. A matrix failure then
+# arrived carrying "THE APP THREAD IS STALLED" about an app thread that
+# was fine, and the session it misdirected is the cost. A diagnostic
+# that fires when it should not is worse than none, because it is read
+# as evidence — so the scene asserts BOTH directions, and this line is
+# the one that fails for a watchdog blind to a transport.
+expect_no_stall
+
 # THEN THE ONE THAT NEVER COMES BACK, which is the shape a real
 # deadlock has: a handler that blocks for 2.5 seconds is a slow handler,
 # and every assertion above would also pass for one. This half proves

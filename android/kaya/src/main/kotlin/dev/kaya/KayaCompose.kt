@@ -2579,6 +2579,27 @@ object KayaCompose {
                             )
                         }
                     }
+                    // THE OTHER HALF OF THE SAME CLAIM, and the half
+                    // nothing asserted for four milestones: a watchdog
+                    // that reports a stall about a HEALTHY app is worse
+                    // than none, because the line is read as evidence. It
+                    // shipped that way — the five languages that read the
+                    // occurrence ring directly reported a stall on every
+                    // green leg — and this arm is what refuses it.
+                    "expect_no_stall" -> {
+                        val idleMs = KayaPresent.stalledMs()
+                        if (idleMs == 0L) {
+                            observed.add("the app thread is keeping up")
+                        } else {
+                            failures.add(
+                                "the stall watchdog reports ${idleMs}ms of unclaimed " +
+                                    "occurrences about an app that is answering this scene — " +
+                                    "either the app thread really is gone, or the watchdog " +
+                                    "cannot see this guest's transport " +
+                                    "(crates/kaya/src/stall.rs)"
+                            )
+                        }
+                    }
                     "click" -> {
                         val ok = onUi(activity) {
                             target(parts[1], "button", KayaSceneModel.buttons)

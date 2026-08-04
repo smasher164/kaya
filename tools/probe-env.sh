@@ -127,6 +127,24 @@ else
     report ios DOWN "simctl unavailable — run inside nix develop (xcrun stub/CLT trap)"
 fi
 
+# --- iOS clipboard isolation -----------------------------------------
+# Simulator.app relays the macOS pasteboard into and out of EVERY booted
+# simulator when its Edit > Automatically Sync Pasteboard is on, which
+# it is by default (measured 2026-08-03: a host `pbcopy` replaced a
+# booted device's clip in 260ms). The clipboard legs then share one
+# board with the mac lane and fail a different step every matrix run,
+# so run-sim.sh MEASURES it per run and refuses. This report is the
+# early warning, not the verdict: it names the app rather than the
+# pref, because a running Simulator.app ignores a `defaults write` and
+# the pref can read NO while the relay is live.
+if pgrep -qx Simulator; then
+    pref=$(defaults read com.apple.iphonesimulator PasteboardAutomaticSync 2>/dev/null || echo unset)
+    report ios-clip CHECK \
+        "Simulator.app is running (stored PasteboardAutomaticSync=$pref) — quit it or turn off Edit > Automatically Sync Pasteboard; run-sim.sh measures the relay and refuses"
+else
+    report ios-clip OK "Simulator.app not running — device clipboards are the devices' own"
+fi
+
 # --- Android emulator ------------------------------------------------
 ANDROID_POOL="${KAYA_ANDROID_EMUS:-2}"
 if command -v adb >/dev/null; then
